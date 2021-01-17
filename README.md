@@ -16,7 +16,7 @@ The MixedMode Modular Central (MMMC) can clock off three sources:
 - CV
 - MIDI
 
-The behaviour of the rest of the module should be the same regardless of the clock source. The MMMC will operate under a `PPQN = 24` master clock derived from any of the sources listed above.
+The behaviour of the rest of the module should be the same regardless of the clock source. The MMMC will operate under a `PPQN = 24` (maybe 48?) master clock derived from any of the sources listed above.
 
 Each I/O channel can be configured as either an **input** or an **output**. They can be assigned to their own **algorithm** or be part of an algorithm that uses multiple inputs and/or outputs.
 
@@ -46,15 +46,15 @@ The MMMC offers several types of gate sequencers:
 
 Configurable logic gates (all gates can also be inverted) & latches:
 
-- NOT
-- AND
-- NAND
-- OR
-- NOR
-- XOR
-- NXOR
-- ASTABLE
-- LATCH
+- `NOT`
+- `AND`
+- `NAND`
+- `OR`
+- `NOR`
+- `XOR`
+- `NXOR`
+- `ASTABLE`
+- `LATCH`
 
 Logic algorithms are not clocked by the master clock and happen at a much higher sample rate
 

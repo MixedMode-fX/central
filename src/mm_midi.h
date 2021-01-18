@@ -6,7 +6,7 @@
 
 
 // DIN MIDI Settings
-struct MidiSettings : public midi::DefaultSettings
+struct MidiSettings : public midi::DefaultSerialSettings
 {
     static const bool HandleNullVelocityNoteOnAsNoteOff = true;
     static const uint16_t SerialFormat = SERIAL_8N1_TXINV; // TX needs inverting due to the circuit
@@ -109,17 +109,17 @@ void mm_send(uint8_t target, uint8_t type, uint8_t data1, uint8_t data2, uint8_t
     if ((target & mmMIDI_USB_3) == mmMIDI_USB_3) usbMIDI.send(type, data1, data2, channel, 3);
     #endif
 
-    // #ifdef SERIAL_MIDI_1
-    // if ((target & mmMIDI_SERIAL_1) == mmMIDI_SERIAL_1) midi1.send(type, data1, data2, channel);
-    // #endif 
+    #ifdef SERIAL_MIDI_1
+    if ((target & mmMIDI_SERIAL_1) == mmMIDI_SERIAL_1) midi1.send((midi::MidiType)type, data1, data2, channel);
+    #endif 
 
-    // #ifdef SERIAL_MIDI_2
-    // if ((target & mmMIDI_SERIAL_2) == mmMIDI_SERIAL_2) midi2.send(type, data1, data2, channel);
-    // #endif 
+    #ifdef SERIAL_MIDI_2
+    if ((target & mmMIDI_SERIAL_2) == mmMIDI_SERIAL_2) midi2.send((midi::MidiType)type, data1, data2, channel);
+    #endif 
 
-    // #ifdef SERIAL_MIDI_3
-    // if ((target & mmMIDI_SERIAL_3) == mmMIDI_SERIAL_3) midi3.send(type, data1, data2, channel);
-    // #endif
+    #ifdef SERIAL_MIDI_3
+    if ((target & mmMIDI_SERIAL_3) == mmMIDI_SERIAL_3) midi3.send((midi::MidiType)type, data1, data2, channel);
+    #endif
 
     #ifdef USB_HOST_TEENSY36_
     if ((target & mmMIDI_HOST_1) == mmMIDI_HOST_1) midi_hosted.send(type, data1, data2, channel);

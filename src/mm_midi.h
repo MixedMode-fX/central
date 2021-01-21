@@ -18,7 +18,7 @@ struct MidiSettings : public midi::DefaultSerialSettings
 
 
 
-enum MidiPorts{
+enum MidiPort   {
     #ifdef MIDI_INTERFACE
     mmMIDI_USB_0 = 0x1,
     mmMIDI_USB_1 = 0x2,
@@ -43,6 +43,8 @@ enum MidiPorts{
     mmMIDI_HOST_1 = 0x80,
     #endif
 };
+
+#define ALL_MIDI_PORTS 0xFF
 
 void mm_midi_setup();
 void mm_midi_read();

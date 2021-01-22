@@ -18,13 +18,20 @@ class Algorithm{
             gpioMapMode(Algorithm::gate_inputs + Algorithm::gate_outputs, OUTPUT);
             gpioMapDigitalWrite(Algorithm::gate_inputs + Algorithm::gate_outputs, LOW);
         };
-        virtual void update(){};
+        void update(){ if(!Algorithm::bypass) _update(); };
+
+        void set_bypass(bool b){ Algorithm::bypass = b; }
+        void toggle_bypass(){ set_bypass(!Algorithm::bypass); }
 
     protected:
         uint8_t midi_inputs;
         uint8_t midi_outputs;
         uint16_t gate_inputs;
         uint16_t gate_outputs;
+
+    private:
+        virtual void _update(){};
+        bool bypass;
 };
 
 

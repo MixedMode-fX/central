@@ -4,7 +4,7 @@
 #include "hardware.h"
 #include "gpio.h"
 #include "mm_midi.h"
-#include "algorithm.h"
+#include "algorithm/algorithm.h"
 
 class Sustain : public Algorithm{
     public:
@@ -14,10 +14,10 @@ class Sustain : public Algorithm{
                     if ((gate_inputs & (1 << i)) != 0){ input_pin_index = i; }
                 }
             };
-        void update();
         void set_invert(bool inv){ invert = inv; }
 
     private:
+        void _update();
         uint8_t input_pin_index;
         uint8_t state = 1;
         bool invert = false;

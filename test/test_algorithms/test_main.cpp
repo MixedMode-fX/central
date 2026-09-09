@@ -230,6 +230,13 @@ static void test_registry_descriptors_are_consistent() {
         TEST_ASSERT_TRUE(d->state_size <= NODE_SLOT_SIZE);
         TEST_ASSERT_NOT_NULL(d->construct);
     }
+    // Ids are part of the preset format: two algorithms sharing one would
+    // silently change what a stored patch means.
+    for (uint8_t i = 0; i < registry::count(); i++) {
+        for (uint8_t j = (uint8_t)(i + 1); j < registry::count(); j++) {
+            TEST_ASSERT_NOT_EQUAL(registry::at(i)->id, registry::at(j)->id);
+        }
+    }
     TEST_ASSERT_NULL(registry::find(ALGO_NONE));
     TEST_ASSERT_NULL(registry::find(200));
 }

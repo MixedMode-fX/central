@@ -101,7 +101,12 @@ void MixedModeMaster::pass(uint32_t now_us){
 }
 
 uint8_t MixedModeMaster::deliver_midi(uint8_t source, const MidiEvent& event, uint32_t now_us){
-    if (event.type >= MIDI_CLOCK){
+    // System messages are not channel-voice traffic and have no business on
+    // a note bus: a MidiOutPort would re-send them with a channel attached.
+    // The realtime ones the clock understands go to the clock; the rest -
+    // SysEx, song position, active sensing - are dropped here until something
+    // asks for them (#11 for SysEx).
+    if (event.type >= 0xF0){
         clk.midi_message(event.type, now_us);
         return 0;
     }

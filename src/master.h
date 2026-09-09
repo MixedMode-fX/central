@@ -47,10 +47,10 @@ class MixedModeMaster {
         void pass(uint32_t now_us);
 
         // Transport input path (#5): offers an incoming message to every
-        // MidiInPort. Returns how many accepted it. MIDI realtime messages
-        // (clock, start, stop, continue) are transport-level rather than note
-        // traffic: they go to the master clock and to no bus, and the call
-        // returns 0. `now_us` is only read for those.
+        // MidiInPort. Returns how many accepted it. System messages never
+        // reach a bus: the realtime ones (clock, start, stop, continue) are
+        // transport-level and go to the master clock, the rest are dropped,
+        // and either way the call returns 0. `now_us` is only read for those.
         uint8_t deliver_midi(uint8_t source, const MidiEvent& event, uint32_t now_us = 0);
         // A rising edge on the external sync jack (#4).
         void sync_edge(uint32_t now_us);

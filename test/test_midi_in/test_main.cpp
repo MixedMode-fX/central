@@ -206,6 +206,27 @@ static void test_realtime_never_reaches_a_note_bus() {
     TEST_ASSERT_FALSE(master.clock().running());
 }
 
+// System messages that are not realtime are dropped rather than put on a note
+// bus, where a MidiOutPort would re-send them with a channel attached.
+static void test_system_messages_never_reach_a_note_bus() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    const uint8_t system[4] = {0xF0, 0xF2, 0xF6, 0xFE};   // SysEx, song position,
+    for (uint8_t i = 0; i < 4; i++) {                     // tune request, sensing
+        TEST_ASSERT_EQUAL(0, master.deliver_midi(mmMIDI_SERIAL_1,
+                                                 MidiEvent{system[i], 0, 1, 2}));
+    }
+    master.pass(0);
+    TEST_ASSERT_EQUAL(0, master.buses().note_count(0));
+    TEST_ASSERT_EQUAL(0, midi.messages.size());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_queue_is_fifo_and_keeps_its_source);
@@ -218,5 +239,6 @@ int main() {
     RUN_TEST(test_source_and_channel_filters);
     RUN_TEST(test_non_note_messages_share_the_bus);
     RUN_TEST(test_realtime_never_reaches_a_note_bus);
+    RUN_TEST(test_system_messages_never_reach_a_note_bus);
     return UNITY_END();
 }

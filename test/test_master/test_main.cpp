@@ -294,7 +294,13 @@ static void test_eight_of_the_same_and_one_of_everything() {
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(all));
     master.setup();
     TEST_ASSERT_EQUAL(registry::count(), master.node_count());
-    for (int i = 0; i < 100; i++) master.pass(i * 1000);
+    // With the clock running, so the nodes that subscribe to the tick get one.
+    for (int i = 0; i < 100; i++) {
+        master.clock().advance();
+        master.deliver_midi(mmMIDI_USB_0, MidiEvent{(uint8_t)((i & 1) ? MIDI_NOTE_OFF : MIDI_NOTE_ON), 1, 60, 100});
+        gpio.set_input(0, (i & 2) ? GPIO_HIGH : GPIO_LOW);
+        master.pass((uint32_t)i * 1000);
+    }
 }
 
 // Zero heap allocation after setup(), asserted by instrumenting operator new.

@@ -271,6 +271,75 @@ await test('the piano roll opens a note, closes it, and holds an open one', asyn
   assert.equal(held.direction, 'in');
 });
 
+// Listening to a note bus, which is what makes an unfinished patch audible: a
+// bus only leaves the module once a MIDI out is patched to it, and while a
+// patch is being built most of them are not.
+await test('a note bus can be listened to, event by event', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const heard = [];
+  module.onNoteBus((event) => heard.push(event));
+
+  // MIDI in on USB 1 onto note bus 0, and *nothing* patched to a MIDI output:
+  // the module sends not one byte, and the bus carries everything.
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  const sent = [];
+  module.onMidi((event) => sent.push(event));
+
+  // Nobody is watching the bus yet, so nothing is read from it.
+  module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 60, 100);
+  module.advance(5000);
+  assert.equal(heard.length, 0, 'a bus nobody asked for is not read');
+
+  module.watchNoteBus(0);
+  module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 64, 100);
+  module.advance(5000);
+  const on = heard.find((e) => e.type === 0x90 && e.d1 === 64);
+  assert.ok(on, `nothing came off the bus (${heard.length} events)`);
+  assert.equal(on.bus, 0, 'a bus event says which bus it is from');
+  assert.equal(on.channel, 1);
+  assert.equal(on.d2, 100, 'velocity survives the unpacking');
+  assert.equal(sent.length, 0, 'nothing is patched to an output, so nothing is sent');
+
+  // Exactly once: the buses are double-buffered and a pass swaps once, so a
+  // sampler that ran twice per pass - or once per frame - would double or drop.
+  const before = heard.length;
+  module.advance(20_000);
+  assert.equal(heard.length, before, 'the same event was read again');
+
+  module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x80, 1, 64, 0);
+  module.advance(5000);
+  assert.ok(heard.some((e) => e.type === 0x80 && e.d1 === 64), 'the note off never arrived');
+
+  // And a bus nobody listens to any more stops being read.
+  module.unwatchNoteBus(0);
+  const quiet = heard.length;
+  module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 67, 100);
+  module.advance(5000);
+  assert.equal(heard.length, quiet, 'the bus is still being read with nobody listening');
+});
+
+await test('the monitor setup survives a reload', async () => {
+  const storage = fakeStorage();
+  new Library(storage).saveListen({
+    volume: 0.3, clicks: false, clickVolume: 0.1,
+    players: [{ source: 'out', bus: 0, wave: 'sawtooth', volume: 1 },
+              { source: 'bus', bus: 3, wave: 'square', volume: 0.5 }],
+  });
+  const back = new Library(storage).readListen();
+  assert.equal(back.players.length, 2, 'both players came back');
+  assert.deepEqual(back.players[1], { source: 'bus', bus: 3, wave: 'square', volume: 0.5 });
+  assert.equal(back.clickVolume, 0.1, 'the clicks keep their own level');
+  assert.equal(back.clicks, false);
+  // A browser that stores nothing is not a crash, here as everywhere else.
+  const none = new Library(null);
+  none.saveListen({ volume: 1 });
+  assert.equal(none.readListen(), null);
+});
+
 await test('a bound CC moves a parameter and is consumed', async () => {
   const { module, E } = await instantiate();
   const device = await connected(module);

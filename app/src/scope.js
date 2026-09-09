@@ -27,7 +27,13 @@ import { Domain } from './validate.js';
 const ROW_H = 18;            // one scope trace
 const TRACE_FONT = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
 const ROLL_GUTTER = 30;      // room for a pitch name
-const ROLL_H = 200;
+const ROLL_H = 220;
+const ROLL_SLOTS = 4;        // most sub-lanes one pitch lane is split into
+// One hue per note bus, fixed rather than generated, so bus 2 is the same
+// colour in every patch and on every reload. They are spaced around the wheel
+// and kept off the blue and orange that already mean "played in" and "sent
+// out".
+const BUS_HUES = ['#7bd88f', '#b78bd8', '#5ecfd8', '#d87ba6', '#c8d87b', '#8b9ad8', '#d8a05e', '#7bd8c6'];
 const MIN_SEMITONES = 13;    // an octave, so a one-note patch is not a full-height bar
 
 // The page's own palette, read from the stylesheet rather than written out
@@ -219,19 +225,39 @@ export function drawScope(app) {
 
 // --- the piano roll ---------------------------------------------------------
 
+// What can appear in the roll, in the order it is stacked and listed: what was
+// played in, what the module sent out, and then each note bus the patch writes.
+export function rollSources(app) {
+  const sources = [
+    { key: 'in', label: 'played in', colour: 'noteIn' },
+    { key: 'out', label: 'sent out', colour: 'noteOut' },
+  ];
+  for (const bus of [...(app.watchedBuses ?? [])].sort((a, b) => a - b)) {
+    sources.push({ key: `bus${bus}`, bus, label: `note bus ${bus}`, colour: BUS_HUES[bus % BUS_HUES.length] });
+  }
+  return sources;
+}
+
+const sourceKey = (note) => (note.direction === 'bus' ? `bus${note.bus}` : note.direction);
+
 export function rollPanel(app) {
   const canvas = el('canvas', { class: 'roll', id: 'roll',
                                 'aria-label': 'the notes of the last eight seconds' });
+  const sources = rollSources(app);
+  const colours = palette();
+  const keys = sources.map((source) => el('span', {
+    class: 'roll-key', style: `--key:${colours[source.colour] ?? source.colour}`,
+  }, source.label));
   return el('section', { class: 'panel' },
     el('h2', {}, 'piano roll — what is playing'),
     el('div', { class: 'scope-wrap' }, canvas),
-    el('div', { class: 'row' },
-      el('span', { class: 'roll-key out' }, 'sent by the module'),
-      el('span', { class: 'roll-key in' }, 'played into it'),
+    el('div', { class: 'row' }, keys,
       el('button', { class: 'ghost', onclick: () => { app.module.clearNotes(); } }, 'clear')),
     el('p', { class: 'hint' },
-      'Every note on and off, on one time line: the keyboard and a controller going in, '
-      + 'and what the patch made of them coming out. A bar still growing is a note still held.'));
+      'Every note on and off, on one time line, and a colour for each place it was seen: going in '
+      + 'from the keyboard or a controller, coming out of the module, and on each note bus the patch '
+      + 'writes. The same phrase usually appears more than once — a sequencer writes a bus and a MIDI '
+      + 'out sends it — and where the two disagree is the bug. A bar still growing is a note held.'));
 }
 
 export function drawRoll(app) {
@@ -296,21 +322,35 @@ export function drawRoll(app) {
     ctx.stroke();
   }
 
+  // A pitch lane is split between the sources actually playing in it, so the
+  // same note seen in two places is two bars rather than one drawn over the
+  // other. Only the sources present get a slot: a roll with one source in it
+  // uses the whole lane, as it should.
+  const sources = rollSources(app);
+  const present = sources.filter((source) => notes.some((note) => sourceKey(note) === source.key));
+  const slots = Math.max(1, Math.min(ROLL_SLOTS, present.length));
+  const slotOf = new Map(present.map((source, i) => [source.key, Math.min(i, slots - 1)]));
+  const colourOf = (source) => COLOUR[source.colour] ?? source.colour;
+  const byKey = new Map(sources.map((source) => [source.key, source]));
+
   for (const note of notes) {
+    const key = sourceKey(note);
     const start = Math.max(from, note.start);
     const end = Math.min(now, note.end ?? now);
     const left = x(start);
     const right = Math.max(left + 2, x(end));
-    const top = y(note.pitch) + Math.min(1, laneH / 6);
-    const barH = Math.max(2, laneH - Math.min(2, laneH / 3));
-    ctx.globalAlpha = note.direction === 'in' ? 0.45 : 0.35 + 0.65 * (note.velocity / 127);
-    ctx.fillStyle = note.direction === 'in' ? COLOUR.noteIn : COLOUR.noteOut;
+    const slot = slotOf.get(key) ?? 0;
+    const slotH = laneH / slots;
+    const top = y(note.pitch) + slot * slotH;
+    const barH = Math.max(1.5, slotH - Math.min(1.5, slotH / 4));
+    ctx.globalAlpha = note.direction === 'in' ? 0.5 : 0.4 + 0.6 * (note.velocity / 127);
+    ctx.fillStyle = colourOf(byKey.get(key) ?? { colour: 'dim' });
     ctx.fillRect(left, top, right - left, barH);
     ctx.globalAlpha = 1;
     if (note.end === null) {
       ctx.strokeStyle = ctx.fillStyle;
       ctx.lineWidth = 1;
-      ctx.strokeRect(left + 0.5, top + 0.5, right - left - 1, barH - 1);
+      ctx.strokeRect(left + 0.5, top + 0.5, right - left - 1, Math.max(1, barH - 1));
     }
   }
 

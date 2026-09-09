@@ -17,6 +17,7 @@
 
 const LIBRARY_KEY = 'mmmc.library.v1';
 const WORKING_KEY = 'mmmc.working.v1';
+const LISTEN_KEY = 'mmmc.listen.v1';
 
 export const toBase64 = (bytes) => {
   let binary = '';
@@ -156,6 +157,27 @@ export class Library {
 
   clearWorking() {
     if (this.available) this.storage.removeItem(WORKING_KEY);
+  }
+
+  // How the monitor is set up: which note buses have a player on them, how
+  // loud each one is, how loud the gate clicks are. Not part of a patch - it
+  // is about listening to a patch, and it should outlive the one on screen -
+  // but losing it on every reload is the same annoyance as losing the patch.
+  saveListen(state) {
+    if (!this.available) return;
+    try {
+      this.storage.setItem(LISTEN_KEY, JSON.stringify(state));
+    } catch { /* a full quota must never break the audio */ }
+  }
+
+  readListen() {
+    if (!this.available) return null;
+    try {
+      const raw = this.storage.getItem(LISTEN_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
   }
 }
 

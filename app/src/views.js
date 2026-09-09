@@ -117,23 +117,27 @@ function busSelect(caps, domain, value, optional, onChange) {
   return select;
 }
 
-// Who else is on this bus. A bus *is* the connection, so the thing a patch
+// Who is on a bus, in words. A bus *is* the connection, so the thing a patch
 // cable would have shown - what this inlet is actually listening to - has to
-// be said in words, or the patch is a list of numbers that happen to match.
-function busNeighbours(app, domain, bus, self) {
-  if (bus === P.NO_BUS) return null;
+// be said, or the patch is a list of numbers that happen to match. `self` is
+// the port asking, which is left out of its own answer; nothing but a port has
+// one, so it is optional.
+export function busUsers(app, domain, bus, self = null) {
   const writers = [];
   const readers = [];
+  if (bus === P.NO_BUS) return { writers, readers };
+  const mine = (isOutlet, index, port) => self && index === self.index
+    && Boolean(self.isOutlet) === isOutlet && self.port === port;
   app.patch.nodes.forEach((node, index) => {
-    const d = app.device.byId.get(node.algorithmId);
+    const d = app.device?.byId.get(node.algorithmId);
     if (!d) return;
     for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
-      if (node.outBus[i] === bus && d.outDomain[i] === domain && !(index === self.index && self.isOutlet && self.port === i)) {
+      if (node.outBus[i] === bus && d.outDomain[i] === domain && !mine(true, index, i)) {
         writers.push(`${d.name} ${index} ${outletName(d, i)}`);
       }
     }
     for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
-      if (node.inBus[i] === bus && d.inDomain[i] === domain && !(index === self.index && !self.isOutlet && self.port === i)) {
+      if (node.inBus[i] === bus && d.inDomain[i] === domain && !mine(false, index, i)) {
         readers.push(`${d.name} ${index} ${inletName(d, i)}`);
       }
     }
@@ -153,6 +157,12 @@ function busNeighbours(app, domain, bus, self) {
       if (port.targetMask && port.bus === bus) readers.push(`MIDI out ${i + 1}`);
     });
   }
+  return { writers, readers };
+}
+
+function busNeighbours(app, domain, bus, self) {
+  if (bus === P.NO_BUS) return null;
+  const { writers, readers } = busUsers(app, domain, bus, self);
   const parts = [];
   if (writers.length) parts.push(`from ${writers.join(', ')}`);
   if (readers.length) parts.push(`to ${readers.join(', ')}`);

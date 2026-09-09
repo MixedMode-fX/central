@@ -77,6 +77,11 @@ export class EmbeddedModule {
     this.midiListeners = new Set();
     this.frameListeners = new Set();
     this.passListeners = new Set();
+    this.noteBusListeners = new Set();
+    // Which note buses somebody is reading. A bus is only read when something
+    // is listening to it: reading all eight every pass is eight calls into the
+    // module a millisecond for buses nobody is monitoring.
+    this.noteBusWatch = new Map();     // bus -> how many listeners want it
     this.midiLog = [];
     // The log is a ring: once it is full its *length* stops changing, so
     // anything deciding "has anything happened?" from the length would decide
@@ -197,6 +202,30 @@ export class EmbeddedModule {
   // listener's clicks - has to look here.
   onPass(fn) { this.passListeners.add(fn); return () => this.passListeners.delete(fn); }
 
+  // --- listening to a note bus --------------------------------------------
+  //
+  // A note bus is the patch's own signal, *before* it reaches a MIDI output
+  // node. Reading it is how the page can play a bus that goes nowhere near a
+  // cable - which is most of them while a patch is being built, since a bus
+  // only leaves the module if somebody has patched a MIDI out to it.
+  //
+  // The queue is read exactly once per pass, right after `emu_pass()`: the
+  // buses are double-buffered and `pass()` swaps once, so at that moment the
+  // front buffer holds precisely what this pass wrote - every event once, none
+  // twice. Anything reading per animation frame instead would see one pass in
+  // sixteen and drop the rest on the floor.
+  onNoteBus(fn) { this.noteBusListeners.add(fn); return () => this.noteBusListeners.delete(fn); }
+
+  watchNoteBus(bus) {
+    this.noteBusWatch.set(bus, (this.noteBusWatch.get(bus) ?? 0) + 1);
+  }
+
+  unwatchNoteBus(bus) {
+    const held = this.noteBusWatch.get(bus);
+    if (!held) return;
+    if (held <= 1) this.noteBusWatch.delete(bus); else this.noteBusWatch.set(bus, held - 1);
+  }
+
   advance(microseconds) {
     const E = this.E;
     const passes = Math.floor(microseconds / PASS_US);
@@ -239,6 +268,23 @@ export class EmbeddedModule {
     a.jackIn |= jackIn; a.jackOut |= jackOut; a.gate |= gate;
     if (green > a.green) a.green = green;
     if (red > a.red) a.red = red;
+
+    // The note buses anything is listening to, drained for this pass.
+    for (const bus of this.noteBusWatch.keys()) {
+      const count = E.emu_note_count(bus);
+      for (let i = 0; i < count; i++) {
+        const packed = E.emu_note_event(bus, i);
+        const event = {
+          t: this.now, bus,
+          type: (packed >>> 24) & 0xff,
+          channel: (packed >>> 16) & 0xff,
+          d1: (packed >>> 8) & 0xff,
+          d2: packed & 0xff,
+        };
+        this.rollNote('bus', event);
+        for (const listener of this.noteBusListeners) listener(event);
+      }
+    }
 
     const c = this.column;
     c.jackIn |= jackIn; c.jackOut |= jackOut; c.gate |= gate;
@@ -328,14 +374,22 @@ export class EmbeddedModule {
   // it, and one still open is drawn as far as the playhead. Kept by simulated
   // time, like everything else the page draws, so a burst of passes inside one
   // animation frame lands where it happened rather than where it was noticed.
-  rollNote(direction, { t, type, d1, d2, channel, target }) {
+  //
+  // A note is filed under *where it was seen*: played into the module, sent
+  // out of it, or on note bus N. The same note usually appears more than once
+  // - a sequencer writes it to a bus and a MIDI out node then sends it - and
+  // that is the point: the roll shows the same phrase at each point in the
+  // chain, so a bus carrying what you did not expect is visible against the
+  // one that does.
+  rollNote(direction, { t, type, d1, d2, channel, target, bus = null }) {
     if (!this.isNote(type)) return;
     const on = type === NOTE_ON && d2 > 0;
     const open = this.notes.find((n) => n.end === null && n.pitch === d1
-      && n.channel === channel && n.direction === direction);
+      && n.channel === channel && n.direction === direction && n.bus === bus);
     if (on) {
       if (open) open.end = t;
-      this.notes.push({ direction, pitch: d1, velocity: d2, channel, port: target, start: t, end: null });
+      this.notes.push({ direction, bus, pitch: d1, velocity: d2, channel,
+                        port: target ?? null, start: t, end: null });
       if (this.notes.length > ROLL_MAX) this.notes.splice(0, this.notes.length - ROLL_MAX);
     } else if (open) {
       open.end = t;

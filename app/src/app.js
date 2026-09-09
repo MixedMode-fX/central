@@ -33,13 +33,13 @@
 import * as P from './protocol.js';
 import * as codec from './codec.js';
 import { Device } from './device.js';
-import { validate, advise } from './validate.js';
+import { validate, advise, Domain } from './validate.js';
 import { describeSupport, discover, requestAccess, WebMidiTransport } from './webmidi.js';
 import { EmbeddedModule } from './module.js';
 import { Listener } from './audio.js';
 import { Controller } from './controller.js';
 import { Library, toBase64 } from './storage.js';
-import { el, nodeCard } from './views.js';
+import { el, nodeCard, busUsers } from './views.js';
 import { connectNewNode } from './graph.js';
 import { routingPanel, globalsPanel, mappingPanel, controllerPanel } from './midi.js';
 import { toPatchJsonText, fromPatchJson } from './patchjson.js';
@@ -85,6 +85,11 @@ class App {
     // Where "play" came from, so leaving it goes back rather than guessing.
     this.editingTab = 'patch';
     this.scopeAll = false;
+    // The note buses the piano roll is reading. A bus is only read when
+    // something asks for it, and what the roll asks for is "every bus this
+    // patch writes" - so the roll follows the patch rather than needing to be
+    // told, and a bus nothing writes costs nothing.
+    this.watchedBuses = new Set();
     // The patch being edited: its name, and where it came from in the library.
     this.current = { id: null, name: 'untitled', dirty: false, savedAt: 0 };
     this.savedImage = null;        // the image as last saved, for the dirty mark
@@ -114,6 +119,28 @@ class App {
     this.scrolled = new Map();
   }
 
+  // Keep the roll's note-bus watches in step with the patch. Called on every
+  // render, which is every edit: a connection dragged onto a new bus is a new
+  // bus to show, and one dragged off is one to stop reading.
+  syncNoteBuses() {
+    const wanted = new Set();
+    if (this.module && this.usingModule && this.device?.capabilities) {
+      for (let bus = 0; bus < this.device.capabilities.noteBuses; bus++) {
+        if (busUsers(this, Domain.Note, bus).writers.length) wanted.add(bus);
+      }
+    }
+    for (const bus of [...this.watchedBuses]) {
+      if (wanted.has(bus)) continue;
+      this.module?.unwatchNoteBus(bus);
+      this.watchedBuses.delete(bus);
+    }
+    for (const bus of wanted) {
+      if (this.watchedBuses.has(bus)) continue;
+      this.module.watchNoteBus(bus);
+      this.watchedBuses.add(bus);
+    }
+  }
+
   // Put every remembered scroller back where it was, before the frame is
   // painted: see `scrolled`.
   restoreScroll() {
@@ -139,6 +166,7 @@ class App {
       this.module = await EmbeddedModule.load();
       this.module.start();
       this.listener = new Listener(this.module);
+      this.listener.restore(this.library.readListen());
       this.controller = new Controller(this.module);
       this.controller.onChange = () => this.render();
       await this.useModule({ silent: true });
@@ -336,7 +364,15 @@ class App {
     }
     Promise.resolve()
       .then(() => this.device.sendPatch(this.patch, this.globals))
-      .then(() => { this.diverged = false; this.status = said; })
+      .then(() => {
+        this.diverged = false;
+        this.status = said;
+        // The nodes that were sounding are gone. A node handed over mid-note
+        // publishes its note off outside a pass, where nothing is reading the
+        // buses, so a player listening to one would drone on a note whose
+        // owner no longer exists.
+        this.listener?.panic();
+      })
       .catch((error) => { this.diverged = true; this.pendingError = error.message; })
       .finally(() => this.render());
   }
@@ -411,6 +447,13 @@ class App {
     // Debounced, because a slider sweep is a hundred edits; immediate where
     // the next thing a user does might be closing the tab.
     if (now) write(); else this.autosaveTimer = setTimeout(write, AUTOSAVE_MS);
+  }
+
+  // The monitor setup, kept across a reload like the patch is. It is written
+  // on the change itself rather than debounced: these are a handful of
+  // deliberate choices, not a slider sweep.
+  saveListen() {
+    if (this.listener) this.library.saveListen(this.listener.toJSON());
   }
 
   restoreWorking() {
@@ -649,6 +692,7 @@ class App {
     this.renderScheduled = true;
     queueMicrotask(() => {
       this.renderScheduled = false;
+      this.syncNoteBuses();
       document.getElementById('app').replaceChildren(this.view());
       this.restoreScroll();
       this.autosave();

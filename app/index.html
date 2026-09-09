@@ -41,7 +41,7 @@
      the screen and one that is clipped off the side of it. */
   .nodes > *, .ports > *, .port-group > *, .params > *, .fields > *, .jacks > *,
   .jack-cards > *, .routes > *, .slots > *, .saved-list > *, .lane-row > *,
-  .row > *, .grid > * { min-width: 0; }
+  .players > *, .row > *, .grid > * { min-width: 0; }
   /* Nothing may make the page itself scroll sideways: an overflowing lane
      scrolls in its own box or it is a bug. */
   html, body { max-width: 100%; overflow-x: hidden; }
@@ -340,10 +340,22 @@
     display: block; width: 100%; border: 1px solid var(--line);
     border-radius: var(--radius); background: var(--bg);
   }
+  /* The roll's key. One entry per place a note can be seen - played in, sent
+     out, and each note bus the patch writes - and the swatch takes the colour
+     the canvas draws that source in, handed over as a custom property because
+     a bus's colour is chosen by its number rather than by a class. */
   .roll-key { font-size: .8rem; color: var(--dim); display: inline-flex; align-items: center; gap: .35rem; }
-  .roll-key::before { content: ''; width: 1.1rem; height: .6rem; border-radius: 2px; }
-  .roll-key.out::before { background: var(--note); }
-  .roll-key.in::before { background: var(--accent); opacity: .45; }
+  .roll-key::before { content: ''; width: 1.1rem; height: .6rem; border-radius: 2px;
+                      background: var(--key, var(--dim)); }
+
+  /* One player per box: the source it listens to, its timbre and its level.
+     A box rather than a row, because on a phone the three controls wrap and
+     two players' worth of wrapped controls in one list is unreadable. */
+  .players { display: grid; gap: .6rem; margin-bottom: .6rem; }
+  .player { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
+  .player > .row { margin-bottom: .3rem; }
+  .player p { margin: .2rem 0 0; overflow-wrap: anywhere; }
+  h4.spaced { margin-top: 1rem; }
 
   .log-scroll { max-height: 16rem; overflow-y: auto; -webkit-overflow-scrolling: touch;
                 border: 1px solid var(--line); border-radius: var(--radius); }

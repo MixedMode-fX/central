@@ -87,12 +87,39 @@ answer only exists over time:
   half the rate of the first. Two traces on one axis are read at a glance. It
   was dropped when the emulator page became this tab and should not have been.
 * **the piano roll** — every note of the last eight seconds on a pitch-against-
-  time grid, what was played *into* the module and what it sent *out*, on the
-  same time line. The log below it is the same events in words, which is the
-  right form for a CC or a Program Change and the wrong one for a melody.
+  time grid, with a colour for each place the note was seen: played *into* the
+  module, sent *out* of it, and **each note bus the patch writes**. The same
+  phrase appears more than once — a sequencer writes a bus, an arpeggiator
+  reads it and writes another, a MIDI out sends that one — and a pitch lane is
+  split between the sources playing in it, so the copies sit beside each other
+  rather than on top. Where two of them disagree is the bug. The log below is
+  the same events in words, which is the right form for a CC or a Program
+  Change and the wrong one for a melody.
 
 Both draw from the module's own per-pass sampling, so what is on the screen is
 what the firmware did rather than what the page caught it doing.
+
+**And you choose what to listen to.** *listen* is a list of **players**, each
+one voice pointed at one thing:
+
+* **what the module sends** — the MIDI leaving a MIDI output node, which is
+  what a synth on the far end of the cable would receive. Complete, and useless
+  while a patch is being built: a bus only leaves the module once somebody has
+  patched a MIDI out to it, so a sequencer feeding an arpeggiator feeding
+  nothing is silent no matter how right it is.
+* **a note bus** — the patch's own signal, read straight off the bus, patched
+  to an output or not.
+
+Add as many as there are things to hear: the sequencer on bus 0 through a saw,
+the arpeggiator on bus 2 through a square, each at its own level, because
+"which of these two is wrong" is a question about hearing them apart. Each
+player says in words what writes the bus it is on, so the list is not eight
+identical "note bus N". The gate clicks are a third thing — percussion made
+from jack edges, not notes — and they have their own level for the same reason:
+they are the loudest thing in the page and usually want to be under the notes.
+The whole setup is kept in `localStorage`, because it is a page of choices
+about a patch and losing it on every reload is the same annoyance as losing the
+patch.
 
 The pass interval, the speed multiplier, single-stepping, the bus tables and
 the registry listing did *not* come back: those are instruments for debugging
@@ -270,6 +297,12 @@ can be one frame late; it cannot be missed. The scope's four-second ring buffer
 and the piano roll's notes are filled from the same place, which is why they
 can be trusted about exactly the signals they exist to show.
 
+A note bus is read the same way and for the same reason. The buses are
+double-buffered and `pass()` swaps once, so reading the queue straight after
+`emu_pass()` yields exactly what that pass wrote — every event once, none
+twice. A bus is only read when something is listening to it (a player, or the
+piano roll following the patch), so the buses nothing is watching cost nothing.
+
 The same shape of bug had the MIDI monitor stop after two hundred messages: the
 log is a ring, so once it is full its *length* never changes again, and the
 view redrew on a change of length. It counts events now (`midiSeq`), which is
@@ -306,10 +339,10 @@ app/
     perform.js        the play surface, and everything that updates live
     scope.js          the two time views: the scope and the piano roll
     library.js        the library tab
-    storage.js        localStorage: the patch library and the working patch
+    storage.js        localStorage: the library, the working patch, the monitor
     examples.js       the example patches, in that JSON
     controller.js     a MIDI controller plugged into this computer
-    audio.js          the synth standing in for what is downstream
+    audio.js          the players: the synth standing in for what is downstream
     webmidi.js        Web MIDI: support, discovery, the hardware transport
     names.js          the words for what the protocol carries as numbers
     patchjson.js      the patch as readable JSON, both ways

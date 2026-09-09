@@ -898,8 +898,20 @@ so the patch can be heard, the MIDI the module is sending — and the two views
 that answer a question no lamp can, because their answer only exists over time.
 A **scope** draws every jack and gate bus the patch uses against the last four
 seconds, which is the only way to read a divider, a Euclidean pattern or a
-logic gate; a **piano roll** draws the notes of the last eight seconds, what
-went into the module and what came out, on one time line.
+logic gate; a **piano roll** draws the notes of the last eight seconds with a
+colour for each place a note was seen — played in, sent out, and each note bus
+the patch writes — so the same phrase is visible at every point in the chain
+and a bus carrying something unexpected stands against the one that does not.
+
+**What you hear is a choice, and there can be several.** Audio used to be
+whatever left a MIDI output node, which is nothing at all while a patch is
+being built: a bus only leaves the module once somebody has patched a MIDI out
+to it. *listen* is a list of players now — each one voice pointed either at
+what the module sends or at **a note bus**, read straight off the bus, with its
+own waveform and its own level, so a sequencer on one bus and an arpeggiator on
+another can be told apart by ear. The gate clicks have their own level too:
+they are percussion made from jack edges rather than part of the music, and
+they are the loudest thing in the page.
 
 Both are filled from the module's own sampling, **once per pass** rather than
 by the page polling at paint time. A trigger here is high for one or two

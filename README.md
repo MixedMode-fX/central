@@ -888,6 +888,25 @@ Three things keep it honest, and all three are checked in CI:
   firmware's validator" is a check, not a hope. The patch library, the runtime
   seam and every example patch are checked the same way.
 
+**Three tabs, and a place to go and listen.** *patch*, *MIDI* and *library* are
+the three things there are to edit; **play** is the module *running*, and it
+sits at the top of the page next to *connect a module* because those two
+buttons answer the same question — which module am I listening to, the one in
+this page or the one on the cable. Play is the emulator's surface: the LEDs and
+the gate buses, the clock, the eight jacks, an on-screen keyboard, a small synth
+so the patch can be heard, the MIDI the module is sending — and the two views
+that answer a question no lamp can, because their answer only exists over time.
+A **scope** draws every jack and gate bus the patch uses against the last four
+seconds, which is the only way to read a divider, a Euclidean pattern or a
+logic gate; a **piano roll** draws the notes of the last eight seconds, what
+went into the module and what came out, on one time line.
+
+Both are filled from the module's own sampling, **once per pass** rather than
+by the page polling at paint time. A trigger here is high for one or two
+milliseconds and an animation frame is sixteen, so a view that reads the levels
+when it happens to draw shows a pattern nobody is playing — which is what the
+gate dots and jack lamps used to do.
+
 Buses are the connections: every inlet and outlet is a selector offering only
 the buses of its own domain, under the name the firmware gives it — *advance*
 and *reset* rather than *in 0* and *in 1* — and each one says what else is on

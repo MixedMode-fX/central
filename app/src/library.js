@@ -1,174 +1,189 @@
-// The patch library: patches kept in this browser.
+// The library tab: what a patch is kept in, and every way of moving one.
 //
-// The module holds PATCH_SLOTS presets in EEPROM and the built-in module holds
-// its own in RAM, which a reload throws away. Neither is somewhere to keep
-// work. A patch is a few hundred bytes, so the browser can hold as many as
-// anyone will make, and keeping them here means the app is useful with no
-// module, no cable and no file manager - which is the case the whole app is
-// built for.
+// A module holds four preset slots and forgets everything else; the built-in
+// module forgets those too, because its EEPROM is RAM. So the app is where
+// patches live. Three places, and the tab is laid out as the three of them:
 //
-// **What is stored is the patch image**: the same bytes `encodePatch()`
-// produces, the same bytes a `.syx` file carries and the module writes to a
-// slot. Not a JavaScript object of the app's own shape - that would be a
-// third format to keep in step with the firmware, and the one that would
-// silently rot. So a stored patch can be exported, sent to hardware or loaded
-// into a slot without conversion, and a patch format version change is caught
-// by the same decoder that catches it in a file.
+//   * **this browser** - the library. Named patches, saved as the patch image
+//     itself, kept in localStorage. This is the working set: the thing you
+//     come back to tomorrow.
+//   * **a file** - `.syx`, the bytes a module stores and any SysEx librarian
+//     can send, and `.json`, the same patch in words.
+//   * **the module** - its preset slots, recalled by Program Change.
+//
+// Everything here moves a patch between two of those, and the patch never
+// changes shape on the way: it is the image in all three.
 
-const LIBRARY_KEY = 'mmmc.library.v1';
-const WORKING_KEY = 'mmmc.working.v1';
+import { el } from './views.js';
+import { ago } from './storage.js';
+import { EXAMPLES } from './examples.js';
 
-export const toBase64 = (bytes) => {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
-export const fromBase64 = (text) => {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-};
-
-const newId = () => `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
-
-export class Library {
-  constructor(storage = globalThis.localStorage) {
-    this.storage = storage;
-    // Private windows, disabled site data and a full quota all show up here.
-    // A library that cannot be written is not a reason for the app to fail -
-    // it is a reason to say so and keep the export path working.
-    this.available = false;
-    this.reason = 'this browser is not storing patches';
-    try {
-      const probe = '__mmmc_probe__';
-      storage.setItem(probe, '1');
-      storage.removeItem(probe);
-      this.available = true;
-      this.reason = '';
-    } catch (error) {
-      this.reason = `patches cannot be saved here (${error.name}). Export a file instead.`;
-    }
-  }
-
-  read() {
-    if (!this.available) return [];
-    try {
-      const raw = this.storage.getItem(LIBRARY_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-
-  write(entries) {
-    if (!this.available) throw new Error(this.reason);
-    try {
-      this.storage.setItem(LIBRARY_KEY, JSON.stringify(entries));
-    } catch (error) {
-      // A quota error is the one failure a user can act on, and the action is
-      // to delete something - so it says that rather than the DOM's wording.
-      throw new Error(error.name === 'QuotaExceededError'
-        ? 'this browser will not store any more patches. Delete one, or export it to a file.'
-        : `could not save: ${error.message}`);
-    }
-  }
-
-  // Newest first, without the images: a list of fifty patches should not carry
-  // fifty patch images through the render path.
-  list() {
-    return this.read()
-      .map(({ image, ...rest }, at) => ({ ...rest, at }))
-      // Newest first, and for two saved in the same millisecond the later one
-      // first: "duplicate" then puts the copy above the original, where the
-      // eye is already looking.
-      .sort((a, b) => b.updated - a.updated || b.at - a.at)
-      .map(({ at, ...rest }) => rest);
-  }
-
-  get(id) {
-    const found = this.read().find((entry) => entry.id === id);
-    return found ? { ...found, bytes: fromBase64(found.image) } : null;
-  }
-
-  // Upsert. A save with no id makes a new patch; a save with one overwrites
-  // it, which is what the "save" button on an already-named patch does.
-  save({ id, name, bytes, nodes }) {
-    const entries = this.read();
-    const now = Date.now();
-    const image = toBase64(bytes);
-    const at = id ? entries.findIndex((entry) => entry.id === id) : -1;
-    const entry = at >= 0
-      ? { ...entries[at], name, image, nodes, updated: now }
-      : { id: id ?? newId(), name, image, nodes, created: now, updated: now };
-    if (at >= 0) entries[at] = entry; else entries.push(entry);
-    this.write(entries);
-    return entry;
-  }
-
-  rename(id, name) {
-    const entries = this.read();
-    const at = entries.findIndex((entry) => entry.id === id);
-    if (at < 0) return null;
-    entries[at] = { ...entries[at], name, updated: Date.now() };
-    this.write(entries);
-    return entries[at];
-  }
-
-  remove(id) {
-    this.write(this.read().filter((entry) => entry.id !== id));
-  }
-
-  duplicate(id) {
-    const entry = this.read().find((e) => e.id === id);
-    if (!entry) return null;
-    const copy = { ...entry, id: newId(), name: `${entry.name} copy`, created: Date.now(), updated: Date.now() };
-    this.write([...this.read(), copy]);
-    return copy;
-  }
-
-  // The patch being edited, saved on every change so a reload - or a phone
-  // deciding to discard the tab - does not lose it. This is separate from the
-  // library: work in progress is not something a user asked to keep, and it
-  // must not appear in the list as if it were.
-  saveWorking(state) {
-    if (!this.available) return;
-    try {
-      this.storage.setItem(WORKING_KEY, JSON.stringify({
-        id: state.id ?? null, name: state.name, image: toBase64(state.bytes), updated: Date.now(),
-      }));
-    } catch { /* a full quota must never break editing */ }
-  }
-
-  readWorking() {
-    if (!this.available) return null;
-    try {
-      const raw = this.storage.getItem(WORKING_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return { ...parsed, bytes: fromBase64(parsed.image) };
-    } catch {
-      return null;
-    }
-  }
-
-  clearWorking() {
-    if (this.available) this.storage.removeItem(WORKING_KEY);
-  }
+export function libraryTab(app) {
+  return el('div', {},
+    currentPanel(app),
+    libraryPanel(app),
+    examplesPanel(app),
+    filesPanel(app),
+    slotsPanel(app));
 }
 
-// "3 minutes ago" beats a timestamp in a list whose whole purpose is to answer
-// "which one was I just working on?".
-export function ago(then, now = Date.now()) {
-  const seconds = Math.max(0, Math.round((now - then) / 1000));
-  if (seconds < 60) return 'just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days} d ago`;
-  return new Date(then).toLocaleDateString();
+function currentPanel(app) {
+  const current = app.current;
+  // On input, and with no re-render: the field is usually left by clicking
+  // "save", and a page rebuilt on the way out of the field would replace the
+  // button before the click reached it.
+  const name = el('input', {
+    type: 'text', class: 'grow', value: current.name, 'aria-label': 'patch name',
+    oninput: (e) => { app.current.name = e.target.value.trim() || 'untitled'; },
+  });
+  return el('section', { class: 'panel' },
+    el('h2', {}, 'this patch'),
+    el('div', { class: 'row' }, name,
+      el('button', { class: 'primary', onclick: () => app.savePatch() },
+        current.id ? 'save' : 'save to this browser'),
+      current.id ? el('button', { onclick: () => app.savePatch({ asNew: true }) }, 'save as a copy') : null),
+    el('p', { class: 'hint' },
+      current.id
+        ? `Saved here ${current.savedAt ? ago(current.savedAt) : 'earlier'}${current.dirty ? ' — with changes since' : ''}.`
+        : 'Not saved yet. Whatever is being edited is kept across a reload anyway; saving gives it a name '
+          + 'and a place in the list below.'),
+    el('div', { class: 'row' },
+      el('button', { class: 'ghost', onclick: () => app.newPatch() }, 'start a new patch')));
+}
+
+function libraryPanel(app) {
+  if (!app.library.available) {
+    return el('section', { class: 'panel' },
+      el('h2', {}, 'in this browser'),
+      el('p', { class: 'hint' }, app.library.reason));
+  }
+  const entries = app.library.list();
+  const rows = entries.map((entry) => {
+    const name = el('input', {
+      type: 'text', class: 'grow', value: entry.name, 'aria-label': `name of ${entry.name}`,
+      onchange: (e) => app.renameSaved(entry.id, e.target.value),
+    });
+    return el('div', { class: `saved ${entry.id === app.current.id ? 'current' : ''}` },
+      el('div', { class: 'row' }, name,
+        el('button', { onclick: () => app.loadSaved(entry.id) }, 'load')),
+      el('div', { class: 'row' },
+        el('span', { class: 'hint grow' },
+          `${entry.nodes} node${entry.nodes === 1 ? '' : 's'} · ${ago(entry.updated)}`
+          + `${entry.id === app.current.id ? ' · open' : ''}`),
+        el('button', { class: 'ghost', onclick: () => app.duplicateSaved(entry.id) }, 'duplicate'),
+        el('button', { class: 'ghost', onclick: () => app.exportSaved(entry.id) }, '.syx'),
+        el('button', { class: 'ghost danger', onclick: () => app.deleteSaved(entry.id) }, 'delete')));
+  });
+
+  return el('section', { class: 'panel' },
+    el('h2', {}, `in this browser (${entries.length})`),
+    entries.length ? el('div', { class: 'saved-list' }, rows) : el('p', { class: 'hint' },
+      'Nothing saved yet. Build a patch, give it a name above and save it — it stays in this '
+      + 'browser, on this device, and never leaves it.'),
+    entries.length ? el('p', { class: 'hint' },
+      'These live in this browser only. Export the ones you care about: clearing site data takes '
+      + 'them with it, and another device cannot see them.') : null);
+}
+
+// Somewhere to start. An empty library in front of a machine with thirty
+// algorithms is a wall, not a blank page.
+function examplesPanel(app) {
+  const names = Object.keys(EXAMPLES);
+  const pick = el('select', { class: 'grow',
+                              onchange: (e) => { app.example = e.target.value; app.render(); } });
+  for (const name of names) {
+    const option = el('option', { value: name }, name);
+    if (name === app.example) option.selected = true;
+    pick.append(option);
+  }
+  app.example ??= names[0];
+  return el('section', { class: 'panel' },
+    el('h2', {}, 'start from an example'),
+    el('div', { class: 'row' }, pick,
+      el('button', { onclick: () => app.loadExample(pick.value) }, 'load')),
+    el('p', { class: 'summary' }, EXAMPLES[app.example]?.about ?? ''),
+    el('p', { class: 'hint' },
+      'Each one exercises one part of the machine. It lands here unsaved, so nothing you have '
+      + 'saved is touched — give it a name above to keep your version of it.'));
+}
+
+function filesPanel(app) {
+  const json = app.patchJson();
+  const box = el('textarea', { class: 'json', spellcheck: 'false', rows: '12',
+                               'aria-label': 'this patch as JSON' }, json);
+  const jsonDetails = el('details', {},
+    el('summary', {}, 'this patch as JSON'),
+    el('p', { class: 'hint' },
+      'The patch in words: algorithms by name, jacks numbered from 1, MIDI ports as a user knows '
+      + 'them. It is readable, diffable and pasteable — and it carries the globals and the '
+      + 'controller bindings too, so nothing is lost by going through it.'),
+    box,
+    el('div', { class: 'row' },
+      el('button', { onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(json);
+          app.status = 'JSON copied to the clipboard';
+        } catch {
+          box.select();
+          app.status = 'selected — copy it with your keyboard';
+        }
+        app.render();
+      } }, 'copy'),
+      el('button', { onclick: () => app.loadJson(box.value, 'the JSON above') }, 'load what is in the box')));
+  jsonDetails.open = app.isOpen('json');
+  jsonDetails.addEventListener('toggle', () => app.setOpen('json', jsonDetails.open));
+
+  return el('section', { class: 'panel' },
+    el('h2', {}, 'files'),
+    el('p', { class: 'hint' },
+      'A .syx file is the patch image — the bytes the module stores. Any SysEx librarian can send '
+      + 'one, which is how a patch built with nothing plugged in reaches a module.'),
+    el('div', { class: 'row' },
+      el('button', { onclick: () => app.exportSyx() }, 'export .syx'),
+      el('button', { onclick: () => app.exportJson() }, 'export .json'),
+      el('label', { class: 'file' }, 'import a file',
+        el('input', {
+          type: 'file', accept: '.syx,.bin,.json',
+          onchange: (e) => { if (e.target.files[0]) app.importFile(e.target.files[0]); },
+        }))),
+    jsonDetails);
+}
+
+function slotsPanel(app) {
+  const slots = app.device?.capabilities?.slots ?? 0;
+  if (!slots) {
+    return el('section', { class: 'panel' },
+      el('h2', {}, 'on the module'),
+      el('p', { class: 'hint' }, 'Connect a module to use its preset slots.'));
+  }
+  const buttons = [];
+  for (let s = 0; s < slots; s++) {
+    buttons.push(el('div', { class: 'slot' },
+      el('span', {}, `slot ${s}`),
+      el('button', { onclick: () => app.edit(async () => {
+        await app.device.saveSlot(s);
+        app.status = `saved this patch to slot ${s}`;
+        app.render();
+      }, 'save') }, 'save'),
+      el('button', { onclick: () => app.edit(async () => {
+        await app.device.loadSlot(s);
+        const dumped = await app.device.dump();
+        app.patch = dumped.patch;
+        app.globals = dumped.globals;
+        app.diverged = false;
+        app.current = { id: null, name: `slot ${s}`, dirty: true, savedAt: 0 };
+        app.status = `recalled slot ${s}`;
+        app.render();
+      }, 'load') }, 'load'),
+      el('button', { class: 'ghost', onclick: () => app.edit(() => app.device.eraseSlot(s), 'erase') }, 'erase')));
+  }
+  return el('section', { class: 'panel' },
+    el('h2', {}, `on the module (${slots} slots of ${app.device.capabilities.slotBytes} bytes)`),
+    el('p', { class: 'hint' },
+      app.usingModule
+        ? 'The built-in module’s slots are RAM, so a reload empties them — they are here to try '
+          + 'Program Change recall, not to keep a patch. The library above is what keeps a patch.'
+        : 'These are the module’s own presets, in its EEPROM. Program Change recalls them once '
+          + 'recall is turned on under MIDI.'),
+    el('div', { class: 'slots' }, buttons));
 }

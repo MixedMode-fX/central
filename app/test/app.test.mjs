@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 
 import * as P from '../src/protocol.js';
 import * as codec from '../src/codec.js';
-import { Library, toBase64, fromBase64, ago } from '../src/library.js';
+import { Library, toBase64, fromBase64, ago } from '../src/storage.js';
 import { fromPatchJson, toPatchJson } from '../src/patchjson.js';
 import { validate } from '../src/validate.js';
 import { SCALES, scaleMaskOf } from '../src/names.js';
@@ -201,6 +201,76 @@ await test('a jack tap is an edge, not a level', async () => {
 // an incoming CC is offered to the firmware's control plane first, exactly as
 // main.cpp's loop offers it, so a bound knob moves a parameter and never
 // reaches the graph.
+// The lights, the scope and the piano roll all hang off one thing: the module
+// samples itself once per pass, and the page reads what has happened since it
+// last painted. Everything below is that seam.
+
+// The bug this closes: the gate dots and jack lamps were read by a timer at
+// 10 Hz, and a trigger on this machine is high for one or two passes - one or
+// two *milliseconds*. Ninety-eight times in a hundred the poll landed while it
+// was low, so the lights showed a pattern nobody was playing.
+await test('a pulse too short to paint still reaches the lights', async () => {
+  const { module } = await instantiate();
+  module.takeActivity();                            // start from a clean latch
+  module.pulseJack(0, 2);                           // two milliseconds: a trigger
+  module.advance(100_000);                          // six animation frames' worth
+  assert.equal(module.jackInput(0), 0, 'the pulse is long over');
+
+  const live = module.takeActivity();
+  assert.ok(live.jackIn & 1, 'the jack was high during that frame and the page never knew');
+  // And the latch is a latch, not a memory: the next frame shows it low again.
+  assert.equal(module.takeActivity().jackIn & 1, 0, 'the lamp would stay lit for ever');
+});
+
+// The same sampling, kept: what the scope draws is every millisecond of it,
+// not what a paint happened to catch.
+await test('the scope keeps the pulse the eye missed', async () => {
+  const { module } = await instantiate();
+  module.pulseJack(1, 3);
+  module.advance(200_000);
+  const trace = module.trace;
+  assert.ok(trace.filled > 100, `only ${trace.filled} columns recorded`);
+  let seen = 0;
+  for (let i = 0; i < trace.filled; i++) if (trace.jackIn[i] & 2) seen++;
+  assert.ok(seen >= 1 && seen <= 10, `the trace holds ${seen} columns of a 3 ms pulse`);
+});
+
+// The other bug this closes, and it is a one-liner with a nasty shape: the log
+// is a ring of two hundred, so once it fills, its *length* never changes
+// again. A view that redraws when the length changes therefore stops for ever
+// at event two hundred - and comes back to life on "clear", which is exactly
+// what it looked like from outside.
+await test('the MIDI log still reports events once the ring is full', async () => {
+  const { module } = await instantiate();
+  for (let i = 0; i < 260; i++) module.emitMidi(P.MidiPort.mmMIDI_USB_0, 0xb0, i & 127, 1, 1);
+  const length = module.midiLog.length;
+  const seq = module.midiSeq;
+  assert.ok(length < 260, 'the log is meant to be a ring');
+  module.emitMidi(P.MidiPort.mmMIDI_USB_0, 0xb0, 7, 1, 1);
+  assert.equal(module.midiLog.length, length, 'the length cannot say anything new');
+  assert.equal(module.midiSeq, seq + 1, 'the sequence must, or the view freezes');
+  assert.equal(module.midiLog.at(-1).d1, 7, 'and the newest event is the one at the end');
+});
+
+await test('the piano roll opens a note, closes it, and holds an open one', async () => {
+  const { module } = await instantiate();
+  const port = P.MidiPort.mmMIDI_USB_0;
+  module.deliverMidi(port, 0x90, 1, 60, 100);       // what a key press does
+  module.advance(20_000);
+  const held = module.notes.find((n) => n.pitch === 60);
+  assert.ok(held, 'the note never reached the roll');
+  assert.equal(held.end, null, 'a note still down is drawn to the playhead');
+  module.deliverMidi(port, 0x80, 1, 60, 0);
+  assert.ok(held.end > held.start, 'the note off has to close the bar it opened');
+
+  // And what the module plays lands on the same time line, marked apart from
+  // what was played into it.
+  module.emitMidi(P.MidiPort.mmMIDI_SERIAL_1, 0x90, 48, 90, 1);
+  const sent = module.notes.find((n) => n.pitch === 48);
+  assert.equal(sent.direction, 'out');
+  assert.equal(held.direction, 'in');
+});
+
 await test('a bound CC moves a parameter and is consumed', async () => {
   const { module, E } = await instantiate();
   const device = await connected(module);
@@ -366,8 +436,8 @@ await test('a slider ignores a scrolling finger and obeys a deliberate one', asy
 
 await test('the built page contains every module, with nothing left to import', async () => {
   const code = bundle('app.js');
-  for (const name of ['app.js', 'module.js', 'library.js', 'perform.js', 'controller.js',
-                      'audio.js', 'patches.js', 'views.js', 'midi.js', 'protocol.js']) {
+  for (const name of ['app.js', 'module.js', 'storage.js', 'perform.js', 'controller.js',
+                      'audio.js', 'library.js', 'scope.js', 'views.js', 'midi.js', 'protocol.js']) {
     assert.ok(code.includes(`__define('${name}'`), `${name} is not in the build`);
   }
   // Nothing may be left that a browser would try to fetch: the built page is

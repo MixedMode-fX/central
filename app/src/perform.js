@@ -1,21 +1,22 @@
-// The play tab: the module, running, with the few controls a module has.
+// The play surface: the module, running, with the few controls a module has.
 //
-// This is the emulator's surface, reduced to what a musician needs while
-// building a patch. The old page also exposed the pass interval, a speed
-// multiplier, single-stepping, a scope, the bus tables and the registry -
-// instruments for debugging the emulator itself. They answered questions about
-// the *simulation*; this tab answers questions about the *patch*: is the clock
-// running, is that jack firing, what is it sending, what does it sound like.
-// Anything that needs the other questions has the native tests, `smoke.mjs`
-// and a debugger.
+// This is the emulator's surface: what a module in a rack gives you - two
+// LEDs, eight jacks, a clock and its MIDI - plus the three things a rack
+// cannot. Ears, an on-screen keyboard, and a *time* axis.
 //
-// What is left is what a module in a rack gives you - two LEDs, eight jacks, a
-// clock and its MIDI - plus the two things a rack cannot: an on-screen
-// keyboard, and ears.
+// The pass interval, the speed multiplier, single-stepping, the bus tables and
+// the registry listing stayed behind when the emulator page became this tab:
+// they answer questions about the *simulation*, and this tab answers questions
+// about the patch. The scope did not belong in that list and should never have
+// gone with them. A divider, a Euclidean sequencer and a logic gate are things
+// whose output only exists over time - a lamp can say a gate is high, it
+// cannot say the pattern is right - and the piano roll beside it does the same
+// job for the notes. Both are in `scope.js`.
 
 import * as P from './protocol.js';
 import { el, noteName, slider } from './views.js';
 import { portNames, MUSICAL_PORTS, CLOCK_SOURCES } from './names.js';
+import { scopePanel, drawScope, rollPanel, drawRoll } from './scope.js';
 
 const MIDI_TYPES = {
   0x80: 'note off', 0x90: 'note on', 0xa0: 'poly AT', 0xb0: 'CC', 0xc0: 'program',
@@ -45,6 +46,8 @@ export function playTab(app) {
   return el('div', {},
     metersPanel(app),
     transportPanel(app),
+    scopePanel(app),
+    rollPanel(app),
     jacksPanel(app),
     keyboardPanel(app),
     listenPanel(app),
@@ -300,38 +303,51 @@ function monitorPanel(app) {
 
 // --- the live bits ----------------------------------------------------------
 //
-// Everything above is rebuilt only when the patch changes. What moves at 10 Hz
-// is written straight into the DOM here: re-rendering the page for a blinking
-// LED would fight every open <select> and every held key.
+// Everything above is rebuilt only when the patch changes. What moves is
+// written straight into the DOM here, once per animation frame: re-rendering
+// the page for a blinking LED would fight every open <select> and every held
+// key.
+//
+// **Per frame, and from the module's own per-pass sampling** - not from a
+// timer reading the levels for itself. This used to run ten times a second and
+// read whatever was high at that instant, which is the wrong shape for the
+// thing it was showing: a trigger is high for one or two passes, an animation
+// frame is sixteen, and a tenth of a second is a hundred. A gate dot lit when
+// the poll happened to land inside a pulse and stayed dark otherwise, so the
+// lights were somewhere between late and fictional. `takeActivity()` hands
+// over everything that has been high since the last paint, folded together
+// with what is high now, so an edge can be one frame late but can no longer be
+// missed.
 export function refreshLive(app) {
   const module = app.module;
   if (!module || !app.usingModule) return;
 
-  const leds = module.leds();
+  const live = module.takeActivity();
   const clock = module.clock();
   const green = document.getElementById('led-green');
   const red = document.getElementById('led-red');
-  if (green) green.style.opacity = String(Math.max(0.08, leds.green / 255));
-  if (red) red.style.opacity = String(Math.max(0.08, leds.red / 255));
+  if (green) green.style.opacity = String(Math.max(0.08, live.green / 255));
+  if (red) red.style.opacity = String(Math.max(0.08, live.red / 255));
 
   const readout = document.getElementById('clock-readout');
   if (readout) {
     readout.textContent = clock.running
-      ? `${clock.bpm} BPM · beat ${Math.floor(clock.count / (P.MASTER_PPQN * P.CLOCK_SUBTICK)) + 1}`
+      ? `${clock.bpm} BPM \u00b7 beat ${Math.floor(clock.count / (P.MASTER_PPQN * P.CLOCK_SUBTICK)) + 1}`
       : 'clock stopped';
   }
 
-  const buses = module.gateBuses();
   for (let b = 0; b < P.N_GATE_BUS; b++) {
     const dot = document.getElementById(`gate-${b}`);
-    if (dot) dot.classList.toggle('lit', (buses & (1 << b)) !== 0);
+    if (dot) dot.classList.toggle('lit', (live.gate & (1 << b)) !== 0);
   }
 
   for (let j = 0; j < P.GPIO_N; j++) {
     const lamp = document.getElementById(`jack-lamp-${j}`);
     if (!lamp) continue;
     const mode = app.patch.gatePorts[j]?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
-    const high = mode === P.GatePortDirection.GATE_PORT_OUT ? module.jackOutput(j) : module.jackInput(j);
+    const high = mode === P.GatePortDirection.GATE_PORT_OUT
+      ? live.jackOut & (1 << j)
+      : live.jackIn & (1 << j);
     lamp.classList.toggle('lit', Boolean(high));
     lamp.classList.toggle('out', mode === P.GatePortDirection.GATE_PORT_OUT);
   }
@@ -345,29 +361,57 @@ export function refreshLive(app) {
     voices.textContent = app.listener.enabled ? `${app.listener.voices.size} voices` : '';
   }
 
+  drawScope(app);
+  drawRoll(app);
   refreshLog(app);
   refreshPlayheads(app);
 }
 
-let shownLog = -1;
+// The log, rebuilt when there is something new in it.
+//
+// "Something new" is the sequence number, not the length. The log is a ring of
+// two hundred events: once it is full, every further event shifts one off the
+// front and leaves the length at two hundred for ever. Comparing lengths -
+// which is what this did - therefore froze the view after the two hundredth
+// event and only ever thawed when *clear* took the length back to zero, which
+// is exactly the "it fills up, stops, and refills when I clear it" that was
+// reported. `midiSeq` counts every event the module has ever sent.
+//
+// The mark lives on the element rather than in a variable here, so a rebuilt
+// panel - the page is replaced wholesale on every edit - draws itself again
+// instead of waiting for the next event to notice it is empty.
+const LOG_MS = 60;
 function refreshLog(app) {
   const box = document.getElementById('midi-log');
   if (!box) return;
-  const log = app.module.midiLog;
-  if (log.length === shownLog) return;
-  shownLog = log.length;
+  const module = app.module;
+  const seq = module.midiSeq;
+  if (Number(box.dataset.seq) === seq) return;
+  // A stream of MIDI clock is forty events a second; there is no reading a
+  // list that is rebuilt under the eye any faster than this.
+  const at = (globalThis.performance ?? Date).now();
+  if (box.dataset.seq !== undefined && at - Number(box.dataset.at ?? 0) < LOG_MS) return;
+  box.dataset.seq = String(seq);
+  box.dataset.at = String(at);
+
+  const log = module.midiLog;
   if (!log.length) {
-    box.replaceChildren(el('p', { class: 'hint' }, 'nothing yet — the module has sent no MIDI'));
+    box.replaceChildren(el('p', { class: 'hint' }, 'nothing yet \u2014 the module has sent no MIDI'));
     return;
   }
+  // Whether to follow the tail is the reader's choice: scrolling back through
+  // what just went past must not be undone by the next event. The scroller is
+  // the box around the log, not the log - which is why this never worked.
+  const scroll = box.parentElement;
+  const following = !scroll || scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
   box.replaceChildren(...log.slice(-LOG_SHOWN).map((event) => el('div', { class: 'log-line' },
     el('span', { class: 'log-time' }, `${(event.t / 1e6).toFixed(2)}s`),
     el('span', { class: 'log-what' }, MIDI_TYPES[event.type] ?? `0x${event.type.toString(16)}`),
-    el('span', { class: 'log-data' }, app.module.isNote(event.type)
+    el('span', { class: 'log-data' }, module.isNote(event.type)
       ? `${noteName(event.d1)} vel ${event.d2}`
       : `${event.d1} ${event.d2}`),
-    el('span', { class: 'log-where' }, `ch ${event.channel} → ${portNames(event.target).join(', ') || event.target}`))));
-  box.scrollTop = box.scrollHeight;
+    el('span', { class: 'log-where' }, `ch ${event.channel} \u2192 ${portNames(event.target).join(', ') || event.target}`))));
+  if (scroll && following) scroll.scrollTop = scroll.scrollHeight;
 }
 
 // A playhead on the step grids in the patch tab, read from the running node.

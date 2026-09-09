@@ -131,7 +131,7 @@ export const EXAMPLES = {
     },
   },
   'Poly sequencer: four chords, four voices, 60 % gate': {
-    about: 'One step per beat, up to four degrees a step in C major, each voice with its own velocity. The 60 % gate is an estimate from the measured step period, so the first chord after a tempo change is the wrong length, on purpose. Change the scale to "dorian" in the JSON under patches → files and load it back: same pattern, different colour.',
+    about: 'One step per beat, up to four degrees a step in C major, each voice with its own velocity. The 60 % gate is an estimate from the measured step period, so the first chord after a tempo change is the wrong length, on purpose. Change the scale to "dorian" in the JSON under library → files and load it back: same pattern, different colour.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       nodes: [

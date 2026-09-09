@@ -330,6 +330,21 @@
   .key.black { background: var(--raised); color: var(--dim); }
   .key.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 
+  /* The scope and the piano roll. A canvas has no intrinsic width, so it is
+     given one - the panel's - and its pixel buffer is set from that times the
+     device pixel ratio in `scope.js`; a canvas sized in CSS alone is a blurred
+     canvas on every phone made since 2014. The height comes from the content
+     (one row per trace, a fixed roll) and is written on the element. */
+  .scope-wrap { margin-bottom: .6rem; }
+  canvas.scope, canvas.roll {
+    display: block; width: 100%; border: 1px solid var(--line);
+    border-radius: var(--radius); background: var(--bg);
+  }
+  .roll-key { font-size: .8rem; color: var(--dim); display: inline-flex; align-items: center; gap: .35rem; }
+  .roll-key::before { content: ''; width: 1.1rem; height: .6rem; border-radius: 2px; }
+  .roll-key.out::before { background: var(--note); }
+  .roll-key.in::before { background: var(--accent); opacity: .45; }
+
   .log-scroll { max-height: 16rem; overflow-y: auto; -webkit-overflow-scrolling: touch;
                 border: 1px solid var(--line); border-radius: var(--radius); }
   .log { display: grid; font-size: .8rem; font-variant-numeric: tabular-nums; }
@@ -339,7 +354,7 @@
   .log-time, .log-where { color: var(--dim); }
   .log-where { grid-column: 1 / -1; font-size: .75rem; }
 
-  /* --- the patches tab --- */
+  /* --- the library tab --- */
   .saved-list { display: grid; gap: .5rem; }
   .saved { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
   .saved.current { border-color: var(--accent); }

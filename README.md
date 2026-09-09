@@ -58,6 +58,22 @@ Configurable logic gates (all gates can also be inverted) & latches:
 
 Logic algorithms are not clocked by the master clock and happen at a much higher sample rate
 
+Decisions recorded for the logic gates:
+
+- A gate folds its operation over every input in its mask, starting from the
+  gate's identity element (1 for AND/NAND, 0 for OR/NOR/XOR/XNOR). **XOR over
+  more than two inputs is therefore parity**: the output is high when an odd
+  number of inputs is high. XNOR is the inverse.
+- Gate inputs are normalised in the hardware layer (see `GATE_INPUT_ACTIVE_LOW`
+  in `src/hardware.h`): an algorithm reads `1` when a gate is present at the
+  jack and `0` otherwise, so an **unpatched input reads 0** and does not force
+  an OR or XOR gate high.
+- `NOT` and `Sustain` take exactly one input port. A mask selecting zero or
+  several ports is rejected at construction (`is_valid()` is false) and the
+  algorithm never touches the hardware.
+- Ports start as inputs at boot. An algorithm claims its outputs in `setup()`
+  and returns every port it claimed to an input when it is destroyed.
+
 # Building
 
 The toolchain is PlatformIO, installed into a project-local `.venv/`. A clone

@@ -18,7 +18,9 @@
 
 #include <Arduino.h>
 #include <MIDI.h>
+#ifdef MMMC_USB_HOST
 #include <USBHost_t36.h>
+#endif
 
 #pragma GCC diagnostic pop
 

@@ -23,7 +23,25 @@ struct MidiSettings : public midi::DefaultSettings
 
 #define MIDI_SERIAL_FORMAT SERIAL_8N1_TXINV // TX needs inverting due to the circuit
 
-#define ALL_MIDI_PORTS 0xFF
+// Every port this build actually has a transport for. Derived, not
+// hardcoded: a bit is only set when the port behind it is compiled in.
+constexpr uint8_t ALL_MIDI_PORTS = 0
+#ifdef MIDI_INTERFACE
+    | mmMIDI_USB_0 | mmMIDI_USB_1 | mmMIDI_USB_2 | mmMIDI_USB_3
+#endif
+#ifdef SERIAL_MIDI_1
+    | mmMIDI_SERIAL_1
+#endif
+#ifdef SERIAL_MIDI_2
+    | mmMIDI_SERIAL_2
+#endif
+#ifdef SERIAL_MIDI_3
+    | mmMIDI_SERIAL_3
+#endif
+#ifdef MMMC_USB_HOST
+    | mmMIDI_HOST_1
+#endif
+    ;
 
 // Brings up every compiled-in transport. Call once from setup().
 void mm_midi_setup();

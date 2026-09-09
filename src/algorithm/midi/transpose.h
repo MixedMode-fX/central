@@ -23,6 +23,7 @@ class Transpose : public Node{
         static const AlgorithmDescriptor descriptor;
         explicit Transpose(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
+        void silence(BusManager& bus) override;
 
         // Live parameter edits arrive with the patch protocol (#11); this is
         // the seam they will use, and what makes "the offset moved while

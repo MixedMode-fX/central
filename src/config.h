@@ -23,13 +23,25 @@
 #define NOTE_QUEUE_DEPTH 16
 
 // Node pool: uniform slots, each large enough for any algorithm's state.
+//
+// The slot is sized by the two largest nodes, PolySequencer and DrumSeqMidi
+// (#13, #14): a 32-step grid of velocities plus the note-off ledger. Every
+// node class checks itself against it with a static_assert, so raising
+// MAX_SEQUENCE_LEN or NOTE_SEQ_VOICES fails here at compile time rather than
+// on the module. 32 x 640 bytes is 20 KB against 1 MB of RAM.
 #define N_NODE 32
-#define NODE_SLOT_SIZE 320
+#define NODE_SLOT_SIZE 640
 
 // Per-node connection limits (NodeConfig is also the preset format).
+//
+// N_PARAM is set by the widest parameter block: PolySequencer and DrumSeqMidi
+// both carry a 16-byte header plus 320 bytes of steps (see
+// algorithm/sequencer/note_sequencer.h and drum_sequencer.h). Every other
+// algorithm uses the first few bytes and leaves the rest zero, which the
+// patch protocol (#11) can exploit by not sending trailing zeros.
 #define MAX_IN 4
 #define MAX_OUT 8
-#define N_PARAM 8
+#define N_PARAM 336
 
 // Reserved hardware nodes outside the pool.
 #define N_MIDI_IN_NODES 4
@@ -65,9 +77,18 @@
 #define TRIGGER_MIN_WIDTH_US 500
 #define TRIGGER_MAX_WIDTH_US 50000
 
-// Steps a sequencer can hold. The README says 16, inherited from hardware
-// that does not constrain us; 32 fits one word and #13 can raise it again.
+// Steps a sequencer can hold. The README said 16, inherited from hardware
+// that does not constrain us; 32 fits a pattern in one word and, at four
+// voices, keeps the largest sequencer under NODE_SLOT_SIZE (#13).
 #define MAX_SEQUENCE_LEN 32
+
+// Voices a PolySequencer step can hold (#13). Four is a chord; each voice
+// costs two bytes per step, so this is the other knob on NODE_SLOT_SIZE.
+#define NOTE_SEQ_VOICES 4
+
+// Lanes in a drum sequencer (#14). Eight is one lane per jack, and the gate
+// variant has one outlet per lane, so this cannot exceed MAX_OUT.
+#define DRUM_SEQ_LANES 8
 
 // Notes one modifier can hold at once (#10). Ten fingers plus headroom for
 // notes still sounding under a sustain pedal, and 16 keeps HeldNotes at

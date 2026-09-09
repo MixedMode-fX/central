@@ -63,3 +63,8 @@ void NotePriority::process(BusManager& bus, uint32_t){
         follow(bus);
     }
 }
+
+void NotePriority::silence(BusManager& bus){
+    sounding.release_all(bus, out);
+    playing = HeldNotes::NONE;
+}

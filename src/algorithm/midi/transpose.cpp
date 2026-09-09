@@ -32,3 +32,7 @@ void Transpose::process(BusManager& bus, uint32_t){
         bus.note_write(out, e);
     }
 }
+
+void Transpose::silence(BusManager& bus){
+    sounding.release_all(bus, out);
+}

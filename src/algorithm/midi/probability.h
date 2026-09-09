@@ -28,6 +28,7 @@ class Probability : public Node{
         static const AlgorithmDescriptor descriptor;
         explicit Probability(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
+        void silence(BusManager& bus) override;
 
         uint8_t sounding_count() const { return sounding.count(); }
 

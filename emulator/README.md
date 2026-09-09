@@ -149,6 +149,29 @@ error codes.
   }
   ```
 
+  A sequencer node can carry a `seq` block instead of raw `params`, which
+  the page packs into the parameter layout the firmware documents in
+  `note_sequencer.h`, `drum_sequencer.h` and `gate_sequencer.h`:
+
+  ```json
+  { "algo": "NoteSequencer", "in": [0, null, 0], "out": [1],
+    "seq": { "scale": "minor", "root": 48, "gate": 0,
+             "steps": [0, { "deg": 0, "accent": true }, "-", 3, { "deg": 5, "len": 2 }, "=",
+                       { "deg": [0, 2, 4], "vel": [100, 80, 80] }] } }
+  { "algo": "DrumSeqMidi", "in": [0], "out": [1],
+    "seq": { "length": 16, "gate": 20,
+             "lanes": [{ "note": 36, "hits": "X...x..X..x.X..." }, { "note": 42, "hits": "o.x.o.x.", "length": 8, "prob": 60 }] } }
+  ```
+
+  A step is a degree, `"-"` for a rest, `"="` for a tie, or an object with
+  `deg`, `vel`, `len`, `rest`, `tie`, `accent`, `prob`; a poly step takes
+  arrays for `deg` and `vel`. A drum lane is a string of hits (`x` 100, `X`
+  127, `o` 60, `1`–`9` for 14–126, anything else off) or an object with
+  `hits`, `note`, `channel`, `length`, `prob`. Scales go by name
+  (`major`, `minor`, `dorian`, ...) or as a 12-bit mask, and the mask comes
+  from the firmware's own table. The gate sequencers take `hits`, `prob`,
+  `pulses`, `rotation`, `density` the same way.
+
   Jacks are numbered 1 to 8 as on the panel. MIDI ports go by the names a
   user knows: `DIN 1`, `DIN 2`, `USB 1` to `USB 4` (the device cables, counted
   from 1 as a DAW lists them; the firmware enum counts them from 0) and
@@ -169,6 +192,12 @@ error codes.
 - **Jacks.** Inputs can be toggled, pulsed for 20 ms, or driven by a square
   wave at a chosen frequency. Outputs light when the firmware drives them
   high. A jack's card follows the mode the port node claimed.
+- **Sequencers.** One grid per loaded sequencer node, read from the node
+  every frame: the pattern, the step each lane is on, and for the note
+  sequencers the pitch every degree resolves to against the node's *current*
+  root and scale — play a key into a root inlet and the grid re-pitches while
+  the stored pattern stays put, which is #12's "show the resulting pitches"
+  with no editor yet. Drum lanes show their note number, channel and length.
 - **Buses.** The front buffer after each pass: which gate buses are high, how
   many events each note bus carried and the last one, the overflow counters,
   the CV values.
@@ -184,8 +213,9 @@ error codes.
 - **Listen.** A small Web Audio synth stands in for whatever would be
   downstream of the module: one oscillator per note on the chosen MIDI
   target(s), with a short envelope, CC 64 sustain, pitch bend, and CC 120/123
-  silence. Events are scheduled on the audio clock at the simulated time they
-  happened, so an arpeggio sounds at the rate the patch produced it. Output
+  silence. Channel 10 gets a percussive voice, so a drum sequencer is
+  audible as drums. Events are scheduled on the audio clock at the simulated
+  time they happened, so an arpeggio sounds at the rate the patch produced it. Output
   jacks can click on every rising edge, pitched by jack number, which makes a
   clock division or a logic gate audible. None of this is firmware: it plays
   what `IMidiOut::send()` and the jacks emit. Audio has to be enabled with the
@@ -205,9 +235,18 @@ error codes.
 - Where the roadmap touches the seam:
   - **#4 and #5 (done):** the page is the interval timer and the sync jack,
     and delivers MIDI with a timestamp as the queue drain in `main.cpp` does.
+  - **#13 and #14 (done):** nothing at the seam. The sequencer grids are
+    read through `emu_seq_*`, a read-only view resolved from the node's
+    descriptor id, and the `seq` sugar in the page packs steps into the
+    firmware's parameter layout. The patch-swap handover (`Node::silence`,
+    flushed through the old patch's MIDI ports) shows up in the MIDI log as
+    the note-offs that arrive when a patch is loaded over a sounding one.
   - **#7, LEDs and console:** whatever interface the LEDs get, the page gets
     two more LEDs; console output can go to a text panel.
-  - **#11, the patch protocol:** feeding SysEx bytes to the same handler
+  - **#11, the patch protocol:** `N_PARAM` is now 336 bytes, of which most
+    algorithms use a handful; the wire format will want to elide trailing
+    zeros, and the emulator's `emu_patch_node_param` already only sets the
+    non-zero ones. Feeding SysEx bytes to the same handler
     makes the emulator a device for #12's editor to talk to, with no hardware
     attached. The editor's acceptance criterion "a patch the editor accepts
     is never rejected by the firmware's validator" then holds by

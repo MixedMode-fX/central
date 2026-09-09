@@ -52,10 +52,80 @@ are separate families sharing this transport.
 - `RandomSequencer` : shred and load a random pattern
 
 All four share one base: an advance inlet, a reset inlet, a length, a
-direction (forward, reverse, ping-pong, random) and a fixed-width trigger
-output. Reset means the same thing in all of them — the next advance plays
-the pattern's first step — and it is an inlet, so one sequencer can reset
-another.
+direction (forward, reverse, ping-pong, random, Brownian), a per-step
+probability and a fixed-width trigger output. Reset means the same thing in
+all of them — the next advance plays the pattern's first step — and it is an
+inlet, so one sequencer can reset another.
+
+The transport underneath — step counter, length, direction, the rule for
+"the next step" — is `StepEngine` (`src/algorithm/sequencer/step_engine.h`),
+shared with the note and drum sequencers below, so a gate sequencer and a
+note sequencer at the same length and direction visit steps identically by
+construction.
+
+### Note Sequencers
+
+`NoteSequencer` (one voice) and `PolySequencer` (`NOTE_SEQ_VOICES = 4`
+voices a step) write a note bus. Same advance and reset inlets, plus an
+optional **root inlet** on a note bus.
+
+**A step stores a scale degree, never an absolute note.** The pitch is
+`root + degree_to_semitone(degree, scale)`, so changing the root transposes
+the whole pattern and keeps it in key, and changing the scale gives the same
+pattern a different character — both one-parameter operations on a pattern
+nobody touches. The root comes from the root inlet when it is patched (last
+note-on wins: play a key and the running sequence transposes) and from a
+parameter otherwise. The scale is a 12-bit mask, one bit per semitone
+(`src/midi/scale.h`): two bytes that cover every named mode and any user
+scale. Beyond the octave, degree *n* in an *n*-note scale is the root an
+octave up and negative degrees go down the same way; when the scale changes
+under a pattern, degrees index the new scale's notes, so the pattern survives
+as an interval shape rather than as pitches (that is what makes it different
+from `Quantise`, which snaps pitches).
+
+Per step: degree and velocity per voice, then a length, three flags (rest,
+tie, accent) and a probability. Global velocity scale and offset, an accent
+amount, a channel.
+
+**Note length has one exact half and one estimated half.** Length is counted
+in advance edges — a note is released on the Nth edge after the one that
+played it — so ties and holds need nothing but the advance inlet and are
+exactly in time. A *tie* extends every sounding note by its own length
+instead of retriggering; a *rest* plays nothing while sounding notes keep
+counting down. A sub-step gate (the `gate` percentage) needs the *duration*
+of a step, which the sequencer only sees edges of, so it measures the
+interval between the last two advances and extrapolates: wrong on the first
+step after a tempo change and on any irregular trigger, the same caveat as
+multiplying from a gate in `ClockDiv`, and labelled as such. Ratcheting has
+the identical problem and is deliberately not built until the estimate has
+proved itself on hardware.
+
+**The sequencer owns a note-off for every note-on it emits** and releases it
+with the pitch it actually sent, from the same ledger the modifiers use —
+never recomputed from the current root or scale. The root moving under a held
+note, the scale changing, the pattern changing, the clock stopping (after a
+configurable number of silent periods the sequencer releases what it holds
+rather than hanging it for ever) and the patch being swapped all release
+correctly, and each has a test.
+
+### Drum Sequencers
+
+A drum pattern is a grid — `DRUM_SEQ_LANES = 8` lanes × up to
+`MAX_SEQUENCE_LEN` steps — that a user edits as one object, so it is one
+node with a `StepEngine` per lane, not eight gate sequencers. Advance and
+reset are shared; **each lane has its own length**, which is polyrhythm for
+free (lanes of 16 and 12 realign after 48 advances). Probability is per lane.
+
+Two algorithms rather than one with a mode switch, because the destinations
+want different things:
+
+- `DrumSeqGate` — one gate outlet per lane, fixed-width triggers. Velocity
+  has no representation in the gate domain, so accent is a second lane, the
+  modular way. Lanes without a jack are left unconnected.
+- `DrumSeqMidi` — one note outlet, a note number and channel per lane
+  (General MIDI defaults), a velocity per cell. Every note-on is released
+  after a fixed number of milliseconds from the ledger; a lane retriggered
+  before then releases first, and a patch swap releases everything.
 
 ## Logic Algorithms
 
@@ -220,12 +290,28 @@ an index that is out of range for that domain. `NO_BUS` leaves an optional
 inlet unconnected.
 
 **Allocation.** All algorithm code is always resident. Instances live in a
-static pool of `N_NODE = 32` uniform slots (`NODE_SLOT_SIZE` bytes each, checked
-per class with `static_assert`), placement-new'd on patch load and destroyed
-explicitly on unload. The 8 jacks and the MIDI endpoints are reserved nodes
-owned by the master, outside the pool, so a patch cannot delete its own MIDI
-output. **There is no heap allocation after boot**; the native tests assert
-it by instrumenting `operator new`.
+static pool of `N_NODE = 32` uniform slots (`NODE_SLOT_SIZE = 640` bytes each,
+checked per class with `static_assert`), placement-new'd on patch load and
+destroyed explicitly on unload. The slot is sized by the two largest nodes,
+`PolySequencer` and `DrumSeqMidi`, at about 540 bytes each: a 32-step grid
+plus the note-off ledger. The 8 jacks and the MIDI endpoints are reserved
+nodes owned by the master, outside the pool, so a patch cannot delete its own
+MIDI output. **There is no heap allocation after boot**; the native tests
+assert it by instrumenting `operator new`.
+
+**Parameters.** `NodeConfig` carries `N_PARAM = 336` parameter bytes, the
+width of the poly and drum sequencers' step grids (a 16-byte header plus 320
+bytes of steps). Every other algorithm uses the first few and leaves the rest
+zero, which is what makes a `Patch` 11 KB in RAM: fine against 1 MB, but the
+patch storage (#7) and the wire format (#11) will want to skip trailing zeros
+rather than store them. An outlet left at `NO_BUS` is unused, not an error —
+a drum sequencer with three of its eight lanes patched is the normal case.
+
+**Handover.** Before a patch is unloaded, the master calls `Node::silence()`
+on every pool node, which emits a note-off for everything the node still has
+sounding, then swaps and flushes the MIDI outputs — so a patch swap under a
+held chord or mid-sequence never hangs a note downstream. Node state does not
+survive a swap: the new patch's nodes are constructed fresh.
 
 Sizing constants live in `src/config.h`. Algorithm ids in
 `src/node/registry.h` are part of the preset format: append, never renumber.
@@ -236,7 +322,9 @@ Algorithms available today:
 |---|---|
 | Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR` (up to four inlets each) |
 | Clock | `ClockDiv` |
-| Sequencers | `Metronome`, `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
+| Gate sequencers | `Metronome`, `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
+| Note sequencers | `NoteSequencer`, `PolySequencer` (degrees in a scale, from a root) |
+| Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `Quantise`, `Probability`, `Arpeggiator` |
 | Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off) |
 
@@ -313,7 +401,8 @@ nodes and the pool, and runs the evaluation order every pass.
 
 Note what the diagram does *not* contain: a `Clock` inside every clocked
 algorithm. Division is `ClockDiv`, a node like any other, and a sequencer
-takes an edge on a gate bus.
+takes an edge on a gate bus. The three sequencer families share one
+`StepEngine` and differ only in what a step holds and which bus it writes.
 
 ```mermaid
 classDiagram
@@ -348,6 +437,7 @@ classDiagram
         + void setup()
         + void process(BusManager&, uint32_t now_us)
         + void tick(BusManager&, uint32_t count)
+        + void silence(BusManager&)
     }
 
     MixedModeMaster *-- MasterClock
@@ -368,16 +458,44 @@ classDiagram
         + TriggerPulse pulse
     }
 
-    class GateSequencer{
+    class StepEngine{
         + uint8_t length
         + uint8_t direction
-        + uint32_t sequence
+        + uint8_t advance(rng)
+        + void reset()
+    }
+
+    class GateSequencer{
+        + StepEngine engine
+        + uint8_t probability[]
         + bool step_on(uint8_t)
     }
+    GateSequencer *-- StepEngine
     GateSequencer --|> Metronome
     GateSequencer --|> StepSequencer
     GateSequencer --|> EuclidianSequencer
     GateSequencer --|> RandomSequencer
+
+    class NoteSequencerBase{
+        + StepEngine engine
+        + uint16_t scale_mask
+        + uint8_t root
+        + SoundingNotes sounding
+        + uint8_t pitch(step, voice)
+    }
+    Node --|> NoteSequencerBase
+    NoteSequencerBase *-- StepEngine
+    NoteSequencerBase --|> NoteSequencer
+    NoteSequencerBase --|> PolySequencer
+
+    class DrumSequencer{
+        + StepEngine lanes[8]
+        + bool hit(lane, step)
+    }
+    Node --|> DrumSequencer
+    DrumSequencer *-- StepEngine
+    DrumSequencer --|> DrumSeqGate
+    DrumSequencer --|> DrumSeqMidi
 
     LogicGate --|> NOT
     LogicGate --|> AND

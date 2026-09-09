@@ -11,6 +11,8 @@
 #include "algorithm/midi/probability.h"
 #include "algorithm/clock/clock_div.h"
 #include "algorithm/sequencer/sequencers.h"
+#include "algorithm/sequencer/note_sequencer.h"
+#include "algorithm/sequencer/drum_sequencer.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -36,6 +38,10 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &StepSequencer::descriptor,
     &EuclidianSequencer::descriptor,
     &RandomSequencer::descriptor,
+    &NoteSequencer::descriptor,
+    &PolySequencer::descriptor,
+    &DrumSeqGate::descriptor,
+    &DrumSeqMidi::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);
@@ -64,9 +70,12 @@ ConfigError registry::validate(const NodeConfig& config){
         }
         if (bus >= bus_count(d->in_domain[i])) return CONFIG_INLET_OUT_OF_RANGE;
     }
+    // An outlet left at NO_BUS is unused: the node's writes to it go nowhere
+    // (BusManager ignores the index). A drum sequencer with eight lanes and
+    // three jacks patched is the normal case, not an error.
     for (uint8_t i = 0; i < d->n_out && i < MAX_OUT; i++){
         const uint8_t bus = config.out_bus[i];
-        if (bus == NO_BUS || bus >= bus_count(d->out_domain[i])) return CONFIG_OUTLET_OUT_OF_RANGE;
+        if (bus != NO_BUS && bus >= bus_count(d->out_domain[i])) return CONFIG_OUTLET_OUT_OF_RANGE;
     }
     return CONFIG_OK;
 }

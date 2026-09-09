@@ -25,6 +25,7 @@ class Chord : public Node{
         static const AlgorithmDescriptor descriptor;
         explicit Chord(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
+        void silence(BusManager& bus) override;
 
         uint8_t sounding_count() const { return sounding.count(); }
         uint32_t refused() const { return sounding.refused(); }

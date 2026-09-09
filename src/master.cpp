@@ -62,6 +62,16 @@ LoadError MixedModeMaster::load(const Patch& patch){
 }
 
 void MixedModeMaster::unload(){
+    // Handover first: whatever a node still has sounding is released, and
+    // the note-offs go out now, before anything is destroyed. The front
+    // buffer at this point holds the last pass's events, already delivered
+    // in that pass's step 5, so swapping them away loses nothing.
+    const uint8_t n = pool.count();
+    if (n > 0){
+        for (uint8_t i = 0; i < n; i++) pool.node(i)->silence(bus);
+        bus.swap();
+        for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, 0);
+    }
     pool.unload_all();
     for (uint8_t i = 0; i < GPIO_N; i++){ gate_in[i].release(); gate_out[i].release(); }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) midi_in[i].release();

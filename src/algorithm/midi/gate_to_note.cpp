@@ -24,3 +24,12 @@ void GateToNote::process(BusManager& bus, uint32_t){
     const MidiEvent e = {(uint8_t)(level ? MIDI_NOTE_ON : MIDI_NOTE_OFF), channel, note, (uint8_t)(level ? velocity : 0)};
     bus.note_write(out, e);
 }
+
+// The gate may still be high when the patch is swapped: the note-off it
+// would have sent on the falling edge goes now.
+void GateToNote::silence(BusManager& bus){
+    if (!last) return;
+    last = false;
+    const MidiEvent e = {MIDI_NOTE_OFF, channel, note, 0};
+    bus.note_write(out, e);
+}

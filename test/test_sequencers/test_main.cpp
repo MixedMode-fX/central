@@ -169,7 +169,7 @@ static void test_directions() {
     }
     // Random visits steps that are on and steps that are off, and stays in range.
     NodeConfig c = seq_config(ALGO_STEP_SEQ, 4);
-    c.params[1] = GateSequencer::SEQ_RANDOM;
+    c.params[1] = StepEngine::SEQ_RANDOM;
     c.params[3] = 0b1001;
     StepSequencer node(c);
     const std::string out = run_sequence(node, 200);
@@ -255,6 +255,48 @@ static void test_random_sequencer_shred_inlet() {
     node.process(bus, now);
     bus.swap();
     TEST_ASSERT_NOT_EQUAL(before, node.pattern());
+}
+
+// Per-step probability, one byte per step from params[8], shared by the
+// whole family through the step engine: 0 is "always", so an old preset
+// plays every step it used to.
+static void test_per_step_probability() {
+    NodeConfig c = seq_config(ALGO_STEP_SEQ, 2);
+    c.params[3] = 0b11;
+    c.params[GateSequencer::PROBABILITY_BASE + 1] = 1;           // step 1 fires 1% of the time
+    StepSequencer node(c);
+    TEST_ASSERT_EQUAL(100, node.probability(0));
+    TEST_ASSERT_EQUAL(1, node.probability(1));
+    const std::string out = run_sequence(node, 200);
+    uint16_t even = 0, odd = 0;
+    for (uint16_t i = 0; i < out.size(); i++) if (out[i] == '1') { if (i & 1) odd++; else even++; }
+    TEST_ASSERT_EQUAL(100, even);
+    TEST_ASSERT_TRUE(odd < 12);
+}
+
+// Brownian: back one, stay, or forward one, never further, and never out of
+// range - and it does move.
+static void test_brownian_direction_walks() {
+    NodeConfig c = seq_config(ALGO_STEP_SEQ, 6);
+    c.params[1] = StepEngine::SEQ_BROWNIAN;
+    c.params[3] = 0x3F;
+    StepSequencer node(c);
+    BusManager bus;
+    uint32_t now = 0;
+    uint8_t last = 0;
+    bool moved = false;
+    for (uint16_t i = 0; i < 500; i++) {
+        advance_once(bus, node, 0, 1, now);
+        const uint8_t pos = node.position();
+        TEST_ASSERT_TRUE(pos < 6);
+        if (i > 0) {
+            const int8_t d = (int8_t)pos - (int8_t)last;
+            TEST_ASSERT_TRUE(d == 0 || d == 1 || d == -1 || d == 5 || d == -5);
+            if (d != 0) moved = true;
+        }
+        last = pos;
+    }
+    TEST_ASSERT_TRUE(moved);
 }
 
 // No sequencer allocates after construction, and none names a pin.
@@ -422,6 +464,8 @@ int main() {
     RUN_TEST(test_reset_returns_to_step_zero);
     RUN_TEST(test_random_sequencer_shred_and_power_cycles);
     RUN_TEST(test_random_sequencer_shred_inlet);
+    RUN_TEST(test_per_step_probability);
+    RUN_TEST(test_brownian_direction_walks);
     RUN_TEST(test_sequencers_fit_a_pool_slot);
     RUN_TEST(test_two_sequencers_behind_dividers_stay_locked);
     RUN_TEST(test_sequencer_advanced_by_a_logic_gate);

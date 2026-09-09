@@ -98,8 +98,10 @@ published most recently, and that has already broken this project's DIN MIDI
 settings once.
 
 Our sources are compiled with `-Wall -Wextra -Weffc++ -Wshadow -Werror`;
-framework headers are included through `src/hal/teensy/teensy_includes.h` so
-that they are not held to the same flags. Headers live next to their sources
+framework and library include paths are passed as `-isystem`
+(`scripts/project_warnings.py`) so that `-Werror` judges our code and not the
+Teensy core's headers, which are included through
+`src/hal/teensy/teensy_includes.h`. Headers live next to their sources
 under `src/`; the `include/` and `lib/` directories are not used.
 
 ## Versions and releases

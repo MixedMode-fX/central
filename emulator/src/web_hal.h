@@ -1,0 +1,42 @@
+#ifndef MMMC_EMULATOR_WEB_HAL_H
+#define MMMC_EMULATOR_WEB_HAL_H
+
+#include <stdint.h>
+#include "config.h"
+#include "hal/igpio.h"
+#include "hal/imidi_out.h"
+
+// The browser's implementations of the two hardware seams. They are the
+// emulator's equivalent of src/hal/teensy/: the jacks are bytes the page
+// can read and write, and MIDI out is a call into JavaScript.
+
+// IGpio over eight bytes. The page sets input levels; the firmware's port
+// nodes set modes and output levels; the page reads them back.
+class WebGpio : public IGpio {
+    public:
+        WebGpio() : modes(), inputs(), outputs() {}
+
+        void mode(uint8_t port, uint8_t m) override { if (port < GPIO_N) modes[port] = m; }
+        void write(uint8_t port, uint8_t state) override { if (port < GPIO_N) outputs[port] = state; }
+        // Levels are already normalised: the page supplies "gate present"
+        // directly, the way TeensyGpio::read() returns it after polarity.
+        uint8_t read(uint8_t port) override { return port < GPIO_N ? inputs[port] : GPIO_LOW; }
+
+        uint8_t modes[GPIO_N];
+        uint8_t inputs[GPIO_N];
+        uint8_t outputs[GPIO_N];
+};
+
+// Supplied by the page (see index.html: the "env" import object).
+extern "C" __attribute__((import_module("env"), import_name("mmmc_midi_send")))
+void mmmc_midi_send(uint32_t target, uint32_t type, uint32_t d1, uint32_t d2, uint32_t channel);
+
+// IMidiOut that hands every message to JavaScript with its target mask.
+class WebMidiOut : public IMidiOut {
+    public:
+        void send(uint8_t target, uint8_t type, uint8_t d1, uint8_t d2, uint8_t channel) override {
+            mmmc_midi_send(target, type, d1, d2, channel);
+        }
+};
+
+#endif

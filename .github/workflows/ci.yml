@@ -91,3 +91,34 @@ jobs:
             .pio/build/teensy41/*.elf
           if-no-files-found: error
           retention-days: 14
+
+  emulator:
+    name: Browser emulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build.sh stamps `git describe` into the page like the firmware.
+          fetch-depth: 0
+
+      # The emulator compiles the firmware core to WebAssembly with a stock
+      # clang; lld provides wasm-ld and llvm the nm used to check imports.
+      - name: Install clang and lld
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+
+      - name: Build
+        run: emulator/build.sh
+
+      # The same scenarios as test/test_master, driven through the wasm
+      # module: proves the browser build behaves like the native one.
+      - name: Smoke test the module
+        run: node emulator/test/smoke.mjs
+
+      # A single self-contained page: download, open, no server needed.
+      - name: Upload the page
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: emulator/dist/index.html
+          if-no-files-found: error
+          retention-days: 14

@@ -1,3 +1,6 @@
 .pio
 .vscode
 .venv
+
+# Emulator build output (emulator/build.sh)
+emulator/dist

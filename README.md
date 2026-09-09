@@ -165,6 +165,23 @@ Nothing under `src/algorithm/` includes `Arduino.h`.
 CI (`.github/workflows/ci.yml`) builds the firmware and runs the native tests
 on every push to `main` and on every pull request.
 
+## Emulator
+
+The same framework-free core compiles unchanged to WebAssembly, with the
+browser as the hardware: `emulator/` adds a web implementation of `IGpio` and
+`IMidiOut` next to the Teensy one, and a page that loads a patch, drives the
+jacks, sends MIDI and shows the buses, the jacks and the MIDI going out.
+
+```sh
+make emulator                    # needs clang and lld; no PlatformIO involved
+open emulator/dist/index.html    # a single self-contained file
+```
+
+The build from `main` is published at
+<https://mixedmode-fx.github.io/central/> (`.github/workflows/pages.yml`),
+and CI attaches every branch's `index.html` to its run. What it can and cannot
+verify, and how it was arrived at, is in `emulator/README.md`.
+
 # Signal bus model
 
 Algorithms do not bind to hardware. They read and write **internal buses**,

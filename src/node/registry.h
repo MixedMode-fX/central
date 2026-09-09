@@ -19,6 +19,16 @@ enum AlgorithmId : uint8_t {
     ALGO_GATE_TO_NOTE = 9,
     ALGO_TRANSPOSE    = 10,
     ALGO_ARPEGGIATOR  = 11,
+    ALGO_CLOCK_DIV    = 12,
+    ALGO_METRONOME    = 13,
+    ALGO_STEP_SEQ     = 14,
+    ALGO_EUCLID_SEQ   = 15,
+    ALGO_RANDOM_SEQ   = 16,
+    ALGO_NOTE_PRIORITY = 17,
+    ALGO_VELOCITY     = 18,
+    ALGO_CHORD        = 19,
+    ALGO_QUANTISE     = 20,
+    ALGO_PROBABILITY  = 21,
 };
 
 enum ConfigError : uint8_t {

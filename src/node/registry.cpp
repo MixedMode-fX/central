@@ -4,6 +4,13 @@
 #include "algorithm/midi/gate_to_note.h"
 #include "algorithm/midi/transpose.h"
 #include "algorithm/midi/arpeggiator.h"
+#include "algorithm/midi/note_priority.h"
+#include "algorithm/midi/velocity_curve.h"
+#include "algorithm/midi/chord.h"
+#include "algorithm/midi/quantise.h"
+#include "algorithm/midi/probability.h"
+#include "algorithm/clock/clock_div.h"
+#include "algorithm/sequencer/sequencers.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -19,6 +26,16 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &GateToNote::descriptor,
     &Transpose::descriptor,
     &Arpeggiator::descriptor,
+    &ClockDiv::descriptor,
+    &NotePriority::descriptor,
+    &VelocityCurve::descriptor,
+    &Chord::descriptor,
+    &Quantise::descriptor,
+    &Probability::descriptor,
+    &Metronome::descriptor,
+    &StepSequencer::descriptor,
+    &EuclidianSequencer::descriptor,
+    &RandomSequencer::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

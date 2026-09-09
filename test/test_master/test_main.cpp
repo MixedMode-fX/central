@@ -294,7 +294,13 @@ static void test_eight_of_the_same_and_one_of_everything() {
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(all));
     master.setup();
     TEST_ASSERT_EQUAL(registry::count(), master.node_count());
-    for (int i = 0; i < 100; i++) master.pass(i * 1000);
+    // With the clock running, so the nodes that subscribe to the tick get one.
+    for (int i = 0; i < 100; i++) {
+        master.clock().advance();
+        master.deliver_midi(mmMIDI_USB_0, MidiEvent{(uint8_t)((i & 1) ? MIDI_NOTE_OFF : MIDI_NOTE_ON), 1, 60, 100});
+        gpio.set_input(0, (i & 2) ? GPIO_HIGH : GPIO_LOW);
+        master.pass((uint32_t)i * 1000);
+    }
 }
 
 // Zero heap allocation after setup(), asserted by instrumenting operator new.
@@ -350,6 +356,122 @@ static void test_thousand_load_unload_cycles_leave_identical_state() {
     TEST_ASSERT_EQUAL(N_NODE, master.node_count());
 }
 
+// ---------------------------------------------------------------------------
+// The worked example from #9, now with the real ClockDiv from #4 in place of
+// the gate jack that stood in for it: the master tick drives a divider, the
+// divider advances an arpeggiator, and two MIDI outputs play an octave apart.
+// ---------------------------------------------------------------------------
+static void test_worked_example_with_a_real_clock_divider() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};        // DIN 1 -> note bus 0
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
+    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].params[1] = 4;                                  // /4
+    p.nodes[1] = node_config(ALGO_ARPEGGIATOR);                // note 0 + gate 0 -> note 1
+    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = 0; p.nodes[1].out_bus[0] = 1;
+    p.nodes[2] = node(ALGO_TRANSPOSE, 1, 2);                   // note 1 -> note 2, +12
+    p.nodes[2].params[0] = 12;
+    p.n_nodes = 3;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 1, 1};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 2, 2};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_ON, 1, 60, 100});
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_ON, 1, 64, 100});
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_ON, 1, 67, 100});
+
+    // Eight beats of the divider, one subtick per pass at 1 ms.
+    uint32_t now = 0;
+    for (uint32_t t = 0; t < 8 * 4 * CLOCK_SUBTICK; t++) {
+        master.clock().advance();
+        master.pass(now);
+        now += 1000;
+    }
+    run_passes(master, 4, now);          // let the last edge through the chain
+
+    // Every note played on USB 0 has its octave twin on DIN 2, one channel
+    // each, and the arpeggio ran up the chord.
+    uint8_t usb_notes = 0, din_notes = 0;
+    uint8_t expected[3] = {60, 64, 67};
+    for (const RecordingMidiOut::Message& m : midi.messages) {
+        if (m.type != MIDI_NOTE_ON) continue;
+        if (m.target == mmMIDI_USB_0) {
+            TEST_ASSERT_EQUAL(1, m.channel);
+            TEST_ASSERT_EQUAL(expected[usb_notes % 3], m.d1);
+            usb_notes++;
+        } else if (m.target == mmMIDI_SERIAL_2) {
+            TEST_ASSERT_EQUAL(2, m.channel);
+            TEST_ASSERT_EQUAL(expected[din_notes % 3] + 12, m.d1);
+            din_notes++;
+        }
+    }
+    TEST_ASSERT_EQUAL(8, usb_notes);
+    TEST_ASSERT_EQUAL(8, din_notes);
+}
+
+// Chaining is the point: every modifier's output is legal input to every
+// other. Transpose -> arpeggiator -> note priority over three buses, with the
+// arpeggiator advanced by a divider.
+static void test_transpose_arpeggiator_priority_chain() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, 0};
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);
+    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].params[1] = 2;
+    p.nodes[1] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, -12
+    p.nodes[1].params[0] = (uint8_t)(int8_t)-12;
+    p.nodes[2] = node_config(ALGO_ARPEGGIATOR);                // note 1 + gate 0 -> note 2
+    p.nodes[2].in_bus[0] = 1; p.nodes[2].in_bus[1] = 0; p.nodes[2].out_bus[0] = 2;
+    p.nodes[3] = node(ALGO_NOTE_PRIORITY, 2, 3);               // note 2 -> note 3
+    p.n_nodes = 4;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, 3};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    master.deliver_midi(mmMIDI_USB_0, MidiEvent{MIDI_NOTE_ON, 1, 72, 100});
+    master.deliver_midi(mmMIDI_USB_0, MidiEvent{MIDI_NOTE_ON, 1, 76, 100});
+
+    uint32_t now = 0;
+    for (uint32_t t = 0; t < 6 * 2 * CLOCK_SUBTICK; t++) {
+        master.clock().advance();
+        master.pass(now);
+        now += 1000;
+    }
+    run_passes(master, 4, now);          // let the last edge through the chain
+
+    // The chord arrived an octave down, and alternates through the arpeggio.
+    uint8_t ons = 0;
+    int8_t sounding = 0;
+    const uint8_t expected[2] = {60, 64};
+    for (const RecordingMidiOut::Message& m : midi.messages) {
+        TEST_ASSERT_EQUAL(mmMIDI_SERIAL_1, m.target);
+        if (m.type == MIDI_NOTE_ON) {
+            TEST_ASSERT_EQUAL(expected[ons % 2], m.d1);
+            ons++;
+            sounding++;
+        } else {
+            sounding--;
+        }
+        TEST_ASSERT_TRUE(sounding >= 0 && sounding <= 1);       // monophonic, always
+    }
+    TEST_ASSERT_EQUAL(6, ons);
+
+    // Lifting the chord leaves nothing sounding anywhere in the chain.
+    master.deliver_midi(mmMIDI_USB_0, MidiEvent{MIDI_NOTE_OFF, 1, 72, 0});
+    master.deliver_midi(mmMIDI_USB_0, MidiEvent{MIDI_NOTE_OFF, 1, 76, 0});
+    run_passes(master, 10, now);
+    int8_t final_sounding = 0;
+    for (const RecordingMidiOut::Message& m : midi.messages) {
+        final_sounding = (int8_t)(final_sounding + (m.type == MIDI_NOTE_ON ? 1 : -1));
+    }
+    TEST_ASSERT_EQUAL(0, final_sounding);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_gate_in_through_algorithms_to_midi_out);
@@ -360,6 +482,8 @@ int main() {
     RUN_TEST(test_self_feedback_oscillates);
     RUN_TEST(test_chain_latency_is_exactly_n_passes);
     RUN_TEST(test_eight_of_the_same_and_one_of_everything);
+    RUN_TEST(test_worked_example_with_a_real_clock_divider);
+    RUN_TEST(test_transpose_arpeggiator_priority_chain);
     RUN_TEST(test_zero_heap_allocation_after_setup);
     RUN_TEST(test_thousand_load_unload_cycles_leave_identical_state);
     return UNITY_END();

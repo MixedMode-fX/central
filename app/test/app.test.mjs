@@ -30,6 +30,13 @@ import { SCALES, scaleMaskOf } from '../src/names.js';
 import { EXAMPLES } from '../src/examples.js';
 import { EmbeddedModule } from '../src/module.js';
 import { slider } from '../src/views.js';
+import {
+  connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
+  applyWrite, freeBus, waitingBus,
+} from '../src/graph.js';
+import {
+  autoLayout, layoutOf, socketPoint, blockHeight, forgetNode, BLOCK_W, ROW_H,
+} from '../src/layout.js';
 import { bundle } from '../tools/bundle.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -520,6 +527,351 @@ await test('the built page contains every module, with nothing left to import', 
   const file = join(scratch, 'bundle.mjs');
   writeFileSync(file, code);
   execFileSync(process.execPath, ['--check', file]);
+});
+
+// --- the patch as blocks and arrows ------------------------------------------
+//
+// The canvas draws a patch; it does not hold one. So what is checked here is
+// the part that could be wrong in a way a screenshot would not show: that the
+// arrows are the buses, that a drag between two sockets produces a patch the
+// firmware accepts, and that a drag it would refuse is refused before it is
+// made rather than after.
+
+// The app's own "add a node": it arrives connected, which is what makes the
+// second node of a chain read the first.
+function added(device, patch, algorithmId) {
+  const descriptor = device.byId.get(algorithmId);
+  const node = codec.emptyNode(algorithmId);
+  connectNewNode(device, patch, node, descriptor);
+  patch.nodes.push(node);
+  return node;
+}
+
+const idOf = (name, device) => device.algorithms.find((d) => d && d.name === name).id;
+
+// A drag, end to end: plan it from the patch as it is, then write it. This is
+// what `App.applyPlan` does, minus the messages.
+function dragged(device, patch, from, to) {
+  const plan = planConnection(patchBlocks(device, patch), device.capabilities, from, to);
+  if (plan.ok) for (const write of plan.writes) applyWrite(patch, write);
+  return plan;
+}
+
+await test('the arrows are the buses, not a second model of the patch', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  added(device, patch, idOf('ClockDiv', device));
+  added(device, patch, idOf('StepSequencer', device));
+
+  const blocks = patchBlocks(device, patch);
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].title, 'ClockDiv');
+  assert.equal(blocks[1].inlets[0].required, true, 'the advance inlet must be connected');
+
+  const arrows = connectionsOf(blocks);
+  assert.equal(arrows.length, 1, 'the sequencer reads the divider');
+  assert.equal(arrows[0].from.blockId, 'node:0');
+  assert.equal(arrows[0].to.blockId, 'node:1');
+  assert.equal(arrows[0].bus, patch.nodes[0].outBus[0]);
+
+  // Move the outlet off its bus from a selector, as the inspector does, and
+  // the arrow is gone: there was never anything else holding it there.
+  patch.nodes[0].outBus[0] = P.NO_BUS;
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0);
+});
+
+await test('a jack and a MIDI port are blocks with one socket each', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, bus: 2 };
+  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_OUT, bus: 2 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 1 };
+  patch.midiOut[3] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, bus: 1 };
+
+  const blocks = patchBlocks(device, patch);
+  assert.deepEqual(blocks.map((b) => b.id), ['midiIn:0', 'jack:0', 'jack:1', 'midiOut:3'],
+                   'what arrives, then what the patch does, then what leaves');
+  assert.equal(blocks[1].outlets.length, 1, 'a jack in drives a bus');
+  assert.equal(blocks[2].inlets.length, 1, 'a jack out is driven by one');
+
+  const arrows = connectionsOf(blocks);
+  assert.equal(arrows.length, 2, 'jack 1 to jack 2, and MIDI in 1 to MIDI out 4');
+
+  // An unused jack is not a block: eight empty boxes around every patch is not
+  // a drawing of it.
+  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_UNUSED, bus: P.NO_BUS };
+  assert.equal(patchBlocks(device, patch).length, 3);
+});
+
+await test('a drag from an outlet to an inlet is a patch the firmware takes', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+
+  const plan = dragged(device, patch,
+    { blockId: 'node:0', at: 0, isOutlet: true },
+    { blockId: 'node:1', at: 0, isOutlet: false });
+  assert.ok(plan.ok, plan.why);
+  assert.equal(plan.writes.length, 2, 'neither end was on a bus, so both moved');
+  assert.equal(patch.nodes[0].outBus[0], patch.nodes[1].inBus[0]);
+
+  assert.deepEqual(validate(device, patch), []);
+  await device.sendPatch(patch, codec.emptyGlobals());     // throws if it is refused
+});
+
+await test('one outlet, two readers, one bus', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+  patch.nodes.push(codec.emptyNode(idOf('Metronome', device)));
+
+  dragged(device, patch, { blockId: 'node:0', at: 0, isOutlet: true },
+                         { blockId: 'node:1', at: 0, isOutlet: false });
+  const second = dragged(device, patch, { blockId: 'node:0', at: 0, isOutlet: true },
+                                        { blockId: 'node:2', at: 0, isOutlet: false });
+  assert.ok(second.ok, second.why);
+  assert.equal(second.writes.length, 1, 'the outlet was already on a bus; only the reader moved');
+  assert.equal(patch.nodes[1].inBus[0], patch.nodes[2].inBus[0], 'both read the same bus');
+
+  const arrows = connectionsOf(patchBlocks(device, patch));
+  assert.equal(arrows.length, 2);
+  assert.deepEqual(arrows.map((a) => a.readers), [2, 2], 'both arrows know the bus is shared');
+  assert.deepEqual(validate(device, patch), []);
+  await device.sendPatch(patch, codec.emptyGlobals());
+});
+
+await test('a drag the module would refuse is refused before it is made', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));   // gate out
+  patch.nodes.push(codec.emptyNode(idOf('Transpose', device)));       // note in
+
+  const crossed = planConnection(patchBlocks(device, patch), device.capabilities,
+    { blockId: 'node:0', at: 0, isOutlet: true },
+    { blockId: 'node:1', at: 0, isOutlet: false });
+  assert.equal(crossed.ok, false);
+  assert.match(crossed.why, /gate outlet cannot drive a note inlet/);
+
+  const twoOutlets = planConnection(patchBlocks(device, patch), device.capabilities,
+    { blockId: 'node:0', at: 0, isOutlet: true },
+    { blockId: 'node:1', at: 0, isOutlet: true });
+  assert.equal(twoOutlets.ok, false);
+  assert.match(twoOutlets.why, /two outlets/);
+
+  // And neither of them touched the patch.
+  assert.equal(patch.nodes[0].outBus[0], P.NO_BUS);
+  assert.equal(patch.nodes[1].inBus[0], P.NO_BUS);
+});
+
+await test('which end the drag started at does not change what it connects', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const build = () => {
+    const patch = codec.emptyPatch();
+    patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));
+    patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+    return patch;
+  };
+  const outlet = { blockId: 'node:0', at: 0, isOutlet: true };
+  const inlet = { blockId: 'node:1', at: 0, isOutlet: false };
+
+  const forwards = build();
+  dragged(device, forwards, outlet, inlet);
+  const backwards = build();
+  dragged(device, backwards, inlet, outlet);
+  assert.deepEqual([...codec.encodePatch(backwards, codec.emptyGlobals())],
+                   [...codec.encodePatch(forwards, codec.emptyGlobals())]);
+});
+
+await test('disconnecting one arrow says what else the inlet stops hearing', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));
+  patch.nodes.push(codec.emptyNode(idOf('Metronome', device)));
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+  // Two sources merged onto one bus, which the bus model allows and a cable
+  // would not: both drivers write gate bus 4, the sequencer reads it.
+  patch.nodes[0].outBus[0] = 4;
+  patch.nodes[1].outBus[0] = 4;
+  patch.nodes[2].inBus[0] = 4;
+
+  const blocks = patchBlocks(device, patch);
+  const arrows = connectionsOf(blocks);
+  assert.equal(arrows.length, 2, 'two writers, one reader');
+  const plan = planDisconnect(blocks, arrows[0]);
+  assert.ok(plan.ok);
+  assert.match(plan.said, /other source was on gate bus 4/);
+  for (const write of plan.writes) applyWrite(patch, write);
+  assert.equal(patch.nodes[2].inBus[0], P.NO_BUS);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0,
+               'the reader came off the bus, so both arrows went with it');
+
+  // And clearing a socket directly is the same edit from the other end.
+  patch.nodes[2].inBus[0] = 4;
+  const cleared = planClear(patchBlocks(device, patch), { blockId: 'node:0', at: 0, isOutlet: true });
+  assert.ok(cleared.ok);
+  for (const write of cleared.writes) applyWrite(patch, write);
+  assert.equal(patch.nodes[0].outBus[0], P.NO_BUS);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 1, 'the other source is still there');
+});
+
+await test('a free bus is one nothing writes, and running out says so', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  for (let i = 0; i < device.capabilities.gateBuses; i++) {
+    const node = codec.emptyNode(idOf('ClockDiv', device));
+    node.outBus[0] = i;
+    patch.nodes.push(node);
+  }
+  const blocks = patchBlocks(device, patch);
+  assert.equal(freeBus(blocks, device.capabilities, 0), null, 'every gate bus is written');
+
+  patch.nodes.push(codec.emptyNode(idOf('Metronome', device)));
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+  const plan = planConnection(patchBlocks(device, patch), device.capabilities,
+    { blockId: `node:${patch.nodes.length - 2}`, at: 0, isOutlet: true },
+    { blockId: `node:${patch.nodes.length - 1}`, at: 0, isOutlet: false });
+  assert.equal(plan.ok, false);
+  assert.match(plan.why, /every gate bus/);
+});
+
+await test('a jack and a MIDI port are never taken off their bus', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  const blocks = patchBlocks(device, patch);
+  const arrow = connectionsOf(blocks)[0];
+
+  // The module validates the pair: a port in use and on no bus is a patch it
+  // refuses, so there is nothing here to disconnect - the block goes out of
+  // use, or it moves to another bus.
+  const cut = planDisconnect(blocks, arrow);
+  assert.equal(cut.ok, false);
+  assert.match(cut.why, /only in the patch while it is on a bus/);
+  const cleared = planClear(blocks, { blockId: 'midiIn:0', at: 0, isOutlet: true });
+  assert.equal(cleared.ok, false);
+
+  // Which is worth checking against the rule itself rather than against the
+  // wording: taking it off the bus is what the firmware would reject.
+  patch.midiOut[0].bus = P.NO_BUS;
+  assert.notDeepEqual(validate(device, patch), []);
+});
+
+await test('a source added after its listener feeds it', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  // A MIDI output waiting on note bus 0 that nothing writes - which `advise`
+  // flags, and which "add the MIDI input next" should answer.
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  const blocks = patchBlocks(device, patch);
+  assert.equal(waitingBus(blocks, 1), 0, 'note bus 0 is read and written by nothing');
+  assert.equal(waitingBus(blocks, 0), null, 'and no gate bus is waiting');
+
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  assert.equal(waitingBus(patchBlocks(device, patch), 1), null, 'nothing is waiting once it is fed');
+  assert.deepEqual(validate(device, patch), []);
+});
+
+// --- where the blocks go -----------------------------------------------------
+
+await test('the layout runs the signal left to right, and a loop does not hang it', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  added(device, patch, idOf('ClockDiv', device));
+  added(device, patch, idOf('StepSequencer', device));
+  added(device, patch, idOf('GateToNote', device));
+
+  const blocks = patchBlocks(device, patch);
+  const positions = autoLayout(blocks, connectionsOf(blocks));
+  const x = blocks.map((b) => positions.get(b.id).x);
+  assert.ok(x[0] < x[1] && x[1] < x[2], `a chain goes rightwards, not ${x}`);
+
+  // A sequencer resetting the divider that advances it is a legal patch - a
+  // bus is read and written once a pass - and a layout that walked it looking
+  // for the furthest-left source would never come back.
+  patch.nodes[0].inBus[0] = patch.nodes[1].outBus[0];
+  const looped = patchBlocks(device, patch);
+  const round = autoLayout(looped, connectionsOf(looped));
+  assert.equal(round.size, looped.length, 'every block still got a position');
+});
+
+await test('a socket is inside the block it belongs to', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  added(device, patch, idOf('DrumSeqGate', device));       // eight outlets, two inlets
+  const block = patchBlocks(device, patch)[0];
+  const at = { x: 0, y: 0 };
+  const last = block.outlets[block.outlets.length - 1];
+  const point = socketPoint(at, last.at, true);
+  assert.equal(point.x, BLOCK_W, 'an outlet is on the right edge');
+  assert.ok(point.y < blockHeight(block), 'and inside the block, which is as tall as its rows');
+  assert.equal(socketPoint(at, 1, true).y - socketPoint(at, 0, true).y, ROW_H);
+  assert.equal(socketPoint(at, 0, false).x, 0, 'an inlet is on the left edge');
+});
+
+await test('a block dragged somewhere is remembered beside the patch, not in it', async () => {
+  const library = new Library(fakeStorage());
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(12));
+  const bytes = codec.encodePatch(patch, codec.emptyGlobals());
+  const entry = library.save({ name: 'arranged', bytes, nodes: 1 });
+
+  library.saveLayout(entry.id, { 'node:0': [400, 120] });
+  assert.deepEqual(library.layoutFor(entry.id), { 'node:0': [400, 120] });
+  // The image is the patch, and a coordinate is not part of one: what a `.syx`
+  // file carries and what the module stores are untouched by arranging it.
+  assert.deepEqual([...library.get(entry.id).bytes], [...bytes]);
+
+  // An unsaved patch keeps its arrangement under the same name the autosave
+  // uses, and the arrangement follows it into the library.
+  library.saveLayout('working', { 'node:0': [10, 20] });
+  library.moveLayout('working', 'p-new');
+  assert.equal(library.layoutFor('working'), null);
+  assert.deepEqual(library.layoutFor('p-new'), { 'node:0': [10, 20] });
+
+  library.dropLayout(entry.id);
+  assert.equal(library.layoutFor(entry.id), null);
+
+  // A view preference is remembered, and a patch nobody arranged simply gets
+  // the automatic layout.
+  library.saveView('list');
+  assert.equal(library.readCanvas().view, 'list');
+  assert.deepEqual(library.layoutFor('p-new'), { 'node:0': [10, 20] }, 'and the layouts survived it');
+});
+
+await test('removing a node moves the blocks after it with it', async () => {
+  const saved = { 'node:0': [0, 0], 'node:1': [1, 1], 'node:3': [3, 3], 'jack:2': [9, 9] };
+  const after = forgetNode(saved, 1);
+  assert.deepEqual(after, { 'node:0': [0, 0], 'node:2': [3, 3], 'jack:2': [9, 9] },
+                   'node 3 became node 2, node 1 is gone, the jack did not move');
+});
+
+await test('a hand-placed block stays where it was put', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  added(device, patch, idOf('ClockDiv', device));
+  added(device, patch, idOf('StepSequencer', device));
+  const blocks = patchBlocks(device, patch);
+  const arrows = connectionsOf(blocks);
+  const placed = layoutOf(blocks, arrows, { 'node:1': [777, 333] });
+  assert.deepEqual(placed.get('node:1'), { x: 777, y: 333 });
+  assert.deepEqual(placed.get('node:0'), autoLayout(blocks, arrows).get('node:0'),
+                   'and nothing else moved because of it');
 });
 
 // --- the harness ------------------------------------------------------------

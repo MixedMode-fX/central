@@ -103,8 +103,20 @@ jobs:
 
       # The module is the firmware core compiled to WebAssembly with a stock
       # clang; lld provides wasm-ld and llvm the nm used to check imports.
+      #
+      # The runner image carries third-party apt sources this build does not
+      # use, and one of them serving an index that disagrees with its own
+      # Release file fails `apt-get update` outright - exit 100, before a
+      # single package is fetched, which took this job down with a Chrome
+      # index nothing here has ever wanted. So the source is dropped, a
+      # partial update is tolerated, and the *install* is what decides whether
+      # the indexes were good enough: clang, lld and llvm all come from
+      # Ubuntu's own archive, so a third party cannot make this job red.
       - name: Install clang and lld
-        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.*
+          sudo apt-get update || true
+          sudo apt-get install -y clang lld llvm
 
       - name: Build
         run: emulator/build.sh

@@ -19,6 +19,7 @@ import { portNames, MUSICAL_PORTS, CLOCK_SOURCES } from './names.js';
 import { scopePanel, drawScope, rollPanel, drawRoll } from './scope.js';
 import { WAVES } from './audio.js';
 import { Domain } from './validate.js';
+import { refreshCanvasLive } from './canvas.js';
 
 const MIDI_TYPES = {
   0x80: 'note off', 0x90: 'note on', 0xa0: 'poly AT', 0xb0: 'CC', 0xc0: 'program',
@@ -484,6 +485,7 @@ export function refreshLive(app) {
     if (readout) readout.textContent = app.listener.enabled ? `${player.voices.size} sounding` : 'audio is off';
   }
 
+  refreshCanvasLive(app, live);
   drawScope(app);
   drawRoll(app);
   refreshLog(app);

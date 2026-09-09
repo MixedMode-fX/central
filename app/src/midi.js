@@ -85,55 +85,52 @@ function portToggles(mask, onChange, { label }) {
 
 // --- routing ---------------------------------------------------------------
 
+// One MIDI port, in full: what it accepts or sends, on which channel, and the
+// note bus it copies to or from. The routing panel is a grid of these and the
+// canvas inspector shows the one whose block was clicked, so a port edited
+// from either place is edited by the same code.
+export function routeCard(app, index, isOut) {
+  const caps = app.device?.capabilities;
+  if (!caps) return null;
+  const port = (isOut ? app.patch.midiOut : app.patch.midiIn)[index];
+  if (!port) return null;
+  const what = isOut ? 'MIDI out' : 'MIDI in';
+  const mask = () => (isOut ? port.targetMask : port.sourceMask);
+  const send = () => app.edit(
+    () => app.device.setMidiPort(index, isOut, mask(), port.channel, port.bus), what);
+
+  return el('div', { class: 'route' },
+    el('div', { class: 'route-head' },
+      el('h4', {}, `${isOut ? 'out' : 'in'} ${index + 1}`),
+      el('span', { class: 'hint' }, mask()
+        ? (isOut
+          ? `note bus ${port.bus === P.NO_BUS ? '—' : port.bus} → ${portNames(mask()).join(', ')}`
+          : `${portNames(mask()).join(', ')} → note bus ${port.bus === P.NO_BUS ? '—' : port.bus}`)
+        : 'unused')),
+    portToggles(mask(), (chosen) => {
+      if (isOut) port.targetMask = chosen; else port.sourceMask = chosen;
+      send();
+      app.render();
+    }, { label: `${what} ${index + 1} ${isOut ? 'targets' : 'sources'}` }),
+    el('div', { class: 'route-fields' },
+      channelSelect(port.channel, (channel) => {
+        port.channel = channel;
+        send();
+        app.render();
+      }, isOut ? { omni: 'keep each event\u2019s channel' } : {}),
+      busSelect(caps, Domain.Note, port.bus, (bus) => {
+        port.bus = bus;
+        send();
+        app.render();
+      }, 'no bus')));
+}
+
 export function routingPanel(app) {
   const caps = app.device?.capabilities;
   if (!caps) return null;
 
-  const ins = app.patch.midiIn.slice(0, caps.midiIn).map((port, i) => el('div', { class: 'route' },
-    el('div', { class: 'route-head' },
-      el('h4', {}, `in ${i + 1}`),
-      el('span', { class: 'hint' }, port.sourceMask
-        ? `${portNames(port.sourceMask).join(', ')} → note bus ${port.bus === P.NO_BUS ? '—' : port.bus}`
-        : 'unused')),
-    portToggles(port.sourceMask, (mask) => {
-      port.sourceMask = mask;
-      app.edit(() => app.device.setMidiPort(i, false, port.sourceMask, port.channel, port.bus), 'MIDI in');
-      app.render();
-    }, { label: `MIDI in ${i + 1} sources` }),
-    el('div', { class: 'route-fields' },
-      channelSelect(port.channel, (channel) => {
-        port.channel = channel;
-        app.edit(() => app.device.setMidiPort(i, false, port.sourceMask, port.channel, port.bus), 'MIDI in');
-        app.render();
-      }),
-      busSelect(caps, Domain.Note, port.bus, (bus) => {
-        port.bus = bus;
-        app.edit(() => app.device.setMidiPort(i, false, port.sourceMask, port.channel, port.bus), 'MIDI in');
-        app.render();
-      }, 'no bus'))));
-
-  const outs = app.patch.midiOut.slice(0, caps.midiOut).map((port, i) => el('div', { class: 'route' },
-    el('div', { class: 'route-head' },
-      el('h4', {}, `out ${i + 1}`),
-      el('span', { class: 'hint' }, port.targetMask
-        ? `note bus ${port.bus === P.NO_BUS ? '—' : port.bus} → ${portNames(port.targetMask).join(', ')}`
-        : 'unused')),
-    portToggles(port.targetMask, (mask) => {
-      port.targetMask = mask;
-      app.edit(() => app.device.setMidiPort(i, true, port.targetMask, port.channel, port.bus), 'MIDI out');
-      app.render();
-    }, { label: `MIDI out ${i + 1} targets` }),
-    el('div', { class: 'route-fields' },
-      channelSelect(port.channel, (channel) => {
-        port.channel = channel;
-        app.edit(() => app.device.setMidiPort(i, true, port.targetMask, port.channel, port.bus), 'MIDI out');
-        app.render();
-      }, { omni: 'keep each event’s channel' }),
-      busSelect(caps, Domain.Note, port.bus, (bus) => {
-        port.bus = bus;
-        app.edit(() => app.device.setMidiPort(i, true, port.targetMask, port.channel, port.bus), 'MIDI out');
-        app.render();
-      }, 'no bus'))));
+  const ins = app.patch.midiIn.slice(0, caps.midiIn).map((_, i) => routeCard(app, i, false));
+  const outs = app.patch.midiOut.slice(0, caps.midiOut).map((_, i) => routeCard(app, i, true));
 
   return el('section', { class: 'panel' },
     el('h2', {}, 'MIDI routing'),

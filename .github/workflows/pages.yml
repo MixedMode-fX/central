@@ -40,8 +40,13 @@ jobs:
           # build.sh stamps `git describe` into the page like the firmware.
           fetch-depth: 0
 
+      # See ci.yml: a third-party source on the runner image must not be able
+      # to fail this before a package is fetched.
       - name: Install clang and lld
-        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.*
+          sudo apt-get update || true
+          sudo apt-get install -y clang lld llvm
 
       - name: Build
         run: emulator/build.sh

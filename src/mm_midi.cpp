@@ -23,16 +23,19 @@ MIDIDevice midi_hosted(mm_usb);
 void mm_midi_setup(){
     #ifdef SERIAL_MIDI_1
     midi1.begin(MIDI_CHANNEL_OMNI);
+    SERIAL_MIDI_1.begin(MidiSettings::BaudRate, MIDI_SERIAL_FORMAT);
     // midi1.turnThruOff();
     #endif
 
     #ifdef SERIAL_MIDI_2
     midi2.begin(MIDI_CHANNEL_OMNI);
+    SERIAL_MIDI_2.begin(MidiSettings::BaudRate, MIDI_SERIAL_FORMAT);
     // midi2.turnThruOff();
     #endif
 
     #ifdef SERIAL_MIDI_3
     midi3.begin(MIDI_CHANNEL_OMNI);
+    SERIAL_MIDI_3.begin(MidiSettings::BaudRate, MIDI_SERIAL_FORMAT);
     midi3.turnThruOff();
     #endif
 

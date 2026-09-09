@@ -58,6 +58,58 @@ Configurable logic gates (all gates can also be inverted) & latches:
 
 Logic algorithms are not clocked by the master clock and happen at a much higher sample rate
 
+# Building
+
+The toolchain is PlatformIO, installed into a project-local `.venv/`. A clone
+needs nothing but `python3`:
+
+```
+make setup     # install PlatformIO and pre-fetch the toolchains (~600 MB, once)
+make build     # build firmware for the Teensy 4.1
+make test      # run the native unit tests, no hardware needed
+make size      # flash and RAM usage
+make upload    # flash an attached Teensy
+```
+
+`make` targets bootstrap PlatformIO on first use, so `make test` works in a
+fresh clone on its own. Claude Code on the web provisions the same toolchain
+through `.claude/hooks/session-start.sh` when a session starts.
+
+The Teensy platform version in `platformio.ini` is pinned on purpose. The core
+ships MIDI Library and USBHost_t36, so the platform pin is what makes those
+dependencies reproducible — an unpinned build resolves whatever the registry
+published most recently, and that has already broken this project's DIN MIDI
+settings once.
+
+## Versions and releases
+
+`VERSION` at the repository root is the single source of truth. Every build
+stamps it into the binary along with `git describe`, reachable from firmware as
+`MMMC_VERSION`, `MMMC_GIT_REV` and `MMMC_BUILD` (see `src/version.h`), and
+printed to the serial console at startup:
+
+```
+MMMC 0.1.0+cbb862d
+```
+
+CI builds every push and pull request, and attaches the resulting `.hex` and
+`.elf` to the run for 14 days, so any branch can be flashed and tried without
+cutting a release.
+
+To publish a release:
+
+1. Update `VERSION` and commit it.
+2. Tag the commit `v<version>` and push the tag.
+
+```
+git tag -a v0.2.0 -m "MMMC 0.2.0"
+git push origin v0.2.0
+```
+
+The release workflow refuses to publish if the tag and `VERSION` disagree, then
+runs the tests, builds firmware, and publishes a GitHub Release carrying
+`mmmc-v<version>-teensy41.hex`, the matching `.elf`, and `SHA256SUMS`.
+
 # Code structure
 
 `Setters` and `Getters` are not represented in the diagram below. 

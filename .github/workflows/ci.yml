@@ -72,11 +72,14 @@ jobs:
         run: pio run -e teensy41 -t size
 
       # Every build is downloadable, so a branch can be flashed and tried on
-      # hardware without cutting a release for it.
+      # hardware without cutting a release for it. On a pull_request event
+      # github.sha is the ephemeral merge commit, which names no commit on the
+      # branch, so prefer the head SHA — the point of the artifact is to be
+      # traceable to something you can check out.
       - name: Upload build output
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ github.sha }}
+          name: firmware-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             .pio/build/teensy41/*.hex
             .pio/build/teensy41/*.elf

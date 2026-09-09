@@ -40,10 +40,13 @@ if (E.__wasm_call_ctors) E.__wasm_call_ctors();
 // are delivered on a microtask the way a real MIDI port would deliver them.
 function wasmTransport() {
   let onMessage = () => {};
-  const scratch = 0x10000;                      // a page the firmware does not use
   return {
     onMessage(fn) { onMessage = fn; },
     send(bytes) {
+      // The module exports the buffer to write into; picking an address by
+      // hand happens to work until the linker moves something.
+      const scratch = E.emu_sysex_in_ptr();
+      if (bytes.length > E.emu_sysex_in_capacity()) throw new Error('message too long');
       const mem = new Uint8Array(E.memory.buffer);
       mem.set(bytes, scratch);
       E.emu_sysex_out_clear();
@@ -122,6 +125,48 @@ await test('the registry dump names every algorithm the firmware has', async () 
     assert.equal(algorithms[i].nOut, E.emu_algo_n_out(i));
     assert.equal(algorithms[i].nParams, E.emu_algo_n_params(i));
   }
+});
+
+// Walking the whole registry is what the editor does on connect, and it is
+// what catches a disagreement about a reply's layout: readParams now rejects
+// on a timeout rather than resolving with a partial answer, so an offset that
+// never recognises the last field fails here instead of stalling for two
+// seconds per algorithm and building half a panel.
+await test('every algorithm answers a parameter request, completely', async () => {
+  for (const descriptor of device.algorithms) {
+    const groups = await device.readParams(descriptor.id);
+    if (descriptor.nParams === 0) {
+      assert.equal(groups.length, 0, `${descriptor.name} has no parameters`);
+      continue;
+    }
+    // Every parameter the algorithm claims must have a descriptor behind it,
+    // or the editor has a control it cannot draw.
+    let covered = 0;
+    for (const group of groups) {
+      assert.ok(group, `${descriptor.name}: a group is missing`);
+      covered += group.repeat * group.nFields;
+      assert.equal(group.fields.filter(Boolean).length, group.nFields,
+                   `${descriptor.name}: a field is missing`);
+    }
+    assert.equal(covered, descriptor.nParams,
+                 `${descriptor.name} describes ${covered} of ${descriptor.nParams}`);
+    assert.ok(device.describeParam(descriptor.id, 0), `${descriptor.name} parameter 0`);
+    assert.ok(device.describeParam(descriptor.id, descriptor.nParams - 1),
+              `${descriptor.name} last parameter`);
+  }
+});
+
+// The emulator module is fetched relative to editor/src/emulator.js, which is
+// one level deeper than the page - the kind of thing that is obvious in a
+// browser and invisible in a unit test, so it is pinned here.
+await test('the embedded module resolves next to the page it is served with', async () => {
+  const { CANDIDATE_PATHS } = await import('../src/emulator.js');
+  const from = 'https://example.test/editor/src/emulator.js';
+  const resolved = CANDIDATE_PATHS.map((c) => new URL(c, from).pathname);
+  assert.ok(resolved.includes('/mmmc.wasm'),
+            `the Pages layout is not covered: ${resolved.join(', ')}`);
+  assert.ok(resolved.includes('/editor/mmmc.wasm'), 'a copy beside the page is not covered');
+  assert.ok(resolved.includes('/emulator/dist/mmmc.wasm'), 'the repository layout is not covered');
 });
 
 await test('parameter descriptors match the firmware, ranges and enum names', async () => {

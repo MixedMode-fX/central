@@ -55,7 +55,13 @@ export class Device extends EventTarget {
   // Collects replies until `isDone` says the exchange is over. Every request
   // that expects an answer goes through here, so a module that has gone away
   // produces a clear timeout rather than a hung UI.
-  request(bytes, isDone, { timeout = REPLY_TIMEOUT_MS } = {}) {
+  //
+  // **A timeout is a failure, including when replies did arrive.** Resolving
+  // with a partial answer looks forgiving and is not: it turns a disagreement
+  // about the message layout into a two-second stall and a half-built panel,
+  // which is exactly the bug this comment exists because of. `partialOk` is
+  // for the one caller that genuinely wants whatever turned up.
+  request(bytes, isDone, { timeout = REPLY_TIMEOUT_MS, partialOk = false, what = 'the module' } = {}) {
     return new Promise((resolve, reject) => {
       const replies = [];
       const waiter = {
@@ -70,8 +76,10 @@ export class Device extends EventTarget {
       };
       const timer = setTimeout(() => {
         waiter.done = true;
-        if (replies.length) resolve(replies);
-        else reject(new Error('the module did not answer'));
+        if (partialOk && replies.length) { resolve(replies); return; }
+        reject(new Error(replies.length
+          ? `${what}: the answer never completed (${replies.length} messages in ${timeout}ms)`
+          : `${what} did not answer`));
       }, timeout);
       this.pending.push(waiter);
       this.send(bytes);
@@ -100,7 +108,8 @@ export class Device extends EventTarget {
   async readCapabilities() {
     const [reply] = await this.request(
       this.msg(P.SysexCommand.SYSEX_CAPS_REQUEST),
-      (r) => this.isReply(r, P.SysexCommand.SYSEX_CAPABILITIES));
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_CAPABILITIES),
+      { what: 'capabilities' });
     let at = 5;
     const u8 = () => reply[at++];
     const u14 = () => { const v = codec.readU14(reply, at); at += 2; return v; };
@@ -121,7 +130,8 @@ export class Device extends EventTarget {
     const replies = await this.request(
       this.msg(P.SysexCommand.SYSEX_ALGO_REQUEST),
       (r, all) => this.isReply(r, P.SysexCommand.SYSEX_ALGORITHM)
-                  && all.filter((x) => this.isReply(x, P.SysexCommand.SYSEX_ALGORITHM)).length >= r[6]);
+                  && all.filter((x) => this.isReply(x, P.SysexCommand.SYSEX_ALGORITHM)).length >= r[6],
+      { what: 'the algorithm list' });
     this.algorithms = [];
     this.byId.clear();
     for (const reply of replies) {
@@ -164,14 +174,25 @@ export class Device extends EventTarget {
 
     const replies = await this.request(
       this.msg(P.SysexCommand.SYSEX_PARAM_REQUEST, [algorithmId]),
-      (r, all) => {
+      (r) => {
+        // An algorithm with no parameters - a logic gate - answers with an
+        // ACK rather than nothing, so a silent module is still a timeout.
+        if (this.isReply(r, P.SysexCommand.SYSEX_ACK)) return true;
+        if (this.isReply(r, P.SysexCommand.SYSEX_NAK)) return true;
         if (!this.isReply(r, P.SysexCommand.SYSEX_PARAM_DESC)) return false;
-        // The last field of the last group ends the exchange.
+        // Otherwise the last field of the last group ends the exchange. The
+        // offsets are the reply's own layout: 6 group, 7 group count, 8 first,
+        // 10 repeat, 12 field count, 14 field index - each u14 taking two.
         const groups = r[7];
-        const field = codec.readU14(r, 13);
-        const fields = codec.readU14(r, 11);
+        const fields = codec.readU14(r, 12);
+        const field = codec.readU14(r, 14);
         return r[6] === groups - 1 && field === fields - 1;
-      });
+      },
+      { what: `the parameters of algorithm ${algorithmId}` });
+    if (replies.some((r) => this.isReply(r, P.SysexCommand.SYSEX_NAK))) {
+      this.throwOnNak(replies.find((r) => this.isReply(r, P.SysexCommand.SYSEX_NAK)),
+                      'no such algorithm');
+    }
 
     const groups = [];
     for (const reply of replies) {

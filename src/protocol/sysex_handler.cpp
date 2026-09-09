@@ -483,6 +483,12 @@ void SysexHandler::reply_param_descriptors(uint8_t source, uint8_t algorithm_id)
     const AlgorithmDescriptor* d = registry::find(algorithm_id);
     if (d == nullptr){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
 
+    // An algorithm with no parameters - every logic gate - would otherwise
+    // produce no reply at all, which a host cannot tell apart from a module
+    // that has gone away. An ACK is the answer: asked, and there is nothing
+    // to send.
+    if (d->n_param_groups == 0){ ack(source); return; }
+
     for (uint8_t g = 0; g < d->n_param_groups; g++){
         const ParamGroup& grp = d->param_groups[g];
         for (uint16_t f = 0; f < grp.n_fields; f++){

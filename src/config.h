@@ -74,6 +74,13 @@
 // 64 bytes.
 #define MAX_HELD_NOTES 16
 
+// Notes one modifier can have sounding at once (#10). A modifier owns the
+// note-off for every note-on it emitted, so it can only emit what it can
+// record: Chord turns one held note into several, and this is the ceiling on
+// the total. An emission that would not fit is refused rather than left
+// unreleasable.
+#define MAX_SOUNDING_NOTES 32
+
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per
 // second, so ~350 messages/s; five transports at once and a 1 kHz pass rate

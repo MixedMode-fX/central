@@ -6,6 +6,7 @@
 #include "hal/teensy/teensy_clock.h"
 #include "hal/gpio_map.h"
 #include "midi/midi_queue.h"
+#include "util/random.h"
 #include "master.h"
 #include "version.h"
 
@@ -41,6 +42,14 @@ static Patch default_patch(){
 void setup(){
     Serial.begin(115200);
     Serial.println("MMMC " MMMC_BUILD);
+
+    // Stir the entropy pool before any node is constructed: a node that draws
+    // a seed at construction (RandomSequencer, Probability) must not play the
+    // same thing on every power cycle. The cycle counter and a floating ADC
+    // input are both weak on their own and differ between boots.
+    entropy::stir(ARM_DWT_CYCCNT);
+    entropy::stir(micros());
+    for (uint8_t i = 0; i < 8; i++) entropy::stir((uint32_t)analogRead(CV_ADC) << i);
 
     // Every port starts as an input; a port node claims an output in setup().
     gpio_map_mode(gpio, ALL_GPIO_MAP, GPIO_MODE_INPUT_PULLUP);

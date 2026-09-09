@@ -646,6 +646,24 @@ parameter descriptor straight off the compiled table — so an algorithm added
 to the firmware appears in an editor with no editor change, and a hardcoded
 list cannot silently drift.
 
+**An algorithm describes itself, not just its shape.** The registry reply
+carries a name for every inlet and every outlet and a one-line summary of the
+algorithm, alongside the domains and counts. A host that has only counts can
+say *in 0* and *in 1*; it cannot say which one advances the sequencer and
+which one resets it, so a user has to read the firmware to patch a node.
+Parameters have carried names since the parameter descriptors landed, and this
+is the same argument at port scope — `test_params` fails if an algorithm in
+the table ships without them. The strings are appended after the algorithm's
+name rather than spliced into the record, so a host that only knows the older
+layout stops where it always did and needs no version bump.
+
+**A parameter value is eight bits and a SysEx data byte is seven.** Several
+ranges reach 255, and the high byte of a step pattern *is* step 8 — so
+`SYSEX_SET_PARAM` carries the eighth bit in an optional extra argument and
+`SYSEX_PARAM_VALUE` answers with a 14-bit value. Truncating instead does not
+round the value: writing step 8 would clear the byte and take the other seven
+steps with it.
+
 **Two tiers of write.** A bulk transfer is chunked, with a sequence number and
 a checksum per chunk, and accumulates into a staging buffer: the live graph is
 untouched until the last chunk has arrived and the whole image has passed the
@@ -844,12 +862,47 @@ Three things keep it honest, and all three are checked in CI:
   never rejected by the firmware's validator" is a check, not a hope.
 
 Buses are the connections: every inlet and outlet is a selector offering only
-the buses of its own domain. Dragging one sends a single message rather than a
-full dump. The sequencers get purpose-built views — a step grid for the gate
-and drum sequencers, with each lane's own length visible, and a note lane over
-**scale degrees** for the note sequencers, showing the pitch each degree
-resolves to so changing the root visibly moves the pitches without touching the
-stored pattern.
+the buses of its own domain, under the name the firmware gives it — *advance*
+and *reset* rather than *in 0* and *in 1* — and each one says what else is on
+its bus, because that is what a patch cable would have shown. Dragging one
+sends a single message rather than a full dump. The sequencers get
+purpose-built views — a step grid for the gate and drum sequencers, with each
+lane's own length visible, and a note lane over **scale degrees** for the note
+sequencers, showing the pitch each degree resolves to so changing the root
+visibly moves the pitches without touching the stored pattern.
+
+**A node added is a node connected.** Its required inlets land on a bus
+something already writes — the node you added last, so a chain builds as you
+type — and its first outlet on a bus nothing writes yet. Added unconnected, a
+node with a required inlet is a patch the module refuses, which used to leave
+the editor a whole graph ahead of the device and every subsequent incremental
+edit addressing a node that was never taken. The editor now tracks that
+divergence explicitly: a patch its own validator refuses is never sent, and the
+first edit that makes it valid sends the whole thing.
+
+**Controller bindings are edited, not only learned.** Learn is the fastest way
+to bind a controller you have in front of you and the only way to bind one
+whose CC number you do not know — and it was the only way to bind anything at
+all, so a binding could not be read back, retargeted, narrowed to a range or
+deleted, and could not be made without the hardware present. The MIDI tab lists
+every binding in words, and every field of every slot is editable: CC, channel,
+source ports, target, sub-range, takeover mode, relative encoding, 14-bit
+pairing and pass-through. MIDI routing, the clock, Program Change recall and
+NRPN are there too, all of which the patch has always carried and none of which
+had a control.
+
+**A patch exports as the emulator's JSON** as well as `.syx`. The `.syx` file
+is the patch *image*, which is what a module and a librarian want and what
+nobody can read; the JSON is the dialect `emulator/index.html` loads, so a
+patch built here can be pasted into the emulator and heard. It re-imports, so
+the JSON is a door in both directions.
+
+**The layout is built for a phone first.** With the module embedded in the page
+there is no cable to plug in, so a phone is a fully working editor and the only
+one an iPhone can have. Every control is finger-sized, every parameter has a
+number field beside its slider — a slider alone cannot hit a value and is
+hopeless on a touch screen — and anything that cannot shrink scrolls inside its
+own box rather than pushing the page sideways.
 
 **It also runs the module itself.** Press *use built-in module* and the editor
 talks to the firmware compiled to WebAssembly in the page, over the same

@@ -536,6 +536,16 @@ static void test_console_lists_algorithms_and_parameters() {
     rig.console.execute("algos", 0);
     TEST_ASSERT_TRUE(rig.io.said("EuclidianSequencer"));
     TEST_ASSERT_TRUE(rig.io.said("DrumSeqMidi"));
+    // The listing says what each algorithm is for and what its connections
+    // mean. With no editor attached this is the only place to find out.
+    TEST_ASSERT_TRUE(rig.io.said("Bjorklund"));
+    TEST_ASSERT_TRUE(rig.io.said("reads: advance, reset (optional)"));
+    TEST_ASSERT_TRUE(rig.io.said("writes: trigger"));
+
+    // And a patch listing names each connection rather than numbering it.
+    rig.io.clear();
+    rig.console.execute("patch", 0);
+    TEST_ASSERT_TRUE(rig.io.said("advance <- bus"));
 
     rig.io.clear();
     rig.console.execute("params 1", 0);

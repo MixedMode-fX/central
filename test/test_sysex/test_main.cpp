@@ -306,6 +306,35 @@ static void test_the_algorithm_dump_matches_the_registry() {
         TEST_ASSERT_EQUAL(d->min_in, s.bytes[9]);
         TEST_ASSERT_EQUAL(d->n_out, s.bytes[10]);
         TEST_ASSERT_EQUAL(d->n_params, (uint16_t)(s.bytes[11] | (s.bytes[12] << 7)));
+
+        // Then the domains, the algorithm's name, one name per inlet, one per
+        // outlet, and the summary - the metadata that is the difference
+        // between an editor that says "advance" and one that says "in 0".
+        size_t at = 13 + 1u + d->n_in + d->n_out;          // wants_tick, domains
+        auto read_string = [&](char* out, size_t capacity) {
+            const uint8_t n = s.bytes[at++];
+            TEST_ASSERT_TRUE(n < capacity);
+            for (uint8_t k = 0; k < n; k++) out[k] = (char)s.bytes[at + k];
+            out[n] = '\0';
+            at += n;
+        };
+        char text[128];
+        read_string(text, sizeof text);
+        TEST_ASSERT_EQUAL_STRING(d->name, text);
+        for (uint8_t k = 0; k < d->n_in; k++) {
+            read_string(text, sizeof text);
+            TEST_ASSERT_EQUAL_STRING(d->in_name[k], text);
+        }
+        for (uint8_t k = 0; k < d->n_out; k++) {
+            read_string(text, sizeof text);
+            TEST_ASSERT_EQUAL_STRING(d->out_name[k], text);
+        }
+        read_string(text, sizeof text);
+        TEST_ASSERT_EQUAL_STRING(d->summary, text);
+        // Nothing but the terminator is left: the record is exactly this
+        // shape, which is what lets an editor parse it without guessing.
+        TEST_ASSERT_EQUAL(s.bytes.size() - 1u, at);
+        TEST_ASSERT_EQUAL(0xF7, s.bytes[at]);
         seen++;
     }
     TEST_ASSERT_EQUAL(registry::count(), seen);
@@ -558,6 +587,33 @@ static void test_a_parameter_edit_preserves_all_node_state() {
     const auto* r = rig.midi.last_reply(SYSEX_PARAM_VALUE);
     TEST_ASSERT_NOT_NULL(r);
     TEST_ASSERT_EQUAL(16, r->bytes[8]);
+}
+
+// A parameter byte reaches 255 and a SysEx data byte holds seven bits. The
+// high byte of a step pattern *is* step 8, so truncating the value would not
+// round it - it would turn step 8 off and clear the other seven with it.
+static void test_a_parameter_above_127_survives_the_wire() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(two_node_patch(), g, 0);
+
+    // Node 1 is a StepSequencer; params[3] is steps 1-8, one bit per step.
+    rig.send(SYSEX_SET_PARAM, {1, 3, 0, 0x01, 0x01});      // 0x81: steps 1 and 8
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(0x81, rig.patches.active().nodes[1].params[3]);
+
+    rig.send(SYSEX_GET_PARAM, {1, 3, 0});
+    const auto* r = rig.midi.last_reply(SYSEX_PARAM_VALUE);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(0x81, (uint16_t)(r->bytes[8] | (r->bytes[9] << 7)));
+    // The low seven bits are where they always were, so a host that predates
+    // the eighth bit reads exactly what it read before.
+    TEST_ASSERT_EQUAL(0x01, r->bytes[8]);
+
+    // And a host that sends four arguments still writes a 7-bit value.
+    rig.send(SYSEX_SET_PARAM, {1, 3, 0, 0x7F});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(0x7F, rig.patches.active().nodes[1].params[3]);
 }
 
 static void test_a_parameter_beyond_its_range_is_refused() {
@@ -911,6 +967,7 @@ int main() {
     RUN_TEST(test_one_bus_change_leaves_every_other_node_undisturbed);
     RUN_TEST(test_an_invalid_connection_is_refused_and_changes_nothing);
     RUN_TEST(test_a_parameter_edit_preserves_all_node_state);
+    RUN_TEST(test_a_parameter_above_127_survives_the_wire);
     RUN_TEST(test_a_parameter_beyond_its_range_is_refused);
     RUN_TEST(test_port_edits_reconstruct_nothing);
     RUN_TEST(test_a_swap_under_a_held_chord_hangs_nothing);

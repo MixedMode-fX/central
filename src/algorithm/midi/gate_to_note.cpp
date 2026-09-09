@@ -12,9 +12,13 @@ static const ParamDescriptor PARAMS[3] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 3, PARAMS}};
 
+static const char* const IN_NAMES[1] = {"gate"};
+static const char* const OUT_NAMES[1] = {"note out"};
+
 const AlgorithmDescriptor GateToNote::descriptor = {
     ALGO_GATE_TO_NOTE, "GateToNote", 1, 1, 1, 3, IN, OUT, sizeof(GateToNote), false, construct_node<GateToNote>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "A gate becomes a note: rising edge sends note on, falling edge sends note off." };
 
 GateToNote::GateToNote(const NodeConfig& config) :
     in(config.in_bus[0]),

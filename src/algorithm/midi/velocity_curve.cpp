@@ -14,9 +14,13 @@ static const ParamDescriptor PARAMS[4] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 4, PARAMS}};
 
+static const char* const IN_NAMES[1] = {"notes in"};
+static const char* const OUT_NAMES[1] = {"notes out"};
+
 const AlgorithmDescriptor VelocityCurve::descriptor = {
     ALGO_VELOCITY, "VelocityCurve", 1, 1, 1, 4, IN, OUT, sizeof(VelocityCurve), false, construct_node<VelocityCurve>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "Reshapes note-on velocity. Pitch is untouched and no note is ever dropped." };
 
 // Velocity never changes a pitch and never drops a note, so this is the one
 // modifier whose parameters cannot strand anything: a note-off carries

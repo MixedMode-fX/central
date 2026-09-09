@@ -65,6 +65,15 @@ struct NodeConfig {
 // Compile-time description of one algorithm. The validator range-checks a
 // NodeConfig against it, the node pool sizes its slots from it, the factory
 // constructs from it, and #11 exposes it over SysEx.
+//
+// **An inlet's name is not decoration.** A patch is a list of what each node
+// reads and writes, so a host that can only say "in 0" and "in 1" is asking a
+// user to guess which one advances the sequencer and which one resets it.
+// The domain narrows the choice to the legal buses; the name is what says
+// what the connection *means*. Every parameter has carried a name since #20
+// for exactly this reason - these close the same gap for the ports and for
+// the algorithm itself, and they travel over the same registry messages, so
+// an algorithm added to the firmware still arrives in the editor described.
 struct AlgorithmDescriptor {
     uint8_t       id;
     const char*   name;
@@ -79,6 +88,20 @@ struct AlgorithmDescriptor {
     Node*       (*construct)(void* storage, const NodeConfig&);
     const ParamGroup* param_groups;   // n_param_groups entries; covers n_params
     uint8_t       n_param_groups;
+    // n_in / n_out entries, and one line saying what the algorithm is for.
+    // Nullptr is legal and means "no better name than the index" - but an
+    // algorithm that ships without these is one a user has to read the source
+    // to patch, so test_params asserts every entry in the table has them.
+    //
+    // Cost, measured rather than guessed, the same way param.h reports the
+    // parameter descriptors': describing all 25 algorithms' ports adds
+    // **about 3 KB of flash** (2048 bytes of string data, the rest the code
+    // that puts them on the wire) against the Teensy 4.1's 8 MB. If that ever
+    // becomes uncomfortable it is these strings that go behind a build flag,
+    // never the domains, because the domains are what the validator enforces.
+    const char* const* in_name;
+    const char* const* out_name;
+    const char*   summary;
 };
 
 // Placement-new factory used by every descriptor. Slot overflow is a compile

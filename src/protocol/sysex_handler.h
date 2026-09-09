@@ -98,7 +98,12 @@ class SysexHandler : public ISysexIn {
 
         void begin_reply(uint8_t command);
         void put(uint8_t value){ if (tx_at < SYSEX_TX_MAX - 1u) tx[tx_at++] = (uint8_t)(value & 0x7F); }
-        void put_string(const char* text);
+        // A length-prefixed ASCII string. The default cap suits a name; an
+        // algorithm's one-line summary asks for SUMMARY_MAX, and both are
+        // budgeted against SYSEX_TX_MAX by test_params.
+        static constexpr uint8_t TEXT_MAX = 24;
+        static constexpr uint8_t SUMMARY_MAX = 96;
+        void put_string(const char* text, uint8_t limit = TEXT_MAX);
         void put_u14(uint16_t value){ put((uint8_t)(value & 0x7F)); put((uint8_t)((value >> 7) & 0x7F)); }
         void send_reply(uint8_t source);
 

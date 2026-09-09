@@ -42,12 +42,13 @@ void SysexHandler::begin_reply(uint8_t command){
     tx[tx_at++] = SYSEX_PROTOCOL_VERSION;
 }
 
-void SysexHandler::put_string(const char* text){
+void SysexHandler::put_string(const char* text, uint8_t limit){
     // Length-prefixed and ASCII-clamped: a name is written by us, but the
     // length has to be on the wire for an editor to parse a variable-length
-    // record without guessing.
+    // record without guessing. A null pointer is a zero-length string, not a
+    // missing field, so a record's shape never depends on what is in it.
     uint8_t n = 0;
-    while (text != nullptr && text[n] != '\0' && n < 24) n++;
+    while (text != nullptr && text[n] != '\0' && n < limit) n++;
     put(n);
     for (uint8_t i = 0; i < n; i++){
         const char c = text[i];
@@ -155,10 +156,17 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             ack(source);
             return;
 
+        // A parameter is a byte, and a SysEx data byte is seven bits. Values
+        // above 127 are ordinary - a step pattern's high byte *is* step 8,
+        // and several ranges reach 255 - so the eighth bit rides in an
+        // optional fifth argument rather than being truncated on the wire.
+        // Appended, not spliced: a host that sends four arguments writes the
+        // same value it always did, which is why this needs no version bump.
         case SYSEX_SET_PARAM: {
             if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             const uint16_t param = (uint16_t)(args[1] | ((uint16_t)args[2] << 7));
-            switch (patches.set_param(args[0], param, args[3], now_us)){
+            const uint8_t value = (uint8_t)(args[3] | ((n > 4 && (args[4] & 0x01)) ? 0x80u : 0u));
+            switch (patches.set_param(args[0], param, value, now_us)){
                 case PARAM_SET_OK: ack(source); return;
                 case PARAM_VALUE_OUT_OF_RANGE:
                 case PARAM_REFUSED: nak(source, SYSEX_ERR_BAD_ARGUMENT); return;
@@ -174,7 +182,10 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             begin_reply(SYSEX_PARAM_VALUE);
             put(args[0]);
             put_u14(param);
-            put(value);
+            // The value's low seven bits where they have always been, its
+            // eighth bit appended: an older host reads the same byte it read
+            // before, a current one reads the whole value back.
+            put_u14(value);
             send_reply(source);
             return;
         }
@@ -473,6 +484,19 @@ void SysexHandler::reply_algorithms(uint8_t source){
         for (uint8_t in = 0; in < d->n_in && in < MAX_IN; in++) put((uint8_t)d->in_domain[in]);
         for (uint8_t out = 0; out < d->n_out && out < MAX_OUT; out++) put((uint8_t)d->out_domain[out]);
         put_string(d->name);
+        // What each connection *means*, and what the algorithm is for. These
+        // are appended after the name rather than spliced in, so a host that
+        // only knows the older layout stops at the name and reads the same
+        // record it always did - the reason this needs no protocol version
+        // bump. A host that does know them gets a patch that reads as
+        // "advance" and "reset" instead of "in 0" and "in 1".
+        for (uint8_t in = 0; in < d->n_in && in < MAX_IN; in++){
+            put_string(d->in_name != nullptr ? d->in_name[in] : nullptr);
+        }
+        for (uint8_t out = 0; out < d->n_out && out < MAX_OUT; out++){
+            put_string(d->out_name != nullptr ? d->out_name[out] : nullptr);
+        }
+        put_string(d->summary, SUMMARY_MAX);
         send_reply(source);
     }
 }

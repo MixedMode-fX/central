@@ -14,9 +14,13 @@ static const ParamDescriptor PARAMS[5] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 5, PARAMS}};
 
+static const char* const IN_NAMES[1] = {"clock in"};
+static const char* const OUT_NAMES[1] = {"trigger"};
+
 const AlgorithmDescriptor ClockDiv::descriptor = {
     ALGO_CLOCK_DIV, "ClockDiv", 1, 0, 1, 5, IN, OUT, sizeof(ClockDiv), true, construct_node<ClockDiv>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "Divides or multiplies the clock into triggers. Leave the inlet free to use the master clock." };
 
 ClockDiv::ClockDiv(const NodeConfig& config) :
     source_in(config.in_bus[0]),

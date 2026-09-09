@@ -150,6 +150,9 @@ export class Device extends EventTarget {
         wantsTick: 0,
         inDomain: [],
         outDomain: [],
+        inName: [],                            // null where the module did not say
+        outName: [],
+        summary: null,
         name: '',
         params: null,                          // filled in lazily by readParams
       };
@@ -157,8 +160,23 @@ export class Device extends EventTarget {
       descriptor.wantsTick = reply[at++];
       for (let i = 0; i < descriptor.nIn; i++) descriptor.inDomain.push(reply[at++]);
       for (let i = 0; i < descriptor.nOut; i++) descriptor.outDomain.push(reply[at++]);
-      const nameLength = reply[at++];
-      descriptor.name = String.fromCharCode(...reply.subarray(at, at + nameLength));
+      const end = reply[reply.length - 1] === 0xf7 ? reply.length - 1 : reply.length;
+      const string = () => {
+        if (at >= end) return null;
+        const length = reply[at++];
+        if (at + length > end) { at = end; return null; }
+        const text = String.fromCharCode(...reply.subarray(at, at + length));
+        at += length;
+        return text;
+      };
+      descriptor.name = string() ?? `algorithm ${descriptor.id}`;
+      // What each connection means, and what the algorithm is for. These come
+      // after the name, so a module whose firmware predates them simply runs
+      // out of record here and the editor falls back to the index - the
+      // reason string() reports the end rather than reading past it.
+      for (let i = 0; i < descriptor.nIn; i++) descriptor.inName.push(string());
+      for (let i = 0; i < descriptor.nOut; i++) descriptor.outName.push(string());
+      descriptor.summary = string();
       this.algorithms[index] = descriptor;
       this.byId.set(descriptor.id, descriptor);
     }
@@ -275,15 +293,21 @@ export class Device extends EventTarget {
     return this.command(P.SysexCommand.SYSEX_SET_CONNECTION,
       [node, isOutlet ? 1 : 0, index, bus === P.NO_BUS ? 0x7f : bus]);
   }
+  // A parameter byte reaches 255 and a SysEx data byte holds seven bits, so
+  // the value travels as a u14 - low seven bits where they have always been,
+  // the eighth appended. Truncating it instead is not a rounding error: the
+  // high byte of a step pattern *is* step 8, so a truncated write turns the
+  // step off and clears the other seven with it.
   async setParam(node, param, value) {
-    return this.command(P.SysexCommand.SYSEX_SET_PARAM, [node, ...codec.u14(param), value]);
+    return this.command(P.SysexCommand.SYSEX_SET_PARAM,
+      [node, ...codec.u14(param), ...codec.u14(value & 0xff)]);
   }
   async getParam(node, param) {
     const [reply] = await this.request(
       this.msg(P.SysexCommand.SYSEX_GET_PARAM, [node, ...codec.u14(param)]),
       (r) => this.isReply(r, P.SysexCommand.SYSEX_PARAM_VALUE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
     this.throwOnNak(reply, 'no such parameter');
-    return reply[8];
+    return codec.readU14(reply, 8) & 0xff;
   }
   async setGatePort(jack, direction, bus) {
     return this.command(P.SysexCommand.SYSEX_SET_GATE_PORT,

@@ -11,9 +11,13 @@ static const ParamDescriptor PARAMS[1] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 1, PARAMS}};
 
+static const char* const IN_NAMES[1] = {"notes in"};
+static const char* const OUT_NAMES[1] = {"note out"};
+
 const AlgorithmDescriptor NotePriority::descriptor = {
     ALGO_NOTE_PRIORITY, "NotePriority", 1, 1, 1, 1, IN, OUT, sizeof(NotePriority), false, construct_node<NotePriority>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "Many notes in, one out: the lowest, the highest or the latest held note wins." };
 
 // The new winner is taken on the next pass by follow(), which releases the
 // old voice from the ledger, so the mode can move under a held chord.

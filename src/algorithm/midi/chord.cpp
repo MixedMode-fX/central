@@ -16,9 +16,13 @@ static const ParamDescriptor PARAMS[7] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 7, PARAMS}};
 
+static const char* const IN_NAMES[1] = {"note in"};
+static const char* const OUT_NAMES[1] = {"chord out"};
+
 const AlgorithmDescriptor Chord::descriptor = {
     ALGO_CHORD, "Chord", 1, 1, 1, 7, IN, OUT, sizeof(Chord), false, construct_node<Chord>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "One note in, a chord out: the root plus up to six intervals, held together." };
 
 // The voicing can move under a held chord: every voice already in the air is
 // released from the ledger at the pitch it was emitted at, so re-voicing

@@ -1,6 +1,7 @@
 #include <unity.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <new>
 
 #include "../fakes/fake_gpio.h"
@@ -75,6 +76,38 @@ static void test_every_parameter_of_every_algorithm_is_described() {
         snprintf(msg, sizeof msg, "%s describes %u of %u parameters",
                  d->name, (unsigned)covered, (unsigned)d->n_params);
         TEST_ASSERT_EQUAL_MESSAGE(d->n_params, covered, msg);
+    }
+}
+
+// Every inlet, every outlet and every algorithm is named and described.
+//
+// An algorithm whose ports are only numbered is one a user has to read the
+// source to patch: "in 0" and "in 1" do not say which one advances the
+// sequencer and which one resets it. This is the same check
+// test_every_parameter_of_every_algorithm_is_described makes for #20's
+// parameter names, at port scope - an algorithm added to the firmware fails
+// here until it says what its connections mean.
+static void test_every_port_and_algorithm_is_named() {
+    for (uint8_t i = 0; i < registry::count(); i++) {
+        const AlgorithmDescriptor* d = registry::at(i);
+        TEST_ASSERT_NOT_NULL_MESSAGE(d->summary, d->name);
+        TEST_ASSERT_TRUE_MESSAGE(d->summary[0] != '\0', d->name);
+        // The reply that carries these is bounded (SYSEX_TX_MAX), so the
+        // budget is checked here rather than discovered as a truncated
+        // descriptor on a module.
+        TEST_ASSERT_TRUE_MESSAGE(strlen(d->summary) <= 96, d->name);
+        TEST_ASSERT_NOT_NULL_MESSAGE(d->in_name, d->name);
+        TEST_ASSERT_NOT_NULL_MESSAGE(d->out_name, d->name);
+        for (uint8_t k = 0; k < d->n_in && k < MAX_IN; k++) {
+            TEST_ASSERT_NOT_NULL_MESSAGE(d->in_name[k], d->name);
+            TEST_ASSERT_TRUE_MESSAGE(d->in_name[k][0] != '\0', d->name);
+            TEST_ASSERT_TRUE_MESSAGE(strlen(d->in_name[k]) <= 16, d->in_name[k]);
+        }
+        for (uint8_t k = 0; k < d->n_out && k < MAX_OUT; k++) {
+            TEST_ASSERT_NOT_NULL_MESSAGE(d->out_name[k], d->name);
+            TEST_ASSERT_TRUE_MESSAGE(d->out_name[k][0] != '\0', d->name);
+            TEST_ASSERT_TRUE_MESSAGE(strlen(d->out_name[k]) <= 16, d->out_name[k]);
+        }
     }
 }
 
@@ -521,6 +554,7 @@ static void test_set_param_never_allocates() {
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_every_parameter_of_every_algorithm_is_described);
+    RUN_TEST(test_every_port_and_algorithm_is_named);
     RUN_TEST(test_enum_descriptors_name_every_option);
     RUN_TEST(test_every_parameter_accepts_its_bounds_and_rejects_beyond);
     RUN_TEST(test_unknown_node_is_rejected);

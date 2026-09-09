@@ -10,9 +10,13 @@ static const ParamDescriptor PARAMS[1] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 1, PARAMS}};
 
+static const char* const IN_NAMES[1] = {"notes in"};
+static const char* const OUT_NAMES[1] = {"notes out"};
+
 const AlgorithmDescriptor Transpose::descriptor = {
     ALGO_TRANSPOSE, "Transpose", 1, 1, 1, 1, IN, OUT, sizeof(Transpose), false, construct_node<Transpose>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "Shifts every note by a number of semitones. A note that leaves 0..127 is dropped." };
 
 Transpose::Transpose(const NodeConfig& config) :
     in(config.in_bus[0]),

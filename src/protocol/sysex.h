@@ -58,6 +58,10 @@ enum SysexCommand : uint8_t {
     SYSEX_DUMP_REQUEST     = 0x05,   // send me the running patch
     SYSEX_PATCH_CHUNK_IN   = 0x06,   // one chunk of a patch, into staging
     SYSEX_PATCH_ABORT      = 0x07,   // forget the partial transfer
+    // <node> <param u14> <value low 7> [<value bit 7>]. A parameter byte
+    // reaches 255 and a SysEx data byte holds seven bits, so the eighth bit
+    // is an optional extra argument; SYSEX_PARAM_VALUE answers with the
+    // value as a u14 for the same reason.
     SYSEX_SET_PARAM        = 0x10,
     SYSEX_GET_PARAM        = 0x11,
     SYSEX_SET_CONNECTION   = 0x12,   // one inlet or outlet of one node

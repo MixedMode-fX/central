@@ -38,3 +38,7 @@ void Chord::process(BusManager& bus, uint32_t){
         }
     }
 }
+
+void Chord::silence(BusManager& bus){
+    sounding.release_all(bus, out);
+}

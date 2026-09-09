@@ -15,6 +15,10 @@
 #include "master.h"
 #include "version.h"
 #include "util/random.h"
+#include "algorithm/sequencer/gate_sequencer.h"
+#include "algorithm/sequencer/note_sequencer.h"
+#include "algorithm/sequencer/drum_sequencer.h"
+#include "midi/scale.h"
 #include "web_hal.h"
 
 #define EMU_EXPORT extern "C" __attribute__((visibility("default")))
@@ -46,6 +50,13 @@ EMU_EXPORT uint32_t emu_const_clock_subtick(){ return CLOCK_SUBTICK; }
 EMU_EXPORT uint32_t emu_const_min_bpm(){ return CLOCK_MIN_BPM; }
 EMU_EXPORT uint32_t emu_const_max_bpm(){ return CLOCK_MAX_BPM; }
 EMU_EXPORT uint32_t emu_const_max_sequence_len(){ return MAX_SEQUENCE_LEN; }
+EMU_EXPORT uint32_t emu_const_note_seq_voices(){ return NOTE_SEQ_VOICES; }
+EMU_EXPORT uint32_t emu_const_drum_seq_lanes(){ return DRUM_SEQ_LANES; }
+EMU_EXPORT uint32_t emu_const_node_slot_size(){ return NODE_SLOT_SIZE; }
+// The named scales (midi/scale.h), as the 12-bit masks the sequencers and
+// Quantise store, so the page resolves a scale name to the firmware's mask.
+EMU_EXPORT uint32_t emu_scale_count(){ return SCALE_COUNT; }
+EMU_EXPORT uint32_t emu_scale_mask(uint32_t id){ return id < SCALE_COUNT ? scale_mask((uint8_t)id) : 0; }
 
 // Registry ----------------------------------------------------------------
 
@@ -167,3 +178,116 @@ EMU_EXPORT uint32_t emu_note_event(uint32_t bus, uint32_t index){
     return ((uint32_t)e.type << 24) | ((uint32_t)e.channel << 16) | ((uint32_t)e.data1 << 8) | e.data2;
 }
 EMU_EXPORT int32_t emu_cv(uint32_t bus){ return master.buses().cv_read((uint8_t)bus); }
+
+// Sequencer view (#13, #14) -----------------------------------------------
+//
+// What the page's step grids show: the pattern each loaded sequencer holds,
+// the step each lane is on, and for the note sequencers the pitch every cell
+// resolves to against the node's *current* root and scale, so playing a key
+// into the root inlet visibly re-pitches the grid. Read-only, and resolved
+// from the descriptor id rather than RTTI, which the wasm build does without.
+
+enum SeqKind : uint32_t { SEQ_NONE = 0, SEQ_GATE = 1, SEQ_NOTE = 2, SEQ_DRUM = 3 };
+
+static uint32_t seq_kind(uint32_t i, Node*& node){
+    node = master.node((uint8_t)i);
+    const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
+    if (node == nullptr || d == nullptr) return SEQ_NONE;
+    switch (d->id){
+        case ALGO_METRONOME: case ALGO_STEP_SEQ: case ALGO_EUCLID_SEQ: case ALGO_RANDOM_SEQ: return SEQ_GATE;
+        case ALGO_NOTE_SEQ: case ALGO_POLY_SEQ: return SEQ_NOTE;
+        case ALGO_DRUM_SEQ_GATE: case ALGO_DRUM_SEQ_MIDI: return SEQ_DRUM;
+        default: return SEQ_NONE;
+    }
+}
+
+EMU_EXPORT uint32_t emu_seq_kind(uint32_t i){ Node* n; return seq_kind(i, n); }
+// Lanes: 1 for a gate sequencer, the voices for a note sequencer, the lanes
+// for a drum sequencer.
+EMU_EXPORT uint32_t emu_seq_lanes(uint32_t i){
+    Node* n;
+    switch (seq_kind(i, n)){
+        case SEQ_GATE: return 1;
+        case SEQ_NOTE: return static_cast<NoteSequencerBase*>(n)->voices();
+        case SEQ_DRUM: return DrumSequencer::LANES;
+        default: return 0;
+    }
+}
+EMU_EXPORT uint32_t emu_seq_length(uint32_t i, uint32_t lane){
+    Node* n;
+    switch (seq_kind(i, n)){
+        case SEQ_GATE: return static_cast<GateSequencer*>(n)->length();
+        case SEQ_NOTE: return static_cast<NoteSequencerBase*>(n)->length();
+        case SEQ_DRUM: return static_cast<DrumSequencer*>(n)->lane_length((uint8_t)lane);
+        default: return 0;
+    }
+}
+// The step the lane is on, or 0xFF before its first advance.
+EMU_EXPORT uint32_t emu_seq_position(uint32_t i, uint32_t lane){
+    Node* n;
+    switch (seq_kind(i, n)){
+        case SEQ_GATE: { GateSequencer* g = static_cast<GateSequencer*>(n); return g->steps_taken() ? g->position() : 0xFF; }
+        case SEQ_NOTE: { NoteSequencerBase* s = static_cast<NoteSequencerBase*>(n); return s->steps_taken() ? s->position() : 0xFF; }
+        case SEQ_DRUM: { DrumSequencer* d = static_cast<DrumSequencer*>(n); return d->steps_taken() ? d->lane_position((uint8_t)lane) : 0xFF; }
+        default: return 0xFF;
+    }
+}
+// A cell: 1/0 for gate patterns, the stored velocity for note and MIDI drum
+// cells (0 is silent).
+EMU_EXPORT uint32_t emu_seq_cell(uint32_t i, uint32_t lane, uint32_t step){
+    Node* n;
+    switch (seq_kind(i, n)){
+        case SEQ_GATE: return static_cast<GateSequencer*>(n)->on((uint8_t)step) ? 1 : 0;
+        case SEQ_NOTE: return static_cast<NoteSequencerBase*>(n)->velocity((uint8_t)step, (uint8_t)lane);
+        case SEQ_DRUM: return static_cast<DrumSequencer*>(n)->cell((uint8_t)lane, (uint8_t)step);
+        default: return 0;
+    }
+}
+// Note sequencers: the pitch a cell resolves to now (0xFF if silent or out
+// of range), its degree, the step's length|flags byte, the current root.
+EMU_EXPORT uint32_t emu_seq_pitch(uint32_t i, uint32_t lane, uint32_t step){
+    Node* n;
+    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->pitch((uint8_t)step, (uint8_t)lane) : 0xFF;
+}
+EMU_EXPORT int32_t emu_seq_degree(uint32_t i, uint32_t lane, uint32_t step){
+    Node* n;
+    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->degree((uint8_t)step, (uint8_t)lane) : 0;
+}
+EMU_EXPORT uint32_t emu_seq_flags(uint32_t i, uint32_t step){
+    Node* n;
+    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->flags((uint8_t)step) : 0;
+}
+EMU_EXPORT uint32_t emu_seq_root(uint32_t i){
+    Node* n;
+    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->root_note() : 0;
+}
+EMU_EXPORT uint32_t emu_seq_scale(uint32_t i){
+    Node* n;
+    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->scale() : 0;
+}
+// Per-step (gate, note) or per-lane (drum) probability, percent.
+EMU_EXPORT uint32_t emu_seq_probability(uint32_t i, uint32_t lane, uint32_t step){
+    Node* n;
+    switch (seq_kind(i, n)){
+        case SEQ_GATE: return static_cast<GateSequencer*>(n)->probability((uint8_t)step);
+        case SEQ_NOTE: return static_cast<NoteSequencerBase*>(n)->probability((uint8_t)step);
+        case SEQ_DRUM: return static_cast<DrumSequencer*>(n)->lane_probability((uint8_t)lane);
+        default: return 0;
+    }
+}
+// Drum MIDI lanes: note number and channel (0 for the gate variant).
+EMU_EXPORT uint32_t emu_seq_lane_note(uint32_t i, uint32_t lane){
+    const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
+    if (d == nullptr || d->id != ALGO_DRUM_SEQ_MIDI) return 0;
+    return static_cast<DrumSeqMidi*>(master.node((uint8_t)i))->lane_note((uint8_t)lane);
+}
+EMU_EXPORT uint32_t emu_seq_lane_channel(uint32_t i, uint32_t lane){
+    const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
+    if (d == nullptr || d->id != ALGO_DRUM_SEQ_MIDI) return 0;
+    return static_cast<DrumSeqMidi*>(master.node((uint8_t)i))->lane_channel((uint8_t)lane);
+}
+// The algorithm id of a loaded node, for the page's labels.
+EMU_EXPORT uint32_t emu_node_algo(uint32_t i){
+    const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
+    return d ? d->id : 0;
+}

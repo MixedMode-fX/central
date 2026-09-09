@@ -27,6 +27,7 @@ class Quantise : public Node{
         static const AlgorithmDescriptor descriptor;
         explicit Quantise(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
+        void silence(BusManager& bus) override;
 
         // As with Transpose, the seam #11's live edits will use - and what
         // proves a root or scale change cannot strand a sounding note.

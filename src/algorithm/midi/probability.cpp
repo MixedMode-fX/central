@@ -32,3 +32,7 @@ void Probability::process(BusManager& bus, uint32_t){
         sounding.emit(bus, out, e.data1, e.data1, e.data2, e.channel);
     }
 }
+
+void Probability::silence(BusManager& bus){
+    sounding.release_all(bus, out);
+}

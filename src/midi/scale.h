@@ -46,6 +46,51 @@ inline uint16_t scale_mask(uint8_t id){
     }
 }
 
+// Notes in the scale: the number of set bits of the 12-bit mask. An empty
+// mask is treated as chromatic everywhere, so this is never 0.
+inline uint8_t scale_size(uint16_t mask){
+    mask &= 0x0FFF;
+    if (mask == 0) return 12;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < 12; i++) if (mask & (uint16_t)(1u << i)) n++;
+    return n;
+}
+
+// The semitone offset of `index`-th note of the scale (0 = the root), for
+// index < scale_size(mask).
+inline uint8_t scale_interval(uint16_t mask, uint8_t index){
+    mask &= 0x0FFF;
+    if (mask == 0) return (uint8_t)(index % 12u);
+    uint8_t seen = 0;
+    for (uint8_t i = 0; i < 12; i++){
+        if (!(mask & (uint16_t)(1u << i))) continue;
+        if (seen == index) return i;
+        seen++;
+    }
+    return 0;
+}
+
+// Scale degree to semitones from the root (#13). Degrees are stored, never
+// absolute notes, so a pattern transposes and stays in key when the root
+// moves, and takes on a different character when the scale changes.
+//
+// Beyond the octave: with n notes in the scale, degree n is the root an
+// octave up, degree n+1 the second an octave up, and negative degrees go
+// down the same way (-1 is the seventh below the root in a 7-note scale).
+// When the scale changes under a pattern, a degree that the new scale does
+// not have is not "missing": degrees index the scale's notes, so degree 5 in
+// a 5-note scale is the root an octave up, and the pattern's shape survives
+// as an interval pattern rather than as pitches. What a degree does *not* do
+// is look at semitones: a pattern written as degrees 0 2 4 in major (C E G)
+// is 0 2 4 in minor (C Eb G), not C E G snapped. That is Quantise's job.
+inline int16_t scale_degree_to_semitone(int16_t degree, uint16_t mask){
+    const int16_t n = scale_size(mask);
+    int16_t octave = degree / n;
+    int16_t index = degree % n;
+    if (index < 0){ index += n; octave--; }       // floor, so -1 is below the root
+    return (int16_t)(octave * 12 + scale_interval(mask, (uint8_t)index));
+}
+
 // Snaps `note` to the nearest pitch in the scale `mask` rooted at pitch class
 // `root` (0..11). Searches outward from the note itself, so the result is
 // never more than six semitones away; a tie goes up, which keeps a rising

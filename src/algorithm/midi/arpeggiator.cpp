@@ -144,3 +144,8 @@ void Arpeggiator::process(BusManager& bus, uint32_t now_us){
     release(bus);
     step(bus, now_us);
 }
+
+void Arpeggiator::silence(BusManager& bus){
+    sounding.release_all(bus, out);
+    playing = HeldNotes::NONE;
+}

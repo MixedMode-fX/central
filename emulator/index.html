@@ -21,6 +21,21 @@
   section { background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; padding: 10px 12px; min-width: 0; }
   section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
   .wide { grid-column: 1 / -1; }
+  .seq { margin: 0 0 10px; }
+  .seq .title { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; margin: 0 0 4px; }
+  .seq .title b { color: var(--text); }
+  .seq table { border-collapse: separate; border-spacing: 2px; font-size: 11px; }
+  .seq th { color: var(--muted); font-weight: normal; padding: 0 2px; min-width: 26px; text-align: center; }
+  .seq th.lane { text-align: right; padding-right: 6px; white-space: nowrap; }
+  .seq td { width: 30px; height: 22px; text-align: center; border-radius: 3px; background: #262a32; color: var(--muted); padding: 0; }
+  .seq td.on { background: #3d6b4b; color: #e8ffe8; }
+  .seq td.acc { box-shadow: inset 0 0 0 1px var(--out); }
+  .seq td.rest { color: #555b66; }
+  .seq td.tie { background: #2e4a5c; color: #cfe4f2; }
+  .seq td.cur { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .seq td.cur.on { background: #5be27a; color: #0b0d12; }
+  .seq td.beyond { visibility: hidden; }
+  .seq .gridwrap { overflow-x: auto; }
   button, select, input { font: inherit; color: var(--text); background: #262a32; border: 1px solid var(--edge); border-radius: 4px; padding: 6px 10px; min-height: 34px; }
   select { max-width: 100%; min-width: 0; }
   #presets { flex: 1 1 100%; width: 100%; }
@@ -162,6 +177,12 @@
     <div class="jacks" id="jacks"></div>
   </section>
 
+  <section class="wide" id="seqsection" hidden>
+    <h2>Sequencers — the grids the loaded nodes hold, and where they are</h2>
+    <div id="sequencers"></div>
+    <p class="muted">Read from the nodes every frame: pattern, position, and for the note sequencers the pitch each degree resolves to against the node's <em>current</em> root and scale, so a key played into a root inlet re-pitches the grid without changing the stored pattern. Rests are dim, ties blue, accents outlined.</p>
+  </section>
+
   <section>
     <h2>Buses</h2>
     <div class="leds" id="gatebuses"><span class="lbl">gate</span></div>
@@ -207,6 +228,11 @@ const DOMAIN = ['gate', 'note', 'cv'];                                          
 const LOAD_ERROR = ['OK', 'TOO_MANY_NODES', 'GATE_PORT_BUS_OUT_OF_RANGE', 'MIDI_PORT_BUS_OUT_OF_RANGE', 'NODE_INVALID'];   // master.h
 const CONFIG_ERROR = ['OK', 'UNKNOWN_ALGORITHM', 'INLET_OUT_OF_RANGE', 'INLET_NOT_CONNECTED', 'OUTLET_OUT_OF_RANGE'];   // node/registry.h
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+// ScaleId order (midi/scale.h); the masks themselves come from the firmware (emu_scale_mask).
+const SCALE_NAMES = ['chromatic', 'major', 'minor', 'harmonic minor', 'melodic minor', 'pentatonic major', 'pentatonic minor', 'blues', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'locrian', 'whole tone'];
+const DIRECTIONS = ['forward', 'reverse', 'pingpong', 'random', 'brownian'];   // StepEngine::Direction
+const SEQ_HEADER = 16, SEQ_LANE_STRIDE = 8;                                    // note_sequencer.h, drum_sequencer.h
+const NOTE_FLAG = { rest: 0x20, tie: 0x40, accent: 0x80 };
 
 // ---------------------------------------------------------------------------
 // Presets: simple patches that each exercise one part of the machine. Written
@@ -304,14 +330,66 @@ const PRESETS = {
     },
   },
   'Step sequencer with probability: 16 steps, 70 % of them get through': {
-    about: 'A 16-step pattern (params 3-6 hold the bits) on a /6 divider, turned into notes and thinned by Probability. Jack 1 shows the full pattern, the notes what survived.',
+    about: 'A 16-step pattern, written as hits, on a /6 divider, turned into notes and thinned by Probability. Jack 1 shows the full pattern, the notes what survived.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }],
       nodes: [
         { algo: 'ClockDiv', out: [0], params: [0, 6] },
-        { algo: 'StepSequencer', in: [0], out: [1], params: [16, 0, 0, 0x95, 0xA5] },
+        { algo: 'StepSequencer', in: [0], out: [1], seq: { hits: 'x.x.x..xx.x..x.x' } },
         { algo: 'GateToNote', in: [1], out: [0], params: [60, 100, 1] },
         { algo: 'Probability', in: [0], out: [1], params: [70, 0] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
+  'Note sequencer: a bass line in C minor, transposed from the keyboard': {
+    about: 'Degrees, not notes: an 8-step line in C minor on a /6 divider, with a rest, an accent, a two-step note and a tie. Enable audio and Run, then play a key: the root inlet re-pitches the running line and the grid below, and the note that was sounding is still released correctly.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
+      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      nodes: [
+        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'NoteSequencer', in: [0, null, 0], out: [1], seq: { scale: 'minor', root: 48, channel: 1,
+            steps: [0, { deg: 0, accent: true }, '-', 3, { deg: 5, len: 2 }, '-', { deg: 4, vel: 80 }, '='] } },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
+  'Poly sequencer: four chords, four voices, 60 % gate': {
+    about: 'One step per beat, up to four degrees a step in C major, each voice with its own velocity. The 60 % gate is an estimate from the measured step period, so the first chord after a tempo change is the wrong length, on purpose. Change the scale to "dorian" in the JSON and reload: same pattern, different colour.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
+      nodes: [
+        { algo: 'ClockDiv', out: [0], params: [0, 24] },
+        { algo: 'PolySequencer', in: [0], out: [1], seq: { scale: 'major', root: 60, gate: 60,
+            steps: [{ deg: [0, 2, 4, 7] }, { deg: [3, 5, 7], vel: [90, 70, 70] }, { deg: [4, 6, 8, 11], vel: [100, 80, 80, 60] }, { deg: [3, 5, 7, 9], len: 1, accent: true }] } },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
+  'Drum sequencer to jacks: kick, snare and a 12-step hat on jacks 1-3': {
+    about: 'One DrumSeqGate, three lanes patched to jacks and five left unconnected. The hat lane is 12 steps against 16, so the pattern realigns every 48 steps. Lane 4 is the accent for the kick: a second gate lane, the modular way. Pulse jack 5 to reset every lane.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 2 }, { port: 3, dir: 'out', bus: 3 }, { port: 4, dir: 'out', bus: 4 }, { port: 5, dir: 'in', bus: 5 }],
+      nodes: [
+        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'DrumSeqGate', in: [0, 5], out: [1, 2, 3, 4, null, null, null, null], seq: { length: 16,
+            lanes: ['x...x...x...x...', '....x.......x...', { hits: 'x.x.x.x.x.x.', length: 12 }, 'x.......x.......'] } },
+      ],
+    },
+  },
+  'Drum sequencer to MIDI: a General MIDI kit on channel 10': {
+    about: 'DrumSeqMidi: a note number per lane, a velocity per cell (x = 100, X = 127, o = 60), 20 ms notes, every note-off from the ledger. The open hat lane fires 60 % of the time. Enable audio: channel 10 gets a percussive voice.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
+      nodes: [
+        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'DrumSeqMidi', in: [0], out: [1], seq: { length: 16, gate: 20, lanes: [
+            { note: 36, hits: 'X...x..X..x.X...' },
+            { note: 38, hits: '....X.......X..o' },
+            { note: 42, hits: 'o.x.o.x.o.x.o.x.' },
+            { note: 46, hits: '..o...o...o...x.', prob: 60 },
+            { note: 39, hits: '..............x.', channel: 10 } ] } },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
     },
@@ -406,6 +484,7 @@ function readConstants() {
     N_NODE: E.emu_const_n_node(), MAX_IN: E.emu_const_max_in(), MAX_OUT: E.emu_const_max_out(), N_PARAM: E.emu_const_n_param(),
     N_MIDI_IN: E.emu_const_n_midi_in(), N_MIDI_OUT: E.emu_const_n_midi_out(), NO_BUS: E.emu_const_no_bus(),
     PPQN: E.emu_const_master_ppqn(), SUBTICK: E.emu_const_clock_subtick(), MIN_BPM: E.emu_const_min_bpm(), MAX_BPM: E.emu_const_max_bpm(),
+    MAX_SEQ: E.emu_const_max_sequence_len(), VOICES: E.emu_const_note_seq_voices(), LANES: E.emu_const_drum_seq_lanes(), SLOT: E.emu_const_node_slot_size(),
   };
   ALGOS = [];
   for (let i = 0; i < E.emu_algo_count(); i++) {
@@ -435,6 +514,100 @@ function portMask(names) {
 }
 function portNames(mask) { return PORTS.filter(p => mask & p.bit).map(p => p.name).join(' + ') || String(mask); }
 
+// ---------------------------------------------------------------------------
+// Sequencer sugar: a node's "seq" object is packed into the parameter block
+// the firmware documents in note_sequencer.h / drum_sequencer.h /
+// gate_sequencer.h, so a preset can be written as steps rather than bytes.
+// ---------------------------------------------------------------------------
+function scaleMask(v) {
+  if (v === undefined) return 0;
+  if (typeof v === 'number') return v & 0xFFF;
+  const i = SCALE_NAMES.indexOf(String(v).toLowerCase().replace(/[_-]+/g, ' ').trim());
+  if (i < 0) throw new Error(`unknown scale "${v}" (one of ${SCALE_NAMES.join(', ')}, or a 12-bit mask)`);
+  return E.emu_scale_mask(i);
+}
+function direction(v) {
+  if (v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  const i = DIRECTIONS.indexOf(String(v).toLowerCase().replace(/[\s_-]+/g, ''));
+  if (i < 0) throw new Error(`unknown direction "${v}" (one of ${DIRECTIONS.join(', ')})`);
+  return i;
+}
+// 'x' 100, 'X' 127, 'o' 60, '1'-'9' = n*14, anything else 0.
+function hitVelocity(ch) {
+  if (ch === 'x') return 100; if (ch === 'X') return 127; if (ch === 'o') return 60;
+  if (ch >= '1' && ch <= '9') return Number(ch) * 14;
+  return 0;
+}
+function hitBits(hits) {
+  let bits = 0;
+  [...String(hits)].forEach((ch, i) => { if (i < 32 && hitVelocity(ch)) bits |= 1 << i; });
+  return bits >>> 0;
+}
+function packSeq(a, seq, params) {
+  const u8 = (i, v) => { if (i >= C.N_PARAM) throw new Error(`${a.name}: parameter ${i} is beyond N_PARAM`); params[i] = v & 0xFF; };
+  const header = () => { if (seq.length !== undefined) u8(0, seq.length); u8(1, direction(seq.direction)); };
+  if (a.name === 'NoteSequencer' || a.name === 'PolySequencer') {
+    const voices = a.name === 'PolySequencer' ? C.VOICES : 1, stride = voices * 2 + 2;
+    header();
+    u8(2, seq.gate ?? 0);
+    const mask = scaleMask(seq.scale); u8(3, mask & 0xFF); u8(4, mask >> 8);
+    u8(5, seq.root ?? 0); u8(6, seq.velScale ?? 0); u8(7, seq.velOffset ?? 0);
+    u8(8, seq.channel ?? 0); u8(9, seq.accent ?? 0); u8(10, seq.stall ?? 0);
+    const steps = seq.steps || [];
+    if (steps.length > C.MAX_SEQ) throw new Error(`${a.name}: at most ${C.MAX_SEQ} steps`);
+    if (seq.length === undefined) u8(0, steps.length);
+    steps.forEach((st, i) => {
+      let o = st;
+      if (typeof st === 'number') o = { deg: st };
+      else if (typeof st === 'string') o = (st === '-' || st === 'rest' || st === '.') ? { rest: true } : (st === '=' || st === 'tie') ? { tie: true } : (() => { throw new Error(`step ${i}: "${st}"? use a degree, "-" (rest), "=" (tie) or an object`); })();
+      const degs = Array.isArray(o.deg) ? o.deg : [o.deg ?? 0];
+      const vels = Array.isArray(o.vel) ? o.vel : [o.vel ?? 100];
+      const base = SEQ_HEADER + i * stride;
+      for (let v = 0; v < voices; v++) {
+        const has = v < degs.length || (v === 0 && !Array.isArray(o.deg));
+        u8(base + v * 2, has ? degs[v] : 0);
+        u8(base + v * 2 + 1, has ? (vels[v] ?? vels[0] ?? 100) : 0);
+      }
+      const flags = (o.rest ? NOTE_FLAG.rest : 0) | (o.tie ? NOTE_FLAG.tie : 0) | (o.accent ? NOTE_FLAG.accent : 0);
+      u8(base + voices * 2, ((o.len ?? 1) & 0x1F) | flags);
+      u8(base + voices * 2 + 1, o.prob ?? 0);
+    });
+  } else if (a.name === 'DrumSeqGate' || a.name === 'DrumSeqMidi') {
+    header();
+    u8(2, seq.gate ?? 0);
+    const lanes = seq.lanes || [];
+    if (lanes.length > C.LANES) throw new Error(`${a.name}: at most ${C.LANES} lanes`);
+    lanes.forEach((ln, l) => {
+      const hits = typeof ln === 'string' ? ln : (ln.hits || '');
+      const o = typeof ln === 'string' ? {} : ln;
+      const base = SEQ_HEADER + l * SEQ_LANE_STRIDE;
+      if (a.name === 'DrumSeqGate') {
+        const bits = hitBits(hits);
+        u8(base, bits); u8(base + 1, bits >> 8); u8(base + 2, bits >> 16); u8(base + 3, bits >> 24);
+        u8(base + 4, o.length ?? 0); u8(base + 5, o.prob ?? 0);
+      } else {
+        u8(base, o.note ?? 0); u8(base + 1, o.channel ?? 0); u8(base + 2, o.length ?? 0); u8(base + 3, o.prob ?? 0);
+        const vb = SEQ_HEADER + C.LANES * SEQ_LANE_STRIDE + l * C.MAX_SEQ;
+        [...hits].forEach((ch, i) => { if (i < C.MAX_SEQ) u8(vb + i, hitVelocity(ch)); });
+      }
+    });
+  } else if (['Metronome', 'StepSequencer', 'EuclidianSequencer', 'RandomSequencer'].includes(a.name)) {
+    header();
+    u8(2, seq.width ?? 0);
+    if (a.name === 'StepSequencer' && seq.hits !== undefined) {
+      const bits = hitBits(seq.hits);
+      u8(3, bits); u8(4, bits >> 8); u8(5, bits >> 16); u8(6, bits >> 24);
+      if (seq.length === undefined) u8(0, String(seq.hits).length);
+    }
+    if (a.name === 'EuclidianSequencer') { u8(3, seq.pulses ?? 0); u8(4, seq.rotation ?? 0); }
+    if (a.name === 'RandomSequencer') { u8(3, seq.density ?? 0); u8(4, seq.seed ?? 0); }
+    (seq.prob || []).forEach((pr, i) => u8(8 + i, pr));
+  } else {
+    throw new Error(`${a.name} takes no "seq" block; use "params"`);
+  }
+}
+
 function applyPatch(p) {
   E.emu_patch_reset();
   for (const g of p.gate_ports || []) {
@@ -452,7 +625,10 @@ function applyPatch(p) {
     E.emu_patch_node(i, a.id);
     (n.in || []).forEach((b, k) => E.emu_patch_node_in(i, k, b === null ? C.NO_BUS : b));
     (n.out || []).forEach((b, k) => E.emu_patch_node_out(i, k, b === null ? C.NO_BUS : b));
-    (n.params || []).forEach((v, k) => E.emu_patch_node_param(i, k, v & 0xFF));
+    const params = new Uint8Array(C.N_PARAM);
+    (n.params || []).forEach((v, k) => { params[k] = v & 0xFF; });
+    if (n.seq) packSeq(a, n.seq, params);
+    for (let k = 0; k < C.N_PARAM; k++) if (params[k]) E.emu_patch_node_param(i, k, params[k]);
   });
   E.emu_patch_n_nodes((p.nodes || []).length);
   const e = E.emu_load();
@@ -471,6 +647,7 @@ function loadFromTextarea() {
     out.textContent = r.msg; out.className = r.ok ? 'ok' : 'err';
     if (r.ok) synthAllOff(synth.ctx ? synth.ctx.currentTime : 0);
     buildJacks();
+    buildSequencers();
   } catch (err) {
     out.textContent = String(err.message || err); out.className = 'err';
   }
@@ -616,6 +793,81 @@ function buildJacks() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Sequencer grids: one per loaded sequencer node, read back from the node.
+// ---------------------------------------------------------------------------
+const seqViews = [];
+function buildSequencers() {
+  const host = document.getElementById('sequencers'); host.innerHTML = ''; seqViews.length = 0;
+  for (let i = 0; i < E.emu_node_count(); i++) {
+    const kind = E.emu_seq_kind(i);
+    if (!kind) continue;
+    const a = ALGOS.find(x => x.id === E.emu_node_algo(i));
+    const lanes = E.emu_seq_lanes(i), isNote = kind === 2, isDrum = kind === 3;
+    let maxLen = 0; for (let l = 0; l < lanes; l++) maxLen = Math.max(maxLen, E.emu_seq_length(i, l));
+    const div = document.createElement('div'); div.className = 'seq';
+    let head = '<tr><th class="lane"></th>'; for (let st = 0; st < maxLen; st++) head += `<th>${st + 1}</th>`; head += '</tr>';
+    let rows = '';
+    for (let l = 0; l < lanes; l++) {
+      const label = isNote ? (lanes > 1 ? `voice ${l + 1}` : 'note') : isDrum ? `lane ${l + 1}` : 'step';
+      rows += `<tr><th class="lane" id="sl${i}_${l}">${label}</th>`;
+      for (let st = 0; st < maxLen; st++) rows += `<td id="sc${i}_${l}_${st}"></td>`;
+      rows += '</tr>';
+    }
+    div.innerHTML = `<div class="title"><b>node ${i}: ${a ? a.name : '?'}</b><span class="muted" id="st${i}"></span></div><div class="gridwrap"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+    host.appendChild(div);
+    seqViews.push({ i, kind, lanes, maxLen });
+  }
+  document.getElementById('seqsection').hidden = seqViews.length === 0;
+}
+
+function renderSequencers() {
+  for (const v of seqViews) {
+    const { i, kind, lanes, maxLen } = v;
+    const isNote = kind === 2, isDrum = kind === 3;
+    if (isNote) {
+      const root = E.emu_seq_root(i), mask = E.emu_seq_scale(i);
+      const scale = SCALE_NAMES.find((_, k) => E.emu_scale_mask(k) === (mask || 0xFFF)) || `mask ${mask.toString(2)}`;
+      document.getElementById(`st${i}`).textContent = `root ${NOTE_NAMES[root % 12]}${Math.floor(root / 12) - 1} (${root}), ${scale}, length ${E.emu_seq_length(i, 0)}`;
+    } else if (!isDrum) {
+      document.getElementById(`st${i}`).textContent = `length ${E.emu_seq_length(i, 0)}`;
+    } else {
+      document.getElementById(`st${i}`).textContent = '';
+    }
+    for (let l = 0; l < lanes; l++) {
+      const len = E.emu_seq_length(i, l), pos = E.emu_seq_position(i, l);
+      if (isDrum) {
+        const note = E.emu_seq_lane_note(i, l);
+        const lbl = document.getElementById(`sl${i}_${l}`);
+        const txt = note ? `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1} ch${E.emu_seq_lane_channel(i, l)} ·${len}` : `lane ${l + 1} ·${len}`;
+        if (lbl.textContent !== txt) lbl.textContent = txt;
+      }
+      for (let st = 0; st < maxLen; st++) {
+        const td = document.getElementById(`sc${i}_${l}_${st}`);
+        if (st >= len) { td.className = 'beyond'; continue; }
+        const cell = E.emu_seq_cell(i, l, st);
+        let cls = cell ? 'on' : '', text = '';
+        if (isNote) {
+          const flags = E.emu_seq_flags(i, st), pitch = E.emu_seq_pitch(i, l, st);
+          if (flags & NOTE_FLAG.rest) { cls = 'rest'; text = '·'; }
+          else if (flags & NOTE_FLAG.tie) { cls = 'tie'; text = '═'; }
+          else if (cell && pitch !== 0xFF) { text = `${NOTE_NAMES[pitch % 12]}${Math.floor(pitch / 12) - 1}`; if (flags & NOTE_FLAG.accent) cls += ' acc'; }
+          else if (cell) { text = '✕'; cls = 'rest'; }
+          const ln = flags & 0x1F; if (ln > 1 && text && cls !== 'rest') text += `⁺${ln}`;
+        } else if (isDrum) {
+          text = cell ? (cell >= 120 ? '●' : cell >= 80 ? '◉' : '○') : '';
+          if (cell && E.emu_seq_lane_note(i, l)) td.title = `velocity ${cell}`;
+        } else {
+          text = cell ? '●' : '';
+        }
+        if (pos === st) cls += ' cur';
+        if (td.className !== cls) td.className = cls;
+        if (td.textContent !== text) td.textContent = text;
+      }
+    }
+  }
+}
+
 function buildKeys() {
   const keys = document.getElementById('keys'); keys.innerHTML = '';
   document.getElementById('octlabel').textContent = `C${octave}`;
@@ -639,7 +891,7 @@ function buildStatic() {
     tr.innerHTML = `<td>${a.id}</td><td>${a.name}</td><td>${a.in.map((d, k) => k < a.min_in ? d : `[${d}]`).join(' ')}</td><td>${a.out.join(' ')}</td><td>${a.n_params}</td><td>${a.tick ? 'yes' : ''}</td>`;
     tb.appendChild(tr);
   }
-  document.getElementById('limits').textContent = `Limits from config.h: ${C.GPIO_N} jacks, ${C.N_GATE_BUS} gate / ${C.N_NOTE_BUS} note / ${C.N_CV_BUS} CV buses, ${C.N_NODE} nodes, ${C.MAX_IN} inlets and ${C.MAX_OUT} outlets per node, ${C.N_PARAM} params, ${C.N_MIDI_IN} MIDI in and ${C.N_MIDI_OUT} MIDI out ports, ${C.PPQN} PPQN × ${C.SUBTICK} subticks. Bracketed inlets are optional.`;
+  document.getElementById('limits').textContent = `Limits from config.h: ${C.GPIO_N} jacks, ${C.N_GATE_BUS} gate / ${C.N_NOTE_BUS} note / ${C.N_CV_BUS} CV buses, ${C.N_NODE} nodes, ${C.MAX_IN} inlets and ${C.MAX_OUT} outlets per node, ${C.N_PARAM} params, ${C.N_MIDI_IN} MIDI in and ${C.N_MIDI_OUT} MIDI out ports, ${C.PPQN} PPQN × ${C.SUBTICK} subticks, ${C.MAX_SEQ} steps per sequencer, ${C.VOICES} voices per poly step, ${C.LANES} drum lanes, ${C.SLOT}-byte node slots. Bracketed inlets are optional; an outlet left null is unused.`;
   document.getElementById('portnames').textContent = 'MIDI ports: ' + PORTS.map(p => `${p.name} = ${p.alias} (${p.hint})`).join('; ') + '. Patches accept either name.';
   const sel = document.getElementById('presets');
   for (const name of Object.keys(PRESETS)) { const o = document.createElement('option'); o.textContent = name; sel.appendChild(o); }
@@ -707,6 +959,7 @@ function render() {
     document.getElementById(`nl${b}`).textContent = lastNote[b] || '';
   }
   for (let b = 0; b < C.N_CV_BUS; b++) document.getElementById(`cv${b}`).textContent = E.emu_cv(b);
+  renderSequencers();
   // MIDI out log
   const tb = document.querySelector('#midilog tbody');
   const last = midiLog.length ? midiLog[midiLog.length - 1] : null;
@@ -765,6 +1018,18 @@ function synthNoteOn(channel, note, velocity, at) {
   const ctx = synth.ctx, key = channel * 128 + note;
   if (synth.voices.has(key)) synthRelease(key, at);
   if (synth.voices.size >= MAX_VOICES) synthRelease(synth.voices.keys().next().value, at);
+  if (channel === 10) {                          // a drum channel: a pitched thump that dies on its own
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    const low = note < 40, f0 = low ? 160 : 200 + (note - 40) * 40;
+    osc.type = low ? 'sine' : (note % 2 ? 'square' : 'triangle');
+    osc.frequency.setValueAtTime(f0 * 2, at);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, f0 / (low ? 4 : 1.5)), at + (low ? 0.12 : 0.05));
+    g.gain.setValueAtTime(0.35 * velocity / 127, at);
+    g.gain.exponentialRampToValueAtTime(0.001, at + (low ? 0.25 : 0.08));
+    osc.connect(g); g.connect(synth.master);
+    osc.start(at); osc.stop(at + 0.3);
+    return;
+  }
   const osc = ctx.createOscillator(), g = ctx.createGain();
   osc.type = document.getElementById('wave').value;
   osc.frequency.value = 440 * Math.pow(2, (note - 69) / 12);

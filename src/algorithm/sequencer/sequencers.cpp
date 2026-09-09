@@ -6,17 +6,19 @@ static const Domain IN2[2] = {Domain::Gate, Domain::Gate};
 static const Domain IN3[3] = {Domain::Gate, Domain::Gate, Domain::Gate};
 static const Domain OUT[1] = {Domain::Gate};
 
+// Every gate sequencer takes the per-step probability block at params[8..],
+// so n_params is the same for all four whatever their own params[3..7] use.
 const AlgorithmDescriptor Metronome::descriptor = {
-    ALGO_METRONOME, "Metronome", 2, 1, 1, 3, IN2, OUT, sizeof(Metronome), false, construct_node<Metronome> };
+    ALGO_METRONOME, "Metronome", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(Metronome), false, construct_node<Metronome> };
 
 const AlgorithmDescriptor StepSequencer::descriptor = {
-    ALGO_STEP_SEQ, "StepSequencer", 2, 1, 1, 7, IN2, OUT, sizeof(StepSequencer), false, construct_node<StepSequencer> };
+    ALGO_STEP_SEQ, "StepSequencer", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(StepSequencer), false, construct_node<StepSequencer> };
 
 const AlgorithmDescriptor EuclidianSequencer::descriptor = {
-    ALGO_EUCLID_SEQ, "EuclidianSequencer", 2, 1, 1, 5, IN2, OUT, sizeof(EuclidianSequencer), false, construct_node<EuclidianSequencer> };
+    ALGO_EUCLID_SEQ, "EuclidianSequencer", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(EuclidianSequencer), false, construct_node<EuclidianSequencer> };
 
 const AlgorithmDescriptor RandomSequencer::descriptor = {
-    ALGO_RANDOM_SEQ, "RandomSequencer", 3, 1, 1, 5, IN3, OUT, sizeof(RandomSequencer), false, construct_node<RandomSequencer> };
+    ALGO_RANDOM_SEQ, "RandomSequencer", 3, 1, 1, GateSequencer::PARAM_COUNT, IN3, OUT, sizeof(RandomSequencer), false, construct_node<RandomSequencer> };
 
 StepSequencer::StepSequencer(const NodeConfig& config) :
     GateSequencer(config, 8), bits(0)

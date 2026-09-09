@@ -46,3 +46,7 @@ void Quantise::process(BusManager& bus, uint32_t){
         sounding.emit(bus, out, e.data1, snapped, e.data2, e.channel);
     }
 }
+
+void Quantise::silence(BusManager& bus){
+    sounding.release_all(bus, out);
+}

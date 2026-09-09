@@ -35,6 +35,7 @@ class Arpeggiator : public Node{
         static const AlgorithmDescriptor descriptor;
         explicit Arpeggiator(const NodeConfig& config);
         void process(BusManager& bus, uint32_t now_us) override;
+        void silence(BusManager& bus) override;
 
         uint8_t held_count() const { return held.count(); }
         uint8_t sounding_count() const { return sounding.count(); }

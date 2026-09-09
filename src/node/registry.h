@@ -29,6 +29,10 @@ enum AlgorithmId : uint8_t {
     ALGO_CHORD        = 19,
     ALGO_QUANTISE     = 20,
     ALGO_PROBABILITY  = 21,
+    ALGO_NOTE_SEQ     = 22,
+    ALGO_POLY_SEQ     = 23,
+    ALGO_DRUM_SEQ_GATE = 24,
+    ALGO_DRUM_SEQ_MIDI = 25,
 };
 
 enum ConfigError : uint8_t {
@@ -36,7 +40,7 @@ enum ConfigError : uint8_t {
     CONFIG_UNKNOWN_ALGORITHM,
     CONFIG_INLET_OUT_OF_RANGE,     // bus index not valid for that inlet's domain
     CONFIG_INLET_NOT_CONNECTED,    // required inlet is NO_BUS
-    CONFIG_OUTLET_OUT_OF_RANGE,
+    CONFIG_OUTLET_OUT_OF_RANGE,    // an outlet may be NO_BUS (unused), never out of range
 };
 
 namespace registry {

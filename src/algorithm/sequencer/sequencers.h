@@ -6,7 +6,7 @@
 // The README's four gate sequencers (#6). Each writes a bool to a gate bus
 // and nothing else: a gate bus cannot carry pitch, velocity, note length or
 // polyphony, so note sequencing (#13) and drum sequencing (#14) are separate
-// families that will share this transport and the step engine underneath.
+// families that share the step engine underneath (step_engine.h).
 
 // Every advance edge is output. GateSequencer with a length of one, and the
 // clearest demonstration that the divider upstream is what sets the rate.

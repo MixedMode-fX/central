@@ -314,9 +314,19 @@ static void test_zero_heap_allocation_after_setup() {
     p.nodes[0].in_bus[0] = 0; p.nodes[0].in_bus[1] = 0; p.nodes[0].out_bus[0] = 1;
     p.nodes[1] = node(ALGO_TRANSPOSE, 1, 2);
     p.nodes[2] = node(ALGO_SUSTAIN, 0, 2);
-    p.n_nodes = 3;
+    // The largest nodes in the system (#13, #14), advanced by the jack.
+    p.nodes[3] = node(ALGO_POLY_SEQ, 0, 3);
+    p.nodes[3].params[16 + 1] = 100;                                      // step 0, voice 0 sounds
+    p.nodes[4] = node(ALGO_DRUM_SEQ_MIDI, 0, 3);
+    p.nodes[4].params[80] = 100;                                          // lane 0, step 0
+    p.nodes[5] = node(ALGO_DRUM_SEQ_GATE, 0, 4);
+    p.nodes[5].params[16] = 1;                                            // lane 0, step 0
+    p.nodes[6] = node(ALGO_NOTE_SEQ, 0, 3);
+    p.n_nodes = 7;
     p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 2};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_2, 0, 3};
     p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 0};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 4};
 
     const size_t before = g_allocations;
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
@@ -327,6 +337,7 @@ static void test_zero_heap_allocation_after_setup() {
         gpio.set_input(0, i & 1);
         run_passes(master, 1, now);
     }
+    master.unload();                        // the handover releases notes: no allocation there either
     TEST_ASSERT_EQUAL(before, g_allocations);
 }
 

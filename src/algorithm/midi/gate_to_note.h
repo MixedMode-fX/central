@@ -12,6 +12,7 @@ class GateToNote : public Node{
         static const AlgorithmDescriptor descriptor;
         explicit GateToNote(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
+        void silence(BusManager& bus) override;
 
     private:
         uint8_t in;

@@ -21,11 +21,18 @@ class Node {
         virtual void process(BusManager&, uint32_t) {}
         // On a master clock event, only if the descriptor says wants_tick.
         virtual void tick(BusManager&, uint32_t) {}
+        // The node is about to be destroyed (patch swap, #11's handover):
+        // emit a note-off for everything it still has sounding, and nothing
+        // else. The master swaps and flushes the MIDI outputs afterwards, so
+        // what is written here reaches the transports. A node that owns no
+        // notes has nothing to do.
+        virtual void silence(BusManager&) {}
 };
 
 // One pool node's configuration. This is also the preset format.
 // Bus indices are interpreted in the domain the algorithm's descriptor
-// declares for that inlet/outlet. NO_BUS marks an unconnected optional inlet.
+// declares for that inlet/outlet. NO_BUS marks an unconnected optional inlet,
+// or an outlet the node writes nowhere (a drum lane with no jack).
 struct NodeConfig {
     uint8_t algorithm_id;
     uint8_t in_bus[MAX_IN];
@@ -42,7 +49,7 @@ struct AlgorithmDescriptor {
     uint8_t       n_in;         // inlets the node has
     uint8_t       min_in;       // inlets that must be connected (the rest may be NO_BUS)
     uint8_t       n_out;
-    uint8_t       n_params;
+    uint16_t      n_params;
     const Domain* in_domain;    // n_in entries
     const Domain* out_domain;   // n_out entries
     uint16_t      state_size;   // sizeof the node class

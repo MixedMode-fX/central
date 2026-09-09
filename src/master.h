@@ -38,7 +38,11 @@ class MixedModeMaster {
         // the current patch keeps running. On success the current patch is
         // unloaded and the new one constructed. Call setup() afterwards.
         LoadError load(const Patch& patch);
-        // Returns every port to a safe state and destroys every pool node.
+        // Handover, then teardown: every pool node releases the notes it
+        // owns (Node::silence) and the note-offs are flushed to the
+        // transports, then every port returns to a safe state and every
+        // pool node is destroyed. A patch swap under a held note therefore
+        // cannot hang it downstream (#11, #13).
         void unload();
 
         // Once after load(): hardware nodes claim their pins.
@@ -67,6 +71,8 @@ class MixedModeMaster {
         ConfigError last_node_error() const { return node_error; }
         uint8_t last_node_index() const { return node_error_index; }
         uint8_t node_count() const { return pool.count(); }
+        Node* node(uint8_t index) const { return pool.node(index); }
+        const AlgorithmDescriptor* node_descriptor(uint8_t index) const { return pool.descriptor(index); }
         const BusManager& buses() const { return bus; }
 
     private:

@@ -1,7 +1,7 @@
 #ifndef GPIO_H
 #define GPIO_H
 
-#include <Arduino.h>
+#include "hal/teensy/teensy_includes.h"
 
 void gpioSetup(uint8_t pins[]);
 void gpioMode(uint8_t pin, uint8_t mode);

@@ -81,6 +81,11 @@ dependencies reproducible — an unpinned build resolves whatever the registry
 published most recently, and that has already broken this project's DIN MIDI
 settings once.
 
+Our sources are compiled with `-Wall -Wextra -Weffc++ -Wshadow -Werror`;
+framework headers are included through `src/hal/teensy/teensy_includes.h` so
+that they are not held to the same flags. Headers live next to their sources
+under `src/`; the `include/` and `lib/` directories are not used.
+
 ## Versions and releases
 
 `VERSION` at the repository root is the single source of truth. Every build

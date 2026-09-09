@@ -1,20 +1,22 @@
 #ifndef __ALGORITHM_H_
 #define __ALGORITHM_H_
 
-#include <Arduino.h>
+#include "hal/teensy/teensy_includes.h"
+#include "gpio.h"
 
 class Algorithm{
     public:
-        Algorithm(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs){
-            Algorithm::midi_inputs = midi_inputs;
-            Algorithm::midi_outputs = midi_outputs;
-            Algorithm::gate_inputs = gate_inputs;
-            Algorithm::gate_outputs = gate_outputs;
-
+        Algorithm(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            midi_inputs(midi_in),
+            midi_outputs(midi_out),
+            gate_inputs(gate_in),
+            gate_outputs(gate_out),
+            bypass(false)
+        {
             gpioMapMode(gate_inputs, INPUT_PULLUP);
             gpioMapMode(gate_outputs, OUTPUT);
         };
-        ~Algorithm(){
+        virtual ~Algorithm(){
             gpioMapMode(Algorithm::gate_inputs + Algorithm::gate_outputs, OUTPUT);
             gpioMapDigitalWrite(Algorithm::gate_inputs + Algorithm::gate_outputs, LOW);
         };

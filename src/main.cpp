@@ -1,4 +1,4 @@
-#include <Arduino.h>
+#include "hal/teensy/teensy_includes.h"
 
 #include "hardware.h"
 #include "gpio.h"
@@ -7,7 +7,6 @@
 
 #include "algorithm/switch/sustain.h"
 #include "algorithm/logic/gates.h"
-// #include "algorithm/midi/priority.h"
 
 uint8_t GPIO[GPIO_N] = {GPIO_PINS};
 

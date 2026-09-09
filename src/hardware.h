@@ -1,7 +1,7 @@
 #ifndef HARDWARE_H
 #define HARDWARE_H
 
-#include <Arduino.h>
+#include "hal/teensy/teensy_includes.h"
 
 #define BOARD_ID 1
 

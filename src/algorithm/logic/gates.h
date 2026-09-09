@@ -7,10 +7,12 @@
 
 class LogicNot : public Algorithm{
     public:
-        LogicNot(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            Algorithm(midi_inputs, midi_outputs, gate_inputs, gate_outputs){
+        LogicNot(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            Algorithm(midi_in, midi_out, gate_in, gate_out),
+            input_pin_index(0)
+            {
                 for(uint8_t i=0; i<GPIO_N; i++){
-                    if ((gate_inputs & (1 << i)) != 0){ input_pin_index = i; }
+                    if ((gate_in & (1 << i)) != 0){ input_pin_index = i; }
                 }
 
             };
@@ -26,8 +28,8 @@ class LogicNot : public Algorithm{
 
 class LogicGate : public Algorithm{
     public:
-        LogicGate(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            Algorithm(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
+        LogicGate(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            Algorithm(midi_in, midi_out, gate_in, gate_out){};
 
     protected:
         uint8_t state = 0;
@@ -52,62 +54,62 @@ class LogicGate : public Algorithm{
             gpioMapDigitalWrite(LogicGate::gate_outputs, state);
         };
 
-        uint8_t operate(uint8_t state, uint8_t input){
-            state &= input;
-            return state;
+        uint8_t operate(uint8_t acc, uint8_t input){
+            acc &= input;
+            return acc;
         }
 };
 
 class LogicAND : public LogicGate{
     public:
-        LogicAND(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicGate(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
+        LogicAND(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicGate(midi_in, midi_out, gate_in, gate_out){};
 
-        uint8_t operate(uint8_t state, uint8_t input){
-            state &= input;
-            return state;
+        uint8_t operate(uint8_t acc, uint8_t input){
+            acc &= input;
+            return acc;
         }
 };
 
 class LogicNAND : public LogicAND{
     public:
-        LogicNAND(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicAND(midi_inputs, midi_outputs, gate_inputs, gate_outputs){ inverted = true; };
+        LogicNAND(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicAND(midi_in, midi_out, gate_in, gate_out){ inverted = true; };
 };
 
 
 class LogicOR : public LogicGate{
     public:
-        LogicOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicGate(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
+        LogicOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicGate(midi_in, midi_out, gate_in, gate_out){};
 
-        uint8_t operate(uint8_t state, uint8_t input){
-            state |= input;
-            return state;
+        uint8_t operate(uint8_t acc, uint8_t input){
+            acc |= input;
+            return acc;
         }
 };
 
 class LogicNOR : public LogicOR{
     public:
-        LogicNOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicOR(midi_inputs, midi_outputs, gate_inputs, gate_outputs){ inverted = true; };
+        LogicNOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicOR(midi_in, midi_out, gate_in, gate_out){ inverted = true; };
 };
 
 class LogicXOR : public LogicGate{
     public:
-        LogicXOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicGate(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
+        LogicXOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicGate(midi_in, midi_out, gate_in, gate_out){};
 
-        uint8_t operate(uint8_t state, uint8_t input){
-            state ^= input;
-            return state;
+        uint8_t operate(uint8_t acc, uint8_t input){
+            acc ^= input;
+            return acc;
         }
 };
 
 class LogicXNOR : public LogicXOR{
     public:
-        LogicXNOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicXOR(midi_inputs, midi_outputs, gate_inputs, gate_outputs){ inverted = true; };
+        LogicXNOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicXOR(midi_in, midi_out, gate_in, gate_out){ inverted = true; };
 };
 
 #endif

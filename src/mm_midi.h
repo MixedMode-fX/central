@@ -1,9 +1,7 @@
 #ifndef __MM_MIDI_H_
 #define __MM_MIDI_H_
 
-#include <Arduino.h>
-#include <MIDI.h>
-#include <USBHost_t36.h>
+#include "hal/teensy/teensy_includes.h"
 
 #include "hardware.h"
 

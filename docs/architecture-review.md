@@ -55,6 +55,19 @@ These are the decisions the rest of the review assumes stay:
 Listed first because they change what "optimisation" means: several of these
 are hidden by the test rig and the emulator and will only show on hardware.
 
+**Status.** Steps 1 to 4 of the plan in section 6 are done on this branch,
+each as its own commit with tests:
+
+| Finding | Fix |
+|---|---|
+| 2.1 SysEx has no clock | `ISysexIn::deliver_sysex()` takes `now_us`; the Teensy transport passes the pass's `micros()`, the emulator the page's time. Four tests run the handler at realistic uptimes. |
+| 2.2 Bursts overflow the note bus | The drain moved to `control/midi_dispatch.cpp`, peeks before it pops and stops in front of a bus with no room. `NOTE_QUEUE_DEPTH` is 32. Three tests in `test_nrpn`. |
+| 2.3 Two owners for clock settings | The console edits through `PatchManager::set_globals`. One test in `test_storage`. |
+| 2.4 Silent reply truncation | `put()` marks an overflow and `send_reply()` sends a NAK instead. |
+| 2.5 `Patch` on the stack | `PatchStore` owns a scratch and a `probe()`; every caller loads into a buffer it already owns. No `Patch` is declared on the stack in `src/`. One test. |
+
+Everything from 2.6 onward is still open.
+
 ### 2.1 The SysEx path has no clock, so every timed behaviour it triggers is wrong on hardware
 
 `ISysexIn::deliver_sysex()` (`src/hal/isysex_in.h:16`) carries no timestamp.

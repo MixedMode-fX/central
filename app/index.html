@@ -12,9 +12,12 @@
      only one an iPhone can have. The wide layout is the enhancement.
 
      The rules that keep it honest on a narrow screen:
-       * every flex and grid child gets min-width: 0, or a long select or a
-         32-step lane pushes the whole page sideways instead of scrolling
-         inside its own box;
+       * every flex and grid child gets min-width: 0. A grid or flex item is
+         min-width: auto by default, which means "at least as wide as what is
+         inside me" - and a 32-step lane is 925px of inside. That width
+         propagates out through the node card and past the screen, where the
+         overflow-x: hidden below *clips* it: the lane does not scroll in its
+         box, it is simply unreachable, and so is half the card around it;
        * anything that cannot shrink - a step grid, a bindings table - lives in
          its own overflow-x container;
        * controls are at least 2.75rem tall, which is a finger rather than a
@@ -29,6 +32,13 @@
     --radius: 8px;
   }
   * { box-sizing: border-box; }
+  /* The children of every grid and flex container in this page, allowed to be
+     narrower than their contents. Anything that then does not fit scrolls in
+     its own box - a lane, a table - which is the only shape a 32-step pattern
+     can have on a phone. */
+  .nodes > *, .ports > *, .port-group > *, .params > *, .fields > *, .jacks > *,
+  .jack-cards > *, .routes > *, .slots > *, .saved-list > *, .lane-row > *,
+  .row > *, .grid > * { min-width: 0; }
   /* Nothing may make the page itself scroll sideways: an overflowing lane
      scrolls in its own box or it is a bug. */
   html, body { max-width: 100%; overflow-x: hidden; }
@@ -120,6 +130,10 @@
     -webkit-appearance: none; appearance: none;
     height: var(--tap); background: none; margin: 0; padding: 0;
     min-width: 0;
+    /* A drag down the page is the page's, not the slider's. This is half of
+       it; the other half is `slider` in views.js, because the browser hands
+       the gesture over only *after* the input has already moved. */
+    touch-action: pan-y;
   }
   input[type=range]::-webkit-slider-runnable-track {
     height: 6px; border-radius: 3px; background: var(--raised); border: 1px solid var(--line);
@@ -203,8 +217,14 @@
   .param-head { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; }
   .param-name { color: var(--dim); font-size: .85rem; }
   .param-value { font-variant-numeric: tabular-nums; font-size: .85rem; text-align: right; }
-  .param-controls { display: flex; gap: .5rem; align-items: center; min-width: 0; }
+  .param-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; min-width: 0; }
   .param-controls > .grow { flex: 1 1 4rem; }
+  /* The slider takes a whole row of its own. Sharing one with the number
+     field and the learn button left it about 130px wide on a phone - two
+     values of a 0..255 parameter per pixel, which is not a control, it is a
+     lottery. Across the card it is twice that, and the number field below it
+     is still there for the value a finger cannot land on. */
+  .param-controls .slider { flex: 1 0 100%; }
   .learn.bound { color: var(--accent); border-color: var(--accent); }
 
   .fields { display: grid; gap: .7rem; margin-bottom: .8rem; }
@@ -241,8 +261,17 @@
   /* --- grids --- */
   .grid { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .8rem; }
   .grid-title { color: var(--dim); font-size: .8rem; margin-bottom: .4rem; }
-  .lane-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .3rem; min-width: 0; }
-  .lane-name { width: 6.5rem; color: var(--dim); font-size: .75rem; flex: none; }
+  /* Every lane of a pattern in one scroller, so they stay in step with each
+     other, and the lane names ride along at the left edge rather than
+     disappearing off it. `width: max-content` on the rows is what gives the
+     sticky name something to stick to. */
+  .lanes { display: grid; gap: .3rem; width: max-content; min-width: 100%; }
+  .lane-row { display: flex; gap: .4rem; align-items: center; width: max-content; }
+  .lane-name {
+    position: sticky; left: 0; z-index: 1; flex: none;
+    width: 5rem; padding-right: .3rem; background: var(--panel);
+    color: var(--dim); font-size: .72rem; line-height: 1.25;
+  }
   .lane { display: flex; gap: 3px; width: max-content; padding-bottom: 2px; }
   .cell {
     width: 26px; height: 30px; min-height: 0; padding: 0; border-radius: 3px;
@@ -280,9 +309,13 @@
 
   /* One octave, playable with a thumb. Not a picture of a piano - the black
      keys are in the row, named, because a 26px key on a phone cannot be hit
-     between two others. */
-  .keys { display: flex; gap: 3px; overflow-x: auto; padding-bottom: .3rem; -webkit-overflow-scrolling: touch; }
-  .key { flex: 1 0 3rem; min-height: 3.5rem; font-size: .75rem; touch-action: none; }
+     between two others - and it wraps rather than scrolls. A key holds
+     `touch-action: none` so a drag across the keyboard plays a glissando
+     instead of panning something, which also means a finger could never have
+     panned the row: scrolling, the octave simply ended at whatever fitted.
+     Wrapped, every key is reachable and none is thinner than a thumb. */
+  .keys { display: flex; flex-wrap: wrap; gap: 3px; padding-bottom: .3rem; }
+  .key { flex: 1 1 3rem; max-width: 8rem; min-height: 3.5rem; font-size: .75rem; touch-action: none; }
   .key.black { background: var(--raised); color: var(--dim); }
   .key.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 

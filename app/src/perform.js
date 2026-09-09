@@ -14,7 +14,7 @@
 // keyboard, and ears.
 
 import * as P from './protocol.js';
-import { el, noteName } from './views.js';
+import { el, noteName, slider } from './views.js';
 import { portNames, MUSICAL_PORTS, CLOCK_SOURCES } from './names.js';
 
 const MIDI_TYPES = {
@@ -268,11 +268,12 @@ function listenPanel(app) {
   const clicks = el('input', { type: 'checkbox', class: 'switch',
     onchange: (e) => { listener.clicks = e.target.checked; } });
   clicks.checked = listener.clicks;
-  const volume = el('input', {
-    type: 'range', class: 'grow', min: '0', max: '100', value: String(Math.round(listener.volume * 100)),
+  // Through `slider`, like every other one: a finger scrolling the play tab
+  // must not set the volume on its way past.
+  const volume = slider({
+    class: 'grow', min: '0', max: '100', value: String(Math.round(listener.volume * 100)),
     'aria-label': 'volume',
-    oninput: (e) => listener.setVolume(Number(e.target.value) / 100),
-  });
+  }, { onInput: (v) => listener.setVolume(Number(v) / 100) });
   return el('section', { class: 'panel' },
     el('h2', {}, 'listen'),
     el('div', { class: 'row' },

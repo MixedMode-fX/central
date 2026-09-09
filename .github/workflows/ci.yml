@@ -114,6 +114,17 @@ jobs:
       - name: Smoke test the module
         run: node emulator/test/smoke.mjs
 
+      # The editor is a client of the firmware's protocol, so it is checked
+      # against the firmware: the generated protocol module must match the
+      # headers, and the editor's codec and validator are driven against the
+      # module compiled to WebAssembly over the real SysEx protocol. A
+      # protocol change therefore breaks both at once, which is the reason
+      # the editor lives in this repository (#12).
+      - name: Check the editor against the firmware
+        run: |
+          node editor/tools/generate-protocol.mjs --check
+          node editor/test/protocol.test.mjs
+
       # A single self-contained page: download, open, no server needed.
       - name: Upload the page
         uses: actions/upload-artifact@v4

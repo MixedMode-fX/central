@@ -1,9 +1,13 @@
 name: Pages
 
-# Publishes the browser emulator (emulator/README.md) to GitHub Pages, so the
-# current firmware can be tried at https://mixedmode-fx.github.io/central/
-# with nothing to download. Pages must be set to deploy from GitHub Actions
-# in the repository settings.
+# Publishes the browser emulator (emulator/README.md) and the patch editor
+# (editor/README.md) to GitHub Pages, so the current firmware can be tried at
+# https://mixedmode-fx.github.io/central/ with nothing to download, and a
+# module can be configured at .../editor/ .
+#
+# Pages is what makes the editor usable at all: Web MIDI needs a secure
+# context, so a file:// copy cannot reach a module. Pages must be set to
+# deploy from GitHub Actions in the repository settings.
 #
 # Every push to main redeploys. Run it by hand (workflow_dispatch) on any
 # branch to put that branch's build on the site instead, e.g. to try a pull
@@ -45,6 +49,16 @@ jobs:
 
       - name: Smoke test the module
         run: node emulator/test/smoke.mjs
+
+      - name: Check the editor against the firmware
+        run: |
+          node editor/tools/generate-protocol.mjs --check
+          node editor/test/protocol.test.mjs
+
+      # The editor is served from /editor/ alongside the emulator. It has no
+      # build step - ES modules and one HTML file - so it is copied as it is.
+      - name: Stage the editor
+        run: cp -r editor emulator/dist/editor
 
       # index.html plus mmmc.wasm: the page fetches the module from next to
       # itself when served and falls back to its embedded copy otherwise.

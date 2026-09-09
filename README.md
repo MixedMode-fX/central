@@ -814,6 +814,49 @@ step grid — is specified but deliberately not built. It needs the same period
 estimate the sub-step gate does, and that should prove itself on hardware
 first.
 
+## The patch editor
+
+`editor/` is a browser editor over Web MIDI. With no encoder, no switches and
+no display, it is not a nicer alternative to a panel menu — between it and the
+console, it is how the module gets configured, so it is a shipping deliverable
+rather than a companion app. It is served from GitHub Pages alongside the
+emulator, which is also what satisfies Web MIDI's secure-context requirement:
+a `file://` copy cannot reach a module.
+
+It is a client of the protocol and nothing more. Everything it knows about what
+the firmware *has* — the algorithms, their inlets and outlets and domains,
+every parameter's range, default, display kind and enum options, and the
+module's real capacities — is read from the device, so an algorithm added to
+the firmware appears in the editor with a working panel and no editor change.
+
+Three things keep it honest, and all three are checked in CI:
+
+- **The message layout is generated, not copied.** `editor/src/protocol.js` is
+  derived from the firmware headers; `make editor` fails if the checked-in copy
+  has drifted. A protocol change breaks both builds at once, which is the
+  reason the editor lives in this repository.
+- **Client-side validation uses the same rules** the firmware enforces, so an
+  error surfaces while editing rather than on send. An editor that lets you
+  build a patch the module will reject is worse than no editor.
+- **It is tested against the real firmware.** The module is compiled to
+  WebAssembly by the emulator build, and the editor's own transport and codec
+  drive it over the actual SysEx protocol — so "a patch the editor accepts is
+  never rejected by the firmware's validator" is a check, not a hope.
+
+Buses are the connections: every inlet and outlet is a selector offering only
+the buses of its own domain. Dragging one sends a single message rather than a
+full dump. The sequencers get purpose-built views — a step grid for the gate
+and drum sequencers, with each lane's own length visible, and a note lane over
+**scale degrees** for the note sequencers, showing the pitch each degree
+resolves to so changing the root visibly moves the pitches without touching the
+stored pattern.
+
+Browser reach is a real constraint: Chrome, Edge and Opera have Web MIDI,
+Firefox asks permission for it, Safari does not have it. A browser without it
+is not a degraded experience, it is a user who cannot set their module up — so
+the page says plainly what is wrong and **`.syx` export is a first-class path**,
+loadable by any standard SysEx librarian.
+
 ## Still open
 
 **The KeyMech header is undocumented.** `SERIAL_KEYMECH` on `Serial8` with

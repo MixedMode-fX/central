@@ -83,6 +83,10 @@ export function emptyGlobals() {
     nrpnEnabled: 0,
     nrpnChannel: 0,
     nrpnSourceMask: 0,
+    // The key every algorithm follows unless it names a scale of its own
+    // (src/midi/global_scale.h). Chromatic is "no key set".
+    scale: P.ScaleId.SCALE_CHROMATIC,
+    root: 0,
   };
 }
 
@@ -136,7 +140,9 @@ function writeGlobals(w, g) {
   w.u8(g.nrpnEnabled);
   w.u8(g.nrpnChannel);
   w.u8(g.nrpnSourceMask);
-  for (let i = 0; i < GLOBALS_BYTES - 11; i++) w.u8(0);
+  w.u8(g.scale ?? P.ScaleId.SCALE_CHROMATIC);
+  w.u8(g.root ?? 0);
+  for (let i = 0; i < GLOBALS_BYTES - 13; i++) w.u8(0);
 }
 
 function readGlobals(r) {
@@ -151,8 +157,13 @@ function readGlobals(r) {
     nrpnEnabled: r.u8(),
     nrpnChannel: r.u8(),
     nrpnSourceMask: r.u8(),
+    // A zero here is what an image written before the key existed carries,
+    // and what the firmware reads as chromatic - so it is shown as chromatic
+    // rather than as a scale the module cannot be in (src/midi/scale.h).
+    scale: r.u8() || P.ScaleId.SCALE_CHROMATIC,
+    root: r.u8(),
   };
-  for (let i = 0; i < GLOBALS_BYTES - 11; i++) r.u8();
+  for (let i = 0; i < GLOBALS_BYTES - 13; i++) r.u8();
   return g;
 }
 

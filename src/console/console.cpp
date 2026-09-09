@@ -2,6 +2,7 @@
 #include "node/registry.h"
 #include "version.h"
 #include "hal/midi_types.h"
+#include "midi/global_scale.h"
 
 // A tiny formatting layer rather than snprintf: the Teensy's newlib printf
 // pulls in a large chunk of flash and a reentrancy structure, and everything
@@ -117,6 +118,7 @@ void Console::dispatch(uint32_t now_us){
     if (str_eq(cmd, "help"))       { cmd_help(); return; }
     if (str_eq(cmd, "info"))       { cmd_info(); return; }
     if (str_eq(cmd, "clock"))      { cmd_clock(argc, now_us); return; }
+    if (str_eq(cmd, "key"))        { cmd_key(argc, now_us); return; }
     if (str_eq(cmd, "patch"))      { cmd_patch(); return; }
     if (str_eq(cmd, "buses"))      { cmd_buses(); return; }
     if (str_eq(cmd, "errors"))     { cmd_errors(); return; }
@@ -142,6 +144,7 @@ void Console::dispatch(uint32_t now_us){
 void Console::cmd_help(){
     put_line("info                    firmware, patch and store summary");
     put_line("clock [bpm] [source]    show, or set tempo and source (0 int, 1 cv, 2 midi)");
+    put_line("key [scale] [root]      show, or set the scale every algorithm follows");
     put_line("patch                   the running patch: ports, nodes, connections");
     put_line("buses                   live bus state");
     put_line("errors                  the counters behind the red LED");
@@ -197,6 +200,33 @@ void Console::cmd_clock(uint8_t n, uint32_t now_us){
     put("running   ");
     put_line(mm.clock().running() ? "yes" : "no");
     put_kv("subticks ", mm.clock().count());
+}
+
+// The key, for the same reason and by the same route as the clock above: it
+// is one of the patch's globals, so setting it here is saved with the patch
+// and pushed to every algorithm that did not name a scale of its own.
+void Console::cmd_key(uint8_t n, uint32_t now_us){
+    if (n >= 2){
+        GlobalSettings g = patches.globals();
+        bool ok = false;
+        const uint32_t id = arg_uint(1, ok);
+        // Not SCALE_GLOBAL: that is the value an *algorithm* carries to say
+        // "whatever this is", and the module cannot follow itself.
+        if (!ok || id == SCALE_GLOBAL || id >= SCALE_COUNT){
+            put_line("key: scale is 1..14 (see the scale parameter of any algorithm)");
+            return;
+        }
+        g.scale = (uint8_t)id;
+        if (n >= 3){
+            const uint32_t root = arg_uint(2, ok);
+            if (!ok || root > 11){ put_line("key: root is a pitch class, 0..11"); return; }
+            g.root = (uint8_t)root;
+        }
+        patches.set_globals(g, now_us);
+    }
+    put("scale     ");
+    put_line(PARAM_SCALE_NAMES[global_scale::id()]);
+    put_kv("root     ", global_scale::root());
 }
 
 void Console::cmd_patch(){

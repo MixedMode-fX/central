@@ -21,7 +21,7 @@
 
 import * as P from './protocol.js';
 import * as codec from './codec.js';
-import { MIDI_PORTS, portNames, scaleMaskOf, STEP_DIRECTIONS } from './names.js';
+import { MIDI_PORTS, portNames, scaleMaskOf, scaleIdOf, scaleName, STEP_DIRECTIONS } from './names.js';
 
 const DIRECTIONS = { [P.GatePortDirection.GATE_PORT_UNUSED]: 'unused',
                      [P.GatePortDirection.GATE_PORT_IN]: 'in',
@@ -56,6 +56,9 @@ const SEQ_HEADER = 16, SEQ_LANE_STRIDE = 8;
 const NOTE_FLAG = { rest: 0x20, tie: 0x40, accent: 0x80 };
 const GATE_SEQUENCERS = ['Metronome', 'StepSequencer', 'EuclidianSequencer', 'RandomSequencer'];
 
+// A sequencer's scale, as the 12-bit mask the firmware stores. Omitted - or
+// named "global" - is an empty mask, and an empty mask is the firmware's
+// "follow the module's key" (src/midi/global_scale.h).
 const scaleOf = (v) => (v === undefined ? 0 : (typeof v === 'number' ? v & 0xfff : scaleMaskOf(v)));
 
 function directionOf(v) {
@@ -202,7 +205,9 @@ export function toPatchJson(patch, globals, device) {
     return entry;
   });
 
-  json.globals = { ...globals };
+  // The key travels by name, like a sequencer's scale does: a file that says
+  // "minor" survives a scale being appended to the firmware's list.
+  json.globals = { ...globals, scale: scaleName(globals.scale || P.ScaleId.SCALE_CHROMATIC) };
   const bindings = [];
   patch.ccMap.forEach((m, slot) => {
     if (!m || !m.sourceMask) return;
@@ -226,6 +231,8 @@ export function fromPatchJson(json, device) {
   if (!json || typeof json !== 'object') throw new Error('that is not a patch object');
   const patch = codec.emptyPatch();
   const globals = { ...codec.emptyGlobals(), ...(json.globals ?? {}) };
+  globals.scale = scaleIdOf(globals.scale ?? P.ScaleId.SCALE_CHROMATIC) || P.ScaleId.SCALE_CHROMATIC;
+  globals.root = Number(globals.root ?? 0) % 12;
 
   for (const g of json.gate_ports ?? []) {
     const jack = Number(g.port) - 1;

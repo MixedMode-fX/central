@@ -19,7 +19,7 @@ import { el } from './views.js';
 import { busCount, Domain, domainName } from './validate.js';
 import { describeSupport } from './webmidi.js';
 import {
-  MUSICAL_PORTS, portNames, CLOCK_SOURCES, SWAP_TIMINGS,
+  MUSICAL_PORTS, portNames, CLOCK_SOURCES, SWAP_TIMINGS, KEY_SCALES, PITCH_CLASSES,
   CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS,
   TAKEOVER, RELATIVE, FOURTEEN_BIT, PASS_THROUGH, channelLabel,
 } from './names.js';
@@ -182,6 +182,23 @@ export function globalsPanel(app) {
     quantise.append(option);
   }
 
+  // The key: one scale and one root for the whole patch. Every algorithm with
+  // a scale parameter follows it unless it names a scale of its own, which is
+  // what "global" is in those lists.
+  const keyScale = el('select', { onchange: (e) => { g.scale = Number(e.target.value); push(); } });
+  for (const s of KEY_SCALES) {
+    const option = el('option', { value: String(s.value) }, s.label);
+    if (s.value === g.scale) option.selected = true;
+    keyScale.append(option);
+  }
+
+  const keyRoot = el('select', { onchange: (e) => { g.root = Number(e.target.value); push(); } });
+  PITCH_CLASSES.forEach((name, pitchClass) => {
+    const option = el('option', { value: String(pitchClass) }, name);
+    if (pitchClass === (g.root ?? 0)) option.selected = true;
+    keyRoot.append(option);
+  });
+
   const nrpnEnabled = el('input', { type: 'checkbox', class: 'switch',
     onchange: (e) => {
       g.nrpnEnabled = e.target.checked ? 1 : 0;
@@ -195,7 +212,14 @@ export function globalsPanel(app) {
     hint ? el('span', { class: 'hint' }, hint) : null);
 
   return el('section', { class: 'panel' },
-    el('h2', {}, 'clock and recall'),
+    el('h2', {}, 'key'),
+    el('p', { class: 'hint' },
+      'The scale every algorithm follows unless it names one of its own - the quantiser, '
+      + 'the chord voicer and the note sequencers. Chromatic is no key at all.'),
+    el('div', { class: 'fields' },
+      field('scale', keyScale, null),
+      field('root', keyRoot, 'a change here moves the whole patch')),
+    el('h2', { class: 'spaced' }, 'clock and recall'),
     el('div', { class: 'fields' },
       field('clock source', source),
       field('tempo', bpm, `${P.CLOCK_MIN_BPM}–${P.CLOCK_MAX_BPM} BPM, when the source is internal`),

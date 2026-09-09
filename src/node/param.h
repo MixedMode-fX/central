@@ -89,6 +89,6 @@ inline uint8_t param_effective(const ParamDescriptor& d, uint8_t stored){
 
 // Shared option-name tables, so two algorithms naming the same enum agree.
 extern const char* const PARAM_DIRECTION_NAMES[5];   // StepEngine::Direction
-extern const char* const PARAM_SCALE_NAMES[14];      // ScaleId
+extern const char* const PARAM_SCALE_NAMES[15];      // ScaleId
 
 #endif

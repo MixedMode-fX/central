@@ -2,6 +2,7 @@
 #include "node/registry.h"
 #include "midi/note_event.h"
 #include "midi/scale.h"
+#include "midi/global_scale.h"
 
 // advance, reset, root, record, record-enable (#22).
 static const Domain IN[5] = {Domain::Gate, Domain::Gate, Domain::Note, Domain::Note, Domain::Gate};
@@ -229,9 +230,13 @@ void NoteSequencerBase::set_step(uint8_t step, uint8_t v, int8_t deg, uint8_t ve
     b[v * 2u + 1u] = vel & 0x7F;
 }
 
+uint16_t NoteSequencerBase::active_mask() const {
+    return global_scale::resolve(scale_mask);
+}
+
 uint8_t NoteSequencerBase::pitch(uint8_t step, uint8_t v) const {
     if (velocity(step, v) == 0) return NO_PITCH;
-    const int16_t p = (int16_t)root + scale_degree_to_semitone(degree(step, v), scale_mask);
+    const int16_t p = (int16_t)root + scale_degree_to_semitone(degree(step, v), active_mask());
     if (p < 0 || p > 127) return NO_PITCH;                // skipped, never wrapped
     return (uint8_t)p;
 }
@@ -272,12 +277,12 @@ void NoteSequencerBase::advance_record_cursor(){
 }
 
 // A keyboard sends a pitch; a step stores a degree. A note outside the current
-// scale is snapped to the nearest tone in it - the same rule Quantise
+// scale is snapped to the nearest tone in it - the same rule NoteQuantise
 // follows - rather than refused, because a step-record that silently dropped
 // a note would be worse than one that put it a semitone away. Snaps are
 // counted so a user can see it happening.
 void NoteSequencerBase::record_note(uint8_t pitch, uint8_t velocity){
-    const uint16_t mask = scale_mask ? scale_mask : (uint16_t)0x0FFF;
+    const uint16_t mask = active_mask();
     const uint8_t snapped_pitch = scale_quantise(pitch, (uint8_t)(root % 12u), mask);
     if (snapped_pitch != pitch) snap_count++;
 

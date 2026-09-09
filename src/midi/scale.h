@@ -5,11 +5,27 @@
 
 // Scales as 12-bit masks, bit 0 being the root (#10, shared with #13).
 //
-// One representation for the whole module: Quantise snaps arbitrary pitches
-// to it, and the note sequencers pick degrees out of it. A mask is cheap to
-// store in a preset and cheap to test - `mask & (1 << interval)`.
+// One representation for the whole module: NoteQuantise snaps arbitrary
+// pitches to it, Chord voices its intervals in it, and the note sequencers
+// pick degrees out of it. A mask is cheap to store in a preset and cheap to
+// test - `mask & (1 << interval)`.
+//
+// **An empty mask means "the global scale"** (midi/global_scale.h), and that
+// is the one rule every algorithm here follows. It falls out of the module's
+// existing convention that a zero parameter byte means the default (see
+// node/param.h): a preset that never mentions a scale follows the key the
+// module is set to, and an algorithm overrides it by naming one. A caller
+// that resolves nothing is never worse off than chromatic - scale_size(),
+// scale_quantise() and the degree maps all treat an empty mask as chromatic
+// - but every algorithm in this repository resolves it, because the whole
+// point of the setting is that a key change moves the whole patch.
+//
+// Ids are preset format: never renumber, only append. SCALE_CHROMATIC is at
+// the end for that reason. It used to be id 0, and 0 is now SCALE_GLOBAL: a
+// patch stored before the global scale existed still plays exactly the same
+// notes, because the global scale is chromatic until a user sets one.
 enum ScaleId : uint8_t {
-    SCALE_CHROMATIC = 0,
+    SCALE_GLOBAL = 0,         // no scale of its own: follow the module's
     SCALE_MAJOR,
     SCALE_NATURAL_MINOR,
     SCALE_HARMONIC_MINOR,
@@ -23,12 +39,16 @@ enum ScaleId : uint8_t {
     SCALE_MIXOLYDIAN,
     SCALE_LOCRIAN,
     SCALE_WHOLE_TONE,
+    SCALE_CHROMATIC,          // appended: every note, whatever the global is
     SCALE_COUNT,
 };
 
-// Semitones from the root, as bits.
+// Semitones from the root, as bits. Zero for SCALE_GLOBAL, which is not a
+// scale but a reference to one: global_scale::resolve() is what turns it into
+// the mask that is actually played.
 inline uint16_t scale_mask(uint8_t id){
     switch (id){
+        case SCALE_GLOBAL:            return 0;
         case SCALE_MAJOR:             return 0b101010110101;   // 0 2 4 5 7 9 11
         case SCALE_NATURAL_MINOR:     return 0b010110101101;   // 0 2 3 5 7 8 10
         case SCALE_HARMONIC_MINOR:    return 0b100110101101;   // 0 2 3 5 7 8 11
@@ -82,7 +102,7 @@ inline uint8_t scale_interval(uint16_t mask, uint8_t index){
 // a 5-note scale is the root an octave up, and the pattern's shape survives
 // as an interval pattern rather than as pitches. What a degree does *not* do
 // is look at semitones: a pattern written as degrees 0 2 4 in major (C E G)
-// is 0 2 4 in minor (C Eb G), not C E G snapped. That is Quantise's job.
+// is 0 2 4 in minor (C Eb G), not C E G snapped. That is NoteQuantise's job.
 inline int16_t scale_degree_to_semitone(int16_t degree, uint16_t mask){
     const int16_t n = scale_size(mask);
     int16_t octave = degree / n;

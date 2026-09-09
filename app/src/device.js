@@ -321,10 +321,14 @@ export class Device extends EventTarget {
     return this.command(P.SysexCommand.SYSEX_SET_MIDI_PORT,
       [index, flags, mask & 0x7f, channel, bus === P.NO_BUS ? 0x7f : bus]);
   }
+  // The key (src/midi/global_scale.h) is appended to the same message: the
+  // firmware takes eight arguments or ten, so an older module is left in the
+  // key it is in rather than refusing the message.
   async setGlobals(g) {
     return this.command(P.SysexCommand.SYSEX_SET_GLOBALS, [
       g.clockSource, g.cvPpqn, ...codec.u14(g.bpm),
       g.pcEnabled, g.pcChannel, g.pcSourceMask, g.pcQuantise,
+      g.scale ?? P.ScaleId.SCALE_CHROMATIC, g.root ?? 0,
     ]);
   }
   async setNrpn(enabled, channel, mask) {

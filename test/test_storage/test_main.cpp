@@ -9,6 +9,8 @@
 #include "../fakes/recording_midi_out.h"
 #include "master.h"
 #include "patch/patch_codec.h"
+#include "midi/scale.h"
+#include "midi/global_scale.h"
 #include "patch/patch_store.h"
 #include "patch/patch_manager.h"
 #include "patch/default_patch.h"
@@ -116,6 +118,8 @@ static void test_patch_round_trips_through_the_codec() {
     g.cv_ppqn = 2;
     g.pc_enabled = 1;
     g.pc_channel = 7;
+    g.scale = SCALE_DORIAN;                        // the key travels with the patch
+    g.root = 5;
 
     size_t written = 0;
     TEST_ASSERT_EQUAL(CODEC_OK, patch_codec::encode(original, g, buffer, sizeof buffer, written));
@@ -129,6 +133,8 @@ static void test_patch_round_trips_through_the_codec() {
     TEST_ASSERT_EQUAL(2, decoded_globals.cv_ppqn);
     TEST_ASSERT_EQUAL(1, decoded_globals.pc_enabled);
     TEST_ASSERT_EQUAL(7, decoded_globals.pc_channel);
+    TEST_ASSERT_EQUAL(SCALE_DORIAN, decoded_globals.scale);
+    TEST_ASSERT_EQUAL(5, decoded_globals.root);
 }
 
 // The whole point of trimming: a patch of ordinary nodes is a couple of
@@ -692,6 +698,32 @@ static void test_leds_store_and_console_never_allocate() {
 // The clock's settings have one owner. What the console sets is what the
 // patch's globals say, so it is saved, and a controller moving the tempo
 // afterwards does not push a stale source back over it.
+// The key is a global like the tempo: set from the console, it is saved with
+// the patch and live in every algorithm that named no scale of its own.
+static void test_console_key_edits_go_through_the_globals() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(three_node_patch(), g, 0);
+    rig.patches.service(PatchStore::AUTOSAVE_SETTLE_US + 1u);
+    TEST_ASSERT_FALSE(rig.store.dirty());
+
+    rig.console.execute("key 2 9", 1000);
+    TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, rig.patches.globals().scale);
+    TEST_ASSERT_EQUAL(9, rig.patches.globals().root);
+    TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, global_scale::id());
+    TEST_ASSERT_EQUAL(9, global_scale::root());
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_NATURAL_MINOR), global_scale::resolve_id(SCALE_GLOBAL));
+    TEST_ASSERT_TRUE(rig.store.dirty());
+
+    // The module cannot be told to follow itself, and nothing changes when it
+    // is asked to.
+    rig.io.clear();
+    rig.console.execute("key 0", 2000);
+    TEST_ASSERT_TRUE(rig.io.said("scale is 1..14"));
+    TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, global_scale::id());
+    global_scale::set(SCALE_CHROMATIC, 0);
+}
+
 static void test_console_clock_edits_go_through_the_globals() {
     Rig rig;
     GlobalSettings g = default_globals();
@@ -780,6 +812,7 @@ int main() {
     RUN_TEST(test_an_overlong_console_line_is_refused_not_overrun);
     RUN_TEST(test_leds_store_and_console_never_allocate);
     RUN_TEST(test_console_clock_edits_go_through_the_globals);
+    RUN_TEST(test_console_key_edits_go_through_the_globals);
     RUN_TEST(test_probe_agrees_with_load_without_decoding);
     return UNITY_END();
 }

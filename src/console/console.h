@@ -56,6 +56,7 @@ class Console {
         void cmd_help();
         void cmd_info();
         void cmd_clock(uint8_t argc, uint32_t now_us);
+        void cmd_key(uint8_t argc, uint32_t now_us);
         void cmd_patch();
         void cmd_buses();
         void cmd_errors();

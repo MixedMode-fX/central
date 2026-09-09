@@ -53,8 +53,8 @@ class SysexHandler : public ISysexIn {
         SysexHandler(const SysexHandler&) = delete;
         SysexHandler& operator=(const SysexHandler&) = delete;
 
-        // A complete incoming message, F0 to F7 inclusive.
-        void deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length) override;
+        // A complete incoming message, F0 to F7 inclusive, at `now_us`.
+        void deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us) override;
 
         // Once per main loop: abandons a stalled transfer and applies a
         // pending quantised swap when its boundary arrives.

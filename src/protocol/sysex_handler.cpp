@@ -86,7 +86,7 @@ void SysexHandler::notify(uint8_t event, uint8_t detail){
 
 // Receiving -------------------------------------------------------------
 
-void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length){
+void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us){
     if (data == nullptr || length < 4) return;
     if (data[0] != 0xF0) return;
 
@@ -101,7 +101,7 @@ void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t l
     if (data[end - 1u] == 0xF7) end--;
 
     if (data[1] == SYSEX_UNIVERSAL_NON_REALTIME){
-        handle_universal(source, data, end, 0);
+        handle_universal(source, data, end, now_us);
         return;
     }
     if (data[1] != SYSEX_MANUFACTURER) return;      // somebody else's device
@@ -120,12 +120,12 @@ void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t l
         return;
     }
     reply_to = source;
-    handle_command(source, command, &data[1u + HEADER_BYTES], (uint16_t)(end - 1u - HEADER_BYTES), 0);
+    handle_command(source, command, &data[1u + HEADER_BYTES], (uint16_t)(end - 1u - HEADER_BYTES), now_us);
 }
 
 // The standard identity request, so an editor finds the module among the
 // host's ports instead of making a user pick one by name.
-void SysexHandler::handle_universal(uint8_t source, const uint8_t* data, uint16_t length, uint32_t){
+void SysexHandler::handle_universal(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us){
     if (length < 5) return;
     if (data[3] != SYSEX_GENERAL_INFORMATION || data[4] != SYSEX_IDENTITY_REQUEST) return;
     const uint8_t addressed = data[2];
@@ -133,7 +133,7 @@ void SysexHandler::handle_universal(uint8_t source, const uint8_t* data, uint16_
     reply_to = source;
     reply_universal_identity(source);
     // Both LEDs, so a user with two modules can see which one answered.
-    leds.identify(0);
+    leds.identify(now_us);
 }
 
 void SysexHandler::handle_command(uint8_t source, uint8_t command,

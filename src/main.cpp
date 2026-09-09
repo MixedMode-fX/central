@@ -90,7 +90,7 @@ void loop(){
     const uint32_t now = micros();
 
     // 1. transports in: parse and enqueue, nothing more.
-    mm_midi_read(midi_in_queue, protocol);
+    mm_midi_read(midi_in_queue, protocol, now);
 
     // 2. hand every queued message to the ports that want it. Realtime
     //    messages go to the clock instead of onto a bus (#4, #5).

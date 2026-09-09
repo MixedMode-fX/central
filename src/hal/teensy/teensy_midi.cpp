@@ -63,7 +63,7 @@ static const uint8_t MAX_MESSAGES_PER_TRANSPORT = 16;
     for (uint8_t i = 0; i < MAX_MESSAGES_PER_TRANSPORT && parser.read(); i++){ \
         if ((uint8_t)parser.getType() == midi::SystemExclusive){ \
             sysex.deliver_sysex((source_bit), parser.getSysExArray(), \
-                                (uint16_t)parser.getSysExArrayLength()); \
+                                (uint16_t)parser.getSysExArrayLength(), now_us); \
             continue; \
         } \
         queue.push((source_bit), MidiEvent{(uint8_t)parser.getType(), \
@@ -72,7 +72,7 @@ static const uint8_t MAX_MESSAGES_PER_TRANSPORT = 16;
                                            (uint8_t)parser.getData2()}); \
     }
 
-void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex){
+void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex, uint32_t now_us){
     #ifdef MMMC_USB_HOST
     mm_usb.Task();
     MM_DRAIN(midi_hosted, mmMIDI_HOST_1)
@@ -86,7 +86,7 @@ void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex){
         const uint8_t source = (uint8_t)(mmMIDI_USB_0 << cable);
         if ((uint8_t)usbMIDI.getType() == usbMIDI.SystemExclusive){
             sysex.deliver_sysex(source, usbMIDI.getSysExArray(),
-                                (uint16_t)usbMIDI.getSysExArrayLength());
+                                (uint16_t)usbMIDI.getSysExArrayLength(), now_us);
             continue;
         }
         queue.push(source,

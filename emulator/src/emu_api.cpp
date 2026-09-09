@@ -342,9 +342,10 @@ static uint8_t sysex_in_buffer[SYSEX_RX_MAX];
 EMU_EXPORT uint8_t* emu_sysex_in_ptr(){ return sysex_in_buffer; }
 EMU_EXPORT uint32_t emu_sysex_in_capacity(){ return SYSEX_RX_MAX; }
 
-// Feeds one complete SysEx message, F0 to F7 inclusive, from `source`.
-EMU_EXPORT void emu_sysex_in(uint32_t source, const uint8_t* data, uint32_t length){
-    protocol.deliver_sysex((uint8_t)source, data, (uint16_t)length);
+// Feeds one complete SysEx message, F0 to F7 inclusive, from `source`, at
+// the page's simulated time - the same clock the passes run on.
+EMU_EXPORT void emu_sysex_in(uint32_t source, const uint8_t* data, uint32_t length, uint32_t now_us){
+    protocol.deliver_sysex((uint8_t)source, data, (uint16_t)length, now_us);
 }
 // Replies, concatenated in the order they were sent. The page reads them out
 // and clears the buffer.

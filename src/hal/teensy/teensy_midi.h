@@ -56,8 +56,9 @@ void mm_midi_setup();
 // follows is where messages are dispatched. Call once per main-loop pass.
 //
 // SysEx never reaches the queue: it is control-plane traffic, not a bus
-// event, so a complete message goes straight to `sysex` (#11).
-void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex);
+// event, so a complete message goes straight to `sysex` (#11), stamped with
+// the pass's `now_us` like every other control-plane call.
+void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex, uint32_t now_us);
 // Sends to every port whose bit is set in `target`.
 void mm_send(uint8_t target, uint8_t type, uint8_t data1, uint8_t data2, uint8_t channel);
 // Sends one complete SysEx message, F0 to F7 inclusive.

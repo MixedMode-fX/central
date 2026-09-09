@@ -13,7 +13,13 @@ struct ISysexIn {
     virtual ~ISysexIn() = default;
     // `data` includes the leading F0 and the trailing F7. The buffer belongs
     // to the transport and is only valid for the duration of the call.
-    virtual void deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length) = 0;
+    //
+    // `now_us` is the same monotonic microsecond clock every other control
+    // path receives. Everything a command starts - a transfer's timeout, a
+    // learn's timeout, the autosave debounce, the identify blink - is measured
+    // from it, so a transport that passed 0 here would have every one of those
+    // measured from boot instead.
+    virtual void deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us) = 0;
 };
 
 #endif

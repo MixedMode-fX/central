@@ -113,7 +113,7 @@ export class EmbeddedModule {
     const scratch = E.emu_sysex_in_ptr();
     new Uint8Array(E.memory.buffer).set(bytes, scratch);
     E.emu_sysex_out_clear();
-    E.emu_sysex_in(E.emu_const_control_port(), scratch, bytes.length);
+    E.emu_sysex_in(E.emu_const_control_port(), scratch, bytes.length, this.now);
 
     // Replies come back as one run of complete messages; split it on F0/F7.
     const out = new Uint8Array(E.memory.buffer, E.emu_sysex_out_ptr(), E.emu_sysex_out_len());

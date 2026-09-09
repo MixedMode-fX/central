@@ -524,8 +524,112 @@ classDiagram
 
 # Control & Feedback
 
-The module has one encoder and two switches.
-Each output has an RGB LED indicating the signal status and algorithm used.
-A small square OLED is present to help with settings
+**There is no human input on this module at all.** `src/hardware.h` declares
+eight jacks, two DIN MIDI ports, four USB MIDI cables, a USB host port, a CV
+expansion header, a KeyMech header, two consoles and two status LEDs. No
+encoder, no switches, no display, and no per-output RGB LEDs. Earlier drafts
+of this README promised all four; the hardware does not have them, and this
+project is not going to design them in.
 
-A tight integration with Novation Launchpads using the DAW mode would be great. This would allow for additional control and feedback.
+Two things follow, and they shape everything downstream.
+
+**Configuration is entirely host-side.** The serial console and the SysEx
+patch protocol are not conveniences sitting next to a panel menu — between
+them they are the only way to configure the module.
+
+**A bad patch must never be able to lock you out.** With no button to hold at
+power-on there is no hardware recovery path, so the console and the protocol
+run independently of whatever patch is loaded: neither is a graph node,
+neither is reachable from a bus, and a patch cannot disable either or reroute
+the port it talks through. A module that could be bricked by a malformed patch
+would be a module you have to reflash over USB to recover.
+
+## The two status LEDs
+
+`GREEN_LED` (pin 36) and `RED_LED` (pin 37) are the module's entire feedback
+surface. Both are PWM-capable on a Teensy 4.1, so brightness is a second
+dimension and the vocabulary uses it. It is worth learning, because it is the
+only way the module explains itself without a host attached:
+
+| What you see | What it means |
+|---|---|
+| Green, bright flash on the beat | The clock is running. The flash rate *is* the tempo. |
+| Green, slow dim pulse | Alive, but no clock is running. |
+| Red, solid | No valid patch: the module is running the built-in default. |
+| Red, brief flash | Something was dropped or refused — a MIDI message, a full note bus, a rejected transfer or parameter write. `errors` on the console has the counters. |
+| Both, alternating | Boot, and the answer to a device inquiry, so you can tell two modules apart. |
+
+Nothing in the LED path blocks: no delays, no busy waits, and no LED work
+inside a node's `process()` or `tick()`.
+
+## Boot behaviour
+
+There is no screen to explain a silence, so a module that appears to do
+nothing must not be the normal case:
+
+- Slot 0 of the EEPROM is loaded if it checks out.
+- If it is missing or fails to validate, the **built-in default patch** runs
+  instead — MIDI thru across every musical transport, a metronome on jack 1 at
+  the default tempo, and a sustain pedal input on jack 8. A freshly flashed
+  module is therefore observably alive out of the box.
+- A *corrupt* stored patch also lights the red LED solid; an *empty* store
+  does not, because a new module is not a fault.
+- Restoring defaults is a host-side command (`defaults` on the console, or
+  SysEx) — there is no button to hold at power-on.
+
+## Patch storage
+
+A patch is the node list plus the bus each inlet and outlet is assigned to,
+plus the global settings — clock source, tempo, PPQN. It is stored in the
+Teensy 4.1's flash-emulated EEPROM (`EEPROM_BYTES` = 4284) as
+`PATCH_SLOTS` = 4 independent images, each with its own magic, format version
+and CRC. Slot 0 is the current patch; the rest are presets for Program Change
+recall. A slot that fails its CRC cannot make the others unreadable.
+
+`sizeof(Patch)` is about 11 KB — `N_PARAM` is 336 because the poly and drum
+sequencers carry a 32-step grid — so the stored image trims every node's
+parameter block at its last non-zero byte. A patch of logic and dividers is a
+couple of hundred bytes. The same encoding goes on the wire, so a patch that
+round-trips through the store round-trips over SysEx byte for byte.
+
+Writes are deliberate: nothing writes flash on a parameter change. An edit
+marks the patch dirty and the autosave writes slot 0 once, two seconds later,
+collapsing a whole knob sweep into a single write.
+
+> **Deferred, not rejected:** the Teensy's microSD socket would hold hundreds
+> of presets, sits on dedicated SDIO pins and needs no pin from `hardware.h`,
+> so it can be added later without touching the hardware surface. Out of scope
+> for now because it is not declared hardware.
+
+## The serial console
+
+USB serial and `SERIAL_UART` (`Serial6`, 115200) both carry the same text
+console. It is how anyone sees inside a running module, and it is the interim
+configuration path until the SysEx protocol is finished.
+
+| Command | What it does |
+|---|---|
+| `info` | Firmware build, node count, store state |
+| `clock [bpm] [source]` | Show or set tempo and clock source |
+| `patch` | The running patch: jacks, MIDI ports, nodes and their connections |
+| `buses` | Live bus state, with the overflow counters |
+| `errors` | Every counter behind the red LED |
+| `algos` | Every algorithm this firmware has, with inlet and outlet counts |
+| `params <node>` | One node's parameters, with ranges, defaults and enum names |
+| `get` / `set <node> <param> [value]` | Read or write one parameter |
+| `slots` | What each preset slot holds |
+| `save` / `load` / `erase <slot>` | Preset management |
+| `defaults` | Back to the built-in patch |
+
+## Still open
+
+**The KeyMech header is undocumented.** `SERIAL_KEYMECH` on `Serial8` with
+boot and reset lines on pins 30 and 31 is declared in `hardware.h` and nothing
+in this repository says what it connects to. If it is an input device it is
+the module's only candidate for panel control, and that changes the whole
+picture above. Still unanswered.
+
+**Launchpad DAW mode over the USB host port** needs no new pins, so it is
+within the hardware surface, and it remains the module's only realistic
+hands-on control surface. Still last in the queue — but it is the eventual
+answer to "no panel controls", not a luxury.

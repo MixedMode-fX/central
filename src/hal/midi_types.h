@@ -33,4 +33,16 @@ enum MidiPort : uint8_t {
     mmMIDI_HOST_1   = 0x80,
 };
 
+// Cable 3 of the USB device port is reserved for control traffic (#11), so a
+// patch transfer never mixes with musical MIDI and a busy note stream cannot
+// starve a dump. Nothing musical is ever routed to it, and a patch cannot
+// take it away from the protocol.
+constexpr uint8_t MIDI_CONTROL_PORT = mmMIDI_USB_3;
+
+// Every logical port that carries music: all of them but the control cable.
+// A transport ignores the bits it has no port for, so this is safe in any
+// build (hal/teensy/teensy_midi.h derives the narrower ALL_MIDI_PORTS from
+// what is actually compiled in).
+constexpr uint8_t MIDI_MUSICAL_PORTS = (uint8_t)(0xFFu & (uint8_t)~MIDI_CONTROL_PORT);
+
 #endif

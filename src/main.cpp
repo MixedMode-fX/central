@@ -4,40 +4,43 @@
 #include "hal/teensy/teensy_gpio.h"
 #include "hal/teensy/teensy_midi.h"
 #include "hal/teensy/teensy_clock.h"
+#include "hal/teensy/teensy_eeprom.h"
+#include "hal/teensy/teensy_leds.h"
+#include "hal/teensy/teensy_console_io.h"
 #include "hal/gpio_map.h"
 #include "midi/midi_queue.h"
 #include "util/random.h"
 #include "master.h"
+#include "led/status_leds.h"
+#include "patch/patch_store.h"
+#include "patch/patch_manager.h"
+#include "console/console.h"
 #include "version.h"
 
 static const uint8_t GPIO_PIN_TABLE[GPIO_N] = {GPIO_PINS};
 static TeensyGpio gpio(GPIO_PIN_TABLE);
 static TeensyMidiOut midi_out;
+static TeensyEeprom eeprom;
+static TeensyLeds led_driver;
+static TeensyConsoleIo console_io;
 
 // Owns the clock, the buses, the hardware port nodes and the node pool.
 // Everything is allocated statically: no heap use after boot.
 static MixedModeMaster master(gpio, midi_out);
 
+// The module's entire feedback surface (#7): two LEDs and a text console.
+static StatusLeds leds(led_driver);
+static PatchStore store(eeprom);
+static PatchManager patches(master, store, leds);
+static Console console(console_io, patches, master, store, leds);
+
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
 
-// Until presets exist (#11): a sustain pedal on jack 8 sent everywhere, and
-// the internal clock divided by four onto jack 1 so the module has a pulse
-// out of the box.
-static Patch default_patch(){
-    Patch p = empty_patch();
-    p.gate_ports[7] = GatePortConfig{GATE_PORT_IN, 0};        // jack 8 -> gate bus 0
-    p.nodes[0] = node_config(ALGO_SUSTAIN);                   // gate bus 0 -> note bus 0
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 0;
-    p.nodes[1] = node_config(ALGO_CLOCK_DIV);                 // master tick -> gate bus 1
-    p.nodes[1].out_bus[0] = 1;
-    p.nodes[1].params[1] = 4;                                 // /4: one pulse per beat
-    p.n_nodes = 2;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 1};       // gate bus 1 -> jack 1
-    p.midi_out[0] = MidiOutConfig{ALL_MIDI_PORTS, 0, 0};      // note bus 0 -> every transport
-    return p;
-}
+// The last beat the green LED flashed on, so a flash happens once per beat
+// rather than once per subtick.
+static uint32_t last_beat = 0;
+static bool have_beat = false;
 
 void setup(){
     Serial.begin(115200);
@@ -54,10 +57,15 @@ void setup(){
     // Every port starts as an input; a port node claims an output in setup().
     gpio_map_mode(gpio, ALL_GPIO_MAP, GPIO_MODE_INPUT_PULLUP);
 
+    led_driver.begin();
+    console_io.begin();
     mm_midi_setup();
 
-    master.load(default_patch());
-    master.setup();
+    // Slot 0 if it checks out, the flash default if it does not - and the red
+    // LED says which (#7). A freshly flashed module with an empty EEPROM
+    // still comes up doing something observable.
+    patches.boot(micros());
+    console.greet();
 
     // Last: the timer only starts once there is a patch for it to drive.
     mm_clock_setup(master.clock());
@@ -79,4 +87,19 @@ void loop(){
 
     // 4. reprogram the subtick timer if the tempo or the external period moved.
     mm_clock_service();
+
+    // 5. the feedback surface. All of this is after the signal path and none
+    //    of it blocks: the LEDs are two writes, the console reads whatever
+    //    bytes are waiting, and the store writes at most once every couple of
+    //    seconds and only when something changed.
+    const uint32_t beat = master.clock().count() / CLOCK_SUBTICKS_PER_QUARTER;
+    if (!have_beat || beat != last_beat){
+        if (have_beat) leds.beat(now);
+        last_beat = beat;
+        have_beat = true;
+    }
+    leds.set_clock_running(master.clock().running());
+    leds.service(now);
+    console.service(now);
+    patches.service(now);
 }

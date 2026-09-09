@@ -58,7 +58,14 @@ struct GlobalSettings {
     uint8_t pc_channel;        // 1..16, 0 = omni
     uint8_t pc_source_mask;    // MidiPort bits the recall listens on
     uint8_t pc_quantise;       // PatchSwapTiming (#11)
-    uint8_t reserved[24];      // #8's calibration lands here
+    // NRPN (#22). Off by default and enabled per port and channel, because
+    // NRPN is a routable CC stream: 99/98/6/38 look like ordinary CCs to
+    // everything upstream, so a module that always consumed them would
+    // silently eat traffic meant for a downstream synth.
+    uint8_t nrpn_enabled;
+    uint8_t nrpn_channel;      // 1..16, 0 = omni
+    uint8_t nrpn_source_mask;  // MidiPort bits; 0 = any
+    uint8_t reserved[21];      // #8's calibration lands here
 };
 
 inline GlobalSettings default_globals(){
@@ -70,6 +77,9 @@ inline GlobalSettings default_globals(){
     g.pc_channel = 1;
     g.pc_source_mask = 0;
     g.pc_quantise = 0;
+    g.nrpn_enabled = 0;                 // off until a user asks for it (#22)
+    g.nrpn_channel = 0;
+    g.nrpn_source_mask = 0;
     return g;
 }
 

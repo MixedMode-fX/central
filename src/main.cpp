@@ -17,6 +17,7 @@
 #include "console/console.h"
 #include "protocol/sysex_handler.h"
 #include "control/cc_mapper.h"
+#include "control/nrpn.h"
 #include "hal/midi_types.h"
 #include "version.h"
 
@@ -40,6 +41,7 @@ static PatchManager patches(master, store, leds);
 // mapping applies at the MIDI input layer and writes through the same
 // validated entry point the protocol and the console use.
 static CcMapper cc_map(patches, master);
+static NrpnDecoder nrpn(patches, cc_map);
 static Console console(console_io, patches, master, store, leds, cc_map);
 
 // The patch protocol (#11). Not a node, not reachable from a bus: with no
@@ -103,6 +105,11 @@ void loop(){
         // remembered here and applied once at the pass boundary, so a knob
         // sweep costs one parameter write per mapping however fast it is
         // sent. A mapping flagged pass-through also reaches the graph.
+        // NRPN first, and only where it is enabled: 99/98/6/38 look like
+        // ordinary CCs, so a module that always consumed them would silently
+        // eat a stream meant for a downstream synth (#22).
+        if (in.event.type == MIDI_CONTROL_CHANGE &&
+            nrpn.observe(in.source, in.event.channel, in.event.data1, in.event.data2, now)) continue;
         if (in.event.type == MIDI_CONTROL_CHANGE &&
             cc_map.observe(in.source, in.event.channel, in.event.data1, in.event.data2, now)) continue;
         master.deliver_midi(in.source, in.event, now);
@@ -131,5 +138,6 @@ void loop(){
     leds.service(now);
     console.service(now);
     protocol.service(now);
+    nrpn.service(now);
     patches.service(now);
 }

@@ -91,6 +91,31 @@ inline int16_t scale_degree_to_semitone(int16_t degree, uint16_t mask){
     return (int16_t)(octave * 12 + scale_interval(mask, (uint8_t)index));
 }
 
+// The inverse of scale_degree_to_semitone, for step-record (#22): which degree
+// names this many semitones from the root?
+//
+// A keyboard sends a pitch and a step stores a degree, so entry is a real
+// conversion. Callers snap the pitch into the scale first (scale_quantise),
+// which is where the "a played note outside the scale has no degree" question
+// is answered; this function is total anyway, resolving an offset the scale
+// does not contain to the degree below it, so it can never fail mid-record.
+//
+// Round-trips with scale_degree_to_semitone for every degree, including
+// negative ones and beyond the octave.
+inline int16_t semitone_to_scale_degree(int16_t semitones, uint16_t mask){
+    mask &= 0x0FFF;
+    if (mask == 0) mask = 0x0FFF;
+    const int16_t n = scale_size(mask);
+    int16_t octave = semitones / 12;
+    int16_t within = semitones % 12;
+    if (within < 0){ within += 12; octave--; }    // floor, as the forward map does
+    int16_t index = 0;
+    for (uint8_t i = 0; i < 12 && i < within; i++){
+        if (mask & (uint16_t)(1u << i)) index++;
+    }
+    return (int16_t)(octave * n + index);
+}
+
 // Snaps `note` to the nearest pitch in the scale `mask` rooted at pitch class
 // `root` (0..11). Searches outward from the note itself, so the result is
 // never more than six semitones away; a tie goes up, which keeps a rising

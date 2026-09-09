@@ -1,7 +1,9 @@
 #include "algorithm/logic/gates.h"
 #include "node/registry.h"
 
-static const Domain GATE_INLETS[MAX_IN] = {Domain::Gate, Domain::Gate, Domain::Gate, Domain::Gate};
+static const Domain GATE_INLETS[MAX_IN] = {
+    Domain::Gate, Domain::Gate, Domain::Gate, Domain::Gate, Domain::Gate };
+static_assert(MAX_IN == 5, "GATE_INLETS lists one domain per inlet");
 static const Domain GATE_OUTLET[1] = {Domain::Gate};
 
 #define GATE_DESCRIPTOR(Class, Id, Name, NIn) \

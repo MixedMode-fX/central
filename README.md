@@ -744,6 +744,76 @@ discipline the master clock already uses.
 Console: `maps`, `map <slot> <cc> <node> <param> [min] [max]`,
 `learn <slot> <node> <param>`, `unmap <slot>`.
 
+## What CC cannot reach: NRPN and pattern data
+
+The rule that decides the tier is address space and payload width, not
+importance: **if it changes the graph's shape it is SysEx; if it changes a
+value inside a node it is CC or NRPN.**
+
+| Tier | Carries | Use |
+|---|---|---|
+| CC | one 7-bit scalar, or 14-bit as a pair | performance: turn a knob, move a parameter |
+| NRPN | 14-bit address + 14-bit value | every parameter of every node, addressed |
+| SysEx | arbitrary length | structure, pattern data, bulk transfer, enumeration |
+
+CC has 120 usable numbers and a 7-bit value; this module has
+`N_NODE` × `N_PARAM` = 10 752 parameters before the clock and the transport
+are counted, so CC cannot address the parameter space even if every value
+fitted.
+
+**The NRPN address space**, written down here and reported in the capability
+message so an editor reads it rather than hardcoding it:
+
+```
+0x0000 .. 0x29FF   a node's parameter: node = address / N_PARAM,
+                                       param = address % N_PARAM
+0x2A00 .. 0x2A0F   the master clock (tempo, source, CV PPQN)
+0x2A10 .. 0x2A1F   the transport (start, stop, continue, tap)
+0x2A20 .. 0x3FFF   reserved
+```
+
+It reaches the same target space CC mapping defines and ends at the same
+`set_param`, so NRPN and CC writing one parameter produce identical results
+and are rejected identically. Data Increment and Decrement (CC 96/97) are
+supported, reading the current value rather than tracking it.
+
+**NRPN is off by default, and enabled per port and channel.** CC 99, 98, 6 and
+38 look like ordinary CCs to everything upstream, so a module that always
+consumed them would silently eat a stream on its way to a downstream synth. A
+partial sequence writes nothing: the address is buffered, the write happens on
+the data MSB, and a sequence that stops halfway times out rather than pairing
+one gesture's address with the next one's value.
+
+**Pattern data.** `N_PARAM` is 336 because the poly and drum sequencers carry
+a 32-step grid, so a note sequence is already inside `NodeConfig::params` and
+travels with the patch — no separate arena is needed, and a full four-voice
+32-step grid fits a preset slot with room to spare. Two SysEx messages read
+and write a run of a node's parameter bytes, going through the same validated
+`set_param` as everything else.
+
+## Entering notes: step-record
+
+A note sequencer stores **scale degrees** and a keyboard sends **pitches**, so
+entry is a real conversion. Two inlets do it: a `record` note inlet and a
+`record enable` gate inlet. A note-on writes the step under the record cursor
+and advances it; reset returns both the playback and the record cursor to the
+first step. It works with any keyboard patched to any port and needs no host.
+
+**A played note outside the current scale snaps to the nearest tone in it** —
+the same rule `Quantise` follows — rather than being refused, because a
+step-record that silently dropped a note would be worse than one that put it a
+semitone away. Snaps are counted so a user can see it happening.
+
+**Rest and tie** are enterable, or step-record is only good for continuous
+runs: two note numbers are reserved for them (`rest key`, default MIDI note 0;
+`tie key`, default note 1), both below anything a keyboard plays and both
+configurable.
+
+**Real-time record** — capturing against the running clock, quantised to the
+step grid — is specified but deliberately not built. It needs the same period
+estimate the sub-step gate does, and that should prove itself on hardware
+first.
+
 ## Still open
 
 **The KeyMech header is undocumented.** `SERIAL_KEYMECH` on `Serial8` with

@@ -88,6 +88,18 @@ class CcMapper {
         // from #20's descriptors rather than hardcoded per target, so a
         // mapping's min/max mean the same thing everywhere.
         bool target_range(const CcMapping& m, uint16_t& lo, uint16_t& hi) const;
+        bool target_range(uint8_t kind, uint8_t index, uint16_t param,
+                          uint16_t& lo, uint16_t& hi) const;
+
+        // Write one target directly. NRPN (#22) is a second *transport* for
+        // parameter writes, not a second semantics, so it ends here - at the
+        // same applier a mapped CC uses, which ends at
+        // PatchManager::set_param.
+        bool write_control(uint8_t kind, uint8_t index, uint16_t param,
+                           uint16_t value, uint32_t now_us);
+        // What a target currently holds, for a host that wants to read one
+        // without a full dump.
+        bool read_control(uint8_t kind, uint8_t index, uint16_t param, uint16_t& value_out) const;
 
     private:
         // Per-mapping state that is *not* part of the patch: where the knob

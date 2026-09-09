@@ -67,6 +67,10 @@ enum SysexCommand : uint8_t {
     SYSEX_SET_CC_MAP       = 0x16,   // one controller binding (#21)
     SYSEX_GET_CC_MAP       = 0x17,
     SYSEX_CC_LEARN         = 0x18,   // arm / cancel: the next CC binds
+    SYSEX_SET_NRPN         = 0x19,   // enable NRPN, per port and channel (#22)
+    SYSEX_SET_PATTERN      = 0x1A,   // a run of one node's parameter bytes (#22)
+    SYSEX_GET_PATTERN      = 0x1B,
+    SYSEX_GET_CONTROL      = 0x1C,   // read any target, by kind and index
     SYSEX_SLOT_SAVE        = 0x20,
     SYSEX_SLOT_LOAD        = 0x21,
     SYSEX_SLOT_ERASE       = 0x22,
@@ -81,6 +85,8 @@ enum SysexCommand : uint8_t {
     SYSEX_PATCH_CHUNK_OUT  = 0x45,
     SYSEX_PARAM_VALUE      = 0x51,
     SYSEX_CC_MAP           = 0x52,
+    SYSEX_PATTERN          = 0x53,
+    SYSEX_CONTROL_VALUE    = 0x54,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>

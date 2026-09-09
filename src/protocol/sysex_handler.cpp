@@ -1,6 +1,7 @@
 #include "protocol/sysex_handler.h"
 #include "patch/default_patch.h"
 #include "node/registry.h"
+#include "control/nrpn.h"
 #include "version.h"
 
 // Message layout, after the F0 and before the F7:
@@ -288,6 +289,73 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             const uint16_t param = (uint16_t)(args[4] | ((uint16_t)(n > 5 ? args[5] : 0u) << 7));
             cc.learn_arm(args[1], args[2], args[3], param, now_us);
             ack(source);
+            return;
+        }
+
+        // NRPN, off by default and enabled deliberately (#22).
+        case SYSEX_SET_NRPN: {
+            if (n < 3){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            GlobalSettings g = patches.globals();
+            g.nrpn_enabled = args[0] ? 1u : 0u;
+            g.nrpn_channel = args[1];
+            g.nrpn_source_mask = args[2];
+            if (g.nrpn_channel > 16){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            patches.set_globals(g, now_us);
+            ack(source);
+            return;
+        }
+
+        // Pattern data (#22). A note sequencer's step grid is far too wide
+        // for NRPN - 320 bytes for a poly sequencer - so an editor writes it
+        // in runs. Every byte still goes through set_param, so the same
+        // validator applies and a write under a sounding note releases it
+        // from the ledger like any other.
+        case SYSEX_SET_PATTERN: {
+            if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            const uint8_t node = args[0];
+            const uint16_t offset = (uint16_t)(args[1] | ((uint16_t)args[2] << 7));
+            const uint8_t packed_len = (uint8_t)(n - 3u);
+            uint8_t bytes[SYSEX_RX_MAX];
+            const size_t count = sysex::unpack(&args[3], packed_len, bytes, sizeof bytes);
+            if (count == 0 && packed_len > 0){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            for (size_t i = 0; i < count; i++){
+                if (patches.set_param(node, (uint16_t)(offset + i), bytes[i], now_us) != PARAM_SET_OK){
+                    // A partially applied run is still better reported than
+                    // hidden: the host is told which byte failed by retrying.
+                    nak(source, SYSEX_ERR_BAD_ARGUMENT);
+                    return;
+                }
+            }
+            ack(source);
+            return;
+        }
+
+        case SYSEX_GET_PATTERN: {
+            if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            const uint16_t offset = (uint16_t)(args[1] | ((uint16_t)args[2] << 7));
+            reply_pattern(source, args[0], offset, args[3]);
+            return;
+        }
+
+        // Any target, by kind and index, so a host can read a clock setting
+        // as easily as a parameter without asking for a full dump.
+        case SYSEX_GET_CONTROL: {
+            if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            const uint16_t param = (uint16_t)(args[2] | ((uint16_t)args[3] << 7));
+            uint16_t value = 0;
+            if (!cc.read_control(args[0], args[1], param, value)){
+                nak(source, SYSEX_ERR_BAD_ARGUMENT);
+                return;
+            }
+            uint16_t addr = 0;
+            NrpnDecoder::address_of(args[0], args[1], param, addr);
+            begin_reply(SYSEX_CONTROL_VALUE);
+            put(args[0]);
+            put(args[1]);
+            put_u14(param);
+            put_u14(value);
+            put_u14(addr);              // the NRPN address that reaches it
+            send_reply(source);
             return;
         }
 
@@ -584,6 +652,34 @@ void SysexHandler::reply_cc_map(uint8_t source, uint8_t slot){
     put_u14(m.min);
     put((uint8_t)(m.flags | ((m.source_mask & 0x80) ? 0x40u : 0u)));
     put_u14(m.max);
+    send_reply(source);
+}
+
+// Pattern data (#22). N_PARAM is 336 because the poly and drum sequencers
+// carry a 32-step grid, so a "pattern blob" needs no arena of its own: the
+// bytes are already in NodeConfig::params and travel with the patch. This is
+// the addressed read of a run of them.
+void SysexHandler::reply_pattern(uint8_t source, uint8_t node, uint16_t offset, uint16_t length){
+    const AlgorithmDescriptor* d = mm.node_descriptor(node);
+    if (d == nullptr){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+    if (offset >= d->n_params){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+    if (length == 0 || length > SYSEX_CHUNK_PAYLOAD) length = SYSEX_CHUNK_PAYLOAD;
+    if (offset + length > d->n_params) length = (uint16_t)(d->n_params - offset);
+
+    uint8_t bytes[SYSEX_CHUNK_PAYLOAD];
+    for (uint16_t i = 0; i < length; i++){
+        uint8_t v = 0;
+        mm.get_node_param(node, (uint16_t)(offset + i), v);
+        bytes[i] = v;
+    }
+
+    begin_reply(SYSEX_PATTERN);
+    put(node);
+    put_u14(offset);
+    put((uint8_t)length);
+    const size_t packed = sysex::pack(bytes, length, &tx[tx_at], (size_t)(SYSEX_TX_MAX - tx_at - 1u));
+    if (packed == 0){ nak(source, SYSEX_ERR_TOO_LARGE); return; }
+    tx_at = (uint16_t)(tx_at + packed);
     send_reply(source);
 }
 

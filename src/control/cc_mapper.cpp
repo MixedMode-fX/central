@@ -21,18 +21,23 @@ void CcMapper::reset(){
 // the knob sweeps" means the same thing for a Euclidean pulse count and for
 // the tempo, and nothing is hardcoded per target.
 bool CcMapper::target_range(const CcMapping& m, uint16_t& lo, uint16_t& hi) const {
-    switch (m.target_kind){
+    return target_range(m.target_kind, m.target_index, m.param, lo, hi);
+}
+
+bool CcMapper::target_range(uint8_t target_kind, uint8_t target_index, uint16_t param,
+                            uint16_t& lo, uint16_t& hi) const {
+    switch (target_kind){
         case CC_TARGET_NODE: {
-            const AlgorithmDescriptor* d = mm.node_descriptor(m.target_index);
+            const AlgorithmDescriptor* d = mm.node_descriptor(target_index);
             if (d == nullptr) return false;
-            const ParamDescriptor* p = registry::param(*d, m.param);
+            const ParamDescriptor* p = registry::param(*d, param);
             if (p == nullptr) return false;
             lo = p->min;
             hi = p->max;
             return true;
         }
         case CC_TARGET_CLOCK:
-            switch (m.param){
+            switch (param){
                 case CC_CLOCK_TEMPO:  lo = CLOCK_MIN_BPM; hi = CLOCK_MAX_BPM; return true;
                 case CC_CLOCK_SOURCE: lo = MasterClock::CLOCK_INTERNAL; hi = MasterClock::CLOCK_MIDI; return true;
                 case CC_CLOCK_PPQN:   lo = 1; hi = 48; return true;
@@ -41,7 +46,7 @@ bool CcMapper::target_range(const CcMapping& m, uint16_t& lo, uint16_t& hi) cons
         case CC_TARGET_TRANSPORT:
             // Momentary: there is no range to sweep, only a threshold.
             lo = 0; hi = 1;
-            return m.param < CC_TRANSPORT_TARGETS;
+            return param < CC_TRANSPORT_TARGETS;
         default:
             return false;
     }
@@ -309,39 +314,73 @@ void CcMapper::apply_one(uint8_t index, uint32_t now_us){
 }
 
 void CcMapper::write_target(const CcMapping& m, uint16_t value, uint32_t now_us){
-    switch (m.target_kind){
+    write_control(m.target_kind, m.target_index, m.param, value, now_us);
+}
+
+// The one applier. A mapped CC and an NRPN both end here, so they produce
+// identical results and are rejected identically when out of range.
+bool CcMapper::write_control(uint8_t kind, uint8_t index, uint16_t param,
+                             uint16_t value, uint32_t now_us){
+    switch (kind){
         case CC_TARGET_NODE:
-            if (patches.set_param(m.target_index, m.param, (uint8_t)value, now_us) == PARAM_SET_OK) write_count++;
-            else refuse_count++;
-            return;
+            if (patches.set_param(index, param, (uint8_t)value, now_us) == PARAM_SET_OK){
+                write_count++;
+                return true;
+            }
+            refuse_count++;
+            return false;
 
         case CC_TARGET_CLOCK: {
             GlobalSettings g = patches.globals();
-            switch (m.param){
+            switch (param){
                 case CC_CLOCK_TEMPO:  g.bpm = value; break;
                 case CC_CLOCK_SOURCE: g.clock_source = (uint8_t)value; break;
                 case CC_CLOCK_PPQN:   g.cv_ppqn = (uint8_t)value; break;
-                default: refuse_count++; return;
+                default: refuse_count++; return false;
             }
             patches.set_globals(g, now_us);
             write_count++;
-            return;
+            return true;
         }
 
         case CC_TARGET_TRANSPORT:
-            switch (m.param){
+            switch (param){
                 case CC_TRANSPORT_START:    mm.clock().start(); break;
                 case CC_TRANSPORT_STOP:     mm.clock().stop(); break;
                 case CC_TRANSPORT_CONTINUE: mm.clock().resume(); break;
                 case CC_TRANSPORT_TAP:      mm.clock().tap(now_us); break;
-                default: refuse_count++; return;
+                default: refuse_count++; return false;
             }
             write_count++;
-            return;
+            return true;
 
         default:
             refuse_count++;
-            return;
+            return false;
+    }
+}
+
+bool CcMapper::read_control(uint8_t kind, uint8_t index, uint16_t param, uint16_t& value_out) const {
+    switch (kind){
+        case CC_TARGET_NODE: {
+            uint8_t v = 0;
+            if (!mm.get_node_param(index, param, v)) return false;
+            value_out = v;
+            return true;
+        }
+        case CC_TARGET_CLOCK:
+            switch (param){
+                case CC_CLOCK_TEMPO:  value_out = mm.clock().bpm(); return true;
+                case CC_CLOCK_SOURCE: value_out = mm.clock().source(); return true;
+                case CC_CLOCK_PPQN:   value_out = mm.clock().cv_ppqn(); return true;
+                default: return false;
+            }
+        case CC_TARGET_TRANSPORT:
+            if (param >= CC_TRANSPORT_TARGETS) return false;
+            value_out = mm.clock().running() ? 1u : 0u;
+            return true;
+        default:
+            return false;
     }
 }
 

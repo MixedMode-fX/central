@@ -39,7 +39,12 @@
 // algorithm/sequencer/note_sequencer.h and drum_sequencer.h). Every other
 // algorithm uses the first few bytes and leaves the rest zero, which the
 // patch protocol (#11) can exploit by not sending trailing zeros.
-#define MAX_IN 4
+// MAX_IN went from 4 to 5 for the note sequencers' step-record inlets (#22):
+// advance, reset, root, record and record-enable is five, and a sequencer
+// that could not be played into would make step-record a host-only feature.
+// It costs one byte per NodeConfig - 32 bytes of RAM and one byte per node on
+// the wire - and gives the logic gates a fifth input for free.
+#define MAX_IN 5
 #define MAX_OUT 8
 #define N_PARAM 336
 

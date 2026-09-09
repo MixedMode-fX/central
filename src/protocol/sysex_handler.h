@@ -91,6 +91,7 @@ class SysexHandler : public ISysexIn {
         void reply_dump(uint8_t source);
         void reply_slots(uint8_t source);
         void reply_cc_map(uint8_t source, uint8_t slot);
+        void reply_pattern(uint8_t source, uint8_t node, uint16_t offset, uint16_t length);
         void ack(uint8_t source);
         void nak(uint8_t source, SysexError code);
         void notify(uint8_t event, uint8_t detail);

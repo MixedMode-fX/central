@@ -15,7 +15,11 @@ class RecordingMidiOut : public IMidiOut {
             uint8_t channel;
         };
 
-        RecordingMidiOut() : messages() {}
+        static constexpr size_t RESERVE = 65536;
+
+        RecordingMidiOut() : messages() {
+            messages.reserve(RESERVE);   // so recording never allocates mid-test
+        }
 
         void send(uint8_t target, uint8_t type,
                   uint8_t d1, uint8_t d2, uint8_t channel) override {

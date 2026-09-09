@@ -145,6 +145,62 @@ pio test -e native
 
 Nothing under `src/algorithm/` includes `Arduino.h`.
 
+CI (`.github/workflows/ci.yml`) builds the firmware and runs the native tests
+on every push to `main` and on every pull request.
+
+# Signal bus model
+
+Algorithms do not bind to hardware. They read and write **internal buses**,
+and the hardware ports are nodes too. An internal bus is a virtual patch cable.
+
+| Domain | Carries | Buses | Fan-in rule |
+|---|---|---|---|
+| Gate | a level (`bool`) | 16 | OR of all writers (a passive mult) |
+| Note | MIDI events (notes, CC, bend, ...) | 8 | arrival order; overflow is counted, never silent |
+| CV | `int16_t` | 8 | sum with saturation (reserved for #8) |
+
+Buses are **double-buffered**: readers see the previous pass, writers write
+the next, and `BusManager::swap()` publishes. Evaluation is therefore
+order-independent, feedback is a one-pass delay instead of a hang (a `NOT`
+feeding itself oscillates at half the pass rate), and every pass is
+deterministic. Each processing stage costs exactly one pass of latency, which
+at gate rate is microseconds.
+
+Every pass, `MixedModeMaster` runs:
+
+1. hardware input nodes (`GateInPort`, `MidiInPort`) sample and write their buses;
+2. pool nodes `process()`;
+3. if a clock tick fired, nodes that subscribe `tick()` (the clock is not a bus:
+   a tick carries a count, see #4);
+4. swap;
+5. hardware output nodes (`GateOutPort`, `MidiOutPort`) read their buses and
+   drive the jacks and transports.
+
+**Nodes.** Every algorithm is a `Node` (`src/node/node.h`). It is described by
+an `AlgorithmDescriptor` in the registry (`src/node/registry.cpp`): id, name,
+inlets and outlets with their *domain*, parameter count, state size, and a
+placement-new constructor. A `NodeConfig` (also the preset format) selects an
+algorithm by id and gives a bus index per inlet and outlet; the index is
+interpreted in the domain the descriptor declares, and the validator rejects
+an index that is out of range for that domain. `NO_BUS` leaves an optional
+inlet unconnected.
+
+**Allocation.** All algorithm code is always resident. Instances live in a
+static pool of `N_NODE = 32` uniform slots (`NODE_SLOT_SIZE` bytes each, checked
+per class with `static_assert`), placement-new'd on patch load and destroyed
+explicitly on unload. The 8 jacks and the MIDI endpoints are reserved nodes
+owned by the master, outside the pool, so a patch cannot delete its own MIDI
+output. **There is no heap allocation after boot**; the native tests assert
+it by instrumenting `operator new`.
+
+Sizing constants live in `src/config.h`. Algorithm ids in
+`src/node/registry.h` are part of the preset format: append, never renumber.
+
+Algorithms available today: `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR`
+(up to four inlets each), `Sustain` (gate to CC), `GateToNote` (gate edge to
+note on/off), `Transpose`, and a minimal `Arpeggiator` (up, one octave; #10
+extends it).
+
 # Code structure
 
 `Setters` and `Getters` are not represented in the diagram below. 

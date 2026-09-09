@@ -39,6 +39,12 @@ jobs:
       - name: Run tests
         run: pio test -e native
 
+      - name: Algorithms must not name hardware
+        # Nothing under src/algorithm/ may include Arduino.h, name a GPIO pin
+        # or a MIDI transport: only the hardware port nodes do that.
+        run: |
+          ! grep -rnE 'Arduino\.h|GPIO_PIN_|mmMIDI_|hardware\.h|hal/teensy|IGpio|IMidiOut' src/algorithm/
+
   firmware:
     name: Teensy 4.1 firmware
     runs-on: ubuntu-latest

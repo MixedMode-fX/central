@@ -10,8 +10,10 @@
 class FakeGpio : public IGpio {
     public:
         struct Write { uint8_t port; uint8_t state; };
+        static constexpr size_t RESERVE = 65536;
 
         FakeGpio() : modes(), inputs(), outputs(), writes() {
+            writes.reserve(RESERVE);   // so recording never allocates mid-test
             for (uint8_t i = 0; i < GPIO_N; i++) {
                 modes[i] = GPIO_MODE_INPUT;
                 inputs[i] = GPIO_LOW;

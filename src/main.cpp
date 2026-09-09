@@ -18,6 +18,7 @@
 #include "protocol/sysex_handler.h"
 #include "control/cc_mapper.h"
 #include "control/nrpn.h"
+#include "control/midi_dispatch.h"
 #include "hal/midi_types.h"
 #include "version.h"
 
@@ -92,28 +93,12 @@ void loop(){
     // 1. transports in: parse and enqueue, nothing more.
     mm_midi_read(midi_in_queue, protocol, now);
 
-    // 2. hand every queued message to the ports that want it. Realtime
-    //    messages go to the clock instead of onto a bus (#4, #5).
-    SourcedMidiEvent in;
-    while (midi_in_queue.pop(in)){
-        // A Program Change the module is listening for recalls a preset and
-        // is consumed; every other one carries on to the graph, so a Program
-        // Change meant for a downstream synth is not silently swallowed.
-        if (in.event.type == MIDI_PROGRAM_CHANGE &&
-            protocol.program_change(in.source, in.event.channel, in.event.data1, now)) continue;
-        // A mapped CC is a control-plane write, not a bus event. It is
-        // remembered here and applied once at the pass boundary, so a knob
-        // sweep costs one parameter write per mapping however fast it is
-        // sent. A mapping flagged pass-through also reaches the graph.
-        // NRPN first, and only where it is enabled: 99/98/6/38 look like
-        // ordinary CCs, so a module that always consumed them would silently
-        // eat a stream meant for a downstream synth (#22).
-        if (in.event.type == MIDI_CONTROL_CHANGE &&
-            nrpn.observe(in.source, in.event.channel, in.event.data1, in.event.data2, now)) continue;
-        if (in.event.type == MIDI_CONTROL_CHANGE &&
-            cc_map.observe(in.source, in.event.channel, in.event.data1, in.event.data2, now)) continue;
-        master.deliver_midi(in.source, in.event, now);
-    }
+    // 2. hand every queued message to the control plane and then the ports
+    //    that want it: preset recall, NRPN, the binding table, the graph
+    //    (control/midi_dispatch.h). Realtime messages go to the clock instead
+    //    of onto a bus (#4, #5). A message the graph has no room for this
+    //    pass stays queued for the next one rather than being dropped.
+    dispatch_midi(midi_in_queue, protocol, nrpn, cc_map, master, now);
 
     // 3. apply whatever the controllers moved, then one evaluation pass.
     //    Parameter writes happen here, before process(), and never in an

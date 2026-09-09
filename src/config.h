@@ -19,8 +19,12 @@
 #define N_NOTE_BUS 8
 #define N_CV_BUS 8
 // Events a note bus can carry per pass. Beyond this, writes are dropped and
-// counted (BusManager::note_overflows()).
-#define NOTE_QUEUE_DEPTH 16
+// counted (BusManager::note_overflows()). The input drain never delivers
+// past it (control/midi_dispatch.h), so the depth only has to cover what the
+// nodes themselves emit in one pass: a four-voice PolySequencer and an
+// eight-lane DrumSeqMidi on one bus is up to 24 note-ons and note-offs on one
+// step. 32 costs 1 KB more than 16 across both buffers of eight buses.
+#define NOTE_QUEUE_DEPTH 32
 
 // Node pool: uniform slots, each large enough for any algorithm's state.
 //

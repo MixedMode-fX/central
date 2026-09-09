@@ -30,6 +30,11 @@ class BusManager {
         uint8_t note_count(uint8_t bus) const;
         const MidiEvent& note_read(uint8_t bus, uint8_t index) const;
         bool note_write(uint8_t bus, const MidiEvent& event);
+        // Events the bus can still take this pass before note_write() starts
+        // dropping. What the input drain asks before it delivers, so a burst
+        // larger than the bus waits in the queue rather than being counted
+        // as overflow (#5).
+        uint8_t note_room(uint8_t bus) const;
         uint32_t note_overflows(uint8_t bus) const;
 
         // CV --------------------------------------------------------------

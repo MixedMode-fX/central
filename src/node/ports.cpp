@@ -39,10 +39,15 @@ void GateOutPort::process(BusManager& buses, uint32_t){
 
 // MidiInPort ----------------------------------------------------------------
 
-bool MidiInPort::deliver(BusManager& buses, uint8_t source, const MidiEvent& event) const {
+bool MidiInPort::accepts(uint8_t source, const MidiEvent& event) const {
     if (!enabled()) return false;
     if ((source_mask & source) == 0) return false;
     if (channel != 0 && event.channel != channel) return false;
+    return true;
+}
+
+bool MidiInPort::deliver(BusManager& buses, uint8_t source, const MidiEvent& event) const {
+    if (!accepts(source, event)) return false;
     buses.note_write(bus, event);
     return true;
 }

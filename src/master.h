@@ -107,6 +107,13 @@ class MixedModeMaster {
         // transport-level and go to the master clock, the rest are dropped,
         // and either way the call returns 0. `now_us` is only read for those.
         uint8_t deliver_midi(uint8_t source, const MidiEvent& event, uint32_t now_us = 0);
+        // Whether every MidiInPort that would accept the event has room on
+        // its bus for it this pass. The input drain asks before delivering,
+        // so a burst larger than a bus - a sustain pedal releasing twenty
+        // notes - waits in the queue instead of losing its tail to overflow
+        // (#5). A system message never needs room: it reaches the clock, not
+        // a bus.
+        bool has_room(uint8_t source, const MidiEvent& event) const;
         // A rising edge on the external sync jack (#4).
         void sync_edge(uint32_t now_us);
         // Master clock (#4): the next pass delivers tick() to subscribed

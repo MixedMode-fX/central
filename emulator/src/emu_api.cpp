@@ -335,6 +335,13 @@ EMU_EXPORT uint32_t emu_boot(uint32_t now_us){
     return patches.running_defaults() ? 1 : 0;
 }
 
+// Where the page writes a message before handing it over. Exported rather
+// than left to the caller to find a free address: guessing at one happens to
+// work until the linker moves something.
+static uint8_t sysex_in_buffer[SYSEX_RX_MAX];
+EMU_EXPORT uint8_t* emu_sysex_in_ptr(){ return sysex_in_buffer; }
+EMU_EXPORT uint32_t emu_sysex_in_capacity(){ return SYSEX_RX_MAX; }
+
 // Feeds one complete SysEx message, F0 to F7 inclusive, from `source`.
 EMU_EXPORT void emu_sysex_in(uint32_t source, const uint8_t* data, uint32_t length){
     protocol.deliver_sysex((uint8_t)source, data, (uint16_t)length);

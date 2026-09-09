@@ -10,6 +10,7 @@ import * as codec from './codec.js';
 import { Device } from './device.js';
 import { validate, advise } from './validate.js';
 import { describeSupport, requestAccess, discover, WebMidiTransport } from './webmidi.js';
+import { EmulatedModule } from './emulator.js';
 import { el, nodeCard } from './views.js';
 
 class App {
@@ -21,6 +22,8 @@ class App {
     this.pendingError = null;
     this.offline = true;
     this.learnTarget = null;
+    this.emulator = null;      // set when the embedded module is the transport
+    this.meterTimer = null;
   }
 
   // An edit goes to the module if one is attached, and is kept locally
@@ -30,6 +33,46 @@ class App {
     Promise.resolve()
       .then(action)
       .catch((error) => { this.pendingError = error.message; this.render(); });
+  }
+
+  // Everything a connection means, once, for whichever transport it is: read
+  // what the firmware has, then take its running patch. The editor is the
+  // same client either way - that is the point of the transport seam.
+  async adopt(transport, label, deviceId = P.SYSEX_DEFAULT_DEVICE) {
+    this.device = new Device(transport);
+    this.device.deviceId = deviceId;
+    this.device.addEventListener('device-event', (e) => this.onDeviceEvent(e.detail));
+    await this.device.readCapabilities();
+    await this.device.readAlgorithms();
+    for (const descriptor of this.device.algorithms) await this.device.readParams(descriptor.id);
+    const dumped = await this.device.dump();
+    this.patch = dumped.patch;
+    this.globals = dumped.globals;
+    this.offline = false;
+    this.status = `connected to ${label}`;
+  }
+
+  // The firmware, compiled to WebAssembly, running in this page. It is the
+  // same code a module runs and it speaks the same protocol, so the editor
+  // cannot tell the difference - and it needs no Web MIDI, which is what
+  // makes the editor usable on a phone at all.
+  async useEmulator() {
+    this.status = 'starting the built-in module…';
+    this.render();
+    try {
+      const emulator = await EmulatedModule.load();
+      emulator.start();
+      this.emulator = emulator;
+      await this.adopt(emulator, emulator.name);
+      // The two status LEDs and the live gate buses are the one thing a page
+      // can show that a MIDI cable cannot; poll them off the render path.
+      clearInterval(this.meterTimer);
+      this.meterTimer = setInterval(() => this.renderMeters(), 100);
+    } catch (error) {
+      this.emulator = null;
+      this.status = `could not start the built-in module: ${error.message}`;
+    }
+    this.render();
   }
 
   async connect() {
@@ -47,17 +90,10 @@ class App {
         return;
       }
       const port = found[0];
-      this.device = new Device(new WebMidiTransport(port.input, port.output));
-      this.device.deviceId = port.deviceId;
-      this.device.addEventListener('device-event', (e) => this.onDeviceEvent(e.detail));
-      await this.device.readCapabilities();
-      await this.device.readAlgorithms();
-      for (const descriptor of this.device.algorithms) await this.device.readParams(descriptor.id);
-      const dumped = await this.device.dump();
-      this.patch = dumped.patch;
-      this.globals = dumped.globals;
-      this.offline = false;
-      this.status = `connected to ${port.name}`;
+      this.emulator?.stop();
+      this.emulator = null;
+      clearInterval(this.meterTimer);
+      await this.adopt(new WebMidiTransport(port.input, port.output), port.name, port.deviceId);
     } catch (error) {
       this.status = `could not connect: ${error.message}`;
     }
@@ -199,10 +235,54 @@ class App {
         el('h4', {}, 'worth a look'),
         el('ul', {}, notes.map((p) => el('li', {}, `${p.where}: ${p.message}`)))) : null,
       this.device?.capabilities ? this.capacities() : null,
+      this.meters(),
       this.ports(),
       el('div', { class: 'nodes' }, this.patch.nodes.map((_, i) => nodeCard(this, i))),
       this.addBar(),
       this.presets());
+  }
+
+  // Updated on a timer rather than by re-rendering: the LEDs move at 10 Hz
+  // and rebuilding the whole page for them would fight every open <select>.
+  renderMeters() {
+    if (!this.emulator) return;
+    const leds = this.emulator.leds();
+    const clock = this.emulator.clock();
+    const green = document.getElementById('led-green');
+    const red = document.getElementById('led-red');
+    const beat = document.getElementById('clock-readout');
+    if (green) green.style.opacity = String(Math.max(0.08, leds.green / 255));
+    if (red) red.style.opacity = String(Math.max(0.08, leds.red / 255));
+    if (beat) {
+      beat.textContent = clock.running
+        ? `${clock.bpm} BPM, beat ${Math.floor(clock.count / (P.MASTER_PPQN * 24)) + 1}`
+        : 'clock stopped';
+    }
+    const buses = this.emulator.gateBuses();
+    for (let b = 0; b < P.N_GATE_BUS; b++) {
+      const dot = document.getElementById(`gate-${b}`);
+      if (dot) dot.classList.toggle('lit', (buses & (1 << b)) !== 0);
+    }
+  }
+
+  // With no panel feedback beyond two LEDs, a live view of what the module is
+  // doing is its missing display - and in the page it costs nothing.
+  meters() {
+    if (!this.emulator) return null;
+    const dots = [];
+    for (let b = 0; b < P.N_GATE_BUS; b++) {
+      dots.push(el('span', { class: 'gate-dot', id: `gate-${b}`, title: `gate bus ${b}` }));
+    }
+    return el('section', { class: 'panel meters' },
+      el('h2', {}, 'what the module is doing'),
+      el('div', { class: 'meter-row' },
+        el('span', { class: 'led green', id: 'led-green', title: 'green: the clock' }),
+        el('span', { class: 'led red', id: 'led-red', title: 'red: attention' }),
+        el('span', { class: 'clock-readout', id: 'clock-readout' }, ''),
+        el('div', { class: 'gate-dots' }, dots)),
+      el('p', { class: 'hint' },
+        'The firmware, running in this page. Presets live in RAM, so a reload '
+        + 'loses them, and the jacks go nowhere — open the emulator to hear a patch.'));
   }
 
   header() {
@@ -210,6 +290,8 @@ class App {
       el('h1', {}, 'MMMC patch editor'),
       el('span', { class: `status ${this.offline ? 'offline' : 'online'}` }, this.status),
       el('button', { onclick: () => this.connect() }, this.offline ? 'connect' : 'reconnect'),
+      el('button', { class: this.emulator ? 'active' : '', onclick: () => this.useEmulator() },
+        this.emulator ? 'emulator running' : 'use built-in module'),
       el('button', { onclick: () => this.exportSyx() }, 'export .syx'),
       el('label', { class: 'file' }, 'import .syx',
         el('input', {

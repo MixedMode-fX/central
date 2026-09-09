@@ -21,6 +21,31 @@ python3 -m http.server -d editor 8080     # then open http://localhost:8080
 GitHub Pages satisfies the secure-context requirement too, which is the
 intended home for it.
 
+## Running it against the built-in module
+
+Press **use built-in module** and the editor talks to the firmware compiled to
+WebAssembly, running in the page. It is the same code a module runs, speaking
+the same protocol through the same codec, so the editor cannot tell the
+difference — `Device` talks to a *transport*, and the wasm module is one.
+
+That is not only a convenience:
+
+- **Web MIDI does not exist on iOS at all**, and on Android needs a permission
+  prompt and an OTG cable. An editor that could only reach a module over Web
+  MIDI would be unusable on most phones. The embedded module needs none of it
+  and runs in every browser, which is why the layout is built for a narrow
+  screen too.
+- It makes the editor demonstrable and testable with no hardware, which is
+  what the Pages deployment is for.
+
+While it runs you get something a MIDI cable cannot give you: the module's two
+status LEDs and its live gate buses, in the page. With no panel feedback beyond
+those LEDs, that view *is* the module's missing display.
+
+What it is not: a substitute for a module. Presets live in RAM, so a reload
+loses them, and the jacks go nowhere — open the emulator itself to hear a
+patch.
+
 ## Browser support
 
 Verify this against current browser support before relying on it; the landscape
@@ -31,6 +56,11 @@ moves. As of writing:
 | Chrome, Edge, Opera | yes | with permission |
 | Firefox | recent versions, behind a permission prompt | with permission |
 | Safari | **no** | — |
+| Any of them, mobile included | not needed for the built-in module | — |
+
+This table is about reaching *hardware*. The built-in module needs no Web MIDI
+at all, so the editor is fully usable on any modern browser including iOS
+Safari — you just cannot talk to a real module from one.
 
 A browser without Web MIDI is not a degraded experience — it is a user who
 cannot set their module up. So the page says plainly what is wrong, and
@@ -99,10 +129,10 @@ pattern as a list of numbers — so those have their own:
 
 ## Still to build
 
-- Live bus activity streamed on the control cable — with no panel feedback
-  beyond two LEDs, a view of which buses are firing is the module's missing
-  display. It has to be rate-limited and disable-able, because it competes with
-  musical traffic.
+- Live bus activity **from a real module**, streamed on the control cable. The
+  built-in module already shows it, because the page can read its state
+  directly; hardware would have to send it, which means rate-limiting it and
+  making it disable-able since it competes with musical traffic.
 - Per-step velocity, length, tie/rest and probability in the note lane, which
   currently shows degrees and pitches only.
 - A dial-and-preview for the Euclidean parameters, which want to be turned

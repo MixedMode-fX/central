@@ -851,11 +851,22 @@ and drum sequencers, with each lane's own length visible, and a note lane over
 resolves to so changing the root visibly moves the pitches without touching the
 stored pattern.
 
-Browser reach is a real constraint: Chrome, Edge and Opera have Web MIDI,
-Firefox asks permission for it, Safari does not have it. A browser without it
-is not a degraded experience, it is a user who cannot set their module up — so
-the page says plainly what is wrong and **`.syx` export is a first-class path**,
-loadable by any standard SysEx librarian.
+**It also runs the module itself.** Press *use built-in module* and the editor
+talks to the firmware compiled to WebAssembly in the page, over the same
+protocol through the same codec — `Device` talks to a transport, and the wasm
+build is one. That matters beyond convenience: **Web MIDI does not exist on
+iOS at all** and needs a permission prompt and an OTG cable on Android, so an
+editor that could only reach a module over Web MIDI would be unusable on most
+phones. Running the module in the page needs none of it. While it runs, the
+editor shows the two status LEDs and the live gate buses — with no panel
+feedback beyond those LEDs, that view is the module's missing display.
+
+Browser reach is a real constraint for reaching *hardware*: Chrome, Edge and
+Opera have Web MIDI, Firefox asks permission for it, Safari does not have it.
+A browser without it is not a degraded experience, it is a user who cannot set
+their module up — so the page says plainly what is wrong, **`.syx` export is a
+first-class path** loadable by any standard SysEx librarian, and the built-in
+module works everywhere regardless.
 
 ## Still open
 

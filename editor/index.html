@@ -15,6 +15,15 @@
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   .shell { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  @media (max-width: 560px) {
+    /* A phone is a first-class target: with the module embedded there is no
+       cable to plug in, so the editor has to be usable one-handed. */
+    .ports { grid-template-columns: 1fr; }
+    .param { grid-template-columns: 6rem 1fr 2.2rem auto; }
+    .lane-name { width: 4.5rem; }
+    .top { gap: .5rem; }
+    .top h1 { font-size: 1.05rem; width: 100%; }
+  }
   h1 { font-size: 1.25rem; margin: 0; }
   h2 { font-size: 0.95rem; margin: 0 0 .6rem; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
   h3 { font-size: 1rem; margin: 0; }
@@ -103,6 +112,17 @@
     font: inherit; text-align: center; padding: 0;
   }
   .note-cell .pitch { font-size: .7rem; color: var(--dim); }
+
+  button.active { border-color: var(--gate); color: var(--gate); }
+  .meters .meter-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .led { width: 14px; height: 14px; border-radius: 50%; flex: none; opacity: .08; }
+  .led.green { background: var(--gate); box-shadow: 0 0 8px var(--gate); }
+  .led.red { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  .clock-readout { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 11rem; }
+  .gate-dots { display: flex; gap: 3px; }
+  .gate-dot { width: 9px; height: 16px; border-radius: 2px; background: #232833;
+              border: 1px solid var(--line); }
+  .gate-dot.lit { background: var(--gate); border-color: var(--gate); }
 
   .add { display: flex; gap: .5rem; margin: 1rem 0; }
   .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .5rem; }

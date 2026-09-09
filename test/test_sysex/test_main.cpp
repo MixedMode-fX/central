@@ -332,6 +332,31 @@ static void test_parameter_descriptors_are_reported_per_group() {
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
 }
 
+// An algorithm with no parameters still answers. Sending nothing at all would
+// be indistinguishable from a module that has gone away, and a host walking
+// the registry to build its panels would stall on the first logic gate.
+static void test_an_algorithm_with_no_parameters_still_answers() {
+    Rig rig;
+    rig.patches.boot(0);
+
+    const AlgorithmDescriptor* gate = registry::find(ALGO_LOGIC_NOT);
+    TEST_ASSERT_EQUAL_MESSAGE(0, gate->n_params, "a logic gate has no parameters");
+
+    rig.midi.clear();
+    rig.send(SYSEX_PARAM_REQUEST, {ALGO_LOGIC_NOT});
+    TEST_ASSERT_EQUAL(0, rig.midi.count_replies(SYSEX_PARAM_DESC));
+    TEST_ASSERT_TRUE_MESSAGE(rig.acked(), "silence is not an answer");
+
+    // Walking the whole registry answers for every algorithm, which is what
+    // an editor does on connect.
+    for (uint8_t i = 0; i < registry::count(); i++) {
+        rig.midi.clear();
+        rig.send(SYSEX_PARAM_REQUEST, {registry::at(i)->id});
+        const bool answered = rig.midi.count_replies(SYSEX_PARAM_DESC) > 0 || rig.acked();
+        TEST_ASSERT_TRUE_MESSAGE(answered, registry::at(i)->name);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Bulk transfer.
 // ---------------------------------------------------------------------------
@@ -876,6 +901,7 @@ int main() {
     RUN_TEST(test_capabilities_report_the_real_limits);
     RUN_TEST(test_the_algorithm_dump_matches_the_registry);
     RUN_TEST(test_parameter_descriptors_are_reported_per_group);
+    RUN_TEST(test_an_algorithm_with_no_parameters_still_answers);
     RUN_TEST(test_a_patch_round_trips_through_dump_and_load);
     RUN_TEST(test_a_truncated_transfer_leaves_the_active_patch_alone);
     RUN_TEST(test_a_corrupted_chunk_is_caught_by_its_checksum);

@@ -85,6 +85,10 @@ class PatchManager {
         ApplyError commit_gate_port(uint8_t jack, const GatePortConfig& config, uint32_t now_us);
         ApplyError commit_midi_in(uint8_t index, const MidiInConfig& config, uint32_t now_us);
         ApplyError commit_midi_out(uint8_t index, const MidiOutConfig& config, uint32_t now_us);
+        // One controller binding (#21). Validated against the running patch,
+        // so a mapping to a node that does not exist is refused rather than
+        // silently doing nothing when the knob is turned.
+        ApplyError commit_cc_map(uint8_t slot, uint32_t now_us);
         // Globals only: no node is reconstructed, so a tempo change cannot
         // restart a sequencer.
         void set_globals(const GlobalSettings& globals, uint32_t now_us);

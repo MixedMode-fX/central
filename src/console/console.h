@@ -5,6 +5,7 @@
 #include "config.h"
 #include "hal/iconsole_io.h"
 #include "patch/patch_manager.h"
+#include "control/cc_mapper.h"
 
 // The text console (#7): with no display and no panel controls, this and the
 // SysEx protocol (#11) are the only two ways anyone sees inside the module or
@@ -29,10 +30,12 @@
 class Console {
     public:
         static constexpr uint8_t CONSOLE_LINE_MAX = 96;
-        static constexpr uint8_t MAX_ARGS = 6;
+        // Enough for the widest command: `map <slot> <cc> <node> <param>
+        // <min> <max>` is seven words including the verb.
+        static constexpr uint8_t MAX_ARGS = 8;
 
         Console(IConsoleIo& io, PatchManager& patches, MixedModeMaster& master,
-                PatchStore& store, StatusLeds& leds);
+                PatchStore& store, StatusLeds& leds, CcMapper& cc);
         Console(const Console&) = delete;
         Console& operator=(const Console&) = delete;
 
@@ -65,6 +68,10 @@ class Console {
         void cmd_load(uint8_t argc, uint32_t now_us);
         void cmd_erase(uint8_t argc);
         void cmd_defaults(uint32_t now_us);
+        void cmd_maps();
+        void cmd_map(uint8_t argc, uint32_t now_us);
+        void cmd_unmap(uint8_t argc, uint32_t now_us);
+        void cmd_learn(uint8_t argc, uint32_t now_us);
 
         void put(const char* text){ io.write(text); }
         void put_line(const char* text){ io.write(text); io.write("\r\n"); }
@@ -83,6 +90,7 @@ class Console {
         MixedModeMaster& mm;
         PatchStore& store;
         StatusLeds& leds;
+        CcMapper& cc;
         char line[CONSOLE_LINE_MAX + 1];
         char* argv[MAX_ARGS];
         uint8_t argc;

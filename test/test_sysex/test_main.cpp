@@ -11,6 +11,7 @@
 #include "protocol/sysex.h"
 #include "protocol/sysex_handler.h"
 #include "patch/patch_manager.h"
+#include "control/cc_mapper.h"
 #include "patch/default_patch.h"
 #include "node/registry.h"
 #include "hal/midi_types.h"
@@ -44,12 +45,13 @@ struct Rig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    CcMapper cc;
     SysexHandler sysex;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds),
-            sysex(patches, master, store, leds, midi) {}
+            patches(master, store, leds), cc(patches, master),
+            sysex(patches, master, store, leds, midi, cc) {}
 
     // One command, framed the way the wire carries it.
     void send(uint8_t command, const std::vector<uint8_t>& args = {}) {

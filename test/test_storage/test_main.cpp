@@ -13,6 +13,7 @@
 #include "patch/patch_manager.h"
 #include "patch/default_patch.h"
 #include "console/console.h"
+#include "control/cc_mapper.h"
 #include "led/status_leds.h"
 #include "node/registry.h"
 #include "hal/midi_types.h"
@@ -42,12 +43,13 @@ struct Rig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    CcMapper cc;
     Console console;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(), io(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds),
-            console(io, patches, master, store, leds) {}
+            patches(master, store, leds), cc(patches, master),
+            console(io, patches, master, store, leds, cc) {}
 };
 
 static Patch three_node_patch() {
@@ -578,6 +580,39 @@ static void test_console_reads_a_line_from_the_transport() {
     TEST_ASSERT_TRUE(rig.io.said("firmware"));
 }
 
+// The console covers the same ground as the SysEx commands, so hardware
+// testing is not blocked on an editor (#21).
+static void test_console_binds_and_lists_a_controller_mapping() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(three_node_patch(), g, 0);
+
+    rig.console.execute("map 0 20 1 3", 0);
+    TEST_ASSERT_TRUE(rig.io.said("bound"));
+    rig.io.clear();
+    rig.console.execute("maps", 0);
+    TEST_ASSERT_TRUE(rig.io.said("cc 20"));
+    TEST_ASSERT_TRUE(rig.io.said("node"));
+
+    rig.io.clear();
+    rig.console.execute("map 0 20 9 3", 0);        // no such node
+    TEST_ASSERT_TRUE(rig.io.said("rejected"));
+
+    rig.io.clear();
+    rig.console.execute("learn 1 1 4", 0);
+    TEST_ASSERT_TRUE(rig.io.said("armed"));
+    TEST_ASSERT_TRUE(rig.cc.learning());
+    rig.console.execute("learn", 0);
+    TEST_ASSERT_FALSE(rig.cc.learning());
+
+    rig.io.clear();
+    rig.console.execute("unmap 0", 0);
+    TEST_ASSERT_TRUE(rig.io.said("forgotten"));
+    rig.io.clear();
+    rig.console.execute("maps", 0);
+    TEST_ASSERT_TRUE(rig.io.said("no bindings"));
+}
+
 static void test_console_reports_an_unknown_command() {
     Rig rig;
     rig.patches.boot(0);
@@ -672,6 +707,7 @@ int main() {
     RUN_TEST(test_console_lists_algorithms_and_parameters);
     RUN_TEST(test_console_saves_recalls_and_restores_defaults);
     RUN_TEST(test_console_reads_a_line_from_the_transport);
+    RUN_TEST(test_console_binds_and_lists_a_controller_mapping);
     RUN_TEST(test_console_reports_an_unknown_command);
     RUN_TEST(test_the_console_works_after_a_patch_fails_to_load);
     RUN_TEST(test_an_overlong_console_line_is_refused_not_overrun);

@@ -102,6 +102,15 @@
 // unreleasable.
 #define MAX_SOUNDING_NOTES 32
 
+// Controller bindings a patch can carry (#21).
+//
+// Thirty-two is a controller's worth - every knob and fader on a typical
+// 16-knob box, twice over - and costs 32 x sizeof(CcMapping) = 384 bytes of
+// RAM inside Patch. Unused entries are not stored or transmitted at all
+// (patch_codec trims them), so a patch with no mappings pays nothing on the
+// wire or in EEPROM.
+#define N_CC_MAP 32
+
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per
 // second, so ~350 messages/s; five transports at once and a 1 kHz pass rate

@@ -29,7 +29,7 @@
 // Bumped when the layout below changes in a way an older decoder would
 // misread. A decoder refuses a version it does not know rather than reading
 // garbage into a live patch.
-#define PATCH_FORMAT_VERSION 1
+#define PATCH_FORMAT_VERSION 2
 
 // "MMMC", big-endian, at the head of every stored or transmitted image.
 #define PATCH_MAGIC 0x4D4D4D43u
@@ -43,6 +43,7 @@ enum CodecError : uint8_t {
     CODEC_TOO_MANY_NODES,     // n_nodes > N_NODE
     CODEC_PARAM_TOO_LONG,     // a node's parameter block exceeds N_PARAM
     CODEC_NO_ROOM,            // encoding did not fit the caller's buffer
+    CODEC_TOO_MANY_MAPPINGS,  // more CC bindings than N_CC_MAP
 };
 
 // Global settings that travel with a patch: everything the module needs to

@@ -679,6 +679,71 @@ the test for all of it is to send garbage — an unknown command, a chunk from
 nowhere, a bad checksum, a lost chunk, a patch that fails validation — and
 then a good patch, and watch the good one land.
 
+## Controller mapping (MIDI CC)
+
+SysEx is the right answer for an editor and the wrong answer for a
+performance. A CC is what a musician already has under their fingers, and with
+no encoder and no display it is the only way to change anything while playing.
+
+A mapping table lives in the patch, applies at the MIDI input layer before the
+graph runs, and writes through the same validated entry point SysEx edits and
+the console use. It is deliberately **not** a node: a parameter is not a bus
+signal — it has no domain, no fan-in rule and no per-pass value — so routing it
+through the graph would mean a mapping only worked when the CC's port happened
+to be patched to a bus, and stopped existing the moment a swap removed the
+node.
+
+`N_CC_MAP` = 32 bindings, a controller's worth. Unused entries cost nothing in
+the stored image or on the wire.
+
+**What a mapping can reach.** A node's parameter is the common case, but the
+master clock is not a node, so the target space has a kind: `node` (index plus
+parameter), `clock` (tempo, source, CV PPQN), and `transport` (start, stop,
+continue, and tap tempo — `MasterClock`'s header has promised tap since the
+clock was built and this is the entry point). `port` is reserved.
+
+**Tempo does not fit in seven bits.** 20 to 300 BPM over 128 CC steps is 2.2
+BPM per step, which is unusable for anything but a coarse sweep. A mapping can
+be flagged 14-bit — CC *n* as the MSB, CC *n*+32 as the LSB, the standard
+convention — which resolves the full range finely enough to be worth turning.
+A lone MSB with no LSB is applied rather than stalling, which costs one message
+of latency on a controller that sends LSB first.
+
+**Takeover**, because a patch recall or a SysEx edit moves a value while the
+physical knob stays put, and with no display the user cannot see it coming:
+
+- **Jump** (the default) takes the value immediately. Loud, but it is the only
+  mode that always responds, and a silent knob is a worse first impression.
+- **Pickup** ignores the knob until it crosses the current value. Correct, and
+  confusing the first time a knob does nothing.
+- **Scale** freezes an anchor when the knob is first moved and maps the travel
+  either side of it onto the range either side of the value, so the knob still
+  reaches both ends and the move is reversible.
+
+**Relative encoders** send an increment, not a position, in one of three
+incompatible encodings (two's complement, signed bit, offset-64). All three are
+supported: an encoder read as absolute makes a parameter jump to the extremes
+with nothing to diagnose it by. A relative mapping sidesteps takeover
+entirely, which is why it is the mode worth recommending.
+
+**Pass-through** is off by default — the user bound this CC deliberately — and
+is one flag away. A consumed CC never reaches a note bus; a forwarded one does
+and reaches a `MidiOutPort` as well as moving the parameter.
+
+**Learn**, without a panel: the editor or the console says *the next CC you see
+binds to node 4 parameter 1*, and the module answers with what it bound. It
+times out, and it ignores the reserved control cable — a learn that bound to
+its own control port would be a trap.
+
+**Rate limiting is at the pass boundary, not per event.** A stuck controller or
+a MIDI loop can hammer a CC thousands of times a second; only the newest value
+per mapping survives to the next pass, so a full-rate sweep costs exactly one
+parameter write per mapping per pass. That is the same "collapse the subticks"
+discipline the master clock already uses.
+
+Console: `maps`, `map <slot> <cc> <node> <param> [min] [max]`,
+`learn <slot> <node> <param>`, `unmap <slot>`.
+
 ## Still open
 
 **The KeyMech header is undocumented.** `SERIAL_KEYMECH` on `Serial8` with

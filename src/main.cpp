@@ -16,6 +16,7 @@
 #include "patch/patch_manager.h"
 #include "console/console.h"
 #include "protocol/sysex_handler.h"
+#include "control/cc_mapper.h"
 #include "hal/midi_types.h"
 #include "version.h"
 
@@ -34,12 +35,17 @@ static MixedModeMaster master(gpio, midi_out);
 static StatusLeds leds(led_driver);
 static PatchStore store(eeprom);
 static PatchManager patches(master, store, leds);
-static Console console(console_io, patches, master, store, leds);
+
+// Controller bindings (#21). Not a node: a parameter is not a bus signal, so
+// mapping applies at the MIDI input layer and writes through the same
+// validated entry point the protocol and the console use.
+static CcMapper cc_map(patches, master);
+static Console console(console_io, patches, master, store, leds, cc_map);
 
 // The patch protocol (#11). Not a node, not reachable from a bus: with no
 // button to hold at power-on, a patch that could take this down would leave
 // reflashing over USB as the only way to recover.
-static SysexHandler protocol(patches, master, store, leds, midi_out);
+static SysexHandler protocol(patches, master, store, leds, midi_out, cc_map);
 
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
@@ -93,10 +99,19 @@ void loop(){
         // Change meant for a downstream synth is not silently swallowed.
         if (in.event.type == MIDI_PROGRAM_CHANGE &&
             protocol.program_change(in.source, in.event.channel, in.event.data1, now)) continue;
+        // A mapped CC is a control-plane write, not a bus event. It is
+        // remembered here and applied once at the pass boundary, so a knob
+        // sweep costs one parameter write per mapping however fast it is
+        // sent. A mapping flagged pass-through also reaches the graph.
+        if (in.event.type == MIDI_CONTROL_CHANGE &&
+            cc_map.observe(in.source, in.event.channel, in.event.data1, in.event.data2, now)) continue;
         master.deliver_midi(in.source, in.event, now);
     }
 
-    // 3. one evaluation pass, which also collects the clock's subticks.
+    // 3. apply whatever the controllers moved, then one evaluation pass.
+    //    Parameter writes happen here, before process(), and never in an
+    //    interrupt: the transport enqueues, the pass applies.
+    cc_map.apply(now);
     master.pass(now);
 
     // 4. reprogram the subtick timer if the tempo or the external period moved.

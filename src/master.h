@@ -28,6 +28,7 @@ enum LoadError : uint8_t {
     LOAD_GATE_PORT_BUS_OUT_OF_RANGE,
     LOAD_MIDI_PORT_BUS_OUT_OF_RANGE,
     LOAD_NODE_INVALID,         // see last_node_error() / last_node_index()
+    LOAD_CC_MAPPING_INVALID,   // see last_mapping_index() (#21)
 };
 
 // Owns the master clock, the buses, the reserved hardware port nodes and the
@@ -120,6 +121,12 @@ class MixedModeMaster {
         LoadError last_error() const { return error; }
         ConfigError last_node_error() const { return node_error; }
         uint8_t last_node_index() const { return node_error_index; }
+        uint8_t last_mapping_index() const { return mapping_error_index; }
+        // Range-checks one controller binding against the patch it belongs
+        // to: unknown target, a node index beyond n_nodes, a parameter index
+        // beyond the descriptor, min > max. A patch with a bad mapping is
+        // rejected whole (#11's rule), never partially applied.
+        static bool mapping_valid(const Patch& patch, const CcMapping& mapping);
         uint8_t node_count() const { return pool.count(); }
         Node* node(uint8_t index) const { return pool.node(index); }
         const AlgorithmDescriptor* node_descriptor(uint8_t index) const { return pool.descriptor(index); }
@@ -142,6 +149,7 @@ class MixedModeMaster {
         LoadError error;
         ConfigError node_error;
         uint8_t node_error_index;
+        uint8_t mapping_error_index;
 };
 
 #endif

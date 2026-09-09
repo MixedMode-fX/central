@@ -124,6 +124,19 @@ ApplyError PatchManager::commit_midi_out(uint8_t index, const MidiOutConfig& con
     return error = APPLY_OK;
 }
 
+ApplyError PatchManager::commit_cc_map(uint8_t slot, uint32_t now_us){
+    if (slot >= N_CC_MAP) return error = APPLY_INVALID;
+    const CcMapping& m = stage.cc_map[slot];
+    // An empty slot is always legal: clearing a binding must never fail.
+    if (m.source_mask != 0 && !MixedModeMaster::mapping_valid(live, m)){
+        leds.error(now_us);
+        return error = APPLY_INVALID;
+    }
+    live.cc_map[slot] = m;
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
 void PatchManager::set_globals(const GlobalSettings& g, uint32_t now_us){
     live_globals = g;
     push_globals();

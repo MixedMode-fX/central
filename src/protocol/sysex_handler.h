@@ -7,6 +7,7 @@
 #include "hal/imidi_out.h"
 #include "protocol/sysex.h"
 #include "patch/patch_manager.h"
+#include "control/cc_mapper.h"
 #include "led/status_leds.h"
 
 // The patch protocol's device end (#11).
@@ -48,7 +49,7 @@ class SysexHandler : public ISysexIn {
         static constexpr uint8_t BEATS_PER_BAR = 4;
 
         SysexHandler(PatchManager& patches, MixedModeMaster& master,
-                     PatchStore& store, StatusLeds& leds, IMidiOut& midi);
+                     PatchStore& store, StatusLeds& leds, IMidiOut& midi, CcMapper& mapper);
         SysexHandler(const SysexHandler&) = delete;
         SysexHandler& operator=(const SysexHandler&) = delete;
 
@@ -89,6 +90,7 @@ class SysexHandler : public ISysexIn {
         void reply_param_descriptors(uint8_t source, uint8_t algorithm_id);
         void reply_dump(uint8_t source);
         void reply_slots(uint8_t source);
+        void reply_cc_map(uint8_t source, uint8_t slot);
         void ack(uint8_t source);
         void nak(uint8_t source, SysexError code);
         void notify(uint8_t event, uint8_t detail);
@@ -111,6 +113,7 @@ class SysexHandler : public ISysexIn {
         PatchStore& store;
         StatusLeds& leds;
         IMidiOut& midi;
+        CcMapper& cc;
 
         // The staging image a bulk transfer accumulates into. The live graph
         // is untouched until the last chunk has arrived and the whole image

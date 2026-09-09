@@ -5,7 +5,7 @@ MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
     gpio(gpio_if), midi(midi_if), clk(), bus(), pool(),
     gate_in(), gate_out(), midi_in(), midi_out(),
     tick_pending(false), tick_count(0),
-    error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0)
+    error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0)
 {}
 
 LoadError MixedModeMaster::validate(const Patch& patch){
@@ -33,7 +33,34 @@ LoadError MixedModeMaster::validate(const Patch& patch){
             return LOAD_NODE_INVALID;
         }
     }
+    for (uint8_t i = 0; i < N_CC_MAP; i++){
+        if (patch.cc_map[i].source_mask == 0) continue;
+        if (!mapping_valid(patch, patch.cc_map[i])){
+            mapping_error_index = i;
+            return LOAD_CC_MAPPING_INVALID;
+        }
+    }
     return LOAD_OK;
+}
+
+bool MixedModeMaster::mapping_valid(const Patch& patch, const CcMapping& m){
+    if (m.cc > 119) return false;                       // 120..127 are channel mode
+    if (m.channel > 16) return false;
+    if (m.min > m.max) return false;
+    // A mapping cannot target the control cable: the protocol's own port is
+    // not something a patch gets to reach (#11, #21).
+    if (m.source_mask & MIDI_CONTROL_PORT) return false;
+    switch (m.target_kind){
+        case CC_TARGET_NODE: {
+            if (m.target_index >= patch.n_nodes) return false;
+            const AlgorithmDescriptor* d = registry::find(patch.nodes[m.target_index].algorithm_id);
+            if (d == nullptr) return false;
+            return registry::param(*d, m.param) != nullptr;
+        }
+        case CC_TARGET_CLOCK:     return m.param < CC_CLOCK_TARGETS;
+        case CC_TARGET_TRANSPORT: return m.param < CC_TRANSPORT_TARGETS;
+        default:                  return false;         // CC_TARGET_PORT is reserved
+    }
 }
 
 LoadError MixedModeMaster::load(const Patch& patch){

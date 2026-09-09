@@ -47,6 +47,15 @@ class MasterClock {
         uint8_t source() const { return src; }
         // Clamped to CLOCK_MIN_BPM .. CLOCK_MAX_BPM.
         void set_bpm(uint16_t beats_per_minute);
+        // Tap tempo (#21): the interval between two taps is one beat. A gap
+        // longer than TAP_TIMEOUT_US starts a new measurement rather than
+        // averaging across a pause, and a tap implying a tempo outside the
+        // limits is ignored rather than clamped - a stray tap should not
+        // silently pin the tempo to 20 BPM. Averaged over the last few taps,
+        // because two taps by hand are not an accurate beat.
+        void tap(uint32_t now_us);
+        static constexpr uint32_t TAP_TIMEOUT_US = 3000000;
+        static constexpr uint8_t TAP_AVERAGE = 4;
         uint16_t bpm() const { return tempo; }
         // Pulses per quarter note expected at the sync jack (1, 2, 4, 24, ...).
         void set_cv_ppqn(uint8_t ppqn);
@@ -112,6 +121,9 @@ class MasterClock {
         volatile bool is_running;
         volatile bool have_edge;
         uint32_t last_consumed;
+        uint32_t last_tap_us;
+        uint32_t tap_intervals[TAP_AVERAGE];
+        uint8_t tap_count;
         uint16_t tempo;
         uint8_t src;
         uint8_t cv_pulses;

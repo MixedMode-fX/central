@@ -1,6 +1,7 @@
 #include "console/console.h"
 #include "node/registry.h"
 #include "version.h"
+#include "hal/midi_types.h"
 
 // A tiny formatting layer rather than snprintf: the Teensy's newlib printf
 // pulls in a large chunk of flash and a reentrancy structure, and everything
@@ -12,8 +13,9 @@ static bool str_eq(const char* a, const char* b){
 }
 
 Console::Console(IConsoleIo& console_io, PatchManager& manager,
-                 MixedModeMaster& master, PatchStore& patch_store, StatusLeds& status) :
-    io(console_io), patches(manager), mm(master), store(patch_store), leds(status),
+                 MixedModeMaster& master, PatchStore& patch_store, StatusLeds& status,
+                 CcMapper& mapper) :
+    io(console_io), patches(manager), mm(master), store(patch_store), leds(status), cc(mapper),
     line(), argv(), argc(0), length(0), overflowed(false)
 {}
 
@@ -127,6 +129,10 @@ void Console::dispatch(uint32_t now_us){
     if (str_eq(cmd, "load"))       { cmd_load(argc, now_us); return; }
     if (str_eq(cmd, "erase"))      { cmd_erase(argc); return; }
     if (str_eq(cmd, "defaults"))   { cmd_defaults(now_us); return; }
+    if (str_eq(cmd, "maps"))       { cmd_maps(); return; }
+    if (str_eq(cmd, "map"))        { cmd_map(argc, now_us); return; }
+    if (str_eq(cmd, "unmap"))      { cmd_unmap(argc, now_us); return; }
+    if (str_eq(cmd, "learn"))      { cmd_learn(argc, now_us); return; }
 
     put("unknown command: ");
     put_line(cmd);
@@ -148,6 +154,10 @@ void Console::cmd_help(){
     put_line("load <slot>             recall a stored patch");
     put_line("erase <slot>            forget a stored patch");
     put_line("defaults                back to the built-in patch");
+    put_line("maps                    the controller bindings");
+    put_line("map <slot> <cc> <node> <param>   bind a CC to a parameter");
+    put_line("learn <slot> <node> <param>      bind the next CC seen");
+    put_line("unmap <slot>            forget a binding");
 }
 
 void Console::cmd_info(){
@@ -401,4 +411,95 @@ void Console::cmd_erase(uint8_t n){
 void Console::cmd_defaults(uint32_t now_us){
     if (patches.restore_defaults(now_us) == APPLY_OK) put_line("running the built-in patch");
     else put_line("defaults: failed");
+}
+
+// Controller bindings (#21). The console covers the same ground as the SysEx
+// commands, so hardware testing is not blocked on an editor.
+
+static const char* const CC_TARGET_NAMES[CC_TARGET_KINDS] = {
+    "node", "clock", "transport", "port",
+};
+
+void Console::cmd_maps(){
+    const Patch& p = patches.active();
+    bool any = false;
+    for (uint8_t i = 0; i < N_CC_MAP; i++){
+        const CcMapping& m = p.cc_map[i];
+        if (m.source_mask == 0) continue;
+        any = true;
+        put_uint(i); put(": cc "); put_uint(m.cc);
+        put(" ch "); put_uint(m.channel);
+        put(" mask "); put_uint(m.source_mask);
+        put(" -> "); put(m.target_kind < CC_TARGET_KINDS ? CC_TARGET_NAMES[m.target_kind] : "?");
+        put(" "); put_uint(m.target_index);
+        put(" param "); put_uint(m.param);
+        put(" ["); put_uint(m.min); put(".."); put_uint(m.max); put("]");
+        if (m.flags & CC_FOURTEEN_BIT) put(" 14-bit");
+        if (m.flags & CC_PASS_THROUGH) put(" thru");
+        if ((m.flags & CC_RELATIVE_MASK) != CC_ABSOLUTE) put(" relative");
+        put_line("");
+    }
+    if (!any) put_line("no bindings");
+    if (cc.learning()) put_line("a learn is armed");
+    put_kv("writes  ", cc.writes());
+    put_kv("refused ", cc.refused());
+}
+
+void Console::cmd_map(uint8_t n, uint32_t now_us){
+    if (n < 5){ put_line("map <slot> <cc> <node> <param> [min] [max]"); return; }
+    bool ok[6] = {false, false, false, false, false, false};
+    const uint32_t slot  = arg_uint(1, ok[0]);
+    const uint32_t cc_no = arg_uint(2, ok[1]);
+    const uint32_t node  = arg_uint(3, ok[2]);
+    const uint32_t param = arg_uint(4, ok[3]);
+    const uint32_t lo    = n > 5 ? arg_uint(5, ok[4]) : 0;
+    const uint32_t hi    = n > 6 ? arg_uint(6, ok[5]) : 0;
+    if (!ok[0] || !ok[1] || !ok[2] || !ok[3]){ put_line("map: every argument must be a number"); return; }
+    if (slot >= N_CC_MAP){ put_line("map: no such slot"); return; }
+
+    CcMapping m = unused_mapping();
+    // Every port but the control cable: a mapping cannot reach the protocol's
+    // own port, and binding to one specific transport is what the editor is
+    // for.
+    m.source_mask = MIDI_MUSICAL_PORTS;
+    m.channel = 0;                       // omni from the console
+    m.cc = (uint8_t)cc_no;
+    m.target_kind = CC_TARGET_NODE;
+    m.target_index = (uint8_t)node;
+    m.param = (uint16_t)param;
+    m.min = (uint16_t)lo;
+    m.max = (uint16_t)hi;
+
+    patches.begin_edit();
+    patches.staging().cc_map[slot] = m;
+    if (patches.commit_cc_map((uint8_t)slot, now_us) != APPLY_OK){
+        put_line("map: rejected - check the node and parameter exist");
+        return;
+    }
+    cc.reset();
+    put_line("bound");
+}
+
+void Console::cmd_unmap(uint8_t n, uint32_t now_us){
+    if (n < 2){ put_line("unmap <slot>"); return; }
+    bool ok = false;
+    const uint32_t slot = arg_uint(1, ok);
+    if (!ok || slot >= N_CC_MAP){ put_line("unmap: no such slot"); return; }
+    patches.begin_edit();
+    patches.staging().cc_map[slot] = unused_mapping();
+    patches.commit_cc_map((uint8_t)slot, now_us);
+    cc.reset();
+    put_line("forgotten");
+}
+
+void Console::cmd_learn(uint8_t n, uint32_t now_us){
+    if (n < 2){ cc.learn_cancel(); put_line("learn cancelled"); return; }
+    if (n < 4){ put_line("learn <slot> <node> <param>, or `learn` alone to cancel"); return; }
+    bool a = false, b = false, c = false;
+    const uint32_t slot  = arg_uint(1, a);
+    const uint32_t node  = arg_uint(2, b);
+    const uint32_t param = arg_uint(3, c);
+    if (!a || !b || !c || slot >= N_CC_MAP){ put_line("learn: bad arguments"); return; }
+    cc.learn_arm((uint8_t)slot, CC_TARGET_NODE, (uint8_t)node, (uint16_t)param, now_us);
+    put_line("armed: turn a controller");
 }

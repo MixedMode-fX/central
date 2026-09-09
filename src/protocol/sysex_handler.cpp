@@ -18,8 +18,9 @@
 static constexpr uint16_t HEADER_BYTES = 4;
 
 SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
-                           PatchStore& patch_store, StatusLeds& status, IMidiOut& midi_out) :
-    patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out),
+                           PatchStore& patch_store, StatusLeds& status, IMidiOut& midi_out,
+                           CcMapper& mapper) :
+    patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out), cc(mapper),
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
     pending_patch(empty_patch()), pending_globals(default_globals()),
@@ -241,6 +242,51 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             }
             timing = g.pc_quantise;
             patches.set_globals(g, now_us);
+            ack(source);
+            return;
+        }
+
+        // One controller binding (#21). The whole record in one message: a
+        // mapping is ten bytes, so chunking it would be ceremony.
+        case SYSEX_SET_CC_MAP: {
+            if (n < 11){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (args[0] >= N_CC_MAP){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            CcMapping m = unused_mapping();
+            // The port mask reaches 0x80, so its top bit rides in the flags
+            // byte's spare bit rather than being truncated on the wire.
+            m.source_mask = (uint8_t)(args[1] | ((args[10] & 0x40) ? 0x80u : 0u));
+            m.channel = args[2];
+            m.cc = args[3];
+            m.target_kind = args[4];
+            m.target_index = args[5];
+            m.param = (uint16_t)(args[6] | ((uint16_t)args[7] << 7));
+            m.min = (uint16_t)(args[8] | ((uint16_t)(args[9] & 0x7F) << 7));
+            m.max = (uint16_t)(n > 12 ? (args[11] | ((uint16_t)(args[12] & 0x7F) << 7)) : 0u);
+            m.flags = (uint8_t)(args[10] & 0x3F);
+            patches.begin_edit();
+            patches.staging().cc_map[args[0]] = m;
+            if (patches.commit_cc_map(args[0], now_us) != APPLY_OK){
+                nak(source, SYSEX_ERR_REJECTED);
+                return;
+            }
+            cc.reset();
+            ack(source);
+            return;
+        }
+
+        case SYSEX_GET_CC_MAP:
+            if (n < 1 || args[0] >= N_CC_MAP){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_cc_map(source, args[0]);
+            return;
+
+        // Learn, without a panel: the host says "the next CC you see binds to
+        // this target", and the module answers with what it bound.
+        case SYSEX_CC_LEARN: {
+            if (n < 1){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (args[0] == 0){ cc.learn_cancel(); ack(source); return; }
+            if (n < 5 || args[1] >= N_CC_MAP){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            const uint16_t param = (uint16_t)(args[4] | ((uint16_t)(n > 5 ? args[5] : 0u) << 7));
+            cc.learn_arm(args[1], args[2], args[3], param, now_us);
             ack(source);
             return;
         }
@@ -525,6 +571,22 @@ void SysexHandler::reply_slots(uint8_t source){
     send_reply(source);
 }
 
+void SysexHandler::reply_cc_map(uint8_t source, uint8_t slot){
+    const CcMapping& m = patches.active().cc_map[slot];
+    begin_reply(SYSEX_CC_MAP);
+    put(slot);
+    put((uint8_t)(m.source_mask & 0x7F));
+    put(m.channel);
+    put(m.cc);
+    put(m.target_kind);
+    put(m.target_index);
+    put_u14(m.param);
+    put_u14(m.min);
+    put((uint8_t)(m.flags | ((m.source_mask & 0x80) ? 0x40u : 0u)));
+    put_u14(m.max);
+    send_reply(source);
+}
+
 // Quantised swap --------------------------------------------------------
 
 uint32_t SysexHandler::swap_boundary() const {
@@ -540,6 +602,7 @@ void SysexHandler::arm_swap(uint32_t now_us){
         // arrives, and a recall that never happened is worse than one that
         // glitched.
         patches.apply(pending_patch, pending_globals, now_us);
+        cc.reset();
         if (pending_slot != 0xFF) notify(SYSEX_EVENT_PROGRAM_CHANGE, pending_slot);
         pending = false;
         return;
@@ -558,8 +621,14 @@ void SysexHandler::service(uint32_t now_us){
         notify(SYSEX_EVENT_ERROR, SYSEX_ERR_TRUNCATED);
     }
 
+    // A learn that captured a controller is reported once, so the editor
+    // updates without polling.
+    uint8_t learned = 0;
+    if (cc.take_learn_result(learned)) notify(SYSEX_EVENT_CC_LEARNED, learned);
+
     if (pending && mm.clock().count() >= pending_at){
         patches.apply(pending_patch, pending_globals, now_us);
+        cc.reset();
         pending = false;
         notify(pending_slot != 0xFF ? SYSEX_EVENT_PROGRAM_CHANGE : SYSEX_EVENT_PATCH_APPLIED,
                pending_slot != 0xFF ? pending_slot : 0);

@@ -64,6 +64,9 @@ enum SysexCommand : uint8_t {
     SYSEX_SET_GATE_PORT    = 0x13,
     SYSEX_SET_MIDI_PORT    = 0x14,
     SYSEX_SET_GLOBALS      = 0x15,
+    SYSEX_SET_CC_MAP       = 0x16,   // one controller binding (#21)
+    SYSEX_GET_CC_MAP       = 0x17,
+    SYSEX_CC_LEARN         = 0x18,   // arm / cancel: the next CC binds
     SYSEX_SLOT_SAVE        = 0x20,
     SYSEX_SLOT_LOAD        = 0x21,
     SYSEX_SLOT_ERASE       = 0x22,
@@ -77,6 +80,7 @@ enum SysexCommand : uint8_t {
     SYSEX_PARAM_DESC       = 0x44,
     SYSEX_PATCH_CHUNK_OUT  = 0x45,
     SYSEX_PARAM_VALUE      = 0x51,
+    SYSEX_CC_MAP           = 0x52,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>
@@ -106,6 +110,7 @@ enum SysexEvent : uint8_t {
     SYSEX_EVENT_PROGRAM_CHANGE = 0x01,   // <slot>: a Program Change recalled a preset
     SYSEX_EVENT_PATCH_APPLIED  = 0x02,   // <0>: a pending quantised swap went live
     SYSEX_EVENT_ERROR          = 0x03,   // <SysexError>: what the red LED is reporting
+    SYSEX_EVENT_CC_LEARNED     = 0x04,   // <slot>: a learn captured a controller
 };
 
 // Chunking. A DIN dump at 31250 baud is slow and the USB path has its own

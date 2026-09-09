@@ -22,12 +22,26 @@
 //                          param length      2   (trailing zeros trimmed)
 //                          params            that many bytes
 //                      }
+//   n_mappings         1   (#21; unused slots are not stored)
+//   mappings           n_mappings x {
+//                          slot              1   which cc_map entry it is
+//                          source_mask       1
+//                          channel           1
+//                          cc                1
+//                          target_kind       1
+//                          target_index      1
+//                          param             2
+//                          min               2
+//                          max               2
+//                          flags             1
+//                      }
 
 static constexpr size_t HEADER_BYTES = 8;
 static constexpr size_t CRC_BYTES = 2;
 static constexpr size_t PORT_BYTES =
     (size_t)GPIO_N * 2u + (size_t)N_MIDI_IN_NODES * 3u + (size_t)N_MIDI_OUT_NODES * 3u + 1u;
 static constexpr size_t NODE_FIXED_BYTES = 1u + MAX_IN + MAX_OUT + 2u;
+static constexpr size_t MAPPING_BYTES = 13u;
 
 uint16_t patch_codec::crc16(const uint8_t* data, size_t length){
     uint16_t crc = 0xFFFF;
@@ -42,7 +56,8 @@ uint16_t patch_codec::crc16(const uint8_t* data, size_t length){
 
 size_t patch_codec::max_encoded_size(){
     return HEADER_BYTES + sizeof(GlobalSettings) + PORT_BYTES
-         + (size_t)N_NODE * (NODE_FIXED_BYTES + N_PARAM) + CRC_BYTES;
+         + (size_t)N_NODE * (NODE_FIXED_BYTES + N_PARAM)
+         + 1u + (size_t)N_CC_MAP * MAPPING_BYTES + CRC_BYTES;
 }
 
 // A small append-only writer, so every put is bounds-checked in one place.
@@ -126,6 +141,26 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
         w.bytes(node.params, n_params);
     }
 
+    // Controller bindings (#21). Only the slots in use are stored, so a patch
+    // with no mappings costs one byte.
+    uint8_t n_mappings = 0;
+    for (uint8_t i = 0; i < N_CC_MAP; i++) if (patch.cc_map[i].source_mask != 0) n_mappings++;
+    w.u8(n_mappings);
+    for (uint8_t i = 0; i < N_CC_MAP; i++){
+        const CcMapping& m = patch.cc_map[i];
+        if (m.source_mask == 0) continue;
+        w.u8(i);
+        w.u8(m.source_mask);
+        w.u8(m.channel);
+        w.u8(m.cc);
+        w.u8(m.target_kind);
+        w.u8(m.target_index);
+        w.u16(m.param);
+        w.u16(m.min);
+        w.u16(m.max);
+        w.u8(m.flags);
+    }
+
     if (w.overflowed) return CODEC_NO_ROOM;
 
     const size_t payload = w.at - payload_start;
@@ -194,5 +229,25 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
         if (r.underflowed) return CODEC_TRUNCATED;
     }
     patch.n_nodes = n_nodes;
+
+    const uint8_t n_mappings = r.u8();
+    if (r.underflowed) return CODEC_TRUNCATED;
+    if (n_mappings > N_CC_MAP) return CODEC_TOO_MANY_MAPPINGS;
+    for (uint8_t i = 0; i < n_mappings; i++){
+        const uint8_t slot = r.u8();
+        CcMapping m = unused_mapping();
+        m.source_mask = r.u8();
+        m.channel = r.u8();
+        m.cc = r.u8();
+        m.target_kind = r.u8();
+        m.target_index = r.u8();
+        m.param = r.u16();
+        m.min = r.u16();
+        m.max = r.u16();
+        m.flags = r.u8();
+        if (r.underflowed) return CODEC_TRUNCATED;
+        if (slot >= N_CC_MAP) return CODEC_TOO_MANY_MAPPINGS;
+        patch.cc_map[slot] = m;
+    }
     return r.underflowed ? CODEC_TRUNCATED : CODEC_OK;
 }

@@ -688,6 +688,36 @@ static void test_leds_store_and_console_never_allocate() {
     TEST_ASSERT_EQUAL(before, g_allocations);
 }
 
+
+// The clock's settings have one owner. What the console sets is what the
+// patch's globals say, so it is saved, and a controller moving the tempo
+// afterwards does not push a stale source back over it.
+static void test_console_clock_edits_go_through_the_globals() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(three_node_patch(), g, 0);
+    rig.patches.service(PatchStore::AUTOSAVE_SETTLE_US + 1u);
+    TEST_ASSERT_FALSE(rig.store.dirty());
+
+    rig.console.execute("clock 140 1", 1000);
+    TEST_ASSERT_EQUAL(140, rig.master.clock().bpm());
+    TEST_ASSERT_EQUAL(MasterClock::CLOCK_CV, rig.master.clock().source());
+    TEST_ASSERT_EQUAL(140, rig.patches.globals().bpm);
+    TEST_ASSERT_EQUAL(MasterClock::CLOCK_CV, rig.patches.globals().clock_source);
+    TEST_ASSERT_TRUE(rig.store.dirty());
+
+    // A tempo write from a controller keeps the source the console chose.
+    TEST_ASSERT_TRUE(rig.cc.write_control(CC_TARGET_CLOCK, 0, CC_CLOCK_TEMPO, 150, 2000));
+    TEST_ASSERT_EQUAL(150, rig.master.clock().bpm());
+    TEST_ASSERT_EQUAL(MasterClock::CLOCK_CV, rig.master.clock().source());
+
+    // Out of range is refused with a message, not clamped into the patch.
+    rig.io.clear();
+    rig.console.execute("clock 999", 3000);
+    TEST_ASSERT_TRUE(rig.io.said("outside the tempo range"));
+    TEST_ASSERT_EQUAL(150, rig.patches.globals().bpm);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_patch_round_trips_through_the_codec);
@@ -722,5 +752,6 @@ int main() {
     RUN_TEST(test_the_console_works_after_a_patch_fails_to_load);
     RUN_TEST(test_an_overlong_console_line_is_refused_not_overrun);
     RUN_TEST(test_leds_store_and_console_never_allocate);
+    RUN_TEST(test_console_clock_edits_go_through_the_globals);
     return UNITY_END();
 }

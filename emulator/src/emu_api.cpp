@@ -14,6 +14,7 @@
 #include "config.h"
 #include "master.h"
 #include "version.h"
+#include "util/random.h"
 #include "web_hal.h"
 
 #define EMU_EXPORT extern "C" __attribute__((visibility("default")))
@@ -40,6 +41,11 @@ EMU_EXPORT uint32_t emu_const_n_param(){ return N_PARAM; }
 EMU_EXPORT uint32_t emu_const_n_midi_in(){ return N_MIDI_IN_NODES; }
 EMU_EXPORT uint32_t emu_const_n_midi_out(){ return N_MIDI_OUT_NODES; }
 EMU_EXPORT uint32_t emu_const_no_bus(){ return NO_BUS; }
+EMU_EXPORT uint32_t emu_const_master_ppqn(){ return MASTER_PPQN; }
+EMU_EXPORT uint32_t emu_const_clock_subtick(){ return CLOCK_SUBTICK; }
+EMU_EXPORT uint32_t emu_const_min_bpm(){ return CLOCK_MIN_BPM; }
+EMU_EXPORT uint32_t emu_const_max_bpm(){ return CLOCK_MAX_BPM; }
+EMU_EXPORT uint32_t emu_const_max_sequence_len(){ return MAX_SEQUENCE_LEN; }
 
 // Registry ----------------------------------------------------------------
 
@@ -107,14 +113,37 @@ EMU_EXPORT uint32_t emu_node_count(){ return master.node_count(); }
 // Running -----------------------------------------------------------------
 
 EMU_EXPORT void emu_pass(uint32_t now_us){ master.pass(now_us); }
-// Master clock (#4). Until the clock lands in main.cpp, the page is the
-// clock: it decides when a tick fires and with what count.
-EMU_EXPORT void emu_tick(uint32_t count){ master.tick(count); }
-// Offers a message to every MidiInPort, as the transports do between passes.
-EMU_EXPORT uint32_t emu_deliver_midi(uint32_t source, uint32_t type, uint32_t channel, uint32_t d1, uint32_t d2){
+// Offers a message to every MidiInPort, as main.cpp does when it drains the
+// transport queue. System realtime messages go to the clock instead.
+EMU_EXPORT uint32_t emu_deliver_midi(uint32_t source, uint32_t type, uint32_t channel, uint32_t d1, uint32_t d2, uint32_t now_us){
     const MidiEvent e = {(uint8_t)type, (uint8_t)channel, (uint8_t)d1, (uint8_t)d2};
-    return master.deliver_midi((uint8_t)source, e);
+    return master.deliver_midi((uint8_t)source, e, now_us);
 }
+// A rising edge on the sync jack (pin SYNC_CLOCK on the Teensy).
+EMU_EXPORT void emu_sync_edge(uint32_t now_us){ master.sync_edge(now_us); }
+// main.cpp stirs the entropy pool at boot from things that differ between
+// power cycles; the page does the same from its own randomness.
+EMU_EXPORT void emu_entropy_stir(uint32_t value){ entropy::stir(value); }
+
+// Master clock (#4). The page is the interval timer and the sync pin
+// interrupt: it calls emu_clock_advance() once per subtick_interval_us() of
+// simulated time, reprogramming itself when take_interval_change() says so,
+// exactly as src/hal/teensy/teensy_clock.cpp does with the IntervalTimer.
+EMU_EXPORT void emu_clock_advance(){ master.clock().advance(); }
+EMU_EXPORT uint32_t emu_clock_interval_us(){ return master.clock().subtick_interval_us(); }
+EMU_EXPORT uint32_t emu_clock_take_interval_change(){ return master.clock().take_interval_change() ? 1 : 0; }
+EMU_EXPORT uint32_t emu_clock_count(){ return master.clock().count(); }
+EMU_EXPORT uint32_t emu_clock_running(){ return master.clock().running() ? 1 : 0; }
+EMU_EXPORT uint32_t emu_clock_source(){ return master.clock().source(); }
+EMU_EXPORT void emu_clock_set_source(uint32_t source){ master.clock().set_source((uint8_t)source); }
+EMU_EXPORT uint32_t emu_clock_bpm(){ return master.clock().bpm(); }
+EMU_EXPORT void emu_clock_set_bpm(uint32_t bpm){ master.clock().set_bpm((uint16_t)bpm); }
+EMU_EXPORT uint32_t emu_clock_cv_ppqn(){ return master.clock().cv_ppqn(); }
+EMU_EXPORT void emu_clock_set_cv_ppqn(uint32_t ppqn){ master.clock().set_cv_ppqn((uint8_t)ppqn); }
+EMU_EXPORT void emu_clock_start(){ master.clock().start(); }
+EMU_EXPORT void emu_clock_stop(){ master.clock().stop(); }
+EMU_EXPORT void emu_clock_resume(){ master.clock().resume(); }
+EMU_EXPORT uint32_t emu_clock_rejected_edges(){ return master.clock().rejected_edges(); }
 
 // Jacks -------------------------------------------------------------------
 

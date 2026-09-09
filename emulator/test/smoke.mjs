@@ -146,6 +146,27 @@ test('sustain: a debounced pedal yields exactly one CC, the default patch from m
   assert.deepEqual(sent, [{ target: 0xFF, type: CC, d1: 64, d2: 127, channel: 1 }]);
 });
 
+test('master clock: the page as interval timer, ClockDiv /24 pulses jack 1 once per beat at 120 BPM', () => {
+  E.emu_patch_gate_port(0, GATE_OUT, 0);
+  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 24);
+  assert.equal(E.emu_load(), 0);
+  E.emu_clock_set_bpm(120);
+  // teensy_clock.cpp: reprogram on request, else free-run.
+  let interval = 0, nextAt = 0, rising = [], last = 0;
+  for (let t = 0; t < 2_100_000; t += 100) {
+    if (E.emu_clock_take_interval_change()) { interval = E.emu_clock_interval_us(); nextAt = t + interval; }
+    while (t >= nextAt) { E.emu_clock_advance(); nextAt += interval; }
+    E.emu_pass(t);
+    const o = E.emu_jack_output(0);
+    if (o && !last) rising.push(t);
+    last = o;
+  }
+  assert.equal(interval, Math.floor(60e6 / (120 * 24 * 24)), 'subtick interval');
+  assert.ok(rising.length >= 4 && rising.length <= 5, `beats in 2.1 s: ${rising.length}`);
+  const period = rising[2] - rising[1];
+  assert.ok(Math.abs(period - 500_000) < 2000, `beat period ${period} µs`);
+});
+
 test('unload returns every jack to an input', () => {
   E.emu_patch_gate_port(2, GATE_OUT, 1);
   assert.equal(E.emu_load(), 0);

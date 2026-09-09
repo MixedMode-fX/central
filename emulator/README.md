@@ -25,7 +25,9 @@ is a second implementation of the hardware seam, next to the Teensy one:
 | `IGpio` (the 8 jacks) | `src/hal/teensy/teensy_gpio.cpp` | `emulator/src/web_hal.h` `WebGpio`: eight bytes the page reads and writes |
 | `IMidiOut` (the transports) | `src/hal/teensy/teensy_midi.cpp` | `WebMidiOut`: one call into JavaScript |
 | main loop | `src/main.cpp` | `index.html`: passes on simulated time |
-| MIDI input | `mm_midi_read()` | `MixedModeMaster::deliver_midi()` from the page |
+| clock timer and sync pin | `src/hal/teensy/teensy_clock.cpp` | `index.html`: `MasterClock::advance()` every `subtick_interval_us()`, `sync_edge()` from a simulated jack |
+| MIDI input | `mm_midi_read()` and the input queue | `MixedModeMaster::deliver_midi()` from the page |
+| entropy at boot | cycle counter, floating ADC | `Math.random()` |
 
 ## Why this works with no rewrite
 
@@ -48,14 +50,15 @@ build trivial: no libc is needed, so no Emscripten is needed either. A stock
 `emulator/shim/new` supplies the one declaration `<new>` would have. The
 module is about 20 KB and imports exactly one function, the MIDI callback.
 
-**It holds for the code in flight.** The same recipe was tried on the branch
-of PR #17 (master clock, MIDI input queue, modifier family, sequencers,
-4500 lines added): all 21 framework-free sources compile to wasm32 unchanged
-under `-Wall -Wextra -Wshadow -Weffc++ -Werror`. `MasterClock` exposes
-`advance()` and `external_edge()` as plain methods for the Teensy's interrupt
-handlers to call, so the page can be the interval timer: call `advance()`
-every `subtick_interval_us()` of simulated time and `external_edge()` on a
-simulated sync jack.
+**It held when the firmware grew.** The emulator was first built against the
+bus model alone; when #17 landed (master clock, MIDI input queue, modifier
+family, sequencers, 4500 lines) every new source compiled to wasm32 unchanged
+under `-Wall -Wextra -Wshadow -Weffc++ -Werror`, and the only emulator work
+was on its side of the seam. `MasterClock` exposes `advance()` and
+`external_edge()` as plain methods for the Teensy's interrupt handlers to
+call, so the page is the interval timer: it calls `advance()` every
+`subtick_interval_us()` of simulated time, reprogramming itself when
+`take_interval_change()` says so, exactly as `teensy_clock.cpp` does.
 
 ### Options considered
 
@@ -126,30 +129,43 @@ error codes.
 ## Using the page
 
 - **Patch.** A JSON patch, resolved by algorithm *name* through the registry.
-  The presets cover the default patch from `main.cpp`, a MIDI thru with the
-  sustain pedal (play the keys, toggle jack 8, listen), the scenarios from
-  `test/test_master`, a logic-gate demo, a feedback loop and a patch the
-  validator rejects. Loading is `MixedModeMaster::load()` followed by
+  Each preset is a simple patch that exercises one part of the machine, with
+  a line saying what to do and what to expect: the default patch from
+  `main.cpp`, a metronome off two dividers, MIDI thru with the sustain pedal,
+  a pure router, a channel split with a merge, chord and transpose, mono note
+  priority, an arpeggiator on a divider, three Euclidean sequencers in
+  lock-step, a step sequencer thinned by Probability, a random sequencer with
+  a shred jack, a divider chain, the logic gates, a feedback loop and a patch
+  the validator rejects. Loading is `MixedModeMaster::load()` followed by
   `setup()`; a rejected patch leaves the running one in place, as on the module.
 
   ```json
   {
-    "gate_ports": [{ "port": 1, "dir": "in", "bus": 0 }, { "port": 2, "dir": "out", "bus": 1 }],
-    "midi_in":    [{ "sources": ["SERIAL_1"], "channel": 0, "bus": 0 }],
-    "nodes":      [{ "algo": "NOT", "in": [0], "out": [1] },
-                   { "algo": "GateToNote", "in": [1], "out": [0], "params": [60, 100, 1] }],
-    "midi_out":   [{ "targets": ["USB_0", "SERIAL_2"], "channel": 0, "bus": 0 }]
+    "gate_ports": [{ "port": 1, "dir": "out", "bus": 0 }],
+    "midi_in":    [{ "sources": ["DIN 1"], "channel": 0, "bus": 0 }],
+    "nodes":      [{ "algo": "ClockDiv", "out": [0], "params": [0, 6] },
+                   { "algo": "Arpeggiator", "in": [0, 0], "out": [1], "params": [2, 2, 60, 0] }],
+    "midi_out":   [{ "targets": ["USB 1", "DIN 2"], "channel": 0, "bus": 1 }]
   }
   ```
 
-  Jacks are numbered 1 to 8 as on the panel. Bus indices are in the domain the
-  algorithm declares for that inlet, as in `NodeConfig`. `null` leaves an
-  optional inlet unconnected. `"ALL"` is every port bit; the firmware's
-  `ALL_MIDI_PORTS` depends on which transports a build compiles in.
-- **Run.** The page is the main loop: it calls `pass(now_us)` on simulated
-  time at the chosen pass interval, at up to the chosen multiple of real time,
-  or one pass at a time. The tick controls call `MixedModeMaster::tick()`,
-  which is what the master clock will do from `pass()` once #4 lands.
+  Jacks are numbered 1 to 8 as on the panel. MIDI ports go by the names a
+  user knows: `DIN 1`, `DIN 2`, `USB 1` to `USB 4` (the device cables, counted
+  from 1 as a DAW lists them; the firmware enum counts them from 0) and
+  `USB Host`; the firmware's enum names (`SERIAL_1`, `USB_0`, ...) are
+  accepted too, and the mapping is listed under "Algorithms" on the page.
+  Bus indices are in the domain the algorithm declares for that inlet, as in
+  `NodeConfig`. `null` leaves an optional inlet unconnected. `"ALL"` is every
+  port bit; the firmware's `ALL_MIDI_PORTS` depends on which transports a
+  build compiles in. `ClockDiv`'s amount is in PPQN ticks: `/24` is a quarter
+  note, `/6` a sixteenth.
+- **Clock & run.** The page is the main loop: it calls `pass(now_us)` on
+  simulated time at the chosen pass interval, at up to the chosen multiple of
+  real time, or one pass at a time. It is also the interval timer for the
+  master clock, so BPM, source and transport are the real `MasterClock`:
+  internal, CV (a simulated sync jack, pulsed by hand or at a rate, with the
+  pulses-per-quarter setting) or MIDI (the page can send MIDI clock at the
+  BPM into a chosen port). A beat LED and the subtick count show it running.
 - **Jacks.** Inputs can be toggled, pulsed for 20 ms, or driven by a square
   wave at a chosen frequency. Outputs light when the firmware drives them
   high. A jack's card follows the mode the port node claimed.
@@ -158,11 +174,13 @@ error codes.
   the CV values.
 - **Scope.** The last two seconds of every jack and every gate bus, sampled
   every millisecond of simulated time with short pulses held so they show.
-- **MIDI in.** A keyboard, a CC sender, a source port and a channel, going
-  through `deliver_midi()`. The count of ports that accepted the message is
-  shown, so a source or channel filter is visible.
+- **Play.** An on-screen keyboard with octave shift, built for touch as much
+  as for the mouse, a CC sender and an all-notes-off, all going through
+  `deliver_midi()` into the chosen port and channel. The count of ports that
+  accepted the message is shown, so a routing or channel filter is visible.
+  The page lays out in one column on a phone, so it can be played from one.
 - **MIDI out.** Every `IMidiOut::send()` with its simulated timestamp, the
-  target ports decoded from the mask, the type, channel and data.
+  target ports by name, the type, channel and data.
 - **Listen.** A small Web Audio synth stands in for whatever would be
   downstream of the module: one oscillator per note on the chosen MIDI
   target(s), with a short envelope, CC 64 sustain, pitch bend, and CC 120/123
@@ -185,11 +203,8 @@ error codes.
   CI. When the native tests gain a scenario worth seeing in the browser, add
   it there too.
 - Where the roadmap touches the seam:
-  - **#4 / PR #17, the master clock:** the page becomes the interval timer
-    (`MasterClock::advance()` at `subtick_interval_us()`) and the sync jack
-    (`external_edge()`), and `tick()` stops being driven by the page.
-  - **#5, MIDI input:** already covered by `deliver_midi()`; a
-    `MidiInputQueue` on the page side mirrors `main.cpp`.
+  - **#4 and #5 (done):** the page is the interval timer and the sync jack,
+    and delivers MIDI with a timestamp as the queue drain in `main.cpp` does.
   - **#7, LEDs and console:** whatever interface the LEDs get, the page gets
     two more LEDs; console output can go to a text panel.
   - **#11, the patch protocol:** feeding SysEx bytes to the same handler

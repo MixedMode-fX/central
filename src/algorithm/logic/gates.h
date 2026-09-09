@@ -1,113 +1,92 @@
-#ifndef __AND_H_
-#define __AND_H_
+#ifndef __GATES_H_
+#define __GATES_H_
 
-#include "hardware.h"
-#include "gpio.h"
-#include "algorithm/algorithm.h"
+#include "node/node.h"
 
-class LogicNot : public Algorithm{
+// Inverter: one gate inlet, one gate outlet.
+class LogicNot : public Node{
     public:
-        LogicNot(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            Algorithm(midi_inputs, midi_outputs, gate_inputs, gate_outputs){
-                for(uint8_t i=0; i<GPIO_N; i++){
-                    if ((gate_inputs & (1 << i)) != 0){ input_pin_index = i; }
-                }
-
-            };
-
+        static const AlgorithmDescriptor descriptor;
+        explicit LogicNot(const NodeConfig& config) :
+            in(config.in_bus[0]), out(config.out_bus[0]) {}
+        void process(BusManager& bus, uint32_t) override {
+            bus.gate_write(out, !bus.gate_read(in));
+        }
     private:
-        uint8_t input_pin_index;
-        void _update(){
-            uint8_t state = !gpioDigitalRead(LogicNot::input_pin_index);
-            gpioMapDigitalWrite(LogicNot::gate_outputs, state);
-        };
-
+        uint8_t in;
+        uint8_t out;
 };
 
-class LogicGate : public Algorithm{
+// N-input gate (up to MAX_IN inlets, unconnected ones are skipped): folds
+// operate() over every connected inlet starting from the gate's identity
+// element. XOR over more than two inputs is therefore parity, see README.
+class LogicGate : public Node{
     public:
-        LogicGate(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            Algorithm(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
-
-    protected:
-        uint8_t state = 0;
-        bool inverted = false;
-
-    private:
-        void _update(){
-            uint8_t input_state[GPIO_N] = {0};
-            gpioMapDigitalRead(LogicGate::gate_inputs, &input_state[0]);
-
-            uint8_t mask = 0;
-            state = 1;
-            for (uint8_t i=0; i<GPIO_N; i++){
-                mask = (1 << i);
-                if (mask > gate_inputs) break;
-
-                if ((mask & gate_inputs) == mask) {
-                    state = operate(state, input_state[i]);
-                }
+        LogicGate(const NodeConfig& config, bool invert) :
+            in(), out(config.out_bus[0]), inverted(invert) {
+            for (uint8_t i = 0; i < MAX_IN; i++) in[i] = config.in_bus[i];
+        }
+        void process(BusManager& bus, uint32_t) override {
+            bool state = identity();
+            for (uint8_t i = 0; i < MAX_IN; i++){
+                if (in[i] == NO_BUS) continue;
+                state = operate(state, bus.gate_read(in[i]));
             }
             if (inverted) state = !state;
-            gpioMapDigitalWrite(LogicGate::gate_outputs, state);
-        };
-
-        uint8_t operate(uint8_t state, uint8_t input){
-            state &= input;
-            return state;
+            bus.gate_write(out, state);
         }
+    protected:
+        virtual bool operate(bool acc, bool input) const = 0;
+        virtual bool identity() const = 0;   // AND/NAND -> 1; OR/NOR/XOR/XNOR -> 0
+    private:
+        uint8_t in[MAX_IN];
+        uint8_t out;
+        bool inverted;
 };
 
 class LogicAND : public LogicGate{
     public:
-        LogicAND(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicGate(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
-
-        uint8_t operate(uint8_t state, uint8_t input){
-            state &= input;
-            return state;
-        }
+        static const AlgorithmDescriptor descriptor;
+        explicit LogicAND(const NodeConfig& config, bool invert = false) : LogicGate(config, invert) {}
+    protected:
+        bool operate(bool acc, bool input) const override { return acc && input; }
+        bool identity() const override { return true; }
 };
 
 class LogicNAND : public LogicAND{
     public:
-        LogicNAND(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicAND(midi_inputs, midi_outputs, gate_inputs, gate_outputs){ inverted = true; };
+        static const AlgorithmDescriptor descriptor;
+        explicit LogicNAND(const NodeConfig& config) : LogicAND(config, true) {}
 };
-
 
 class LogicOR : public LogicGate{
     public:
-        LogicOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicGate(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
-
-        uint8_t operate(uint8_t state, uint8_t input){
-            state |= input;
-            return state;
-        }
+        static const AlgorithmDescriptor descriptor;
+        explicit LogicOR(const NodeConfig& config, bool invert = false) : LogicGate(config, invert) {}
+    protected:
+        bool operate(bool acc, bool input) const override { return acc || input; }
+        bool identity() const override { return false; }
 };
 
 class LogicNOR : public LogicOR{
     public:
-        LogicNOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicOR(midi_inputs, midi_outputs, gate_inputs, gate_outputs){ inverted = true; };
+        static const AlgorithmDescriptor descriptor;
+        explicit LogicNOR(const NodeConfig& config) : LogicOR(config, true) {}
 };
 
 class LogicXOR : public LogicGate{
     public:
-        LogicXOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicGate(midi_inputs, midi_outputs, gate_inputs, gate_outputs){};
-
-        uint8_t operate(uint8_t state, uint8_t input){
-            state ^= input;
-            return state;
-        }
+        static const AlgorithmDescriptor descriptor;
+        explicit LogicXOR(const NodeConfig& config, bool invert = false) : LogicGate(config, invert) {}
+    protected:
+        bool operate(bool acc, bool input) const override { return acc != input; }
+        bool identity() const override { return false; }
 };
 
 class LogicXNOR : public LogicXOR{
     public:
-        LogicXNOR(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            LogicXOR(midi_inputs, midi_outputs, gate_inputs, gate_outputs){ inverted = true; };
+        static const AlgorithmDescriptor descriptor;
+        explicit LogicXNOR(const NodeConfig& config) : LogicXOR(config, true) {}
 };
 
 #endif

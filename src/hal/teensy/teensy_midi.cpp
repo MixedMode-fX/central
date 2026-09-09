@@ -1,4 +1,4 @@
-#include "mm_midi.h"
+#include "hal/teensy/teensy_midi.h"
 
 #ifdef SERIAL_MIDI_1
 MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_1, midi1, MidiSettings);
@@ -12,7 +12,7 @@ MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_3, midi3, MidiSettings);
 
 
 // USB Host MIDI
-#ifdef USB_HOST_TEENSY36_
+#ifdef MMMC_USB_HOST
 USBHost mm_usb;
 USBHub hub1(mm_usb);
 USBHub hub2(mm_usb);
@@ -39,14 +39,14 @@ void mm_midi_setup(){
     midi3.turnThruOff();
     #endif
 
-    #ifdef USB_HOST_TEENSY36_
+    #ifdef MMMC_USB_HOST
     mm_usb.begin();
     #endif
 }
 
 
 void mm_midi_read(){
-    #ifdef USB_HOST_TEENSY36_
+    #ifdef MMMC_USB_HOST
     mm_usb.Task();
     midi_hosted.read();
     #endif
@@ -86,7 +86,7 @@ void mm_send(uint8_t target, uint8_t type, uint8_t data1, uint8_t data2, uint8_t
     if ((target & mmMIDI_SERIAL_3) == mmMIDI_SERIAL_3) midi3.send((midi::MidiType)type, data1, data2, channel);
     #endif
 
-    #ifdef USB_HOST_TEENSY36_
+    #ifdef MMMC_USB_HOST
     if ((target & mmMIDI_HOST_1) == mmMIDI_HOST_1) midi_hosted.send(type, data1, data2, channel);
     #endif
 

@@ -1,26 +1,37 @@
 #ifndef __SUSTAIN_H_
 #define __SUSTAIN_H_
 
-#include "hardware.h"
-#include "gpio.h"
-#include "mm_midi.h"
-#include "algorithm/algorithm.h"
+#include "node/node.h"
 
-class Sustain : public Algorithm{
+// Sustain pedal to MIDI CC. Reads one gate bus (the pedal), writes a control
+// change to a note bus whenever the debounced level changes. The first
+// stable level after load is transmitted too, so a host that starts with
+// the pedal already down learns about it.
+//
+// params[0] channel (1..16, 0 -> 1)   params[1] controller (0 -> 64)
+// params[2] invert (non-zero for a normally-closed pedal)
+class Sustain : public Node{
     public:
-        Sustain(uint8_t midi_inputs, uint8_t midi_outputs, uint16_t gate_inputs, uint16_t gate_outputs) :
-            Algorithm(midi_inputs, midi_outputs, gate_inputs, gate_outputs){
-                for(uint8_t i=0; i<GPIO_N; i++){
-                    if ((gate_inputs & (1 << i)) != 0){ input_pin_index = i; }
-                }
-            };
-        void set_invert(bool inv){ invert = inv; }
+        static const AlgorithmDescriptor descriptor;
+        static constexpr uint32_t DEBOUNCE_US = 5000;
+        static constexpr uint8_t UNKNOWN = 0xFF;
+
+        explicit Sustain(const NodeConfig& config);
+        void process(BusManager& bus, uint32_t now_us) override;
+
+        uint8_t pedal_down() const { return state == UNKNOWN ? 0 : state; }
 
     private:
-        void _update();
-        uint8_t input_pin_index;
-        uint8_t state = 1;
-        bool invert = false;
+        void send(BusManager& bus) const;
+
+        uint8_t in;
+        uint8_t out;
+        uint8_t channel;
+        uint8_t controller;
+        bool invert;
+        uint8_t state;          // debounced, after inversion; UNKNOWN until settled
+        uint8_t last_raw;
+        uint32_t last_change_us;
 };
 
 #endif

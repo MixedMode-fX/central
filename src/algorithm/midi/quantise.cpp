@@ -14,9 +14,13 @@ static const ParamGroup GROUPS[1] = {{0, 1, 2, PARAMS}};
 
 static_assert(SCALE_COUNT == 14, "PARAM_SCALE_NAMES lists one name per ScaleId");
 
+static const char* const IN_NAMES[2] = {"notes in", "root"};
+static const char* const OUT_NAMES[1] = {"notes out"};
+
 const AlgorithmDescriptor Quantise::descriptor = {
     ALGO_QUANTISE, "Quantise", 2, 1, 1, 2, IN, OUT, sizeof(Quantise), false, construct_node<Quantise>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "Snaps every note to a scale. The root inlet takes it from a note-on instead." };
 
 // Root and scale can both move under a sounding note: the release is taken
 // from the ledger, so it is the pitch that was actually sent and never a

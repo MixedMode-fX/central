@@ -62,21 +62,32 @@ static const ParamGroup RANDOM_GROUPS[4] = {
 
 // Every gate sequencer takes the per-step probability block at params[8..],
 // so n_params is the same for all four whatever their own params[3..7] use.
+// Inlet and outlet names, so a patch says what each connection *means*
+// rather than "in 0" and "in 1". Reset is the second inlet in every
+// sequencer, which is the shape being able to read the names makes visible.
+static const char* const SEQ_IN_NAMES[2] = {"advance", "reset"};
+static const char* const RANDOM_IN_NAMES[3] = {"advance", "reset", "shred"};
+static const char* const SEQ_OUT_NAMES[1] = {"trigger"};
+
 const AlgorithmDescriptor Metronome::descriptor = {
     ALGO_METRONOME, "Metronome", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(Metronome), false, construct_node<Metronome>,
-    METRONOME_GROUPS, 3 };
+    METRONOME_GROUPS, 3, SEQ_IN_NAMES, SEQ_OUT_NAMES,
+    "One trigger per advance edge. A GateSequencer of length one: the divider sets the rate." };
 
 const AlgorithmDescriptor StepSequencer::descriptor = {
     ALGO_STEP_SEQ, "StepSequencer", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(StepSequencer), false, construct_node<StepSequencer>,
-    STEP_GROUPS, 4 };
+    STEP_GROUPS, 4, SEQ_IN_NAMES, SEQ_OUT_NAMES,
+    "A pattern of on/off steps, clicked in the grid below. Steps past the length are kept." };
 
 const AlgorithmDescriptor EuclidianSequencer::descriptor = {
     ALGO_EUCLID_SEQ, "EuclidianSequencer", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(EuclidianSequencer), false, construct_node<EuclidianSequencer>,
-    EUCLID_GROUPS, 4 };
+    EUCLID_GROUPS, 4, SEQ_IN_NAMES, SEQ_OUT_NAMES,
+    "Bjorklund: spreads \"pulses\" evenly over \"steps\", plus a rotation." };
 
 const AlgorithmDescriptor RandomSequencer::descriptor = {
     ALGO_RANDOM_SEQ, "RandomSequencer", 3, 1, 1, GateSequencer::PARAM_COUNT, IN3, OUT, sizeof(RandomSequencer), false, construct_node<RandomSequencer>,
-    RANDOM_GROUPS, 4 };
+    RANDOM_GROUPS, 4, RANDOM_IN_NAMES, SEQ_OUT_NAMES,
+    "A random pattern at a density, held until the shred inlet draws a new one." };
 
 // StepSequencer --------------------------------------------------------------
 

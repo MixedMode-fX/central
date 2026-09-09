@@ -14,9 +14,13 @@ static const ParamDescriptor PARAMS[4] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 4, PARAMS}};
 
+static const char* const IN_NAMES[3] = {"chord in", "advance", "reset"};
+static const char* const OUT_NAMES[1] = {"notes out"};
+
 const AlgorithmDescriptor Arpeggiator::descriptor = {
     ALGO_ARPEGGIATOR, "Arpeggiator", 3, 2, 1, 4, IN, OUT, sizeof(Arpeggiator), false, construct_node<Arpeggiator>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "Plays a held chord one note per advance edge, over a range of octaves." };
 
 // The cursor is a position in a figure whose length is held notes x octaves,
 // and step() takes it modulo that length, so narrowing the octave range under

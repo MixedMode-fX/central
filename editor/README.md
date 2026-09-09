@@ -68,6 +68,23 @@ cannot set their module up. So the page says plainly what is wrong, and
 offline with nothing plugged in, export it, and send it with any standard SysEx
 librarian. Import reads back either an exported `.syx` or a raw patch image.
 
+## Two file formats, for two different readers
+
+`.syx` is the patch **image** — the bytes the module stores and a librarian
+sends. It is the right thing for hardware and unreadable by a person.
+
+`.json` is the dialect **the full emulator loads**: named algorithms, jacks
+numbered from 1, named MIDI ports, bus indices per domain — exactly what
+`applyPatch()` in `emulator/index.html` reads. Paste it into the emulator's
+Patch JSON box and the patch you built here is one you can hear. The *files*
+tab shows it live with a copy button, and reads it back, so it is a door in
+both directions rather than a one-way export.
+
+Two keys ride along that the emulator ignores: `globals` and `cc_map`. The
+emulator has its own tempo and clock controls and no controller bindings, so it
+skips what it does not know — and carrying them means re-importing here loses
+nothing, which a "lossy export of the patch" would not.
+
 ## How it stays honest
 
 **No special-case firmware.** The editor is a client of the protocol in
@@ -75,11 +92,18 @@ librarian. Import reads back either an exported `.syx` or a raw patch image.
 protocol gains a message — never a private side channel — so the console, this
 editor and an eventual Launchpad stay interchangeable.
 
-**Everything is read from the device.** The algorithms, their inlets and
-outlets and domains, every parameter's name, range, default, display kind and
-enum options, and the module's real capacities all come from the registry and
-capability messages. An algorithm added to the firmware appears here with a
-working panel and no change to any file in this directory.
+**Everything is read from the device.** The algorithms, **their inlets' and
+outlets' names** and domains, a one-line summary of each algorithm, every
+parameter's name, range, default, display kind and enum options, and the
+module's real capacities all come from the registry and capability messages. An
+algorithm added to the firmware appears here with a working, *described* panel
+and no change to any file in this directory.
+
+The only words not read from the device are the ones the protocol defines by
+enum rather than by description — MIDI port names, clock sources, takeover
+modes. Those live in `src/names.js`, keyed by the generated enum's own
+identifiers and checked against them on import, so renaming one in the firmware
+breaks the editor loudly instead of mislabelling a cable.
 
 **The message layout is generated, not copied.** `src/protocol.js` is derived
 from the firmware headers by `tools/generate-protocol.mjs`. `make editor`
@@ -109,12 +133,40 @@ make editor        # regenerates the protocol module and runs the checks
 **Buses are the connections.** Every inlet and outlet is a bus selector
 offering only the buses of its own domain, because that is all the module will
 accept. There is no cable to drag and no cable to lose: a patch reads as a list
-of what each node reads and writes.
+of what each node reads and writes — under the name the firmware gives each
+port, with what else is on its bus written underneath, because that is the part
+a cable would have shown.
 
 **Dragging a connection sends one message**, not a full dump — under the bus
 model a connection change is one byte, with no re-sort and no graph rebuild.
 Adding or removing a node changes the graph's *shape*, so that is a whole
 patch.
+
+**A node arrives connected.** Its required inlets go to a bus something already
+writes — the node added last, so a chain builds in the order you build it — and
+its first outlet to a bus nothing writes yet. A node added unconnected is one
+the module refuses, which left the editor a graph ahead of the device; from
+there every incremental edit named a node the module had never taken and came
+back `SYSEX_ERR_BAD_ARGUMENT`. The editor tracks that divergence now
+(`App.diverged`): a patch its own validator refuses is never sent, and the
+first edit that makes it valid sends the whole patch instead of an addressed
+one.
+
+**Bindings are edited, not only learned.** The MIDI tab lists every controller
+binding in words and makes every field of every slot editable — CC, channel,
+source ports, target, sub-range, takeover, relative encoding, 14-bit pairing,
+pass-through — so a binding can be built with no controller in the room, which
+is the same case `.syx` export exists for. Learn is still there, per parameter
+and per slot. MIDI routing, the clock, Program Change recall and NRPN are on
+the same tab; the patch has always carried them and none of them had a control.
+
+**A phone is the first target, not the fallback.** With the module embedded
+there is no cable to plug in, so a phone is a complete editor — and the only
+one iOS can have. Every control is finger-sized, every numeric parameter has a
+number field beside its slider (a slider cannot hit a value, and on a touch
+screen a 1px drag is a whole step of a 255-wide range), and anything that
+cannot shrink — a 32-step lane, the bindings table — scrolls inside its own box
+rather than pushing the page sideways.
 
 The generic parameter view is wrong for a sequencer — nobody enters a drum
 pattern as a list of numbers — so those have their own:

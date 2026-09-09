@@ -1,54 +1,155 @@
 <!doctype html>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
 <title>MMMC patch editor</title>
+<!-- Inline, so the page makes no request for it: there is nothing else to
+     fetch here but the modules and the wasm. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2312141a'/%3E%3Cpath d='M3 11V5h2l1.5 3L8 5h2v6H8.5V7.5L7 10H6L4.5 7.5V11z' fill='%236ea8fe'/%3E%3Ccircle cx='12.5' cy='9.5' r='1.5' fill='%237bd88f'/%3E%3C/svg%3E">
 <style>
+  /* Mobile first, and not as a courtesy: the module embeds in this page, so a
+     phone with no cable and no Web MIDI is a *fully working* editor and is the
+     only one an iPhone can have. The wide layout is the enhancement.
+
+     The rules that keep it honest on a narrow screen:
+       * every flex and grid child gets min-width: 0, or a long select or a
+         32-step lane pushes the whole page sideways instead of scrolling
+         inside its own box;
+       * anything that cannot shrink - a step grid, a bindings table - lives in
+         its own overflow-x container;
+       * controls are at least 2.75rem tall, which is a finger rather than a
+         mouse pointer;
+       * a slider is never the only way to set a value. */
   :root {
-    color-scheme: light dark;
-    --bg: #12141a; --panel: #1b1e26; --line: #2c313d; --ink: #e6e9f0;
+    color-scheme: dark light;
+    --bg: #12141a; --panel: #1b1e26; --raised: #232833; --line: #2c313d; --ink: #e6e9f0;
     --dim: #8b93a7; --accent: #6ea8fe; --gate: #7bd88f; --note: #d8a67b; --cv: #b78bd8;
     --bad: #ff8a8a; --warn: #e8c46a;
+    --tap: 2.75rem;
+    --radius: 8px;
   }
   * { box-sizing: border-box; }
+  /* Nothing may make the page itself scroll sideways: an overflowing lane
+     scrolls in its own box or it is a bug. */
+  html, body { max-width: 100%; overflow-x: hidden; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-text-size-adjust: 100%;
   }
-  .shell { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
-  @media (max-width: 560px) {
-    /* A phone is a first-class target: with the module embedded there is no
-       cable to plug in, so the editor has to be usable one-handed. */
-    .ports { grid-template-columns: 1fr; }
-    .param { grid-template-columns: 6rem 1fr 2.2rem auto; }
-    .lane-name { width: 4.5rem; }
-    .top { gap: .5rem; }
-    .top h1 { font-size: 1.05rem; width: 100%; }
+  .shell {
+    max-width: 68rem; margin: 0 auto;
+    padding: 1rem .75rem 5rem;
+    padding-left: max(.75rem, env(safe-area-inset-left));
+    padding-right: max(.75rem, env(safe-area-inset-right));
   }
-  h1 { font-size: 1.25rem; margin: 0; }
-  h2 { font-size: 0.95rem; margin: 0 0 .6rem; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+  h1 { font-size: 1.15rem; margin: 0; }
+  h2 { font-size: .8rem; margin: 0 0 .6rem; color: var(--dim);
+       text-transform: uppercase; letter-spacing: .08em; }
+  h2.spaced { margin-top: 1.4rem; }
   h3 { font-size: 1rem; margin: 0; }
-  h4 { margin: 0 0 .3rem; font-size: .9rem; }
+  h4 { margin: 0 0 .3rem; font-size: .8rem; color: var(--dim);
+       text-transform: uppercase; letter-spacing: .06em; }
+  p { margin: 0 0 .6rem; }
 
-  .top { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
-  .status { flex: 1 1 20rem; color: var(--dim); }
+  /* --- header and tabs --- */
+  .top { display: grid; gap: .6rem; margin-bottom: .75rem; }
+  .top-buttons { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .top-buttons button { flex: 1 1 auto; min-width: 0; }
+  .status { color: var(--dim); font-size: .9rem; margin: 0; }
   .status.online { color: var(--gate); }
-  button, select, input[type=file] { font: inherit; }
+  .status.warn { color: var(--warn); }
+
+  .tabs {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; gap: .25rem; margin: 0 -.25rem 1rem;
+    padding: .35rem .25rem; background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: 1 0 auto; min-height: var(--tap); padding: 0 .9rem;
+    background: none; border: 1px solid transparent; border-radius: var(--radius);
+    color: var(--dim); font: inherit; cursor: pointer;
+  }
+  .tab.active { background: var(--panel); border-color: var(--line); color: var(--ink); }
+
+  /* --- controls --- */
+  button, select, input, textarea { font: inherit; color: var(--ink); }
   button {
-    background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-    border-radius: 6px; padding: .35rem .7rem; cursor: pointer;
+    min-height: var(--tap); background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: .4rem .9rem; cursor: pointer;
+    touch-action: manipulation;
   }
   button:hover { border-color: var(--accent); }
-  button.ghost { background: none; border-color: transparent; color: var(--dim); padding: .2rem .45rem; }
+  button:active { background: var(--raised); }
+  button.ghost { background: none; border-color: transparent; color: var(--dim);
+                 min-height: 2.25rem; padding: .2rem .6rem; }
   button.ghost:hover { color: var(--ink); border-color: var(--line); }
-  select { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-           border-radius: 6px; padding: .25rem .4rem; }
-  label.file { border: 1px solid var(--line); border-radius: 6px; padding: .35rem .7rem; cursor: pointer; }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  button.active { border-color: var(--gate); color: var(--gate); }
+  select {
+    min-height: var(--tap); max-width: 100%;
+    background: var(--raised); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: .35rem .5rem;
+  }
+  input[type=number], input[type=text], textarea {
+    min-height: var(--tap); background: var(--raised); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: .35rem .5rem;
+  }
+  input.number { width: 4.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+  input.number.wide { width: 6rem; }
+  .grow { flex: 1 1 8rem; min-width: 0; }
+  label.file {
+    display: inline-flex; align-items: center; min-height: var(--tap);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: .4rem .9rem; cursor: pointer;
+  }
   label.file input { display: none; }
+  .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .row > * { min-width: 0; }
 
+  /* A slider a finger can actually use: a tall, obvious thumb over a thin
+     track, with room around it so a tap near the line still lands. */
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    height: var(--tap); background: none; margin: 0; padding: 0;
+    min-width: 0;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 3px; background: var(--raised); border: 1px solid var(--line);
+  }
+  input[type=range]::-moz-range-track {
+    height: 6px; border-radius: 3px; background: var(--raised); border: 1px solid var(--line);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 26px; height: 26px; margin-top: -11px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg); cursor: pointer;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg); cursor: pointer;
+  }
+  input[type=checkbox].switch { width: 1.4rem; height: 1.4rem; accent-color: var(--accent); }
+  .bool { display: inline-flex; gap: .5rem; align-items: center; min-height: var(--tap); }
+
+  .chip {
+    min-height: 2.4rem; padding: .25rem .7rem; border-radius: 999px;
+    background: var(--raised); border: 1px solid var(--line); color: var(--dim);
+    font-size: .85rem;
+  }
+  .chip.on { background: color-mix(in srgb, var(--accent) 22%, transparent);
+             border-color: var(--accent); color: var(--ink); }
+  .ports-row { display: flex; flex-wrap: wrap; gap: .35rem; }
+
+  /* --- boxes --- */
   .caps { color: var(--dim); font-size: .85rem; margin-bottom: 1rem; }
   .hint { color: var(--dim); font-size: .85rem; }
+  .summary { color: var(--dim); font-size: .9rem; margin: 0 0 .8rem; }
   .error, .problems, .notes {
-    border-radius: 8px; padding: .6rem .8rem; margin-bottom: 1rem; border: 1px solid;
+    border-radius: var(--radius); padding: .7rem .8rem; margin-bottom: 1rem; border: 1px solid;
   }
   .error { border-color: var(--bad); color: var(--bad); cursor: pointer; }
   .problems { border-color: var(--bad); }
@@ -56,80 +157,157 @@
   .notes { border-color: var(--warn); }
   .notes h4 { color: var(--warn); }
   .problems ul, .notes ul { margin: 0; padding-left: 1.1rem; }
+  .problems li, .notes li { overflow-wrap: anywhere; }
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-           padding: 1rem; margin-bottom: 1rem; }
-  .jacks { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .5rem; }
-  .jack { display: flex; gap: .5rem; align-items: center; justify-content: space-between; }
+           padding: .9rem; margin-bottom: 1rem; }
+  .jacks { display: grid; gap: .5rem; }
+  .jack { display: grid; grid-template-columns: 4.5rem 1fr; gap: .5rem; align-items: center; }
   .jack span { color: var(--dim); }
+  .jack select { width: 100%; }
 
+  /* --- nodes --- */
   .nodes { display: grid; gap: 1rem; }
-  .node { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; }
+  .node { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .9rem; }
   .node.bad { border-color: var(--bad); }
-  .node header { display: flex; gap: .6rem; align-items: center; margin-bottom: .8rem; }
+  .node header { display: flex; gap: .5rem; align-items: center; margin-bottom: .6rem; flex-wrap: wrap; }
   .node-index {
-    background: var(--line); border-radius: 5px; padding: .05rem .45rem;
+    background: var(--line); border-radius: 5px; padding: .05rem .5rem;
     color: var(--dim); font-variant-numeric: tabular-nums;
   }
-  .tag { font-size: .75rem; color: var(--accent); border: 1px solid var(--accent);
+  .tag { font-size: .7rem; color: var(--accent); border: 1px solid var(--accent);
          border-radius: 4px; padding: 0 .35rem; }
   .node header button { margin-left: auto; }
 
-  .ports { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem 2rem; margin-bottom: .8rem; }
-  .port { display: flex; gap: .5rem; align-items: center; justify-content: space-between; margin-bottom: .3rem; }
-  .port-name { color: var(--dim); font-variant-numeric: tabular-nums; }
-  .bus-gate { border-left: 3px solid var(--gate); }
-  .bus-note { border-left: 3px solid var(--note); }
-  .bus-CV   { border-left: 3px solid var(--cv); }
+  .ports { display: grid; gap: .9rem; margin-bottom: .8rem; }
+  .port-group { min-width: 0; display: grid; gap: .5rem; }
+  .port { min-width: 0; padding-left: .55rem; border-left: 3px solid var(--line); }
+  .port-head { display: grid; grid-template-columns: 1fr; gap: .25rem; }
+  .port-name { color: var(--ink); font-size: .9rem; }
+  .port-name .required { color: var(--warn); margin-left: .15rem; }
+  .port select { width: 100%; }
+  .wire { display: block; color: var(--dim); font-size: .78rem; margin-top: .25rem;
+          overflow-wrap: anywhere; }
+  .wire.empty { color: var(--warn); }
+  .bus-gate { border-left-color: var(--gate); }
+  .bus-note { border-left-color: var(--note); }
+  .bus-CV   { border-left-color: var(--cv); }
 
-  .params { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .4rem 1rem; }
-  .param { display: grid; grid-template-columns: 7rem 1fr 2.5rem auto; gap: .5rem; align-items: center; }
-  .param-name { color: var(--dim); }
-  .param-value { font-variant-numeric: tabular-nums; text-align: right; }
-  .param input[type=range] { width: 100%; }
+  /* --- parameters --- */
+  .params { display: grid; gap: .7rem; }
+  .param { min-width: 0; }
+  .param-head { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; }
+  .param-name { color: var(--dim); font-size: .85rem; }
+  .param-value { font-variant-numeric: tabular-nums; font-size: .85rem; text-align: right; }
+  .param-controls { display: flex; gap: .5rem; align-items: center; min-width: 0; }
+  .param-controls > .grow { flex: 1 1 4rem; }
+  .learn.bound { color: var(--accent); border-color: var(--accent); }
 
+  .fields { display: grid; gap: .7rem; margin-bottom: .8rem; }
+  .field { display: grid; gap: .3rem; min-width: 0; }
+  .field-name { color: var(--dim); font-size: .85rem; }
+  .field select, .field input[type=number] { max-width: 100%; }
+  .field:empty { display: none; }
+
+  .routes { display: grid; gap: 1rem; }
+  .route { border: 1px solid var(--line); border-radius: var(--radius);
+           padding: .6rem; margin-bottom: .6rem; }
+  .route-head { display: flex; justify-content: space-between; gap: .5rem;
+                flex-wrap: wrap; margin-bottom: .5rem; }
+  .route-head h4 { margin: 0; }
+  .route-fields { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+
+  /* --- bindings --- */
+  .table-scroll, .lane-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; min-width: 0; }
+  table.bindings { border-collapse: collapse; width: 100%; font-size: .85rem; }
+  table.bindings th { text-align: left; color: var(--dim); font-weight: 400;
+                      border-bottom: 1px solid var(--line); padding: .35rem .5rem .35rem 0; }
+  table.bindings td { padding: .45rem .5rem .45rem 0; border-bottom: 1px solid var(--line);
+                      vertical-align: top; }
+  .bindings-detail { margin-top: .8rem; }
+  details > summary { cursor: pointer; min-height: var(--tap); display: flex;
+                      align-items: center; gap: .5rem; color: var(--dim); }
+  .binding { border: 1px solid var(--line); border-radius: var(--radius);
+             padding: .3rem .6rem; margin-bottom: .5rem; }
+  .binding.active > summary { color: var(--ink); }
+  .binding-list { margin-top: .5rem; }
+  .slot-index { background: var(--line); border-radius: 5px; padding: 0 .45rem;
+                color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  /* --- grids --- */
   .grid { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .8rem; }
-  .grid-title { color: var(--dim); font-size: .85rem; margin-bottom: .4rem; }
-  .lane-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .25rem; }
-  .lane-name { width: 7rem; color: var(--dim); font-size: .8rem; flex: none; }
-  .lane { display: flex; gap: 2px; overflow-x: auto; }
+  .grid-title { color: var(--dim); font-size: .8rem; margin-bottom: .4rem; }
+  .lane-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .3rem; min-width: 0; }
+  .lane-name { width: 6.5rem; color: var(--dim); font-size: .75rem; flex: none; }
+  .lane { display: flex; gap: 3px; width: max-content; padding-bottom: 2px; }
   .cell {
-    width: 20px; height: 24px; padding: 0; border-radius: 3px;
-    background: #232833; border: 1px solid var(--line); flex: none;
+    width: 26px; height: 30px; min-height: 0; padding: 0; border-radius: 3px;
+    background: var(--raised); border: 1px solid var(--line); flex: none;
   }
   .cell.on { background: var(--gate); border-color: var(--gate); }
   .cell.beyond { opacity: .3; }
   .note-cell {
-    display: grid; gap: 1px; width: 46px; flex: none; text-align: center;
-    border: 1px solid var(--line); border-radius: 3px; padding: 2px; background: #232833;
+    display: grid; gap: 1px; width: 52px; flex: none; text-align: center;
+    border: 1px solid var(--line); border-radius: 3px; padding: 2px; background: var(--raised);
   }
   .note-cell.on { border-color: var(--note); }
   .note-cell.beyond { opacity: .35; }
   .note-cell.rest { border-style: dashed; }
   .note-cell.tie { border-color: var(--accent); }
   .note-cell input {
-    width: 100%; background: none; border: none; color: var(--ink);
-    font: inherit; text-align: center; padding: 0;
+    width: 100%; min-height: 1.6rem; background: none; border: none; color: var(--ink);
+    font: inherit; font-size: .85rem; text-align: center; padding: 0;
   }
-  .note-cell .pitch { font-size: .7rem; color: var(--dim); }
+  .note-cell .pitch { font-size: .65rem; color: var(--dim); }
 
-  button.active { border-color: var(--gate); color: var(--gate); }
+  /* --- meters --- */
   .meters .meter-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
   .led { width: 14px; height: 14px; border-radius: 50%; flex: none; opacity: .08; }
   .led.green { background: var(--gate); box-shadow: 0 0 8px var(--gate); }
   .led.red { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
-  .clock-readout { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 11rem; }
-  .gate-dots { display: flex; gap: 3px; }
-  .gate-dot { width: 9px; height: 16px; border-radius: 2px; background: #232833;
+  .clock-readout { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 10rem; }
+  .gate-dots { display: flex; gap: 3px; flex-wrap: wrap; }
+  .gate-dot { width: 9px; height: 16px; border-radius: 2px; background: var(--raised);
               border: 1px solid var(--line); }
   .gate-dot.lit { background: var(--gate); border-color: var(--gate); }
 
-  .add { display: flex; gap: .5rem; margin: 1rem 0; }
-  .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .5rem; }
+  .slots { display: grid; gap: .5rem; }
   .slot { display: flex; gap: .4rem; align-items: center; }
   .slot span { width: 4rem; color: var(--dim); }
+  .slot button { flex: 1 1 auto; }
 
-  noscript, .fallback { display: block; padding: 1rem; border: 1px solid var(--warn); border-radius: 8px; }
+  textarea.json {
+    width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .8rem; line-height: 1.45; resize: vertical; white-space: pre;
+  }
+
+  noscript, .fallback { display: block; padding: 1rem; border: 1px solid var(--warn);
+                        border-radius: var(--radius); }
+
+  /* --- wider screens. Every rule below only adds columns; nothing here is
+         needed for the editor to work. --- */
+  @media (min-width: 34rem) {
+    .shell { padding: 1.5rem 1rem 4rem; }
+    h1 { font-size: 1.25rem; }
+    .top { grid-template-columns: 1fr auto; align-items: center; }
+    .top-buttons { justify-content: flex-end; }
+    .top-buttons button { flex: 0 0 auto; }
+    .status { grid-column: 1 / -1; }
+    .tab { flex: 0 0 auto; }
+    .params { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem 1.5rem; }
+    .fields { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+    .jacks { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+    .slots { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+    .lane-name { width: 8rem; font-size: .8rem; }
+  }
+  @media (min-width: 52rem) {
+    .ports { grid-template-columns: 1fr 1fr; gap: 1rem 1.5rem; }
+    .routes { grid-template-columns: 1fr 1fr; }
+    .port-head { grid-template-columns: 8rem 1fr; align-items: center; gap: .5rem; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .tab, button, .chip { transition: border-color .12s ease, background .12s ease, color .12s ease; }
+  }
 </style>
 
 <div id="app"></div>

@@ -11,9 +11,13 @@ static const ParamDescriptor PARAMS[2] = {
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 2, PARAMS}};
 
+static const char* const IN_NAMES[1] = {"notes in"};
+static const char* const OUT_NAMES[1] = {"notes out"};
+
 const AlgorithmDescriptor Probability::descriptor = {
     ALGO_PROBABILITY, "Probability", 1, 1, 1, 2, IN, OUT, sizeof(Probability), false, construct_node<Probability>,
-    GROUPS, 1 };
+    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    "Lets each note through with a chance, and keeps its note-off with it." };
 
 // The odds move freely: the pass/drop decision is taken on the note-on and
 // remembered, so a note already passed is always released whatever the

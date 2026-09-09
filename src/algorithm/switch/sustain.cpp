@@ -12,9 +12,13 @@ static const ParamDescriptor SUSTAIN_PARAMS[3] = {
 };
 static const ParamGroup SUSTAIN_GROUPS[1] = {{0, 1, 3, SUSTAIN_PARAMS}};
 
+static const char* const SUSTAIN_IN_NAMES[1] = {"pedal"};
+static const char* const SUSTAIN_OUT_NAMES[1] = {"CC out"};
+
 const AlgorithmDescriptor Sustain::descriptor = {
     ALGO_SUSTAIN, "Sustain", 1, 1, 1, 3, SUSTAIN_IN, SUSTAIN_OUT, sizeof(Sustain), false, construct_node<Sustain>,
-    SUSTAIN_GROUPS, 1 };
+    SUSTAIN_GROUPS, 1, SUSTAIN_IN_NAMES, SUSTAIN_OUT_NAMES,
+    "A sustain pedal on a gate inlet, sent as a MIDI control change on a note bus." };
 
 Sustain::Sustain(const NodeConfig& config) :
     in(config.in_bus[0]),

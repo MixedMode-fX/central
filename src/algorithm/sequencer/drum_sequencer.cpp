@@ -61,15 +61,24 @@ static const ParamGroup MIDI_GROUPS[3] = {
     {DrumSeqMidi::VELOCITY_BASE, DRUM_SEQ_LANES * MAX_SEQUENCE_LEN, 1, MIDI_VELOCITY},
 };
 
+// One outlet per lane on the gate variant, so the names are what tells a user
+// which jack a lane reaches - "out 3" would not.
+static const char* const DRUM_IN_NAMES[2] = {"advance", "reset"};
+static const char* const DRUM_GATE_OUT_NAMES[DRUM_SEQ_LANES] = {
+    "lane 1", "lane 2", "lane 3", "lane 4", "lane 5", "lane 6", "lane 7", "lane 8"};
+static const char* const DRUM_NOTE_OUT_NAMES[1] = {"notes out"};
+
 const AlgorithmDescriptor DrumSeqGate::descriptor = {
     ALGO_DRUM_SEQ_GATE, "DrumSeqGate", 2, 1, DRUM_SEQ_LANES, DrumSeqGate::PARAM_COUNT,
     IN, GATE_OUT, sizeof(DrumSeqGate), false, construct_node<DrumSeqGate>,
-    GATE_GROUPS, 2 };
+    GATE_GROUPS, 2, DRUM_IN_NAMES, DRUM_GATE_OUT_NAMES,
+    "Eight gate lanes on one grid, each with its own length. One outlet per lane." };
 
 const AlgorithmDescriptor DrumSeqMidi::descriptor = {
     ALGO_DRUM_SEQ_MIDI, "DrumSeqMidi", 2, 1, 1, DrumSeqMidi::PARAM_COUNT,
     IN, NOTE_OUT, sizeof(DrumSeqMidi), false, construct_node<DrumSeqMidi>,
-    MIDI_GROUPS, 3 };
+    MIDI_GROUPS, 3, DRUM_IN_NAMES, DRUM_NOTE_OUT_NAMES,
+    "Eight drum lanes as MIDI: a note and channel per lane, a velocity per cell." };
 
 // General MIDI, so an unconfigured lane lands on something a drum machine
 // answers to: kick, snare, closed hat, open hat, low tom, mid tom, crash, ride.

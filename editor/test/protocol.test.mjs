@@ -25,6 +25,8 @@ import * as P from '../src/protocol.js';
 import * as codec from '../src/codec.js';
 import { Device } from '../src/device.js';
 import { validate } from '../src/validate.js';
+import { connectNewNode } from '../src/graph.js';
+import { toEmulatorJson, toEmulatorText, fromEmulatorJson } from '../src/emujson.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const wasmPath = process.argv[2] || join(here, '..', '..', 'emulator', 'dist', 'mmmc.wasm');
@@ -187,6 +189,26 @@ await test('parameter descriptors match the firmware, ranges and enum names', as
   assert.equal(device.describeParam(euclid.id, 20).name, 'probability');
 });
 
+// Every inlet, every outlet and every algorithm arrives described. Without
+// this the editor can only say "in 0" and "in 1", and a user has to read the
+// firmware to find out which one resets the sequencer.
+await test('the registry describes every inlet, outlet and algorithm', async () => {
+  for (const descriptor of device.algorithms) {
+    assert.equal(descriptor.inName.length, descriptor.nIn, `${descriptor.name} inlet names`);
+    assert.equal(descriptor.outName.length, descriptor.nOut, `${descriptor.name} outlet names`);
+    for (const name of descriptor.inName) assert.ok(name, `${descriptor.name}: an inlet is unnamed`);
+    for (const name of descriptor.outName) assert.ok(name, `${descriptor.name}: an outlet is unnamed`);
+    assert.ok(descriptor.summary, `${descriptor.name} has no summary`);
+  }
+  // The names are the firmware's, not a table in the editor.
+  const seq = device.algorithms.find((a) => a.name === 'StepSequencer');
+  assert.deepEqual(seq.inName, ['advance', 'reset']);
+  assert.deepEqual(seq.outName, ['trigger']);
+  const drums = device.algorithms.find((a) => a.name === 'DrumSeqGate');
+  assert.equal(drums.outName.length, P.DRUM_SEQ_LANES);
+  assert.equal(drums.outName[0], 'lane 1');
+});
+
 // --- Round-trips ----------------------------------------------------------
 
 function samplePatch() {
@@ -325,6 +347,120 @@ await test('pattern data reads and writes in runs', async () => {
   await device.setPattern(0, base, written);
   const back = await device.getPattern(0, base, written.length);
   assert.deepEqual(Array.from(back.subarray(0, written.length)), Array.from(written));
+});
+
+// The regression this whole seam exists for. Adding a clock and an inverter -
+// two nodes, no configuration - used to leave the module refusing the patch
+// (the inverter's inlet was unconnected) and then refusing every edit
+// afterwards with SYSEX_ERR_BAD_ARGUMENT, because those edits addressed a node
+// the module had never taken.
+await test('nodes added the way the editor adds them build a patch the module takes', async () => {
+  const patch = codec.emptyPatch();
+  const add = (name) => {
+    const d = device.algorithms.find((a) => a.name === name);
+    const node = codec.emptyNode(d.id);
+    connectNewNode(device, patch, node, d);
+    patch.nodes.push(node);
+    return { d, node };
+  };
+
+  const clock = add('ClockDiv');
+  assert.deepEqual(validate(device, patch), [], 'a clock on its own must be valid');
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  const inverter = add('NOT');
+  assert.deepEqual(validate(device, patch), [], 'clock + inverter must be valid');
+  // The inverter reads what the clock writes: that is the patch, not a
+  // coincidence of both defaulting to bus 0.
+  assert.equal(inverter.node.inBus[0], clock.node.outBus[0]);
+  assert.notEqual(inverter.node.outBus[0], clock.node.outBus[0]);
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  // And now an incremental edit addresses a node the module really has.
+  await device.setConnection(1, false, 0, clock.node.outBus[0]);
+  const dumped = await device.dump();
+  assert.equal(dumped.patch.nodes.length, 2);
+  assert.equal(dumped.patch.nodes[1].inBus[0], clock.node.outBus[0]);
+
+  // Every algorithm, added into an empty patch the same way.
+  for (const d of device.algorithms) {
+    const one = codec.emptyPatch();
+    const node = codec.emptyNode(d.id);
+    connectNewNode(device, one, node, d);
+    one.nodes.push(node);
+    const problems = validate(device, one);
+    assert.deepEqual(problems, [], `${d.name}: ${JSON.stringify(problems)}`);
+    await device.sendPatch(one, codec.emptyGlobals());
+  }
+});
+
+// A parameter byte reaches 255 and a SysEx data byte holds seven bits. Step 8
+// of a step sequencer *is* bit 7 of a pattern byte, so a truncated write did
+// not round the value - it cleared the whole byte.
+await test('a parameter above 127 survives the round trip', async () => {
+  const seq = device.algorithms.find((a) => a.name === 'StepSequencer');
+  const patch = codec.emptyPatch();
+  const node = codec.emptyNode(seq.id);
+  node.inBus[0] = 0;
+  node.outBus[0] = 0;
+  patch.nodes = [node];
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  await device.setParam(0, 3, 0x81);              // steps 1 and 8
+  assert.equal(await device.getParam(0, 3), 0x81);
+  const dumped = await device.dump();
+  assert.equal(dumped.patch.nodes[0].params[3], 0x81, 'the dump has to agree');
+
+  for (const value of [0, 1, 127, 128, 200, 255]) {
+    await device.setParam(0, 3, value);
+    assert.equal(await device.getParam(0, 3), value, `parameter value ${value}`);
+  }
+});
+
+// --- The emulator's JSON --------------------------------------------------
+
+await test('a patch exports as the emulator JSON and comes back unchanged', async () => {
+  const patch = samplePatch();
+  const globals = { ...codec.emptyGlobals(), bpm: 96, pcEnabled: 1 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 2, bus: 0 };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 1 };
+
+  const json = toEmulatorJson(patch, globals, device);
+  // The dialect is the emulator's: named algorithms, jacks from 1, named ports.
+  assert.equal(typeof json.nodes[0].algo, 'string');
+  assert.ok(device.algorithms.some((a) => a.name === json.nodes[0].algo));
+  assert.deepEqual(json.midi_in[0].sources, ['DIN 1']);
+  assert.deepEqual(json.midi_out[0].targets, ['USB 1']);
+  for (const jack of json.gate_ports ?? []) {
+    assert.ok(jack.port >= 1 && jack.port <= P.GPIO_N, 'jacks are numbered from 1');
+    assert.ok(['in', 'out', 'unused'].includes(jack.dir));
+  }
+  // It is text a user can paste, not a blob.
+  assert.equal(toEmulatorText(patch, globals, device), `${JSON.stringify(json, null, 2)}\n`);
+
+  const back = fromEmulatorJson(JSON.parse(toEmulatorText(patch, globals, device)), device);
+  assert.equal(back.patch.nodes.length, patch.nodes.length);
+  assert.deepEqual(back.patch.nodes.map((n) => n.algorithmId), patch.nodes.map((n) => n.algorithmId));
+  assert.deepEqual(Array.from(back.patch.nodes[0].params.subarray(0, 8)),
+                   Array.from(patch.nodes[0].params.subarray(0, 8)));
+  assert.deepEqual(back.patch.gatePorts, patch.gatePorts);
+  assert.equal(back.patch.midiIn[0].sourceMask, patch.midiIn[0].sourceMask);
+  assert.equal(back.globals.bpm, 96);
+  assert.equal(back.globals.pcEnabled, 1);
+  assert.equal(back.patch.ccMap[0].cc, patch.ccMap[0].cc);
+
+  // And what came back is still a patch the module takes.
+  assert.deepEqual(validate(device, back.patch), []);
+  await device.sendPatch(back.patch, back.globals);
+});
+
+await test('the JSON importer refuses what it cannot resolve', () => {
+  assert.throws(() => fromEmulatorJson({ nodes: [{ algo: 'Nonexistent' }] }, device),
+                /no algorithm "Nonexistent"/);
+  assert.throws(() => fromEmulatorJson({ gate_ports: [{ port: 99, dir: 'in', bus: 0 }] }, device),
+                /jack 99 does not exist/);
+  assert.throws(() => fromEmulatorJson({ midi_in: [{ sources: ['DIN 9'], bus: 0 }] }, device),
+                /no MIDI port called DIN 9/);
 });
 
 // --- Presets --------------------------------------------------------------

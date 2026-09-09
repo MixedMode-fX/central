@@ -230,14 +230,21 @@ void Console::cmd_patch(){
         put("  "); put_uint(n); put(" ");
         put_line(d ? d->name : "<unknown>");
         if (d == nullptr) continue;
+        // By name, not by index: "in 1 <- bus 3" does not say whether the
+        // connection advances this node or resets it, and the descriptor has
+        // known since the registry gained port names.
         for (uint8_t i = 0; i < d->n_in && i < MAX_IN; i++){
             if (p.nodes[n].in_bus[i] == NO_BUS) continue;
-            put("      in  "); put_uint(i); put(" <- bus "); put_uint(p.nodes[n].in_bus[i]);
+            put("      in  "); put_uint(i); put(" ");
+            put(d->in_name != nullptr ? d->in_name[i] : "");
+            put(" <- bus "); put_uint(p.nodes[n].in_bus[i]);
             put_line("");
         }
         for (uint8_t o = 0; o < d->n_out && o < MAX_OUT; o++){
             if (p.nodes[n].out_bus[o] == NO_BUS) continue;
-            put("      out "); put_uint(o); put(" -> bus "); put_uint(p.nodes[n].out_bus[o]);
+            put("      out "); put_uint(o); put(" ");
+            put(d->out_name != nullptr ? d->out_name[o] : "");
+            put(" -> bus "); put_uint(p.nodes[n].out_bus[o]);
             put_line("");
         }
     }
@@ -287,6 +294,27 @@ void Console::cmd_algorithms(uint8_t n){
         put(" params "); put_uint(d->n_params);
         if (d->wants_tick) put(" clocked");
         put_line("");
+        // The console is the only discovery surface on a module with no
+        // editor attached, so it says what the algorithm is for and what its
+        // connections mean rather than only how many there are.
+        if (d->summary != nullptr){ put("   "); put_line(d->summary); }
+        if (d->in_name != nullptr && d->n_in){
+            put("   reads: ");
+            for (uint8_t k = 0; k < d->n_in && k < MAX_IN; k++){
+                if (k) put(", ");
+                put(d->in_name[k]);
+                if (k >= d->min_in) put(" (optional)");
+            }
+            put_line("");
+        }
+        if (d->out_name != nullptr && d->n_out){
+            put("   writes: ");
+            for (uint8_t k = 0; k < d->n_out && k < MAX_OUT; k++){
+                if (k) put(", ");
+                put(d->out_name[k]);
+            }
+            put_line("");
+        }
     }
 }
 

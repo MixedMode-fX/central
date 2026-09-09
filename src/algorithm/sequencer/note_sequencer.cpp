@@ -67,15 +67,21 @@ static const ParamGroup POLY_GROUPS[2] = {
     {NoteSequencerBase::STEP_BASE, MAX_SEQUENCE_LEN, NoteSequencerBase::stride(NOTE_SEQ_VOICES), POLY_STEP},
 };
 
+static const char* const NOTE_IN_NAMES[5] = {
+    "advance", "reset", "root", "record", "rec enable"};
+static const char* const NOTE_OUT_NAMES[1] = {"notes out"};
+
 const AlgorithmDescriptor NoteSequencer::descriptor = {
     ALGO_NOTE_SEQ, "NoteSequencer", 5, 1, 1, NoteSequencerBase::param_count(1),
     IN, OUT, sizeof(NoteSequencer), false, construct_node<NoteSequencer>,
-    MONO_GROUPS, 2 };
+    MONO_GROUPS, 2, NOTE_IN_NAMES, NOTE_OUT_NAMES,
+    "A melody in scale degrees, so the root and scale move the pitches, not the pattern." };
 
 const AlgorithmDescriptor PolySequencer::descriptor = {
     ALGO_POLY_SEQ, "PolySequencer", 5, 1, 1, NoteSequencerBase::param_count(NOTE_SEQ_VOICES),
     IN, OUT, sizeof(PolySequencer), false, construct_node<PolySequencer>,
-    POLY_GROUPS, 2 };
+    POLY_GROUPS, 2, NOTE_IN_NAMES, NOTE_OUT_NAMES,
+    "The note sequencer with several voices a step: chords in scale degrees." };
 
 static_assert(NoteSequencerBase::param_count(NOTE_SEQ_VOICES) <= N_PARAM, "PolySequencer's steps do not fit N_PARAM");
 

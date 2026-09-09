@@ -367,13 +367,29 @@ EMU_EXPORT uint32_t emu_control_program_change(uint32_t source, uint32_t channel
                                               uint32_t program, uint32_t now_us){
     return protocol.program_change((uint8_t)source, (uint8_t)channel, (uint8_t)program, now_us) ? 1 : 0;
 }
-// Once per loop, before the pass: applies whatever the controllers moved, and
-// services the protocol's timeouts and any pending quantised swap.
+// The last beat the green LED flashed on, so a flash happens once per beat
+// rather than once per subtick (main.cpp).
+static uint32_t last_beat = 0;
+static bool have_beat = false;
+
+// Once per loop, before the pass: applies whatever the controllers moved,
+// services the protocol's timeouts and any pending quantised swap, and drives
+// the feedback surface - the same five calls main.cpp's loop makes, in the
+// same order. The beat belongs here rather than in the page: the LED
+// vocabulary is the firmware's (led/status_leds.h), and a page that decided
+// for itself when to flash would be showing something the module does not do.
 EMU_EXPORT void emu_control_service(uint32_t now_us){
     cc_map.apply(now_us);
     protocol.service(now_us);
     nrpn.service(now_us);
     patches.service(now_us);
+    const uint32_t beat = master.clock().count() / CLOCK_SUBTICKS_PER_QUARTER;
+    if (!have_beat || beat != last_beat){
+        if (have_beat) leds.beat(now_us);
+        last_beat = beat;
+        have_beat = true;
+    }
+    leds.set_clock_running(master.clock().running());
     leds.service(now_us);
 }
 

@@ -525,9 +525,14 @@ void SysexHandler::reply_param_descriptors(uint8_t source, uint8_t algorithm_id)
             put_u14(grp.repeat);
             put_u14(grp.n_fields);
             put_u14(f);
-            put(p.min);
-            put(p.max);
-            put(p.def);
+            // Fourteen bits each, for the same reason SYSEX_PARAM_VALUE is
+            // fourteen: a range reaching 255 does not fit in a data byte, and
+            // truncating a descriptor is worse than truncating a value - a
+            // host told a step pattern's byte tops out at 127 refuses step 8
+            // and every patch that uses it.
+            put_u14(p.min);
+            put_u14(p.max);
+            put_u14(p.def);
             put(p.kind);
             put_string(p.name);
             // Enum option names, so the editor renders a list rather than a

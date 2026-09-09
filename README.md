@@ -235,22 +235,24 @@ Nothing under `src/algorithm/` includes `Arduino.h`.
 CI (`.github/workflows/ci.yml`) builds the firmware and runs the native tests
 on every push to `main` and on every pull request.
 
-## Emulator
+## The module in a browser
 
 The same framework-free core compiles unchanged to WebAssembly, with the
 browser as the hardware: `emulator/` adds a web implementation of `IGpio` and
-`IMidiOut` next to the Teensy one, and a page that loads a patch, drives the
-jacks, sends MIDI and shows the buses, the jacks and the MIDI going out.
+`IMidiOut` next to the Teensy one, and `app/` is the app that drives it — the
+patch editor and the emulator, which are one program because the module in the
+page is both the thing being edited and the thing running.
 
 ```sh
-make emulator                    # needs clang and lld; no PlatformIO involved
+make app                         # needs clang, lld and node; no PlatformIO
 open emulator/dist/index.html    # a single self-contained file
 ```
 
 The build from `main` is published at
 <https://mixedmode-fx.github.io/central/> (`.github/workflows/pages.yml`),
-and CI attaches every branch's `index.html` to its run. What it can and cannot
-verify, and how it was arrived at, is in `emulator/README.md`.
+and CI attaches every branch's `index.html` to its run. What the WebAssembly
+build can and cannot verify, and how it was arrived at, is in
+`emulator/README.md`; the app is `app/README.md`.
 
 # Signal bus model
 
@@ -664,6 +666,13 @@ ranges reach 255, and the high byte of a step pattern *is* step 8 — so
 round the value: writing step 8 would clear the byte and take the other seven
 steps with it.
 
+The same is true of a *descriptor*: `SYSEX_PARAM_DESC` sends `min`, `max` and
+`def` as 14-bit too (protocol version 2). It did not, and a range of 0..255
+arrived as 0..127 — so the app drew a slider that could not reach step 8 and
+its validator refused every patch that had one, which is a pattern with a hit
+on the eighth step of any lane. A truncated descriptor is worse than a
+truncated value: it makes legal patches unreachable rather than wrong.
+
 **Two tiers of write.** A bulk transfer is chunked, with a sequence number and
 a checksum per chunk, and accumulates into a staging buffer: the live graph is
 untouched until the last chunk has arrived and the whole image has passed the
@@ -832,34 +841,52 @@ step grid — is specified but deliberately not built. It needs the same period
 estimate the sub-step gate does, and that should prove itself on hardware
 first.
 
-## The patch editor
+## The app
 
-`editor/` is a browser editor over Web MIDI. With no encoder, no switches and
-no display, it is not a nicer alternative to a panel menu — between it and the
-console, it is how the module gets configured, so it is a shipping deliverable
-rather than a companion app. It is served from GitHub Pages alongside the
-emulator, which is also what satisfies Web MIDI's secure-context requirement:
-a `file://` copy cannot reach a module.
+`app/` is the browser app: the patch editor and the emulator, merged. With no
+encoder, no switches and no display, it is not a nicer alternative to a panel
+menu — between it and the console, it is how the module gets configured, so it
+is a shipping deliverable rather than a companion app. It is served from GitHub
+Pages, which is also what satisfies Web MIDI's secure-context requirement: a
+`file://` copy cannot reach a module.
+
+**The module runs in the page, always.** The firmware compiled to WebAssembly
+is two things at once, and that is why the two pages became one:
+
+- it is the **transport** the editor talks to. `Device` talks to a transport,
+  not to Web MIDI, so every edit reaches the module as the SysEx message a
+  cable would have carried, and the validator that accepts or refuses a patch
+  is the firmware's own.
+- it is a **machine that runs**. The page is its main loop, its interval timer
+  and its sync pin, so its jacks, LEDs, MIDI output and sequencer positions are
+  live beside the controls that shape them — the step being played is outlined
+  in the grid you are editing.
+
+That also matters beyond convenience: **Web MIDI does not exist on iOS at all**
+and needs a permission prompt and an OTG cable on Android, so an app that could
+only reach a module over Web MIDI would be unusable on most phones. Running the
+module in the page needs none of it.
 
 It is a client of the protocol and nothing more. Everything it knows about what
 the firmware *has* — the algorithms, their inlets and outlets and domains,
 every parameter's range, default, display kind and enum options, and the
 module's real capacities — is read from the device, so an algorithm added to
-the firmware appears in the editor with a working panel and no editor change.
+the firmware appears with a working panel and no app change.
 
 Three things keep it honest, and all three are checked in CI:
 
-- **The message layout is generated, not copied.** `editor/src/protocol.js` is
-  derived from the firmware headers; `make editor` fails if the checked-in copy
+- **The message layout is generated, not copied.** `app/src/protocol.js` is
+  derived from the firmware headers; `make app` fails if the checked-in copy
   has drifted. A protocol change breaks both builds at once, which is the
-  reason the editor lives in this repository.
+  reason the app lives in this repository.
 - **Client-side validation uses the same rules** the firmware enforces, so an
-  error surfaces while editing rather than on send. An editor that lets you
-  build a patch the module will reject is worse than no editor.
+  error surfaces while editing rather than on send. An app that lets you build
+  a patch the module will reject is worse than no app.
 - **It is tested against the real firmware.** The module is compiled to
-  WebAssembly by the emulator build, and the editor's own transport and codec
-  drive it over the actual SysEx protocol — so "a patch the editor accepts is
-  never rejected by the firmware's validator" is a check, not a hope.
+  WebAssembly and the app's own transport and codec drive it over the actual
+  SysEx protocol — so "a patch the app accepts is never rejected by the
+  firmware's validator" is a check, not a hope. The patch library, the runtime
+  seam and every example patch are checked the same way.
 
 Buses are the connections: every inlet and outlet is a selector offering only
 the buses of its own domain, under the name the firmware gives it — *advance*
@@ -875,10 +902,28 @@ visibly moves the pitches without touching the stored pattern.
 something already writes — the node you added last, so a chain builds as you
 type — and its first outlet on a bus nothing writes yet. Added unconnected, a
 node with a required inlet is a patch the module refuses, which used to leave
-the editor a whole graph ahead of the device and every subsequent incremental
-edit addressing a node that was never taken. The editor now tracks that
-divergence explicitly: a patch its own validator refuses is never sent, and the
-first edit that makes it valid sends the whole thing.
+the app a whole graph ahead of the device and every subsequent incremental edit
+addressing a node that was never taken. The app now tracks that divergence
+explicitly: a patch its own validator refuses is never sent, and the first edit
+that makes it valid sends the whole thing.
+
+**Patches live in the browser.** A module holds four preset slots in EEPROM and
+the module in the page holds its own in RAM, which a reload empties; neither is
+somewhere to keep work. So the app keeps a library in `localStorage`, and what
+it stores is the patch **image** — the same bytes a `.syx` file carries and a
+slot holds, not an object of the app's own shape that would be a third format
+to keep in step with the firmware. Whatever is being edited is written back on
+every change, so a reload picks up where you left off; anything unsaved is put
+in the library before something replaces it. Eighteen example patches, each
+exercising one part of the machine, are there to start from — and CI loads
+every one of them into the real firmware, so an example cannot rot.
+
+**A controller plays it.** A MIDI controller plugged into the *computer* is
+routed into the module's own MIDI input on a chosen port and channel, and what
+the module plays can go back out to a real port. Routing it in rather than
+around is what makes **learn work with no module in the room**: an incoming CC
+takes the path `main.cpp` gives it — preset recall, then NRPN, then the binding
+table, then the graph — through the firmware's own control plane.
 
 **Controller bindings are edited, not only learned.** Learn is the fastest way
 to bind a controller you have in front of you and the only way to bind one
@@ -891,35 +936,25 @@ pairing and pass-through. MIDI routing, the clock, Program Change recall and
 NRPN are there too, all of which the patch has always carried and none of which
 had a control.
 
-**A patch exports as the emulator's JSON** as well as `.syx`. The `.syx` file
-is the patch *image*, which is what a module and a librarian want and what
-nobody can read; the JSON is the dialect `emulator/index.html` loads, so a
-patch built here can be pasted into the emulator and heard. It re-imports, so
-the JSON is a door in both directions.
+**A patch exports as `.syx` and as JSON.** The `.syx` file is the patch
+*image*, which is what a module and a librarian want and what nobody can read;
+the JSON is the same patch in words — named algorithms, jacks numbered from 1,
+sequencers as patterns rather than bytes — and it imports back, so it is a door
+in both directions rather than a one-way export.
 
-**The layout is built for a phone first.** With the module embedded in the page
-there is no cable to plug in, so a phone is a fully working editor and the only
-one an iPhone can have. Every control is finger-sized, every parameter has a
-number field beside its slider — a slider alone cannot hit a value and is
-hopeless on a touch screen — and anything that cannot shrink scrolls inside its
-own box rather than pushing the page sideways.
-
-**It also runs the module itself.** Press *use built-in module* and the editor
-talks to the firmware compiled to WebAssembly in the page, over the same
-protocol through the same codec — `Device` talks to a transport, and the wasm
-build is one. That matters beyond convenience: **Web MIDI does not exist on
-iOS at all** and needs a permission prompt and an OTG cable on Android, so an
-editor that could only reach a module over Web MIDI would be unusable on most
-phones. Running the module in the page needs none of it. While it runs, the
-editor shows the two status LEDs and the live gate buses — with no panel
-feedback beyond those LEDs, that view is the module's missing display.
+**The layout is built for a phone first.** With the module in the page there is
+no cable to plug in, so a phone is a fully working app and the only one an
+iPhone can have. Every control is finger-sized, every parameter has a number
+field beside its slider — a slider alone cannot hit a value and is hopeless on
+a touch screen — and anything that cannot shrink scrolls inside its own box
+rather than pushing the page sideways.
 
 Browser reach is a real constraint for reaching *hardware*: Chrome, Edge and
 Opera have Web MIDI, Firefox asks permission for it, Safari does not have it.
 A browser without it is not a degraded experience, it is a user who cannot set
 their module up — so the page says plainly what is wrong, **`.syx` export is a
-first-class path** loadable by any standard SysEx librarian, and the built-in
-module works everywhere regardless.
+first-class path** loadable by any standard SysEx librarian, and the module in
+the page works everywhere regardless.
 
 ## Still open
 

@@ -4,7 +4,7 @@
 // **Learn is not a mapping interface.** Arming a learn and turning a knob is
 // the fastest way to bind a controller you have in front of you, and it is the
 // only way to bind one whose CC number you do not know. It is also the only
-// thing the editor offered, which meant a binding could not be read, changed,
+// thing the app offered, which meant a binding could not be read, changed,
 // narrowed to a range, moved to another parameter or deleted - and could not
 // be made at all without the hardware present. A patch built offline for a
 // controller that is in the next room is exactly the case the `.syx` export
@@ -17,6 +17,7 @@
 import * as P from './protocol.js';
 import { el } from './views.js';
 import { busCount, Domain, domainName } from './validate.js';
+import { describeSupport } from './webmidi.js';
 import {
   MUSICAL_PORTS, portNames, CLOCK_SOURCES, SWAP_TIMINGS,
   CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS,
@@ -65,7 +66,7 @@ function busSelect(caps, domain, value, onChange, noneLabel = 'not connected') {
 
 // The port mask, as a row of toggles. The control cable is not offered: it is
 // reserved for the protocol, and a patch that could route music onto it - or
-// take it away from the editor - is a patch that could lock the module out.
+// take it away from the app - is a patch that could lock the module out.
 function portToggles(mask, onChange, { label }) {
   return el('div', { class: 'ports-row', role: 'group', 'aria-label': label },
     MUSICAL_PORTS.map((p) => {
@@ -228,6 +229,86 @@ export function globalsPanel(app) {
         app.edit(() => app.device.setNrpn(g.nrpnEnabled, g.nrpnChannel, g.nrpnSourceMask), 'NRPN');
         app.render();
       }, { label: 'NRPN source ports' }), 'none selected means any port')));
+}
+
+// --- an external controller ------------------------------------------------
+
+// A controller plugged into the *computer*, playing the module in the page.
+//
+// This is what makes the app an instrument rather than a form: the keys and
+// knobs on the desk reach the patch being edited, on a chosen port and its own
+// channel, through the same MIDI input a cable would use. Learn works from it,
+// because an incoming CC takes the path main.cpp gives it before anything else
+// sees it - so a binding can be made with a real knob and no module.
+export function controllerPanel(app) {
+  const controller = app.controller;
+  const support = describeSupport();
+
+  if (!app.usingModule) {
+    return el('section', { class: 'panel' },
+      el('h2', {}, 'external controller'),
+      el('p', { class: 'hint' },
+        'The app is talking to a module on a cable, so a controller belongs in that module’s '
+        + 'own MIDI input rather than in this page.'));
+  }
+  if (!support.ok) {
+    return el('section', { class: 'panel' },
+      el('h2', {}, 'external controller'),
+      el('p', { class: 'hint' }, support.reason),
+      el('p', { class: 'hint' },
+        'The on-screen keyboard under play needs none of this, and a binding can be typed in '
+        + 'by hand below with no controller present.'));
+  }
+  if (!controller.access) {
+    return el('section', { class: 'panel' },
+      el('h2', {}, 'external controller'),
+      el('p', { class: 'hint' },
+        'Play the built-in module from a controller plugged into this computer, and send what '
+        + 'the module plays back out to a real port.'),
+      el('div', { class: 'row' },
+        el('button', { onclick: () => app.connectController() }, 'find my MIDI devices')));
+  }
+
+  const inputs = el('select', { class: 'grow', onchange: (e) => { app.controller.listenTo(e.target.value); app.render(); } });
+  inputs.append(el('option', { value: '' }, 'nothing'));
+  for (const port of controller.inputs) {
+    const option = el('option', { value: port.id }, port.name);
+    if (port.id === controller.inputId) option.selected = true;
+    inputs.append(option);
+  }
+
+  const outputs = el('select', { class: 'grow', onchange: (e) => { app.controller.sendTo(e.target.value); app.render(); } });
+  outputs.append(el('option', { value: '' }, 'nothing'));
+  for (const port of controller.outputs) {
+    const option = el('option', { value: port.id }, port.name);
+    if (port.id === controller.outputId) option.selected = true;
+    outputs.append(option);
+  }
+
+  const arrives = el('select', { onchange: (e) => { app.controller.setPort(Number(e.target.value)); app.render(); } });
+  for (const port of MUSICAL_PORTS) {
+    const option = el('option', { value: String(port.value) }, port.label);
+    if (port.value === controller.port) option.selected = true;
+    arrives.append(option);
+  }
+
+  const field = (name, ...controls) => el('div', { class: 'field' },
+    el('span', { class: 'field-name' }, name), ...controls);
+
+  return el('section', { class: 'panel' },
+    el('h2', {}, 'external controller'),
+    el('div', { class: 'fields' },
+      field('play the module from', inputs),
+      field('arriving on', arrives,
+        el('span', { class: 'hint' }, 'the module’s own port, so a patch’s source filter applies')),
+      field('send what it plays to', outputs)),
+    el('p', { class: 'hint' }, controller.inputId
+      ? 'Turn a knob and press “learn” beside a parameter to bind it — the binding is made by the '
+        + 'firmware’s own control plane, exactly as it would be on hardware.'
+      : 'Choose an input and the patch is played by it.'),
+    controller.inputId || controller.outputId
+      ? el('p', { class: 'hint', id: 'controller-activity' }, '')
+      : null);
 }
 
 // --- controller bindings ---------------------------------------------------

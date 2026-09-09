@@ -1,8 +1,8 @@
 // The same rules `registry::validate` and `MixedModeMaster::validate` apply,
 // so an error surfaces while editing rather than on send.
 //
-// **An editor that lets you build a patch the module will reject is worse than
-// no editor.** These checks are written from the same descriptors the firmware
+// **An app that lets you build a patch the module will reject is worse than
+// no app.** These checks are written from the same descriptors the firmware
 // publishes - inlet and outlet domains, required inlets, parameter ranges, the
 // module's real bus counts - all read from the device, so they cannot drift
 // from what the firmware enforces. The test suite sends every patch this
@@ -115,7 +115,7 @@ export function validateMapping(device, patch, slot) {
 export function validate(device, patch) {
   const caps = device.capabilities;
   const found = [];
-  if (!caps) return [problem('editor', 'the module has not reported its capabilities yet')];
+  if (!caps) return [problem('the app', 'the module has not reported its capabilities yet')];
 
   if (patch.nodes.length > caps.nodes) {
     found.push(problem('patch', `${patch.nodes.length} nodes; this module holds ${caps.nodes}`));
@@ -141,7 +141,7 @@ export function validate(device, patch) {
 }
 
 // Warnings are not errors: the firmware runs these patches happily, and an
-// editor that refused them would be lying about what the module does. They are
+// app that refused them would be lying about what the module does. They are
 // what a user usually wants to know anyway.
 export function advise(device, patch) {
   const notes = [];

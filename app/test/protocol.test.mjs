@@ -1,4 +1,4 @@
-// The editor, driven against the real firmware.
+// The app, driven against the real firmware.
 //
 // The module is compiled to WebAssembly (the emulator) and the editor talks to
 // it through its own Device and codec over the actual SysEx protocol. So the
@@ -14,7 +14,7 @@
 //   * an algorithm added to the firmware appears in the editor with no editor
 //     change, because the editor reads the registry.
 //
-//   node editor/test/protocol.test.mjs [path/to/mmmc.wasm]
+//   node app/test/protocol.test.mjs [path/to/mmmc.wasm]
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ import * as codec from '../src/codec.js';
 import { Device } from '../src/device.js';
 import { validate } from '../src/validate.js';
 import { connectNewNode } from '../src/graph.js';
-import { toEmulatorJson, toEmulatorText, fromEmulatorJson } from '../src/emujson.js';
+import { toPatchJson, toPatchJsonText, fromPatchJson } from '../src/patchjson.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const wasmPath = process.argv[2] || join(here, '..', '..', 'emulator', 'dist', 'mmmc.wasm');
@@ -158,17 +158,47 @@ await test('every algorithm answers a parameter request, completely', async () =
   }
 });
 
-// The emulator module is fetched relative to editor/src/emulator.js, which is
-// one level deeper than the page - the kind of thing that is obvious in a
-// browser and invisible in a unit test, so it is pinned here.
+// The wasm module is fetched relative to app/src/module.js, which is one level
+// deeper than the page - the kind of thing that is obvious in a browser and
+// invisible in a unit test, so it is pinned here.
 await test('the embedded module resolves next to the page it is served with', async () => {
-  const { CANDIDATE_PATHS } = await import('../src/emulator.js');
-  const from = 'https://example.test/editor/src/emulator.js';
+  const { CANDIDATE_PATHS } = await import('../src/module.js');
+  const from = 'https://example.test/app/src/module.js';
   const resolved = CANDIDATE_PATHS.map((c) => new URL(c, from).pathname);
   assert.ok(resolved.includes('/mmmc.wasm'),
             `the Pages layout is not covered: ${resolved.join(', ')}`);
-  assert.ok(resolved.includes('/editor/mmmc.wasm'), 'a copy beside the page is not covered');
+  assert.ok(resolved.includes('/app/mmmc.wasm'), 'a copy beside the page is not covered');
   assert.ok(resolved.includes('/emulator/dist/mmmc.wasm'), 'the repository layout is not covered');
+});
+
+// Every field of every descriptor, against the firmware's own table. A
+// descriptor is what the app draws a control from and what its validator
+// checks against, so a field that loses a bit on the wire is a control that
+// cannot reach a legal value and a validator that refuses a legal patch - as
+// a max of 255 did, arriving as 127 and making step 8 of every pattern
+// unreachable.
+await test('every descriptor field survives the wire intact', async () => {
+  const mem = () => new Uint8Array(E.memory.buffer);
+  const cstr = (p) => { let s = ''; while (mem()[p]) s += String.fromCharCode(mem()[p++]); return s; };
+  let widest = 0;
+  for (let i = 0; i < E.emu_algo_count(); i++) {
+    const id = E.emu_algo_id(i);
+    const groups = await device.readParams(id);
+    for (let g = 0; g < E.emu_algo_n_param_groups(i); g++) {
+      for (let f = 0; f < E.emu_param_group_fields(i, g); f++) {
+        const field = groups[g].fields[f];
+        const where = `${cstr(E.emu_algo_name(i))} group ${g} field ${f}`;
+        assert.equal(field.name, cstr(E.emu_param_name(i, g, f)), where);
+        assert.equal(field.min, E.emu_param_min(i, g, f), `${where} min`);
+        assert.equal(field.max, E.emu_param_max(i, g, f), `${where} max`);
+        assert.equal(field.def, E.emu_param_default(i, g, f), `${where} default`);
+        assert.equal(field.kind, E.emu_param_kind(i, g, f), `${where} kind`);
+        widest = Math.max(widest, field.max);
+      }
+    }
+  }
+  assert.ok(widest > 127, `no parameter reaches past a data byte (widest ${widest}), `
+                        + 'so this check would not catch one being truncated');
 });
 
 await test('parameter descriptors match the firmware, ranges and enum names', async () => {
@@ -425,7 +455,7 @@ await test('a patch exports as the emulator JSON and comes back unchanged', asyn
   patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 2, bus: 0 };
   patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 1 };
 
-  const json = toEmulatorJson(patch, globals, device);
+  const json = toPatchJson(patch, globals, device);
   // The dialect is the emulator's: named algorithms, jacks from 1, named ports.
   assert.equal(typeof json.nodes[0].algo, 'string');
   assert.ok(device.algorithms.some((a) => a.name === json.nodes[0].algo));
@@ -436,9 +466,9 @@ await test('a patch exports as the emulator JSON and comes back unchanged', asyn
     assert.ok(['in', 'out', 'unused'].includes(jack.dir));
   }
   // It is text a user can paste, not a blob.
-  assert.equal(toEmulatorText(patch, globals, device), `${JSON.stringify(json, null, 2)}\n`);
+  assert.equal(toPatchJsonText(patch, globals, device), `${JSON.stringify(json, null, 2)}\n`);
 
-  const back = fromEmulatorJson(JSON.parse(toEmulatorText(patch, globals, device)), device);
+  const back = fromPatchJson(JSON.parse(toPatchJsonText(patch, globals, device)), device);
   assert.equal(back.patch.nodes.length, patch.nodes.length);
   assert.deepEqual(back.patch.nodes.map((n) => n.algorithmId), patch.nodes.map((n) => n.algorithmId));
   assert.deepEqual(Array.from(back.patch.nodes[0].params.subarray(0, 8)),
@@ -455,11 +485,11 @@ await test('a patch exports as the emulator JSON and comes back unchanged', asyn
 });
 
 await test('the JSON importer refuses what it cannot resolve', () => {
-  assert.throws(() => fromEmulatorJson({ nodes: [{ algo: 'Nonexistent' }] }, device),
+  assert.throws(() => fromPatchJson({ nodes: [{ algo: 'Nonexistent' }] }, device),
                 /no algorithm "Nonexistent"/);
-  assert.throws(() => fromEmulatorJson({ gate_ports: [{ port: 99, dir: 'in', bus: 0 }] }, device),
+  assert.throws(() => fromPatchJson({ gate_ports: [{ port: 99, dir: 'in', bus: 0 }] }, device),
                 /jack 99 does not exist/);
-  assert.throws(() => fromEmulatorJson({ midi_in: [{ sources: ['DIN 9'], bus: 0 }] }, device),
+  assert.throws(() => fromPatchJson({ midi_in: [{ sources: ['DIN 9'], bus: 0 }] }, device),
                 /no MIDI port called DIN 9/);
 });
 

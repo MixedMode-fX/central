@@ -255,7 +255,15 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             g.pc_channel = args[5];
             g.pc_source_mask = args[6];
             g.pc_quantise = args[7];
-            if (g.clock_source > MasterClock::CLOCK_MIDI || g.pc_quantise > SWAP_NEXT_BAR){
+            // The key (midi/global_scale.h), appended: a host that predates
+            // it sends eight arguments and leaves the module in the key it
+            // is already in, rather than being told its message is short.
+            if (n >= 10){
+                g.scale = args[8];
+                g.root = args[9];
+            }
+            if (g.clock_source > MasterClock::CLOCK_MIDI || g.pc_quantise > SWAP_NEXT_BAR
+                || g.scale >= SCALE_COUNT || g.root > 11){
                 nak(source, SYSEX_ERR_BAD_ARGUMENT);
                 return;
             }

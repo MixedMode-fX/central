@@ -7,8 +7,11 @@ const char* const PARAM_DIRECTION_NAMES[5] = {
     "forward", "reverse", "pingpong", "random", "brownian",
 };
 
-const char* const PARAM_SCALE_NAMES[14] = {
-    "chromatic", "major", "minor", "harmonic minor", "melodic minor",
+// Index 0 is not a scale but a reference to the module's own (see
+// midi/scale.h): it is what an algorithm carries until a user names a scale
+// on it, which is why it reads as "global" rather than as a mode.
+const char* const PARAM_SCALE_NAMES[15] = {
+    "global", "major", "minor", "harmonic minor", "melodic minor",
     "pentatonic major", "pentatonic minor", "blues", "dorian", "phrygian",
-    "lydian", "mixolydian", "locrian", "whole tone",
+    "lydian", "mixolydian", "locrian", "whole tone", "chromatic",
 };

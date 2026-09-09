@@ -8,17 +8,21 @@
 #include "midi/held_notes.h"
 #include "midi/sounding_notes.h"
 #include "midi/scale.h"
+#include "midi/global_scale.h"
 #include "midi/note_event.h"
 #include "algorithm/midi/transpose.h"
 #include "algorithm/midi/note_priority.h"
 #include "algorithm/midi/velocity_curve.h"
 #include "algorithm/midi/chord.h"
-#include "algorithm/midi/quantise.h"
+#include "algorithm/midi/note_quantise.h"
 #include "algorithm/midi/probability.h"
 #include "algorithm/midi/arpeggiator.h"
 
 void setUp() {}
-void tearDown() {}
+// The module's key is process-wide state (midi/global_scale.h), so every test
+// gets it back the way it found it: chromatic, which is what a module with no
+// key set is in.
+void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
 
 // ---------------------------------------------------------------------------
 // Test rig: one pass around a node, exactly as MixedModeMaster runs it.
@@ -378,16 +382,16 @@ static void test_chord_emits_the_interval_set_and_releases_all_of_it() {
 }
 
 // ---------------------------------------------------------------------------
-// Quantise
+// NoteQuantise
 // ---------------------------------------------------------------------------
 
-static void test_quantise_snaps_and_releases_what_it_sent() {
+static void test_note_quantise_snaps_and_releases_what_it_sent() {
     BusManager bus;
-    NodeConfig c = node_config(ALGO_QUANTISE);
+    NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
     c.in_bus[0] = 0; c.in_bus[1] = NO_BUS; c.out_bus[0] = 1;
     c.params[0] = SCALE_MAJOR;
     c.params[1] = 0;                              // C
-    Quantise node(c);
+    NoteQuantise node(c);
 
     bus.note_write(0, on(61));                    // C# -> D
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
@@ -404,12 +408,12 @@ static void test_quantise_snaps_and_releases_what_it_sent() {
     TEST_ASSERT_EQUAL(62, out[0].data1);          // the pitch that was sent
 }
 
-static void test_quantise_takes_its_root_from_a_bus() {
+static void test_note_quantise_takes_its_root_from_a_bus() {
     BusManager bus;
-    NodeConfig c = node_config(ALGO_QUANTISE);
+    NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
     c.in_bus[0] = 0; c.in_bus[1] = 2; c.out_bus[0] = 1;
     c.params[0] = SCALE_MAJOR;
-    Quantise node(c);
+    NoteQuantise node(c);
 
     bus.note_write(2, on(62));                    // root D, from the root inlet
     bus.note_write(0, on(60));                    // C is not in D major -> C#
@@ -455,6 +459,117 @@ static void test_probability_defaults_to_passing_everything() {
         bus.note_write(0, on((uint8_t)(60 + i)));
         TEST_ASSERT_EQUAL(1, run_pass(bus, node, 1).size());
     }
+}
+
+// ---------------------------------------------------------------------------
+// The module's scale (midi/global_scale.h)
+// ---------------------------------------------------------------------------
+
+// An algorithm that named no scale follows the module's; one that named a
+// scale keeps it, and takes its own root with it.
+static void test_the_global_scale_is_the_default_and_an_override_wins() {
+    global_scale::set(SCALE_MAJOR, 2);                 // D major
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), global_scale::mask());
+    TEST_ASSERT_EQUAL(2, global_scale::root());
+
+    TEST_ASSERT_TRUE(global_scale::follows(SCALE_GLOBAL));
+    TEST_ASSERT_FALSE(global_scale::follows(SCALE_BLUES));
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), global_scale::resolve_id(SCALE_GLOBAL));
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_BLUES), global_scale::resolve_id(SCALE_BLUES));
+    TEST_ASSERT_EQUAL(2, global_scale::resolve_root(SCALE_GLOBAL, 7));
+    TEST_ASSERT_EQUAL(7, global_scale::resolve_root(SCALE_BLUES, 7));
+
+    // Chromatic is a scale like any other, and is what the module is in
+    // until a key is set - which is why a patch written before the setting
+    // existed plays what it always did.
+    global_scale::set(SCALE_CHROMATIC, 0);
+    TEST_ASSERT_EQUAL_HEX16(0x0FFF, global_scale::resolve_id(SCALE_GLOBAL));
+    // The global scale cannot follow itself.
+    global_scale::set(SCALE_GLOBAL, 5);
+    TEST_ASSERT_EQUAL(SCALE_CHROMATIC, global_scale::id());
+    TEST_ASSERT_EQUAL_HEX16(0x0FFF, global_scale::mask());
+}
+
+static void test_note_quantise_follows_the_module_scale_until_it_names_one() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;                 // scale left at 0: the module's
+    NoteQuantise node(c);
+
+    global_scale::set(SCALE_MAJOR, 2);                 // D major
+    bus.note_write(0, on(60));                         // C is not in it -> C#
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(61, out[0].data1);
+    TEST_ASSERT_EQUAL(2, node.active_root());
+
+    // Naming a scale opts out of the key, root and all.
+    bus.note_write(0, off(60));
+    run_pass(bus, node, 1);
+    node.set_scale(SCALE_CHROMATIC);
+    bus.note_write(0, on(60));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);
+}
+
+// The intervals are scale steps, so one voicing is a triad on every degree.
+static void test_chord_voices_its_intervals_in_the_scale() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_CHORD);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.params[0] = 2;
+    c.params[1] = 2; c.params[2] = 4;                  // a triad, in scale steps
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);                 // C major
+    bus.note_write(0, on(60));                         // C E G
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);
+    TEST_ASSERT_EQUAL(64, out[1].data1);
+    TEST_ASSERT_EQUAL(67, out[2].data1);
+    bus.note_write(0, off(60));
+    run_pass(bus, node, 1);
+
+    bus.note_write(0, on(62));                         // D F A: the same 0 2 4
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(62, out[0].data1);
+    TEST_ASSERT_EQUAL(65, out[1].data1);
+    TEST_ASSERT_EQUAL(69, out[2].data1);
+    bus.note_write(0, off(62));
+    run_pass(bus, node, 1);
+
+    // A note outside the key is snapped into it, so the chord is in key even
+    // when the playing is not.
+    bus.note_write(0, on(61));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(62, out[0].data1);
+    TEST_ASSERT_EQUAL(65, out[1].data1);
+    TEST_ASSERT_EQUAL(69, out[2].data1);
+}
+
+// Chromatic on the node is the escape hatch: a stack of fixed semitones,
+// whatever key the module is in - and it is what every patch written before
+// the scale existed is doing.
+static void test_chord_in_the_chromatic_scale_is_fixed_semitones() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_CHORD);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.params[0] = 2;
+    c.params[1] = 4; c.params[2] = 7;                  // a major triad in semitones
+    c.params[Chord::P_SCALE] = SCALE_CHROMATIC;
+    Chord node(c);
+
+    global_scale::set(SCALE_PENTATONIC_MINOR, 3);
+    bus.note_write(0, on(61));
+    const std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(61, out[0].data1);
+    TEST_ASSERT_EQUAL(65, out[1].data1);
+    TEST_ASSERT_EQUAL(68, out[2].data1);
 }
 
 // ---------------------------------------------------------------------------
@@ -578,6 +693,133 @@ static void test_arpeggiator_releases_when_the_chord_is_lifted() {
     TEST_ASSERT_EQUAL(0, node.sounding_count());
 }
 
+// The single note-on in a pass, or NONE. Every arpeggiator step is one note.
+static uint8_t note_played(const std::vector<MidiEvent>& out) {
+    uint8_t played = HeldNotes::NONE;
+    for (const MidiEvent& e : out) if (is_note_on(e)) played = e.data1;
+    return played;
+}
+
+// One edge, one step, with nobody touching the keyboard: the point of hold.
+static void test_arpeggiator_hold_keeps_the_figure_after_the_keys_are_lifted() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_ARPEGGIATOR);
+    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 1;
+    c.params[4] = 1;                                   // hold
+    Arpeggiator node(c);
+
+    hold_triad(bus, 0);
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, node.keys_down());
+
+    bus.note_write(0, off(60));
+    bus.note_write(0, off(64));
+    bus.note_write(0, off(67));
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(0, node.keys_down());
+    TEST_ASSERT_EQUAL(3, node.held_count());           // the figure survives
+    TEST_ASSERT_TRUE(node.latched());
+
+    const uint8_t expected[3] = {60, 64, 67};
+    for (uint8_t step = 0; step < 3; step++) {
+        bus.gate_write(0, true);
+        TEST_ASSERT_EQUAL(expected[step], note_played(run_pass(bus, node, 1)));
+        bus.gate_write(0, false);
+        run_pass(bus, node, 1);
+    }
+}
+
+// The first key of a new chord replaces the latched one instead of adding to
+// it - otherwise every fumbled change leaves a note in the figure for ever.
+static void test_arpeggiator_hold_replaces_the_chord_rather_than_adding_to_it() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_ARPEGGIATOR);
+    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 1;
+    c.params[4] = 1;
+    Arpeggiator node(c);
+
+    hold_triad(bus, 0);
+    run_pass(bus, node, 1);
+    bus.gate_write(0, true);
+    NoteBalance balance;
+    balance.observe(run_pass(bus, node, 1));
+    bus.gate_write(0, false);
+    balance.observe(run_pass(bus, node, 1));
+    bus.note_write(0, off(60));
+    bus.note_write(0, off(64));
+    bus.note_write(0, off(67));
+    balance.observe(run_pass(bus, node, 1));
+
+    bus.note_write(0, on(72));
+    balance.observe(run_pass(bus, node, 1));
+    TEST_ASSERT_EQUAL(1, node.held_count());           // the new chord, not four notes
+    TEST_ASSERT_EQUAL(0, balance.total());             // and the latched note went with it
+
+    // Adding to a held chord is still possible: keep one key down.
+    bus.note_write(0, on(76));
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(2, node.held_count());
+    bus.gate_write(0, true);
+    TEST_ASSERT_EQUAL(72, note_played(run_pass(bus, node, 1)));
+}
+
+// Hold coming off keeps what is still under the fingers and drops the rest,
+// so lifting the latch does not cut the notes being played.
+static void test_arpeggiator_hold_off_drops_only_what_no_key_holds() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_ARPEGGIATOR);
+    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 1;
+    c.params[4] = 1;
+    Arpeggiator node(c);
+
+    bus.note_write(0, on(60));
+    bus.note_write(0, on(64));
+    run_pass(bus, node, 1);
+    bus.note_write(0, off(64));                        // one finger up, one down
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(2, node.held_count());
+    TEST_ASSERT_EQUAL(1, node.keys_down());
+
+    TEST_ASSERT_TRUE(node.set_param(4, 0));            // hold off
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, node.held_count());
+    TEST_ASSERT_FALSE(node.latched());
+    bus.gate_write(0, true);
+    TEST_ASSERT_EQUAL(60, note_played(run_pass(bus, node, 1)));
+}
+
+// The inlet is the parameter: a footswitch latches, and letting it go with no
+// key down stands the arpeggiator down without leaving a note sounding.
+static void test_arpeggiator_hold_inlet_latches_like_the_parameter() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_ARPEGGIATOR);
+    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[3] = 2; c.out_bus[0] = 1;
+    Arpeggiator node(c);
+
+    NoteBalance balance;
+    bus.gate_write(2, true);                           // the switch goes down
+    hold_triad(bus, 0);
+    balance.observe(run_pass(bus, node, 1));
+    bus.gate_write(2, true);
+    bus.note_write(0, off(60));
+    bus.note_write(0, off(64));
+    bus.note_write(0, off(67));
+    balance.observe(run_pass(bus, node, 1));
+    TEST_ASSERT_EQUAL(3, node.held_count());
+
+    bus.gate_write(2, true);
+    bus.gate_write(0, true);
+    balance.observe(run_pass(bus, node, 1));
+    TEST_ASSERT_EQUAL(1, balance.total());
+
+    bus.gate_write(2, false);                          // and comes back up
+    bus.gate_write(0, false);
+    balance.observe(run_pass(bus, node, 1));
+    TEST_ASSERT_EQUAL(0, node.held_count());
+    TEST_ASSERT_EQUAL(0, balance.total());
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
 // A fixed gate length releases on time rather than on the next step.
 static void test_arpeggiator_gate_length_releases_early() {
     BusManager bus;
@@ -603,9 +845,12 @@ static void test_arpeggiator_gate_length_releases_early() {
 // The rule that governs every modifier: no hanging notes, ever
 // ---------------------------------------------------------------------------
 
+// `unlatch` is for a node that is *meant* to keep playing with every key
+// released - an arpeggiator on hold. The storm ends the same way a player
+// does: the latch comes off, and then nothing may be left sounding.
 template <class T>
 static void assert_no_hanging_notes(NodeConfig config, uint8_t in_bus, uint8_t out_bus,
-                                    uint32_t seed, bool with_gate) {
+                                    uint32_t seed, bool with_gate, uint16_t unlatch = 0xFFFF) {
     BusManager bus;
     T node(config);
     NoteBalance balance;
@@ -652,6 +897,10 @@ static void assert_no_hanging_notes(NodeConfig config, uint8_t in_bus, uint8_t o
     // And a last pass with the gate low, for anything waiting on an edge.
     if (with_gate) bus.gate_write(1, false);
     balance.observe(run_pass(bus, node, out_bus, now + 100000));
+    if (unlatch != 0xFFFF) {
+        TEST_ASSERT_TRUE(node.set_param(unlatch, 0));
+        balance.observe(run_pass(bus, node, out_bus, now + 200000));
+    }
 
     TEST_ASSERT_FALSE(balance.went_negative);
     TEST_ASSERT_EQUAL_MESSAGE(0, bus.note_overflows(in_bus), "the test overflowed the input bus");
@@ -686,16 +935,30 @@ static void test_chord_hangs_nothing() {
     assert_no_hanging_notes<Chord>(c, 0, 3, 4, false);
 }
 
-static void test_quantise_hangs_nothing() {
-    NodeConfig c = modifier_config(ALGO_QUANTISE);
+static void test_note_quantise_hangs_nothing() {
+    NodeConfig c = modifier_config(ALGO_NOTE_QUANTISE);
     c.params[0] = SCALE_BLUES;
-    assert_no_hanging_notes<Quantise>(c, 0, 3, 5, false);
+    assert_no_hanging_notes<NoteQuantise>(c, 0, 3, 5, false);
 }
 
 static void test_probability_hangs_nothing() {
     NodeConfig c = modifier_config(ALGO_PROBABILITY);
     c.params[0] = 60;
     assert_no_hanging_notes<Probability>(c, 0, 3, 6, false);
+}
+
+// Hold is the one state where a modifier keeps notes with nothing held, so
+// it gets the storm too: what the latch keeps must still be released when it
+// comes off.
+static void test_arpeggiator_on_hold_hangs_nothing() {
+    for (uint8_t mode = 0; mode <= Arpeggiator::ARP_AS_PLAYED; mode++) {
+        NodeConfig c = modifier_config(ALGO_ARPEGGIATOR);
+        c.in_bus[1] = 1;
+        c.params[0] = mode;
+        c.params[1] = 2;
+        c.params[4] = 1;                               // hold
+        assert_no_hanging_notes<Arpeggiator>(c, 0, 3, 21u + mode, true, 4);
+    }
 }
 
 static void test_arpeggiator_hangs_nothing_in_any_mode() {
@@ -724,8 +987,12 @@ int main() {
     RUN_TEST(test_velocity_curves_never_reach_zero);
     RUN_TEST(test_velocity_curve_shapes_and_passes_offs);
     RUN_TEST(test_chord_emits_the_interval_set_and_releases_all_of_it);
-    RUN_TEST(test_quantise_snaps_and_releases_what_it_sent);
-    RUN_TEST(test_quantise_takes_its_root_from_a_bus);
+    RUN_TEST(test_note_quantise_snaps_and_releases_what_it_sent);
+    RUN_TEST(test_note_quantise_takes_its_root_from_a_bus);
+    RUN_TEST(test_the_global_scale_is_the_default_and_an_override_wins);
+    RUN_TEST(test_note_quantise_follows_the_module_scale_until_it_names_one);
+    RUN_TEST(test_chord_voices_its_intervals_in_the_scale);
+    RUN_TEST(test_chord_in_the_chromatic_scale_is_fixed_semitones);
     RUN_TEST(test_probability_pairs_every_note_it_passes);
     RUN_TEST(test_probability_defaults_to_passing_everything);
     RUN_TEST(test_arpeggiator_one_note_per_edge_in_order);
@@ -733,12 +1000,17 @@ int main() {
     RUN_TEST(test_arpeggiator_octave_range_and_reset);
     RUN_TEST(test_arpeggiator_releases_when_the_chord_is_lifted);
     RUN_TEST(test_arpeggiator_gate_length_releases_early);
+    RUN_TEST(test_arpeggiator_hold_keeps_the_figure_after_the_keys_are_lifted);
+    RUN_TEST(test_arpeggiator_hold_replaces_the_chord_rather_than_adding_to_it);
+    RUN_TEST(test_arpeggiator_hold_off_drops_only_what_no_key_holds);
+    RUN_TEST(test_arpeggiator_hold_inlet_latches_like_the_parameter);
     RUN_TEST(test_transpose_hangs_nothing);
     RUN_TEST(test_note_priority_hangs_nothing);
     RUN_TEST(test_velocity_curve_hangs_nothing);
     RUN_TEST(test_chord_hangs_nothing);
-    RUN_TEST(test_quantise_hangs_nothing);
+    RUN_TEST(test_note_quantise_hangs_nothing);
     RUN_TEST(test_probability_hangs_nothing);
     RUN_TEST(test_arpeggiator_hangs_nothing_in_any_mode);
+    RUN_TEST(test_arpeggiator_on_hold_hangs_nothing);
     return UNITY_END();
 }

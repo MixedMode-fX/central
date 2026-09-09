@@ -27,7 +27,7 @@ enum AlgorithmId : uint8_t {
     ALGO_NOTE_PRIORITY = 17,
     ALGO_VELOCITY     = 18,
     ALGO_CHORD        = 19,
-    ALGO_QUANTISE     = 20,
+    ALGO_NOTE_QUANTISE = 20,   // was ALGO_QUANTISE; the id is preset format
     ALGO_PROBABILITY  = 21,
     ALGO_NOTE_SEQ     = 22,
     ALGO_POLY_SEQ     = 23,

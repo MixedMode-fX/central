@@ -14,7 +14,7 @@
 #include "algorithm/sequencer/drum_sequencer.h"
 #include "algorithm/clock/clock_div.h"
 #include "algorithm/midi/transpose.h"
-#include "algorithm/midi/quantise.h"
+#include "algorithm/midi/note_quantise.h"
 #include "algorithm/midi/chord.h"
 #include "midi/scale.h"
 
@@ -377,7 +377,7 @@ static void test_a_bad_parameter_leaves_the_running_patch_alone() {
     master.setup();
 
     Patch bad = empty_patch();
-    bad.nodes[0] = node_config(ALGO_QUANTISE);
+    bad.nodes[0] = node_config(ALGO_NOTE_QUANTISE);
     bad.nodes[0].in_bus[0] = 0; bad.nodes[0].out_bus[0] = 1;
     bad.nodes[0].params[0] = SCALE_COUNT + 3;         // no such scale
     bad.n_nodes = 1;
@@ -450,11 +450,11 @@ static void modifier_under_held_notes(uint8_t algorithm, uint16_t param, uint8_t
 static void test_transpose_offset_moving_under_a_chord_hangs_nothing() {
     modifier_under_held_notes(ALGO_TRANSPOSE, 0, 7, "Transpose offset");
 }
-static void test_quantise_scale_moving_under_a_chord_hangs_nothing() {
-    modifier_under_held_notes(ALGO_QUANTISE, 0, SCALE_PENTATONIC_MINOR, "Quantise scale");
+static void test_note_quantise_scale_moving_under_a_chord_hangs_nothing() {
+    modifier_under_held_notes(ALGO_NOTE_QUANTISE, 0, SCALE_PENTATONIC_MINOR, "NoteQuantise scale");
 }
-static void test_quantise_root_moving_under_a_chord_hangs_nothing() {
-    modifier_under_held_notes(ALGO_QUANTISE, 1, 7, "Quantise root");
+static void test_note_quantise_root_moving_under_a_chord_hangs_nothing() {
+    modifier_under_held_notes(ALGO_NOTE_QUANTISE, 1, 7, "NoteQuantise root");
 }
 static void test_chord_voicing_moving_under_a_chord_hangs_nothing() {
     modifier_under_held_notes(ALGO_CHORD, 0, 3, "Chord voicing");
@@ -567,8 +567,8 @@ int main() {
     RUN_TEST(test_out_of_range_parameter_is_rejected_by_the_validator);
     RUN_TEST(test_a_bad_parameter_leaves_the_running_patch_alone);
     RUN_TEST(test_transpose_offset_moving_under_a_chord_hangs_nothing);
-    RUN_TEST(test_quantise_scale_moving_under_a_chord_hangs_nothing);
-    RUN_TEST(test_quantise_root_moving_under_a_chord_hangs_nothing);
+    RUN_TEST(test_note_quantise_scale_moving_under_a_chord_hangs_nothing);
+    RUN_TEST(test_note_quantise_root_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_chord_voicing_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_velocity_curve_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_gate_to_note_releases_the_note_it_sent);

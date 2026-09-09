@@ -81,7 +81,8 @@ scale. Beyond the octave, degree *n* in an *n*-note scale is the root an
 octave up and negative degrees go down the same way; when the scale changes
 under a pattern, degrees index the new scale's notes, so the pattern survives
 as an interval shape rather than as pitches (that is what makes it different
-from `Quantise`, which snaps pitches).
+from `NoteQuantise`, which snaps pitches). A pattern that names no scale of
+its own follows the module's key — see [The key](#the-key).
 
 Per step: degree and velocity per voice, then a length, three flags (rest,
 tie, accent) and a probability. Global velocity scale and offset, an accent
@@ -327,7 +328,7 @@ Algorithms available today:
 | Gate sequencers | `Metronome`, `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` (degrees in a scale, from a root) |
 | Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
-| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `Quantise`, `Probability`, `Arpeggiator` |
+| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator` |
 | Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off) |
 
 # Master clock
@@ -393,6 +394,55 @@ emitted, and releases it with the transformation it originally applied, not the
 current parameter value** — otherwise moving a transpose offset, or a
 quantiser's root, under a held note hangs it on the downstream synth for ever.
 A modifier that cannot record an emission does not make it.
+
+**`Arpeggiator` holds.** A module with no keyboard attached needs the figure
+to keep running with nobody touching one, so hold latches the chord: it is a
+parameter and an optional gate inlet, either one on its own, so a footswitch
+on a jack and an editor do the same thing. It is deliberately not a sustain
+pedal — while hold is on, the *next* note-on played after every key has been
+released replaces the figure rather than adding to it, which is what every
+hardware arpeggiator does and the reason is that adding makes the chord grow
+by one note every time a player fumbles a change. Adding is still possible:
+keep one key down and play the rest. Taking hold off keeps whatever is still
+physically held and drops only the rest, so lifting the latch under your
+fingers does not cut the notes you are actually playing — and everything the
+latch was keeping is released, because a latched note is still a note this
+node owes a note-off.
+
+## The key
+
+**`NoteQuantise` is called that, and not `Quantise`, because this module
+quantises two unrelated things**: a pitch to a scale, and a patch swap to a
+bar. A name that does not say which is a name a user has to guess at.
+
+Several algorithms have a scale — `NoteQuantise` snaps to one, `Chord` voices
+its intervals in one, `NoteSequencer` and `PolySequencer` pick degrees out of
+one — and having a copy each is right for the algorithm and wrong for the
+instrument: changing key meant editing four nodes and hoping they agreed. So
+the key is one setting for the module, a scale and a root, carried in the
+patch's `GlobalSettings` (`src/midi/global_scale.h`).
+
+**It is the default, and an algorithm overrides it by naming a scale.** That
+falls out of a convention the module already had — a zero parameter byte means
+the default (`src/node/param.h`) — so a scale parameter left alone follows the
+key, and `ScaleId` 0 is `SCALE_GLOBAL` rather than a mode. Chromatic is still
+selectable, appended at the end of the list, and is what a node uses to opt
+out of the key entirely. Following the module's scale means following its
+root as well, because a scale without a root is not a key; a patched root
+inlet outranks both, because a cable is the most explicit thing a user can
+say. The note sequencers are the exception to the root half: theirs is an
+absolute pitch naming the octave the pattern starts in, and a pitch class
+cannot say that, so they take the scale and keep their own root.
+
+The module is chromatic until a key is set, so **a patch written before this
+existed plays exactly the notes it always did.** Set it from the console
+(`key`), from a host over `SYSEX_SET_GLOBALS`, or in the app under MIDI;
+either way it is saved with the patch and pushed to the graph by
+`PatchManager::push_globals()`, the same route the tempo takes.
+
+`Chord`'s intervals are **steps of that scale**, which is the same thing as
+semitones when the scale is chromatic — so 0 2 4 is a diatonic triad on every
+degree, and the fixed semitone stack it always was when nothing names a key.
 
 # Code structure
 
@@ -512,7 +562,7 @@ classDiagram
     MidiModifier --|> NotePriority
     MidiModifier --|> VelocityCurve
     MidiModifier --|> Chord
-    MidiModifier --|> Quantise
+    MidiModifier --|> NoteQuantise
     MidiModifier --|> Probability
     MidiModifier --|> Arpeggiator
 
@@ -613,6 +663,7 @@ configuration path until the SysEx protocol is finished.
 |---|---|
 | `info` | Firmware build, node count, store state |
 | `clock [bpm] [source]` | Show or set tempo and clock source |
+| `key [scale] [root]` | Show or set the scale every algorithm follows |
 | `patch` | The running patch: jacks, MIDI ports, nodes and their connections |
 | `buses` | Live bus state, with the overflow counters |
 | `errors` | Every counter behind the red LED |
@@ -827,7 +878,7 @@ and advances it; reset returns both the playback and the record cursor to the
 first step. It works with any keyboard patched to any port and needs no host.
 
 **A played note outside the current scale snaps to the nearest tone in it** —
-the same rule `Quantise` follows — rather than being refused, because a
+the same rule `NoteQuantise` follows — rather than being refused, because a
 step-record that silently dropped a note would be worse than one that put it a
 semitone away. Snaps are counted so a user can see it happening.
 

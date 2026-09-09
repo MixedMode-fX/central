@@ -15,6 +15,7 @@
 #include "patch/default_patch.h"
 #include "node/registry.h"
 #include "hal/midi_types.h"
+#include "midi/global_scale.h"
 #include "algorithm/sequencer/gate_sequencer.h"
 #include "algorithm/sequencer/sequencers.h"
 #include "algorithm/sequencer/drum_sequencer.h"
@@ -880,6 +881,37 @@ static void test_globals_can_be_set_and_come_back_in_a_dump() {
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
 }
 
+// The key (midi/global_scale.h) rides on the same message, appended: a host
+// that predates it sends eight arguments and is not told its message is
+// short, and the module is left in the key it was already in.
+static void test_the_global_scale_travels_with_the_globals() {
+    Rig rig;
+    rig.patches.boot(0);
+    const uint8_t was = global_scale::id();
+
+    rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
+                                 (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
+                                 0, 1, 0, 0});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(was, global_scale::id());
+
+    rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
+                                 (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
+                                 0, 1, 0, 0, SCALE_LYDIAN, 7});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(SCALE_LYDIAN, rig.patches.globals().scale);
+    TEST_ASSERT_EQUAL(7, rig.patches.globals().root);
+    TEST_ASSERT_EQUAL(SCALE_LYDIAN, global_scale::id());       // and it is live
+    TEST_ASSERT_EQUAL(7, global_scale::root());
+
+    rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
+                                 (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
+                                 0, 1, 0, 0, SCALE_COUNT, 0});  // no such scale
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+    TEST_ASSERT_EQUAL(SCALE_LYDIAN, global_scale::id());
+    global_scale::set(SCALE_CHROMATIC, 0);
+}
+
 // ---------------------------------------------------------------------------
 // No heap allocation on the receive or swap path.
 // ---------------------------------------------------------------------------
@@ -1070,6 +1102,7 @@ int main() {
     RUN_TEST(test_a_quantised_recall_with_a_stopped_clock_is_immediate);
     RUN_TEST(test_restore_defaults_over_sysex);
     RUN_TEST(test_globals_can_be_set_and_come_back_in_a_dump);
+    RUN_TEST(test_the_global_scale_travels_with_the_globals);
     RUN_TEST(test_dump_chunks_stay_within_the_wire_budget);
     RUN_TEST(test_the_protocol_never_allocates);
     RUN_TEST(test_a_chunked_transfer_survives_the_main_loop_after_ten_seconds_of_uptime);

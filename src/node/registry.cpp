@@ -7,7 +7,7 @@
 #include "algorithm/midi/note_priority.h"
 #include "algorithm/midi/velocity_curve.h"
 #include "algorithm/midi/chord.h"
-#include "algorithm/midi/quantise.h"
+#include "algorithm/midi/note_quantise.h"
 #include "algorithm/midi/probability.h"
 #include "algorithm/clock/clock_div.h"
 #include "algorithm/sequencer/sequencers.h"
@@ -32,7 +32,7 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &NotePriority::descriptor,
     &VelocityCurve::descriptor,
     &Chord::descriptor,
-    &Quantise::descriptor,
+    &NoteQuantise::descriptor,
     &Probability::descriptor,
     &Metronome::descriptor,
     &StepSequencer::descriptor,

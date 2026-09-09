@@ -77,7 +77,7 @@ export const EXAMPLES = {
     },
   },
   'Arpeggiator clocked by the module: hold a chord': {
-    about: 'A /6 divider (sixteenths) advances the arpeggiator, up-down over two octaves with 60 ms gates. Enable audio under play and hold two or three keys. Change the tempo while it plays.',
+    about: 'A /6 divider (sixteenths) advances the arpeggiator, up-down over two octaves with 60 ms gates. Enable audio under play and hold two or three keys. Change the tempo while it plays — or turn the hold parameter on and let go of the keys.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
@@ -86,6 +86,19 @@ export const EXAMPLES = {
         { algo: 'Arpeggiator', in: [0, 0], out: [1], params: [2, 2, 60, 0] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
+  'In key: a chord voiced from the module\u2019s scale, arpeggiated and held': {
+    about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad (0, 2 and 4 steps of the scale), the arpeggiator holds it, and a /6 divider plays it. Press one key and let go: it keeps running. Change the key under \u201cMIDI\u201d and the whole patch moves.',
+    patch: {
+      globals: { scale: 'minor', root: 9 },
+      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      nodes: [
+        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Chord', in: [0], out: [1], params: [2, 2, 4] },
+        { algo: 'Arpeggiator', in: [1, 0], out: [2], params: [0, 2, 60, 0, 1] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
   'Euclidean drums: E(3,8), E(5,8), E(2,8) on jacks 1-3 and as notes': {

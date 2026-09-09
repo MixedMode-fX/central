@@ -54,8 +54,12 @@ export const portMaskOf = (names) => MIDI_PORTS
 // The scales, by the names a musician uses. The *masks* are generated from
 // midi/scale.h (P.ScaleMask), so only the words are here - and `labelled`
 // fails the moment the firmware gains or renames one.
+//
+// "global" is not a scale but a reference to the module's own (its mask is
+// zero, which is what the firmware reads as "follow the key"), and it is what
+// an algorithm carries until someone names a scale on it.
 export const SCALES = labelled(P.ScaleId, {
-  SCALE_CHROMATIC: 'chromatic',
+  SCALE_GLOBAL: 'global',
   SCALE_MAJOR: 'major',
   SCALE_NATURAL_MINOR: 'minor',
   SCALE_HARMONIC_MINOR: 'harmonic minor',
@@ -69,8 +73,29 @@ export const SCALES = labelled(P.ScaleId, {
   SCALE_MIXOLYDIAN: 'mixolydian',
   SCALE_LOCRIAN: 'locrian',
   SCALE_WHOLE_TONE: 'whole tone',
+  SCALE_CHROMATIC: 'chromatic',
   SCALE_COUNT: '',
 }, 'ScaleId').filter((s) => s.label);
+
+// The scales a *key* can be in: every one except the reference to itself.
+export const KEY_SCALES = SCALES.filter((s) => s.value !== P.ScaleId.SCALE_GLOBAL);
+
+// Pitch classes, for a root. Sharps rather than flats, because the firmware
+// stores a pitch class and has no opinion about spelling.
+export const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+// The id, for the places that store a ScaleId rather than a mask: an
+// algorithm's `scale` parameter, and the key in the globals.
+export function scaleIdOf(name) {
+  if (typeof name === 'number') return name & 0xff;
+  const found = SCALES.find((s) => s.label === String(name).toLowerCase().replace(/[_-]+/g, ' ').trim());
+  if (!found) {
+    throw new Error(`unknown scale "${name}" (one of ${SCALES.map((s) => s.label).join(', ')})`);
+  }
+  return found.value;
+}
+
+export const scaleName = (id) => SCALES.find((s) => s.value === id)?.label ?? String(id);
 
 export function scaleMaskOf(name) {
   const found = SCALES.find((s) => s.label === String(name).toLowerCase().replace(/[_-]+/g, ' ').trim());

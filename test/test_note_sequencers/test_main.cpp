@@ -10,12 +10,15 @@
 #include "node/registry.h"
 #include "master.h"
 #include "midi/scale.h"
+#include "midi/global_scale.h"
 #include "midi/note_event.h"
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/sequencers.h"
 
 void setUp() {}
-void tearDown() {}
+// The module's key is process-wide (midi/global_scale.h): every test gets it
+// back the way it found it.
+void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
 
 typedef NoteSequencerBase NS;
 
@@ -188,6 +191,34 @@ static void test_scale_change_releases_what_was_sent() {
     expect("-65/0 +60/100 ", rig.edge(node));
     expect("-60/0 +62/100 ", rig.edge(node));
     expect("-62/0 +63/100 ", rig.edge(node));                   // Eb now
+}
+
+// A pattern that named no scale plays the module's, so one key change moves
+// every sequencer in the patch. The root is the sequencer's own: it is an
+// absolute pitch, naming the octave the pattern starts in, and a pitch class
+// cannot say that.
+static void test_a_sequence_with_no_scale_of_its_own_follows_the_module() {
+    NodeConfig c = scale_run(4, 0, 60);                         // no scale named
+    NoteSequencer node(c);
+    Rig rig;
+    global_scale::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), node.active_mask());
+    expect("+60/100 ", rig.edge(node));
+    expect("-60/0 +62/100 ", rig.edge(node));
+    expect("-62/0 +64/100 ", rig.edge(node));                   // E: major
+
+    // Changing the module's key changes the character and releases what was
+    // actually sent, exactly as this node's own scale parameter does.
+    global_scale::set(SCALE_NATURAL_MINOR, 0);
+    expect("-64/0 +65/100 ", rig.edge(node));
+    expect("-65/0 +60/100 ", rig.edge(node));
+    expect("-60/0 +62/100 ", rig.edge(node));
+    expect("-62/0 +63/100 ", rig.edge(node));                   // Eb now
+
+    // And a pattern that names a scale keeps it whatever the module is in.
+    node.set_scale_mask(scale_mask(SCALE_MAJOR));
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), node.active_mask());
+    expect("-63/0 +65/100 ", rig.edge(node));
 }
 
 // A pitch that leaves 0..127 is skipped, never wrapped, and owes nothing.
@@ -578,6 +609,7 @@ int main() {
     RUN_TEST(test_root_change_releases_what_was_sent_and_transposes_the_rest);
     RUN_TEST(test_root_inlet_last_note_on_wins);
     RUN_TEST(test_scale_change_releases_what_was_sent);
+    RUN_TEST(test_a_sequence_with_no_scale_of_its_own_follows_the_module);
     RUN_TEST(test_out_of_range_pitch_is_skipped);
     RUN_TEST(test_velocity_per_step_with_scale_offset_and_accent);
     RUN_TEST(test_rest_plays_nothing_and_releases_on_time);

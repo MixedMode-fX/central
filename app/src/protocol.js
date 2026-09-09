@@ -211,7 +211,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_NOTE_PRIORITY: 17,
   ALGO_VELOCITY: 18,
   ALGO_CHORD: 19,
-  ALGO_QUANTISE: 20,
+  ALGO_NOTE_QUANTISE: 20,
   ALGO_PROBABILITY: 21,
   ALGO_NOTE_SEQ: 22,
   ALGO_POLY_SEQ: 23,
@@ -220,7 +220,7 @@ export const AlgorithmId = Object.freeze({
 });
 
 export const ScaleId = Object.freeze({
-  SCALE_CHROMATIC: 0,
+  SCALE_GLOBAL: 0,
   SCALE_MAJOR: 1,
   SCALE_NATURAL_MINOR: 2,
   SCALE_HARMONIC_MINOR: 3,
@@ -234,10 +234,12 @@ export const ScaleId = Object.freeze({
   SCALE_MIXOLYDIAN: 11,
   SCALE_LOCRIAN: 12,
   SCALE_WHOLE_TONE: 13,
-  SCALE_COUNT: 14,
+  SCALE_CHROMATIC: 14,
+  SCALE_COUNT: 15,
 });
 
 export const ScaleMask = Object.freeze({
+  SCALE_GLOBAL: 0,
   SCALE_MAJOR: 2741,
   SCALE_NATURAL_MINOR: 1453,
   SCALE_HARMONIC_MINOR: 2477,

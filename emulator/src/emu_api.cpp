@@ -78,8 +78,10 @@ EMU_EXPORT uint32_t emu_const_max_sequence_len(){ return MAX_SEQUENCE_LEN; }
 EMU_EXPORT uint32_t emu_const_note_seq_voices(){ return NOTE_SEQ_VOICES; }
 EMU_EXPORT uint32_t emu_const_drum_seq_lanes(){ return DRUM_SEQ_LANES; }
 EMU_EXPORT uint32_t emu_const_node_slot_size(){ return NODE_SLOT_SIZE; }
-// The named scales (midi/scale.h), as the 12-bit masks the sequencers and
-// Quantise store, so the page resolves a scale name to the firmware's mask.
+// The scales (midi/scale.h), as the 12-bit masks the sequencers and
+// NoteQuantise store, so the page resolves a scale name to the firmware's
+// mask. SCALE_GLOBAL is in the list and its mask is zero: that is what the
+// firmware reads as "follow the module's scale".
 EMU_EXPORT uint32_t emu_scale_count(){ return SCALE_COUNT; }
 EMU_EXPORT uint32_t emu_scale_mask(uint32_t id){ return id < SCALE_COUNT ? scale_mask((uint8_t)id) : 0; }
 

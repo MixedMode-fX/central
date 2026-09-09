@@ -258,7 +258,7 @@ the node's persistent state, so the base class can hold exactly that.
 
 ### 3.3 The note-modifier skeleton is written four times, and the README already names the class
 
-`Transpose`, `Chord`, `Quantise` and `Probability` have identical `process()`
+`Transpose`, `Chord`, `NoteQuantise` and `Probability` have identical `process()`
 loops: note-off releases from the ledger, note-on transforms and emits,
 everything else passes through, `silence()` releases all. The README's diagram
 shows a `MidiModifier` base with `HeldNotes` and `SoundingNotes`; the code
@@ -277,7 +277,7 @@ fit the same base with `HeldNotes` added.
 
 ### 3.5 "Root from a note bus, last note-on wins"
 
-Identical loops in `Quantise::process` (`quantise.cpp:55`) and
+Identical loops in `NoteQuantise::process` (`note_quantise.cpp:55`) and
 `NoteSequencerBase::process` (`note_sequencer.cpp:363`). A six-line
 `latest_note_on(const BusManager&, uint8_t bus, uint8_t& note)` helper next to
 `is_note_on` removes the duplication and makes the rule greppable.

@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include "config.h"
 #include "node/patch.h"
+#include "midi/scale.h"
 
 // One serialisation of a Patch, used by EEPROM storage (#7) and by the SysEx
 // protocol (#11). Written once so the two cannot drift, and so a patch that
@@ -65,7 +66,13 @@ struct GlobalSettings {
     uint8_t nrpn_enabled;
     uint8_t nrpn_channel;      // 1..16, 0 = omni
     uint8_t nrpn_source_mask;  // MidiPort bits; 0 = any
-    uint8_t reserved[21];      // #8's calibration lands here
+    // The key the module is in (midi/global_scale.h). Every algorithm with a
+    // scale follows this one unless it names its own, so it is patch state
+    // and not a node's: two of the reserved bytes rather than a new field at
+    // the end, so the format version does not have to move for it.
+    uint8_t scale;             // ScaleId; SCALE_GLOBAL / 0 reads as chromatic
+    uint8_t root;              // pitch class, 0..11
+    uint8_t reserved[19];      // #8's calibration lands here
 };
 
 inline GlobalSettings default_globals(){
@@ -80,6 +87,8 @@ inline GlobalSettings default_globals(){
     g.nrpn_enabled = 0;                 // off until a user asks for it (#22)
     g.nrpn_channel = 0;
     g.nrpn_source_mask = 0;
+    g.scale = SCALE_CHROMATIC;          // no key until a user sets one
+    g.root = 0;
     return g;
 }
 

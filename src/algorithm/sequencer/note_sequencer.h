@@ -16,7 +16,12 @@
 // one-parameter operations on a pattern nobody touches. The root can come
 // from a note bus (last note-on wins), so a keyboard transposes the running
 // sequence; the scale is a 12-bit mask (midi/scale.h), two bytes that cover
-// every named mode and any user scale.
+// every named mode and any user scale. An empty mask - what a pattern that
+// never named a scale carries - follows the module's own
+// (midi/global_scale.h), so one key change moves every sequencer in the
+// patch. The root is not taken from there: it is an absolute pitch here,
+// naming the octave the pattern starts in, and a pitch class cannot say
+// that. Patch the root inlet to move it from a keyboard.
 //
 // Inlet 0 (gate): advance. One step per rising edge, from a ClockDiv, a
 //         logic gate, a jack, or another sequencer.
@@ -35,7 +40,7 @@
 // **Pitch to degree** is a real conversion, not a copy: a step stores a
 // degree and a keyboard sends a pitch. A played note is quantised to the
 // nearest tone of the current scale and stored as that tone's degree relative
-// to the root - the same snap Quantise does, so a note outside the scale
+// to the root - the same snap NoteQuantise does, so a note outside the scale
 // lands on the nearest one in it rather than being refused. Out-of-scale
 // notes are counted (`snapped()`) so a user can tell it happened.
 //
@@ -57,7 +62,7 @@
 //                   1..100: the last edge-unit of every note is shortened to
 //                   this percent of the measured step period - an estimate,
 //                   see "Note length" below.
-//   [3] scale low   scale mask bits 0..7   (both 0 -> chromatic)
+//   [3] scale low   scale mask bits 0..7   (both 0 -> the module's scale)
 //   [4] scale high  scale mask bits 8..11
 //   [5] root        MIDI note when the root inlet is unpatched (0 -> 60)
 //   [6] vel scale   percent applied to every velocity (0 -> 100)
@@ -152,6 +157,9 @@ class NoteSequencerBase : public Node{
         uint8_t voices() const { return n_voices; }
         uint8_t root_note() const { return root; }
         uint16_t scale() const { return scale_mask; }
+        // What is actually played: the module's scale when this one named
+        // none. Every pitch this class produces goes through it.
+        uint16_t active_mask() const;
         uint8_t channel_number() const { return channel; }
         uint8_t length() const { return engine.length(); }
         uint8_t position() const { return engine.position(); }

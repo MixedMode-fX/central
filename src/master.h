@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "config.h"
 #include "bus/bus_manager.h"
+#include "clock/master_clock.h"
 #include "node/node_pool.h"
 #include "node/ports.h"
 #include "node/patch.h"
@@ -19,8 +20,9 @@ enum LoadError : uint8_t {
     LOAD_NODE_INVALID,         // see last_node_error() / last_node_index()
 };
 
-// Owns the buses, the reserved hardware port nodes and the node pool, and
-// runs the evaluation order every pass:
+// Owns the master clock, the buses, the reserved hardware port nodes and the
+// node pool, and runs the evaluation order every pass:
+//   0. collapse whatever subticks the clock produced since the last pass
 //   1. hardware input nodes sample and write their buses
 //   2. pool nodes process()
 //   3. if a clock tick fired, nodes that want it tick()
@@ -45,10 +47,20 @@ class MixedModeMaster {
         void pass(uint32_t now_us);
 
         // Transport input path (#5): offers an incoming message to every
-        // MidiInPort. Returns how many accepted it.
-        uint8_t deliver_midi(uint8_t source, const MidiEvent& event);
-        // Master clock (#4): the next pass delivers tick() to subscribed nodes.
+        // MidiInPort. Returns how many accepted it. MIDI realtime messages
+        // (clock, start, stop, continue) are transport-level rather than note
+        // traffic: they go to the master clock and to no bus, and the call
+        // returns 0. `now_us` is only read for those.
+        uint8_t deliver_midi(uint8_t source, const MidiEvent& event, uint32_t now_us = 0);
+        // A rising edge on the external sync jack (#4).
+        void sync_edge(uint32_t now_us);
+        // Master clock (#4): the next pass delivers tick() to subscribed
+        // nodes. pass() calls this itself from the clock; it stays public so
+        // a test can drive the tick directly.
         void tick(uint32_t tick_count);
+
+        MasterClock& clock() { return clk; }
+        const MasterClock& clock() const { return clk; }
 
         // Diagnostics
         LoadError last_error() const { return error; }
@@ -62,6 +74,7 @@ class MixedModeMaster {
 
         IGpio& gpio;
         IMidiOut& midi;
+        MasterClock clk;
         BusManager bus;
         NodePool pool;
         GateInPort gate_in[GPIO_N];

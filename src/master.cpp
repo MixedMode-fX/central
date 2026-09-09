@@ -1,7 +1,8 @@
 #include "master.h"
+#include "hal/midi_types.h"
 
 MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
-    gpio(gpio_if), midi(midi_if), bus(), pool(),
+    gpio(gpio_if), midi(midi_if), clk(), bus(), pool(),
     gate_in(), gate_out(), midi_in(), midi_out(),
     tick_pending(false), tick_count(0),
     error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0)
@@ -75,6 +76,11 @@ void MixedModeMaster::setup(){
 }
 
 void MixedModeMaster::pass(uint32_t now_us){
+    // 0. the clock. Subticks that arrived since the last pass are collapsed
+    //    into one tick() with the newest count: a node works from the count,
+    //    so nothing is lost, and no node code ever runs in the timer ISR.
+    uint32_t count = 0;
+    if (clk.consume(count)) tick(count);
     // 1. hardware inputs (MIDI input arrives through deliver_midi() between passes)
     for (uint8_t i = 0; i < GPIO_N; i++) gate_in[i].process(bus, now_us);
     // 2. gate-rate nodes
@@ -94,12 +100,20 @@ void MixedModeMaster::pass(uint32_t now_us){
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, now_us);
 }
 
-uint8_t MixedModeMaster::deliver_midi(uint8_t source, const MidiEvent& event){
+uint8_t MixedModeMaster::deliver_midi(uint8_t source, const MidiEvent& event, uint32_t now_us){
+    if (event.type >= MIDI_CLOCK){
+        clk.midi_message(event.type, now_us);
+        return 0;
+    }
     uint8_t accepted = 0;
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         if (midi_in[i].deliver(bus, source, event)) accepted++;
     }
     return accepted;
+}
+
+void MixedModeMaster::sync_edge(uint32_t now_us){
+    if (clk.source() == MasterClock::CLOCK_CV) clk.external_edge(now_us);
 }
 
 void MixedModeMaster::tick(uint32_t count){

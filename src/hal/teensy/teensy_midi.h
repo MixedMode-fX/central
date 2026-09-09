@@ -3,6 +3,7 @@
 
 #include "hal/teensy/teensy_includes.h"
 #include "hal/imidi_out.h"
+#include "midi/midi_queue.h"
 #include "hardware.h"
 
 // DIN MIDI Settings
@@ -44,9 +45,15 @@ constexpr uint8_t ALL_MIDI_PORTS = 0
     ;
 
 // Brings up every compiled-in transport. Call once from setup().
+//
+// Library soft-thru is turned off on both DIN ports: an input echoed straight
+// to an output is a patch, not a default. A MidiInPort and a MidiOutPort on a
+// shared note bus give the same behaviour when somebody asks for it (#5).
 void mm_midi_setup();
-// Pumps every compiled-in parser. Call once per main-loop pass.
-void mm_midi_read();
+// Pumps every compiled-in parser and enqueues whatever it produced, tagged
+// with the transport it arrived on. Nothing else happens here: the pass that
+// follows is where messages are dispatched. Call once per main-loop pass.
+void mm_midi_read(MidiInputQueue& queue);
 // Sends to every port whose bit is set in `target`.
 void mm_send(uint8_t target, uint8_t type, uint8_t data1, uint8_t data2, uint8_t channel);
 

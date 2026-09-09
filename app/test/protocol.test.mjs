@@ -52,7 +52,7 @@ function wasmTransport() {
       const mem = new Uint8Array(E.memory.buffer);
       mem.set(bytes, scratch);
       E.emu_sysex_out_clear();
-      E.emu_sysex_in(E.emu_const_control_port(), scratch, bytes.length);
+      E.emu_sysex_in(E.emu_const_control_port(), scratch, bytes.length, 0);
       const out = new Uint8Array(E.memory.buffer,
                                  E.emu_sysex_out_ptr(), E.emu_sysex_out_len());
       // The buffer is a run of complete messages; split it on F0/F7.

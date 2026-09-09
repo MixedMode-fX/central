@@ -688,6 +688,63 @@ static void test_leds_store_and_console_never_allocate() {
     TEST_ASSERT_EQUAL(before, g_allocations);
 }
 
+
+// The clock's settings have one owner. What the console sets is what the
+// patch's globals say, so it is saved, and a controller moving the tempo
+// afterwards does not push a stale source back over it.
+static void test_console_clock_edits_go_through_the_globals() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(three_node_patch(), g, 0);
+    rig.patches.service(PatchStore::AUTOSAVE_SETTLE_US + 1u);
+    TEST_ASSERT_FALSE(rig.store.dirty());
+
+    rig.console.execute("clock 140 1", 1000);
+    TEST_ASSERT_EQUAL(140, rig.master.clock().bpm());
+    TEST_ASSERT_EQUAL(MasterClock::CLOCK_CV, rig.master.clock().source());
+    TEST_ASSERT_EQUAL(140, rig.patches.globals().bpm);
+    TEST_ASSERT_EQUAL(MasterClock::CLOCK_CV, rig.patches.globals().clock_source);
+    TEST_ASSERT_TRUE(rig.store.dirty());
+
+    // A tempo write from a controller keeps the source the console chose.
+    TEST_ASSERT_TRUE(rig.cc.write_control(CC_TARGET_CLOCK, 0, CC_CLOCK_TEMPO, 150, 2000));
+    TEST_ASSERT_EQUAL(150, rig.master.clock().bpm());
+    TEST_ASSERT_EQUAL(MasterClock::CLOCK_CV, rig.master.clock().source());
+
+    // Out of range is refused with a message, not clamped into the patch.
+    rig.io.clear();
+    rig.console.execute("clock 999", 3000);
+    TEST_ASSERT_TRUE(rig.io.said("outside the tempo range"));
+    TEST_ASSERT_EQUAL(150, rig.patches.globals().bpm);
+}
+
+
+// probe() judges a slot the way load() does - empty, corrupt or whole, and
+// how big - without decoding it, so the slot list costs no Patch at all.
+static void test_probe_agrees_with_load_without_decoding() {
+    FakeEeprom eeprom;
+    PatchStore store(eeprom);
+    GlobalSettings g = default_globals();
+    uint16_t bytes = 0;
+    TEST_ASSERT_EQUAL(STORE_EMPTY, store.probe(1, bytes));
+    TEST_ASSERT_EQUAL(0, bytes);
+    TEST_ASSERT_EQUAL(STORE_NO_SUCH_SLOT, store.probe(PATCH_SLOTS, bytes));
+
+    TEST_ASSERT_EQUAL(STORE_OK, store.save(1, three_node_patch(), g));
+    TEST_ASSERT_EQUAL(STORE_OK, store.probe(1, bytes));
+    TEST_ASSERT_TRUE(bytes > 8);
+    TEST_ASSERT_EQUAL(bytes, store.used(1));
+
+    // One payload byte flipped: the CRC catches it and probe says corrupt.
+    const size_t base = (size_t)1 * PATCH_SLOT_BYTES;
+    eeprom.write(base + 20, (uint8_t)(eeprom.read(base + 20) ^ 0x55));
+    TEST_ASSERT_EQUAL(STORE_CORRUPT, store.probe(1, bytes));
+    TEST_ASSERT_EQUAL(0, bytes);
+    TEST_ASSERT_FALSE(store.occupied(1));
+    Patch p;
+    TEST_ASSERT_EQUAL(STORE_CORRUPT, store.load(1, p, g));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_patch_round_trips_through_the_codec);
@@ -722,5 +779,7 @@ int main() {
     RUN_TEST(test_the_console_works_after_a_patch_fails_to_load);
     RUN_TEST(test_an_overlong_console_line_is_refused_not_overrun);
     RUN_TEST(test_leds_store_and_console_never_allocate);
+    RUN_TEST(test_console_clock_edits_go_through_the_globals);
+    RUN_TEST(test_probe_agrees_with_load_without_decoding);
     return UNITY_END();
 }

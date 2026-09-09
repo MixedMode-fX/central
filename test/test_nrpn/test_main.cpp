@@ -9,6 +9,7 @@
 #include "../fakes/fake_leds.h"
 #include "../fakes/recording_midi_out.h"
 #include "master.h"
+#include "control/midi_dispatch.h"
 #include "control/cc_mapper.h"
 #include "control/nrpn.h"
 #include "protocol/sysex_handler.h"
@@ -85,7 +86,7 @@ struct Rig {
                                SYSEX_PROTOCOL_VERSION};
         for (uint8_t b : args) m.push_back(b);
         m.push_back(0xF7);
-        sysex.deliver_sysex(MIDI_CONTROL_PORT, m.data(), (uint16_t)m.size());
+        sysex.deliver_sysex(MIDI_CONTROL_PORT, m.data(), (uint16_t)m.size(), 0);
     }
     bool acked() const { return midi.last_reply(SYSEX_ACK) != nullptr; }
 };
@@ -698,6 +699,86 @@ static void test_the_nrpn_path_never_allocates() {
     TEST_ASSERT_EQUAL(before, g_allocations);
 }
 
+
+// ---------------------------------------------------------------------------
+// The input path as main.cpp runs it (control/midi_dispatch.h): the order of
+// the control plane, and the drain stopping in front of a full bus.
+// ---------------------------------------------------------------------------
+static Patch thru_patch() {
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, 0};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    return p;
+}
+
+// A sustain pedal released under a held chord: more note-offs in one burst
+// than a bus holds in one pass. Every one of them must reach the output.
+static void test_a_note_off_burst_larger_than_the_bus_is_not_dropped() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(thru_patch(), g, 0);
+    MidiInputQueue queue;
+    const uint8_t burst = NOTE_QUEUE_DEPTH + 4;
+    for (uint8_t i = 0; i < burst; i++) queue.push(KEYBOARD, MidiEvent{MIDI_NOTE_OFF, 1, (uint8_t)(40 + i), 0});
+
+    TEST_ASSERT_EQUAL(NOTE_QUEUE_DEPTH, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 0));
+    TEST_ASSERT_EQUAL(4, queue.count());
+    rig.master.pass(0);
+    TEST_ASSERT_EQUAL(NOTE_QUEUE_DEPTH, rig.midi.messages.size());
+
+    TEST_ASSERT_EQUAL(4, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 1000));
+    rig.master.pass(1000);
+    TEST_ASSERT_EQUAL(burst, rig.midi.messages.size());
+    TEST_ASSERT_EQUAL(0, rig.master.buses().note_overflows(0));
+    // In order, so a note-on and its note-off cannot swap places.
+    for (uint8_t i = 0; i < burst; i++) TEST_ASSERT_EQUAL(40 + i, rig.midi.messages[i].d1);
+}
+
+// Realtime bytes reach the clock even while a bus is full: they need no room.
+static void test_realtime_is_never_held_behind_a_full_bus() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(thru_patch(), g, 0);
+    rig.master.clock().stop();
+    MidiInputQueue queue;
+    for (uint8_t i = 0; i < NOTE_QUEUE_DEPTH; i++) queue.push(KEYBOARD, MidiEvent{MIDI_NOTE_ON, 1, (uint8_t)(40 + i), 100});
+    queue.push(KEYBOARD, MidiEvent{MIDI_START, 0, 0, 0});
+    queue.push(KEYBOARD, MidiEvent{MIDI_NOTE_ON, 1, 100, 100});
+    dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 0);
+    // The bus is full; the note behind the start waits, the start went through.
+    TEST_ASSERT_EQUAL(1, queue.count());
+    TEST_ASSERT_TRUE(rig.master.clock().running());
+}
+
+// A mapped CC is consumed before the graph sees it; an unmapped one passes.
+static void test_the_dispatcher_runs_the_control_plane_before_the_graph() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    Patch p = thru_patch();
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);
+    p.nodes[0].out_bus[0] = 0;
+    p.n_nodes = 1;
+    p.cc_map[0] = unused_mapping();
+    p.cc_map[0].source_mask = KEYBOARD;
+    p.cc_map[0].cc = 20;
+    p.cc_map[0].target_kind = CC_TARGET_NODE;
+    p.cc_map[0].target_index = 0;
+    p.cc_map[0].param = 1;
+    rig.patches.apply(p, g, 0);
+
+    MidiInputQueue queue;
+    queue.push(KEYBOARD, MidiEvent{MIDI_CONTROL_CHANGE, 1, 20, 127});   // mapped: consumed
+    queue.push(KEYBOARD, MidiEvent{MIDI_CONTROL_CHANGE, 1, 21, 127});   // unmapped: through
+    TEST_ASSERT_EQUAL(2, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 0));
+    rig.cc.apply(0);
+    rig.master.pass(0);
+    TEST_ASSERT_EQUAL(1, rig.midi.messages.size());
+    TEST_ASSERT_EQUAL(21, rig.midi.messages[0].d1);
+    uint8_t amount = 0;
+    TEST_ASSERT_TRUE(rig.master.get_node_param(0, 1, amount));
+    TEST_ASSERT_EQUAL(255, amount);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_the_address_space_covers_every_target_and_reverses);
@@ -722,5 +803,8 @@ int main() {
     RUN_TEST(test_reset_returns_the_record_cursor_to_the_first_step);
     RUN_TEST(test_recording_during_playback_hangs_nothing);
     RUN_TEST(test_the_nrpn_path_never_allocates);
+    RUN_TEST(test_a_note_off_burst_larger_than_the_bus_is_not_dropped);
+    RUN_TEST(test_realtime_is_never_held_behind_a_full_bus);
+    RUN_TEST(test_the_dispatcher_runs_the_control_plane_before_the_graph);
     return UNITY_END();
 }

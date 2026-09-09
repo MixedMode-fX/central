@@ -172,19 +172,24 @@ void Console::cmd_info(){
     put_line(store.dirty() ? "yes (autosave armed)" : "no");
 }
 
+// The clock's settings belong to the patch's globals, and GlobalSettings is
+// their one owner: a write goes through PatchManager::set_globals like a CC
+// or a SysEx edit does, so it is saved with the patch and cannot be undone by
+// the next controller move pushing the stored value back over it.
 void Console::cmd_clock(uint8_t n, uint32_t now_us){
-    (void)now_us;
     if (n >= 2){
+        GlobalSettings g = patches.globals();
         bool ok = false;
         const uint32_t bpm = arg_uint(1, ok);
         if (!ok){ put_line("clock: bpm must be a number"); return; }
-        mm.clock().set_bpm((uint16_t)bpm);
-    }
-    if (n >= 3){
-        bool ok = false;
-        const uint32_t src = arg_uint(2, ok);
-        if (!ok || src > MasterClock::CLOCK_MIDI){ put_line("clock: source is 0, 1 or 2"); return; }
-        mm.clock().set_source((uint8_t)src);
+        if (bpm < CLOCK_MIN_BPM || bpm > CLOCK_MAX_BPM){ put_line("clock: bpm is outside the tempo range"); return; }
+        g.bpm = (uint16_t)bpm;
+        if (n >= 3){
+            const uint32_t src = arg_uint(2, ok);
+            if (!ok || src > MasterClock::CLOCK_MIDI){ put_line("clock: source is 0, 1 or 2"); return; }
+            g.clock_source = (uint8_t)src;
+        }
+        patches.set_globals(g, now_us);
     }
     put_kv("bpm      ", mm.clock().bpm());
     put_kv("source   ", mm.clock().source());

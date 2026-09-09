@@ -47,11 +47,15 @@ struct Rig {
     PatchManager patches;
     CcMapper cc;
     SysexHandler sysex;
+    // The time every message is delivered at. Zero by default; a test that
+    // cares about uptime moves it, the way a module that has been on for a
+    // while has.
+    uint32_t now;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
             patches(master, store, leds), cc(patches, master),
-            sysex(patches, master, store, leds, midi, cc) {}
+            sysex(patches, master, store, leds, midi, cc), now(0) {}
 
     // One command, framed the way the wire carries it.
     void send(uint8_t command, const std::vector<uint8_t>& args = {}) {
@@ -63,7 +67,7 @@ struct Rig {
         m.push_back(SYSEX_PROTOCOL_VERSION);
         for (uint8_t b : args) m.push_back(b);
         m.push_back(0xF7);
-        sysex.deliver_sysex(CONTROL, m.data(), (uint16_t)m.size());
+        sysex.deliver_sysex(CONTROL, m.data(), (uint16_t)m.size(), now);
     }
 
     bool acked() const { return midi.last_reply(SYSEX_ACK) != nullptr; }
@@ -136,8 +140,11 @@ static std::vector<uint8_t> reassemble(const RecordingMidiOut& midi) {
 }
 
 // Splits an image into the chunk messages a host would send.
+// `loop_between_chunks` runs the handler's service() between chunks, which is
+// what happens on hardware while the host waits for each chunk's ACK: the
+// main loop keeps going, and a transfer has to survive it.
 static void send_image(Rig& rig, const std::vector<uint8_t>& image, bool corrupt_checksum = false,
-                       bool skip_a_chunk = false) {
+                       bool skip_a_chunk = false, bool loop_between_chunks = false) {
     size_t at = 0;
     uint8_t seq = 0;
     bool skipped = false;
@@ -170,6 +177,7 @@ static void send_image(Rig& rig, const std::vector<uint8_t>& image, bool corrupt
         args.push_back(sum);
         for (size_t i = 0; i < packed_len; i++) args.push_back(packed[i]);
         rig.send(SYSEX_PATCH_CHUNK_IN, args);
+        if (loop_between_chunks) { rig.now += 1000; rig.sysex.service(rig.now); }
     }
 }
 
@@ -212,7 +220,7 @@ static void test_universal_identity_request_is_answered_and_blinks() {
 
     const uint8_t request[] = {0xF0, SYSEX_UNIVERSAL_NON_REALTIME, SYSEX_BROADCAST_DEVICE,
                                SYSEX_GENERAL_INFORMATION, SYSEX_IDENTITY_REQUEST, 0xF7};
-    rig.sysex.deliver_sysex(CONTROL, request, sizeof request);
+    rig.sysex.deliver_sysex(CONTROL, request, sizeof request, rig.now);
 
     TEST_ASSERT_EQUAL(1, rig.midi.sysex.size());
     const auto& r = rig.midi.sysex[0].bytes;
@@ -241,12 +249,12 @@ static void test_a_message_for_another_device_is_ignored() {
     rig.midi.clear();
 
     const uint8_t m[] = {0xF0, SYSEX_MANUFACTURER, 5, SYSEX_HELLO, SYSEX_PROTOCOL_VERSION, 0xF7};
-    rig.sysex.deliver_sysex(CONTROL, m, sizeof m);
+    rig.sysex.deliver_sysex(CONTROL, m, sizeof m, rig.now);
     TEST_ASSERT_EQUAL(0, rig.midi.sysex.size());
 
     // Its own id, and the broadcast id, both answer.
     const uint8_t mine[] = {0xF0, SYSEX_MANUFACTURER, 3, SYSEX_HELLO, SYSEX_PROTOCOL_VERSION, 0xF7};
-    rig.sysex.deliver_sysex(CONTROL, mine, sizeof mine);
+    rig.sysex.deliver_sysex(CONTROL, mine, sizeof mine, rig.now);
     TEST_ASSERT_NOT_NULL(rig.midi.last_reply(SYSEX_IDENTITY));
 }
 
@@ -255,7 +263,7 @@ static void test_an_older_protocol_version_fails_cleanly() {
     rig.patches.boot(0);
     const uint8_t m[] = {0xF0, SYSEX_MANUFACTURER, SYSEX_DEFAULT_DEVICE, SYSEX_HELLO,
                          (uint8_t)(SYSEX_PROTOCOL_VERSION + 1), 0xF7};
-    rig.sysex.deliver_sysex(CONTROL, m, sizeof m);
+    rig.sysex.deliver_sysex(CONTROL, m, sizeof m, rig.now);
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_VERSION));
     TEST_ASSERT_NULL(rig.midi.last_reply(SYSEX_IDENTITY));
 }
@@ -268,7 +276,7 @@ static void test_a_reply_looped_back_is_not_acted_on() {
     rig.send(SYSEX_HELLO);
     const auto reply = rig.midi.sysex[0].bytes;
     rig.midi.clear();
-    rig.sysex.deliver_sysex(CONTROL, reply.data(), (uint16_t)reply.size());
+    rig.sysex.deliver_sysex(CONTROL, reply.data(), (uint16_t)reply.size(), rig.now);
     TEST_ASSERT_EQUAL(0, rig.midi.sysex.size());
 }
 
@@ -504,7 +512,7 @@ static void test_garbage_cannot_stop_the_next_valid_patch_landing() {
     rig.send(SYSEX_SLOT_LOAD, {99});                       // no such slot
     const uint8_t rubbish[] = {0xF0, SYSEX_MANUFACTURER, 0, SYSEX_PATCH_CHUNK_IN,
                                SYSEX_PROTOCOL_VERSION, 0x7F, 0x7F, 0x7F, 0x7F, 0xF7};
-    rig.sysex.deliver_sysex(CONTROL, rubbish, sizeof rubbish);
+    rig.sysex.deliver_sysex(CONTROL, rubbish, sizeof rubbish, rig.now);
 
     // A malformed patch image, which decodes but does not validate.
     Patch bad = empty_patch();
@@ -893,11 +901,11 @@ static void test_the_protocol_never_allocates() {
     for (int i = 0; i < 5; i++) {
         message[3] = SYSEX_SET_PARAM;
         message[5] = 1; message[6] = 0; message[7] = 0; message[8] = (uint8_t)(8 + i);
-        rig.sysex.deliver_sysex(CONTROL, message, 10);
+        rig.sysex.deliver_sysex(CONTROL, message, 10, rig.now);
 
         message[3] = SYSEX_SET_CONNECTION;
         message[5] = 0; message[6] = 1; message[7] = 0; message[8] = (uint8_t)(1 + (i % 3));
-        rig.sysex.deliver_sysex(CONTROL, message, 10);
+        rig.sysex.deliver_sysex(CONTROL, message, 10, rig.now);
 
         rig.sysex.service((uint32_t)(1000 * i));
     }
@@ -946,6 +954,89 @@ static void test_dump_chunks_stay_within_the_wire_budget() {
     TEST_ASSERT_EQUAL(ALGO_DRUM_SEQ_MIDI, other.patches.active().nodes[0].algorithm_id);
 }
 
+
+// ---------------------------------------------------------------------------
+// Uptime. Every command arrives with the pass's clock, and everything a
+// command starts is measured from it. These run the handler on a module that
+// has been on for a while, because a module that has just booted is the one
+// case where "measured from boot" and "measured from the message" agree.
+// ---------------------------------------------------------------------------
+static Patch big_patch() {
+    Patch p = empty_patch();
+    p.nodes[0] = node_config(ALGO_POLY_SEQ);
+    p.nodes[0].in_bus[0] = 0;
+    p.nodes[0].out_bus[0] = 0;
+    // Every step byte non-zero and legal for every field, so the image is
+    // several chunks long and the validator accepts it at the end.
+    for (uint16_t i = 16; i < 300; i++) p.nodes[0].params[i] = 1;
+    p.n_nodes = 1;
+    return p;
+}
+
+static void test_a_chunked_transfer_survives_the_main_loop_after_ten_seconds_of_uptime() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(empty_patch(), g, 0);
+    static uint8_t buffer[PATCH_SLOT_BYTES];
+    size_t written = 0;
+    TEST_ASSERT_EQUAL(CODEC_OK, patch_codec::encode(big_patch(), g, buffer, sizeof buffer, written));
+    TEST_ASSERT_TRUE(written > SYSEX_CHUNK_PAYLOAD);
+
+    rig.now = SYSEX_TRANSFER_TIMEOUT_US + 1000000u;      // eleven seconds in
+    send_image(rig, std::vector<uint8_t>(buffer, buffer + written), false, false, true);
+    TEST_ASSERT_FALSE_MESSAGE(rig.ever_naked_with(SYSEX_ERR_NO_TRANSFER),
+                              "the timeout abandoned a transfer that was still arriving");
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(ALGO_POLY_SEQ, rig.patches.active().nodes[0].algorithm_id);
+}
+
+static void test_learn_over_sysex_binds_after_twenty_seconds_of_uptime() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    Patch p = empty_patch();
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);
+    p.nodes[0].out_bus[0] = 0;
+    p.n_nodes = 1;
+    rig.patches.apply(p, g, 0);
+
+    rig.now = CcMapper::LEARN_TIMEOUT_US + 5000000u;
+    rig.send(SYSEX_CC_LEARN, {1, 0, CC_TARGET_NODE, 0, 1, 0});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_TRUE(rig.cc.learning());
+    TEST_ASSERT_TRUE_MESSAGE(rig.cc.observe(mmMIDI_USB_0, 1, 20, 64, rig.now + 1000),
+                             "the learn had already timed out");
+    TEST_ASSERT_EQUAL(20, rig.patches.active().cc_map[0].cc);
+}
+
+static void test_a_sysex_edit_is_autosaved_after_the_settle_time_not_at_once() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    Patch p = empty_patch();
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);
+    p.nodes[0].out_bus[0] = 0;
+    p.n_nodes = 1;
+    rig.patches.apply(p, g, 0);
+    rig.patches.service(PatchStore::AUTOSAVE_SETTLE_US + 1u);   // the load's own save
+    TEST_ASSERT_FALSE(rig.store.dirty());
+
+    rig.now = 30000000u;
+    const uint32_t writes = rig.store.writes();
+    rig.send(SYSEX_SET_PARAM, {0, 1, 0, 5});
+    TEST_ASSERT_TRUE(rig.acked());
+    rig.patches.service(rig.now + 1000);                         // the next loop
+    TEST_ASSERT_EQUAL_MESSAGE(writes, rig.store.writes(), "flash was written on the very next loop");
+    rig.patches.service(rig.now + PatchStore::AUTOSAVE_SETTLE_US + 1u);
+    TEST_ASSERT_EQUAL(writes + 1u, rig.store.writes());
+}
+
+static void test_hello_blinks_the_identify_pattern_whatever_the_uptime() {
+    Rig rig;
+    rig.now = 60000000u;
+    rig.send(SYSEX_HELLO);
+    rig.leds.service(rig.now + 1000);
+    TEST_ASSERT_EQUAL(StatusLeds::BRIGHT, rig.leds.level(LED_GREEN));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_seven_bit_packing_round_trips_every_byte_value);
@@ -981,5 +1072,9 @@ int main() {
     RUN_TEST(test_globals_can_be_set_and_come_back_in_a_dump);
     RUN_TEST(test_dump_chunks_stay_within_the_wire_budget);
     RUN_TEST(test_the_protocol_never_allocates);
+    RUN_TEST(test_a_chunked_transfer_survives_the_main_loop_after_ten_seconds_of_uptime);
+    RUN_TEST(test_learn_over_sysex_binds_after_twenty_seconds_of_uptime);
+    RUN_TEST(test_a_sysex_edit_is_autosaved_after_the_settle_time_not_at_once);
+    RUN_TEST(test_hello_blinks_the_identify_pattern_whatever_the_uptime);
     return UNITY_END();
 }

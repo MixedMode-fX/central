@@ -67,8 +67,13 @@ class MidiInPort : public Node {
         void release(){ source_mask = 0; bus = NO_BUS; }
         bool enabled() const { return source_mask != 0 && bus != NO_BUS; }
 
-        // Writes the event to the bus if it matches this port's filter.
-        // Returns true if it was accepted.
+        // Whether this port's filter takes the event: enabled, the source is
+        // in its mask, and the channel matches (or the port is omni).
+        bool accepts(uint8_t source, const MidiEvent& event) const;
+        // The note bus an accepted event is written to.
+        uint8_t note_bus() const { return bus; }
+        // Writes the event to the bus if accepts() says so. Returns true if
+        // it was accepted, whether or not the bus had room for it.
         bool deliver(BusManager& buses, uint8_t source, const MidiEvent& event) const;
 
     private:

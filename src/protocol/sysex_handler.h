@@ -53,8 +53,8 @@ class SysexHandler : public ISysexIn {
         SysexHandler(const SysexHandler&) = delete;
         SysexHandler& operator=(const SysexHandler&) = delete;
 
-        // A complete incoming message, F0 to F7 inclusive.
-        void deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length) override;
+        // A complete incoming message, F0 to F7 inclusive, at `now_us`.
+        void deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us) override;
 
         // Once per main loop: abandons a stalled transfer and applies a
         // pending quantised swap when its boundary arrives.
@@ -97,7 +97,14 @@ class SysexHandler : public ISysexIn {
         void notify(uint8_t event, uint8_t detail);
 
         void begin_reply(uint8_t command);
-        void put(uint8_t value){ if (tx_at < SYSEX_TX_MAX - 1u) tx[tx_at++] = (uint8_t)(value & 0x7F); }
+        // A byte that does not fit is not dropped quietly: the reply is
+        // marked, and send_reply() sends a NAK in its place. A truncated
+        // enumeration that looked well-formed would be worse than no reply -
+        // an editor would build its picture of the module from half a record.
+        void put(uint8_t value){
+            if (tx_at < SYSEX_TX_MAX - 1u) tx[tx_at++] = (uint8_t)(value & 0x7F);
+            else tx_overflow = true;
+        }
         // A length-prefixed ASCII string. The default cap suits a name; an
         // algorithm's one-line summary asks for SUMMARY_MAX, and both are
         // budgeted against SYSEX_TX_MAX by test_params.
@@ -140,6 +147,7 @@ class SysexHandler : public ISysexIn {
 
         uint8_t tx[SYSEX_TX_MAX];
         uint16_t tx_at;
+        bool tx_overflow;
         uint8_t reply_to;             // the port the last notification goes to
 
         uint32_t reject_count;

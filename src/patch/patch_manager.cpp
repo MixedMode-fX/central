@@ -46,10 +46,10 @@ ApplyError PatchManager::restore_defaults(uint32_t now_us){
 }
 
 void PatchManager::boot(uint32_t now_us){
-    Patch stored;
-    GlobalSettings stored_globals;
-    const StoreError s = store.load(0, stored, stored_globals);
-    if (s == STORE_OK && apply(stored, stored_globals, now_us) == APPLY_OK){
+    // Straight into staging: a Patch is over 11 KB and has no business on
+    // the stack, and staging is exactly the buffer commit() reads.
+    const StoreError s = store.load(0, stage, stage_globals);
+    if (s == STORE_OK && commit(now_us) == APPLY_OK){
         leds.identify(now_us);                 // a power cycle is visible
         return;
     }
@@ -75,12 +75,10 @@ ApplyError PatchManager::save_slot(uint8_t slot){
 
 ApplyError PatchManager::recall_slot(uint8_t slot, uint32_t now_us){
     if (slot >= PATCH_SLOTS) return error = APPLY_NO_SUCH_SLOT;
-    Patch p;
-    GlobalSettings g;
-    const StoreError s = store.load(slot, p, g);
+    const StoreError s = store.load(slot, stage, stage_globals);
     if (s == STORE_EMPTY) return error = APPLY_SLOT_EMPTY;
     if (s != STORE_OK) return error = APPLY_SLOT_CORRUPT;
-    return apply(p, g, now_us);
+    return commit(now_us);
 }
 
 ApplyError PatchManager::commit_node(uint8_t node_index, uint32_t now_us){

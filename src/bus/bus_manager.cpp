@@ -55,6 +55,11 @@ bool BusManager::note_write(uint8_t bus, const MidiEvent& event){
     return true;
 }
 
+uint8_t BusManager::note_room(uint8_t bus) const {
+    if (bus >= N_NOTE_BUS) return 0;
+    return (uint8_t)(NOTE_QUEUE_DEPTH - note_back[bus].count);
+}
+
 uint32_t BusManager::note_overflows(uint8_t bus) const {
     if (bus >= N_NOTE_BUS) return 0;
     return note_overflow[bus];

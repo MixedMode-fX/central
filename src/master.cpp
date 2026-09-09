@@ -235,6 +235,15 @@ uint8_t MixedModeMaster::deliver_midi(uint8_t source, const MidiEvent& event, ui
     return accepted;
 }
 
+bool MixedModeMaster::has_room(uint8_t source, const MidiEvent& event) const {
+    if (event.type >= 0xF0) return true;
+    for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
+        if (!midi_in[i].accepts(source, event)) continue;
+        if (bus.note_room(midi_in[i].note_bus()) == 0) return false;
+    }
+    return true;
+}
+
 void MixedModeMaster::sync_edge(uint32_t now_us){
     if (clk.source() == MasterClock::CLOCK_CV) clk.external_edge(now_us);
 }

@@ -45,6 +45,14 @@ class MidiInputQueue {
             tail = (uint8_t)((tail + 1u) % MIDI_INPUT_QUEUE_DEPTH);
             return true;
         }
+        // The oldest message without taking it, so the drain can stop in
+        // front of a message the graph has no room for and leave it queued
+        // for the next pass (control/midi_dispatch.h).
+        bool peek(SourcedMidiEvent& out) const {
+            if (tail == head) return false;
+            out = items[tail];
+            return true;
+        }
 
         bool empty() const { return head == tail; }
         uint8_t count() const {

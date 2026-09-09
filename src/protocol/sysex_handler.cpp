@@ -26,7 +26,7 @@ SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
     receiving(false),
     pending_patch(empty_patch()), pending_globals(default_globals()),
     pending_at(0), pending_slot(0xFF), pending(false),
-    tx(), tx_at(0), reply_to(MIDI_CONTROL_PORT),
+    tx(), tx_at(0), tx_overflow(false), reply_to(MIDI_CONTROL_PORT),
     reject_count(0), error(SYSEX_ERR_NONE),
     device(SYSEX_DEFAULT_DEVICE), timing(SWAP_IMMEDIATE)
 {}
@@ -35,6 +35,7 @@ SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
 
 void SysexHandler::begin_reply(uint8_t command){
     tx_at = 0;
+    tx_overflow = false;
     tx[tx_at++] = 0xF0;
     tx[tx_at++] = SYSEX_MANUFACTURER;
     tx[tx_at++] = device;
@@ -57,7 +58,13 @@ void SysexHandler::put_string(const char* text, uint8_t limit){
 }
 
 void SysexHandler::send_reply(uint8_t source){
-    if (tx_at + 1u > SYSEX_TX_MAX) return;
+    if (tx_overflow || tx_at + 1u > SYSEX_TX_MAX){
+        // The reply did not fit. Say so rather than sending its first 319
+        // bytes with an F7 on the end, which a host cannot tell from a
+        // complete message.
+        nak(source, SYSEX_ERR_TOO_LARGE);
+        return;
+    }
     tx[tx_at++] = 0xF7;
     midi.send_sysex(source, tx, tx_at);
 }
@@ -86,7 +93,7 @@ void SysexHandler::notify(uint8_t event, uint8_t detail){
 
 // Receiving -------------------------------------------------------------
 
-void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length){
+void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us){
     if (data == nullptr || length < 4) return;
     if (data[0] != 0xF0) return;
 
@@ -101,7 +108,7 @@ void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t l
     if (data[end - 1u] == 0xF7) end--;
 
     if (data[1] == SYSEX_UNIVERSAL_NON_REALTIME){
-        handle_universal(source, data, end, 0);
+        handle_universal(source, data, end, now_us);
         return;
     }
     if (data[1] != SYSEX_MANUFACTURER) return;      // somebody else's device
@@ -120,12 +127,12 @@ void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t l
         return;
     }
     reply_to = source;
-    handle_command(source, command, &data[1u + HEADER_BYTES], (uint16_t)(end - 1u - HEADER_BYTES), 0);
+    handle_command(source, command, &data[1u + HEADER_BYTES], (uint16_t)(end - 1u - HEADER_BYTES), now_us);
 }
 
 // The standard identity request, so an editor finds the module among the
 // host's ports instead of making a user pick one by name.
-void SysexHandler::handle_universal(uint8_t source, const uint8_t* data, uint16_t length, uint32_t){
+void SysexHandler::handle_universal(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us){
     if (length < 5) return;
     if (data[3] != SYSEX_GENERAL_INFORMATION || data[4] != SYSEX_IDENTITY_REQUEST) return;
     const uint8_t addressed = data[2];
@@ -133,7 +140,7 @@ void SysexHandler::handle_universal(uint8_t source, const uint8_t* data, uint16_
     reply_to = source;
     reply_universal_identity(source);
     // Both LEDs, so a user with two modules can see which one answered.
-    leds.identify(0);
+    leds.identify(now_us);
 }
 
 void SysexHandler::handle_command(uint8_t source, uint8_t command,
@@ -380,13 +387,11 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
 
         case SYSEX_SLOT_LOAD: {
             if (n < 1){ nak(source, SYSEX_ERR_TRUNCATED); return; }
-            Patch p;
-            GlobalSettings g;
-            const StoreError s = store.load(args[0], p, g);
+            // Into the pending buffers directly: on any error the store
+            // leaves them alone, and a Patch is too large for the stack.
+            const StoreError s = store.load(args[0], pending_patch, pending_globals);
             if (s == STORE_EMPTY){ nak(source, SYSEX_ERR_SLOT_EMPTY); return; }
             if (s != STORE_OK){ nak(source, SYSEX_ERR_SLOT_CORRUPT); return; }
-            pending_patch = p;
-            pending_globals = g;
             pending_slot = args[0];
             arm_swap(now_us);
             ack(source);
@@ -429,6 +434,7 @@ void SysexHandler::reply_identity(uint8_t source){
 void SysexHandler::reply_universal_identity(uint8_t source){
     // F0 7E <dev> 06 02 <manufacturer> <family lo hi> <member lo hi> <version x4> F7
     tx_at = 0;
+    tx_overflow = false;
     tx[tx_at++] = 0xF0;
     tx[tx_at++] = SYSEX_UNIVERSAL_NON_REALTIME;
     tx[tx_at++] = device;
@@ -640,22 +646,20 @@ void SysexHandler::receive_chunk(uint8_t source, const uint8_t* args, uint16_t n
 
     // The whole image has arrived. Decode - which checks the magic, the
     // format version and the CRC before interpreting a byte - then validate
-    // and swap. Until this point the live graph has not been touched.
-    Patch decoded;
-    GlobalSettings decoded_globals;
-    const CodecError e = patch_codec::decode(staging, staged, decoded, decoded_globals);
+    // and swap. Until this point the live graph has not been touched. The
+    // decode target is the pending buffer this handler already owns; the
+    // stack is no place for a Patch.
+    const CodecError e = patch_codec::decode(staging, staged, pending_patch, pending_globals);
     abort_transfer();
     if (e != CODEC_OK){
         nak(source, SYSEX_ERR_BAD_IMAGE);
         return;
     }
-    pending_patch = decoded;
-    pending_globals = decoded_globals;
     pending_slot = 0xFF;
     // A bulk load is what the user just asked for, so it is not quantised:
     // waiting for a bar boundary after a deliberate "send patch" reads as a
     // hang. Only Program Change recall and an explicit slot load are.
-    if (patches.apply(decoded, decoded_globals, now_us) != APPLY_OK){
+    if (patches.apply(pending_patch, pending_globals, now_us) != APPLY_OK){
         nak(source, SYSEX_ERR_REJECTED);
         return;
     }
@@ -779,14 +783,10 @@ bool SysexHandler::program_change(uint8_t source, uint8_t channel, uint8_t progr
     if (g.pc_channel != 0 && g.pc_channel != channel) return false;
     if (program >= PATCH_SLOTS) return false;
 
-    Patch p;
-    GlobalSettings recalled;
-    if (store.load(program, p, recalled) != STORE_OK){
+    if (store.load(program, pending_patch, pending_globals) != STORE_OK){
         leds.error(now_us);
         return true;                      // addressed to us; it just failed
     }
-    pending_patch = p;
-    pending_globals = recalled;
     pending_slot = program;
     timing = g.pc_quantise;
     arm_swap(now_us);

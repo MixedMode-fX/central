@@ -16,7 +16,9 @@ The MixedMode Modular Central (MMMC) can clock off three sources:
 - CV
 - MIDI
 
-The behaviour of the rest of the module should be the same regardless of the clock source. The MMMC will operate under a `PPQN = 24` (maybe 48?) master clock derived from any of the sources listed above.
+The behaviour of the rest of the module is the same regardless of the clock
+source. The MMMC operates under a `PPQN = 24` master clock derived from any of
+the sources listed above — see [Master clock](#master-clock).
 
 Each I/O channel can be configured as either an **input** or an **output**. They can be assigned to their own **algorithm** or be part of an algorithm that uses multiple inputs and/or outputs.
 
@@ -26,21 +28,34 @@ Each MIDI I/O can be routed to each other and MIDI Modifier Algorithms can be ap
 
 ### Clock Dividers / Multipliers
 
-Each output channel will have its own independant clock divider / multiplier. This will drive the refresh rate at which the algorithms will operate.
+Division is an algorithm, not something every clocked algorithm carries:
+`ClockDiv` is an ordinary node that writes a gate bus, and sequencers take an
+edge-triggered advance inlet. So one divider can drive several sequencers —
+which locks them together by construction, because they read the same edge —
+a divider can divide another divider, and a sequencer can just as well be
+advanced by a logic gate or an external jack.
 
-Each clock has its own independent `phase` which represents
+Each `ClockDiv` has its own `phase` (a fraction of its own output period, so
+it wraps inside the cycle) and `delay` (whole ticks of lag, which does not
+wrap). Both are exact from the master tick. See [Master clock](#master-clock)
+for what "exact" costs and where it stops.
 
 ### Gate Sequencers
 
-The MMMC offers several types of gate sequencers:
+Each writes a bool to a gate bus. A gate bus cannot carry pitch, velocity,
+note length or polyphony, so note sequencing (#13) and drum sequencing (#14)
+are separate families sharing this transport.
 
-- `Metronome` : every tick of the clock is outputted according to the clock multiplier/divider
+- `Metronome` : every advance edge is output
+- `StepSequencer` : a classic step sequencer, 1..`MAX_SEQUENCE_LEN` steps, each ON/OFF
+- `EuclidianSequencer` : Bjorklund's distribution of *k* pulses over *n* steps, plus rotation
+- `RandomSequencer` : shred and load a random pattern
 
-- `StepSequencer` : a classic step sequencer with variable length (1-16). Each step can be ON/OFF.
-
-- `EuclidianSequencer` : regular old Euclidian
-
-- `RandomSequencer`: shred and load a random pattern
+All four share one base: an advance inlet, a reset inlet, a length, a
+direction (forward, reverse, ping-pong, random) and a fixed-width trigger
+output. Reset means the same thing in all of them — the next advance plays
+the pattern's first step — and it is an inlet, so one sequencer can reset
+another.
 
 ## Logic Algorithms
 
@@ -198,63 +213,177 @@ it by instrumenting `operator new`.
 Sizing constants live in `src/config.h`. Algorithm ids in
 `src/node/registry.h` are part of the preset format: append, never renumber.
 
-Algorithms available today: `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR`
-(up to four inlets each), `Sustain` (gate to CC), `GateToNote` (gate edge to
-note on/off), `Transpose`, and a minimal `Arpeggiator` (up, one octave; #10
-extends it).
+Algorithms available today:
+
+| Domain | Algorithms |
+|---|---|
+| Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR` (up to four inlets each) |
+| Clock | `ClockDiv` |
+| Sequencers | `Metronome`, `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
+| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `Quantise`, `Probability`, `Arpeggiator` |
+| Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off) |
+
+# Master clock
+
+One monotonic counter for the whole module, in **subticks**: `CLOCK_SUBTICK`
+= 24 of them per PPQN tick, 576 per quarter note. The subdivision is what caps
+the fastest multiplier — `xN` is exact only when N divides `CLOCK_SUBTICK` —
+and 24 was chosen for its divisors, so a triplet is as exact as a duplet. That
+puts the timer at 1.2 kHz at 120 BPM, for an ISR that increments one counter.
+
+**No node's `tick()` runs in interrupt context.** The ISR increments; the main
+loop reads the count through `MasterClock::consume()` and the pass does the
+work, so a slow algorithm cannot stall the clock. Subticks that arrive between
+two passes are collapsed into one `tick()` with the newest count — a node works
+from the count, so nothing is lost.
+
+Three sources feed that counter:
+
+| Source | Driven by | Notes |
+|---|---|---|
+| Internal | the interval timer, from BPM | 20–300 BPM |
+| CV | rising edges on the sync jack | `cv_ppqn` pulses per quarter |
+| MIDI | MIDI clock bytes, at 24 PPQN | start / stop / continue drive the transport |
+
+For both external sources the timer free-runs between edges at the last
+measured period, and each edge re-phases the count onto its subtick boundary.
+Re-phasing only ever moves the count **forward**: a node comparing two readings
+never sees time reverse. An edge whose period is implausible is counted rather
+than believed.
+
+**Multiplication from a gate source is refused**, and says so. With only past
+edges to go on, a multiplier has to estimate the period and extrapolate, which
+puts its extra pulses in the wrong place exactly when the tempo moves — which
+is when a musician notices. From the master tick, where the count is already
+known, multiplication is exact. An inexact multiplier off the tick (one that
+does not divide `CLOCK_SUBTICK`) is refused the same way.
+
+Trigger width is wall-clock, never ticks. A 24-PPQN tick at 120 BPM is ~20 ms
+and a Eurorack trigger is 1–10 ms, so a width in ticks would stop being a
+trigger as soon as the tempo changed.
+
+# MIDI
+
+Two DIN ports, a four-cable class-compliant USB device and a USB host port all
+feed the same algorithm graph.
+
+**In.** Every parser is drained into one queue, tagged with the transport the
+message arrived on; the transport side does nothing but enqueue, and the pass
+dispatches. A full queue drops the newest message and counts it, so "MIDI went
+strange under load" is a number rather than a mystery. Realtime messages
+(clock, start, stop, continue) are transport-level: they reach the master clock
+and no bus.
+
+**Thru is a patch, not a default.** Library soft-thru is off on both DIN ports;
+a `MidiInPort` and a `MidiOutPort` on a shared note bus give thru back when
+somebody asks for it. That is also the clearest demonstration that routing is
+just bus assignment.
+
+**Modifiers** all compose over one held-note model (`src/midi/held_notes.h`):
+which notes are held, in what order, at what velocity. The rule that governs
+every one of them is that **a modifier owns the note-off for every note-on it
+emitted, and releases it with the transformation it originally applied, not the
+current parameter value** — otherwise moving a transpose offset, or a
+quantiser's root, under a held note hangs it on the downstream synth for ever.
+A modifier that cannot record an emission does not make it.
 
 # Code structure
 
-`Setters` and `Getters` are not represented in the diagram below. 
+Everything is a `Node`. A node reads and writes bus indices and never names a
+pin or a transport; only the hardware port nodes hold an `IGpio` or an
+`IMidiOut`. `MixedModeMaster` owns the clock, the buses, the reserved port
+nodes and the pool, and runs the evaluation order every pass.
+
+Note what the diagram does *not* contain: a `Clock` inside every clocked
+algorithm. Division is `ClockDiv`, a node like any other, and a sequencer
+takes an edge on a gate bus.
 
 ```mermaid
 classDiagram
 
     class MixedModeMaster{
-        + uint8_t clock_source
-        + GateAlgorithm gate_algorithms[N_IO_PORT]
-        + MIDIAlgorithm midi_algorithm[N_MIDI_SLOT]
-        + void tick()
+        + MasterClock clock
+        + BusManager buses
+        + NodePool pool
+        + GateInPort/GateOutPort ports[GPIO_N]
+        + MidiInPort/MidiOutPort midi[]
+        + LoadError load(Patch)
+        + void pass(uint32_t now_us)
+        + uint8_t deliver_midi(source, event, now_us)
     }
 
-    class Clock{
-        + uint32_t counter
-        + uint8_t modifier
-        + uint8_t type
-        + int phase
-        + int delay
-        + void tick()
+    class MasterClock{
+        + uint32_t subticks
+        + uint8_t source
+        + void advance()
+        + void external_edge(uint32_t now_us)
+        + bool consume(uint32_t&)
     }
 
-    class GateAlgorithm{
-        + bool enable
-        + uint8_t io_pins[]
-        + uint8_t io_types[]
+    class BusManager{
+        + gate_read/gate_write
+        + note_read/note_write
+        + cv_read/cv_write
+        + void swap()
+    }
+
+    class Node{
         + void setup()
-        + void tick()
+        + void process(BusManager&, uint32_t now_us)
+        + void tick(BusManager&, uint32_t count)
     }
-    GateAlgorithm --|> GateSequencer
+
+    MixedModeMaster *-- MasterClock
+    MixedModeMaster *-- BusManager
+    MixedModeMaster *-- Node
+
+    Node --|> ClockDiv
+    Node --|> GateSequencer
+    Node --|> LogicGate
+    Node --|> HardwarePort
+    Node --|> MidiModifier
+
+    class ClockDiv{
+        + uint8_t mode
+        + uint8_t amount
+        + uint8_t phase
+        + uint8_t delay
+        + TriggerPulse pulse
+    }
 
     class GateSequencer{
-        + Clock clock
         + uint8_t length
-        + uint8_t sequence[MAX_SEQUENCE_LEN]
+        + uint8_t direction
+        + uint32_t sequence
+        + bool step_on(uint8_t)
     }
-
     GateSequencer --|> Metronome
     GateSequencer --|> StepSequencer
     GateSequencer --|> EuclidianSequencer
     GateSequencer --|> RandomSequencer
 
-    GateAlgorithm --|> LogicAlgorithm
-    LogicAlgorithm --|> NOT
-    LogicAlgorithm --|> AND
-    LogicAlgorithm --|> OR
-    LogicAlgorithm --|> XOR
-    LogicAlgorithm --|> LATCH
-    LogicAlgorithm --|> ASTABLE
+    LogicGate --|> NOT
+    LogicGate --|> AND
+    LogicGate --|> OR
+    LogicGate --|> XOR
 
-    MIDIAlgorithm
+    class MidiModifier{
+        + HeldNotes held
+        + SoundingNotes sounding
+    }
+    MidiModifier --|> Transpose
+    MidiModifier --|> NotePriority
+    MidiModifier --|> VelocityCurve
+    MidiModifier --|> Chord
+    MidiModifier --|> Quantise
+    MidiModifier --|> Probability
+    MidiModifier --|> Arpeggiator
+
+    class HardwarePort
+    HardwarePort --|> GateInPort
+    HardwarePort --|> GateOutPort
+    HardwarePort --|> MidiInPort
+    HardwarePort --|> MidiOutPort
 
 ```
 

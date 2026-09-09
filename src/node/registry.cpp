@@ -10,6 +10,7 @@
 #include "algorithm/midi/quantise.h"
 #include "algorithm/midi/probability.h"
 #include "algorithm/clock/clock_div.h"
+#include "algorithm/sequencer/sequencers.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -31,6 +32,10 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &Chord::descriptor,
     &Quantise::descriptor,
     &Probability::descriptor,
+    &Metronome::descriptor,
+    &StepSequencer::descriptor,
+    &EuclidianSequencer::descriptor,
+    &RandomSequencer::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

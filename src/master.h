@@ -12,6 +12,16 @@
 #include "hal/igpio.h"
 #include "hal/imidi_out.h"
 
+// Why a parameter write was refused (#20). The caller reports; it never
+// guesses, and it never silently clamps.
+enum ParamError : uint8_t {
+    PARAM_SET_OK = 0,
+    PARAM_NO_SUCH_NODE,
+    PARAM_NO_SUCH_PARAM,      // index beyond n_params, or a reserved byte
+    PARAM_VALUE_OUT_OF_RANGE, // outside the ParamDescriptor's [min, max]
+    PARAM_REFUSED,            // the node itself refused it
+};
+
 enum LoadError : uint8_t {
     LOAD_OK = 0,
     LOAD_TOO_MANY_NODES,
@@ -49,6 +59,23 @@ class MixedModeMaster {
         void setup();
         // One evaluation pass.
         void pass(uint32_t now_us);
+
+        // The one public entry point for a runtime parameter write (#20).
+        // Every control-plane caller - #11's incremental SysEx edits, #21's
+        // CC mapping, the console - goes through it, so there is one
+        // validator and one set of tests rather than one per transport.
+        //
+        // The value is range-checked against the ParamDescriptor before it
+        // reaches the node. Out of range is **rejected, not clamped**: the
+        // node keeps its previous value and the caller is told. A controller
+        // never produces an out-of-range value because #21 scales it onto
+        // [min, max] first.
+        //
+        // Called from the main loop between passes, never from an interrupt.
+        ParamError set_node_param(uint8_t node_index, uint16_t param_index, uint8_t value);
+        // What the node is running. False when the node or the parameter
+        // does not exist.
+        bool get_node_param(uint8_t node_index, uint16_t param_index, uint8_t& value_out) const;
 
         // Transport input path (#5): offers an incoming message to every
         // MidiInPort. Returns how many accepted it. System messages never

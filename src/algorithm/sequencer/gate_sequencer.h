@@ -33,9 +33,25 @@ class GateSequencer : public Node{
         static constexpr uint8_t PROBABILITY_BASE = 8;
         static constexpr uint8_t PARAM_COUNT = PROBABILITY_BASE + MAX_SEQUENCE_LEN;
 
+        // The header block every gate sequencer shares. The four subclasses
+        // differ only in params[3..7], so the descriptors below are built by
+        // splicing a subclass block between this and the probability run.
+        static const ParamDescriptor HEADER[3];
+        static const ParamDescriptor PROBABILITY[1];
+        // params[3..7] that a subclass does not use. Described rather than
+        // left blank so an editor knows they are unused, and so the
+        // descriptor table covers the whole parameter space.
+        static const ParamDescriptor RESERVED[1];
+
         GateSequencer(const NodeConfig& config, uint8_t default_length);
 
         void process(BusManager& bus, uint32_t now_us) override;
+        // params[0..2] and the params[8..] probability block. A subclass
+        // handles its own params[3..7] and calls this for the rest; a length
+        // change re-derives whatever the subclass caches, through
+        // on_length_changed().
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         uint8_t length() const { return engine.length(); }
         uint8_t position() const { return engine.position(); }
@@ -54,6 +70,11 @@ class GateSequencer : public Node{
         virtual void on_reset() {}
         // A rising edge on a subclass's own third inlet, if it has one.
         virtual void on_extra_edge(){}
+        // The length moved at runtime: a subclass that derives its pattern
+        // from the length (Euclid) recomputes it here.
+        virtual void on_length_changed(){}
+
+        uint8_t default_len() const { return fallback; }
 
         StepEngine engine;
         Xorshift32 rng;
@@ -63,6 +84,8 @@ class GateSequencer : public Node{
         EdgeIn reset_in;
         EdgeIn extra_in;
         uint8_t out;
+        uint8_t fallback;                    // the subclass's default length
+        uint8_t width_param;                 // as stored, for get_param
         TriggerPulse pulse;
         uint8_t chance[MAX_SEQUENCE_LEN];
 };

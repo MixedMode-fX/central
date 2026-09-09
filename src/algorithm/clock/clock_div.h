@@ -35,6 +35,10 @@
 // params[3] delay     whole PPQN ticks (gate source: whole input edges) of lag
 //                     applied on top of phase. Does not wrap.
 // params[4] width     trigger width in milliseconds (0 -> TRIGGER_WIDTH_US)
+//
+// Live edits (#20): amount, mode, phase, delay and width can all move at
+// runtime. The period is re-derived immediately but the pulse already
+// scheduled is not moved - see derive() below.
 class ClockDiv : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -43,6 +47,8 @@ class ClockDiv : public Node{
 
         void process(BusManager& bus, uint32_t now_us) override;
         void tick(BusManager& bus, uint32_t count) override;
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         // Diagnostics / tests
         bool gate_sourced() const { return source_in != NO_BUS; }
@@ -51,6 +57,14 @@ class ClockDiv : public Node{
         uint32_t pulses() const { return pulse_count; }
 
     private:
+        // Recomputes div_period, the multiply refusal and the offset from
+        // mode, amount, phase and delay. Called from the constructor and from
+        // set_param; it deliberately leaves next_fire alone, so **the pulse
+        // already scheduled lands where it was going to and the new period
+        // applies from the one after it**. Changing the amount mid-period
+        // therefore lets the current period complete rather than moving a
+        // pulse that a musician is already counting on.
+        void derive();
         void restart();
         void fire(BusManager& bus);
         // Advances the pattern to `position`, firing if a fire point was
@@ -62,6 +76,9 @@ class ClockDiv : public Node{
         uint8_t out;
         uint8_t mode;
         uint8_t amount;
+        uint8_t phase_param;     // as stored, so set_param can re-derive
+        uint8_t delay_param;
+        uint8_t width_param;
         uint32_t div_period;     // positions between two output pulses
         uint32_t offset;         // positions before the first pulse
         uint32_t next_fire;

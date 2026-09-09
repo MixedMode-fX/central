@@ -5,8 +5,41 @@
 static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
+static const char* const CURVE_NAMES[4] = {"linear", "soft", "hard", "fixed"};
+static const ParamDescriptor PARAMS[4] = {
+    {"curve",  0, 3,   0,   PARAM_ENUM,    CURVE_NAMES},
+    {"scale",  1, 255, 100, PARAM_PERCENT, nullptr},
+    {"offset", 0, 255, 0,   PARAM_SIGNED,  nullptr},
+    {"fixed",  1, 127, 100, PARAM_NUMBER,  nullptr},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, 4, PARAMS}};
+
 const AlgorithmDescriptor VelocityCurve::descriptor = {
-    ALGO_VELOCITY, "VelocityCurve", 1, 1, 1, 4, IN, OUT, sizeof(VelocityCurve), false, construct_node<VelocityCurve> };
+    ALGO_VELOCITY, "VelocityCurve", 1, 1, 1, 4, IN, OUT, sizeof(VelocityCurve), false, construct_node<VelocityCurve>,
+    GROUPS, 1 };
+
+// Velocity never changes a pitch and never drops a note, so this is the one
+// modifier whose parameters cannot strand anything: a note-off carries
+// velocity 0 through unchanged whatever the curve has become.
+bool VelocityCurve::set_param(uint16_t index, uint8_t value){
+    switch (index){
+        case 0: if (value > CURVE_FIXED) return false; curve = value; return true;
+        case 1: scale = value ? value : 100; return true;
+        case 2: offset = (int8_t)value; return true;
+        case 3: fixed = value ? value : 100; return true;
+        default: return false;
+    }
+}
+
+uint8_t VelocityCurve::get_param(uint16_t index) const {
+    switch (index){
+        case 0: return curve;
+        case 1: return scale;
+        case 2: return (uint8_t)offset;
+        case 3: return fixed;
+        default: return 0;
+    }
+}
 
 VelocityCurve::VelocityCurve(const NodeConfig& config) :
     in(config.in_bus[0]),

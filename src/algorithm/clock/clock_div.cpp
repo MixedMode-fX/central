@@ -4,21 +4,43 @@
 static const Domain IN[1] = {Domain::Gate};
 static const Domain OUT[1] = {Domain::Gate};
 
+static const char* const MODE_NAMES[2] = {"divide", "multiply"};
+static const ParamDescriptor PARAMS[5] = {
+    {"mode",   0, 1,   0, PARAM_ENUM,   MODE_NAMES},
+    {"amount", 1, 255, 1, PARAM_NUMBER, nullptr},
+    {"phase",  0, 255, 0, PARAM_NUMBER, nullptr},
+    {"delay",  0, 255, 0, PARAM_NUMBER, nullptr},
+    {"width",  0, 255, 0, PARAM_MILLIS, nullptr},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, 5, PARAMS}};
+
 const AlgorithmDescriptor ClockDiv::descriptor = {
-    ALGO_CLOCK_DIV, "ClockDiv", 1, 0, 1, 5, IN, OUT, sizeof(ClockDiv), true, construct_node<ClockDiv> };
+    ALGO_CLOCK_DIV, "ClockDiv", 1, 0, 1, 5, IN, OUT, sizeof(ClockDiv), true, construct_node<ClockDiv>,
+    GROUPS, 1 };
 
 ClockDiv::ClockDiv(const NodeConfig& config) :
     source_in(config.in_bus[0]),
     out(config.out_bus[0]),
     mode(config.params[0]),
     amount(config.params[1] ? config.params[1] : 1),
+    phase_param(0), delay_param(0), width_param(0),
     div_period(1), offset(0), next_fire(0), last_position(0),
     edges(0), pulse_count(0), now(0), pulse(),
     refused(false), started(false), last_gate(false)
 {
+    phase_param = config.params[2];
+    delay_param = config.params[3];
+    width_param = config.params[4];
+    derive();
+    next_fire = offset;
+    if (width_param) pulse.set_width_us((uint32_t)width_param * 1000u);
+}
+
+void ClockDiv::derive(){
     const bool from_gate = (source_in != NO_BUS);
     const bool multiply = (mode != 0);
 
+    refused = false;
     if (multiply && from_gate){
         refused = true;                       // documented above: x1 instead
         div_period = 1;
@@ -39,13 +61,53 @@ ClockDiv::ClockDiv(const NodeConfig& config) :
 
     // phase is a fraction of one output period; delay is whole ticks (whole
     // input edges from a gate source).
-    const uint32_t phase = ((uint32_t)config.params[2] * div_period) / 256u;
-    const uint32_t delay = from_gate ? (uint32_t)config.params[3]
-                                     : (uint32_t)config.params[3] * CLOCK_SUBTICK;
+    const uint32_t phase = ((uint32_t)phase_param * div_period) / 256u;
+    const uint32_t delay = from_gate ? (uint32_t)delay_param
+                                     : (uint32_t)delay_param * CLOCK_SUBTICK;
     offset = phase + delay;
-    next_fire = offset;
+}
 
-    if (config.params[4]) pulse.set_width_us((uint32_t)config.params[4] * 1000u);
+bool ClockDiv::set_param(uint16_t index, uint8_t value){
+    switch (index){
+        case 0:
+            if (value > 1) return false;
+            if (value == mode) return true;
+            mode = value;
+            break;
+        case 1: {
+            const uint8_t amt = value ? value : 1;
+            if (amt == amount) return true;
+            amount = amt;
+            break;
+        }
+        case 2:
+            if (value == phase_param) return true;
+            phase_param = value;
+            break;
+        case 3:
+            if (value == delay_param) return true;
+            delay_param = value;
+            break;
+        case 4:
+            width_param = value;
+            pulse.set_width_us(value ? (uint32_t)value * 1000u : (uint32_t)TRIGGER_WIDTH_US);
+            return true;
+        default:
+            return false;
+    }
+    derive();
+    return true;
+}
+
+uint8_t ClockDiv::get_param(uint16_t index) const {
+    switch (index){
+        case 0: return mode;
+        case 1: return amount;
+        case 2: return phase_param;
+        case 3: return delay_param;
+        case 4: return width_param;
+        default: return 0;
+    }
 }
 
 void ClockDiv::restart(){

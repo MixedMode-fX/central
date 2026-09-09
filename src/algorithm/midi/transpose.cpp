@@ -5,8 +5,14 @@
 static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
+static const ParamDescriptor PARAMS[1] = {
+    {"semitones", 0, 255, 0, PARAM_SIGNED, nullptr},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, 1, PARAMS}};
+
 const AlgorithmDescriptor Transpose::descriptor = {
-    ALGO_TRANSPOSE, "Transpose", 1, 1, 1, 1, IN, OUT, sizeof(Transpose), false, construct_node<Transpose> };
+    ALGO_TRANSPOSE, "Transpose", 1, 1, 1, 1, IN, OUT, sizeof(Transpose), false, construct_node<Transpose>,
+    GROUPS, 1 };
 
 Transpose::Transpose(const NodeConfig& config) :
     in(config.in_bus[0]),
@@ -31,6 +37,16 @@ void Transpose::process(BusManager& bus, uint32_t){
         }
         bus.note_write(out, e);
     }
+}
+
+bool Transpose::set_param(uint16_t index, uint8_t value){
+    if (index != 0) return false;
+    semitones = (int8_t)value;      // the ledger releases at the sent pitch
+    return true;
+}
+
+uint8_t Transpose::get_param(uint16_t index) const {
+    return index == 0 ? (uint8_t)semitones : 0;
 }
 
 void Transpose::silence(BusManager& bus){

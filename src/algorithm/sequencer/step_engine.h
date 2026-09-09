@@ -45,6 +45,20 @@ class StepEngine {
             reset();
         }
 
+        // Live length and direction changes (#20). Unlike configure() these
+        // leave the cursor and the at-first flag alone: a length that drops
+        // below the current position is **clamped on the next advance, not
+        // immediately**, because an immediate jump reorders the pattern under
+        // a running sequence and a musician hears the sequencer stumble.
+        void set_length(uint8_t length, uint8_t fallback = 1){
+            len = length ? length : fallback;
+            if (len == 0) len = 1;
+            if (len > MAX_SEQUENCE_LEN) len = MAX_SEQUENCE_LEN;
+        }
+        void set_direction(uint8_t direction){
+            if (direction < SEQ_DIRECTIONS) dir = direction;
+        }
+
         // The next advance plays the first step.
         void reset(){ at_first = true; descending = false; }
 

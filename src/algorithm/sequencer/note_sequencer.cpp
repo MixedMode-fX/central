@@ -6,13 +6,74 @@
 static const Domain IN[3] = {Domain::Gate, Domain::Gate, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
+// Parameter descriptors (#20): a 16-byte header, then the steps as one
+// repeating group whose stride is the step size. The poly variant's 336
+// parameters are two groups and 26 descriptors this way, instead of 336
+// hand-written entries that would drift the moment a voice was added.
+const ParamDescriptor NoteSequencerBase::HEADER[16] = {
+    {"length",     1, MAX_SEQUENCE_LEN,               8,  PARAM_NUMBER,  nullptr},
+    {"direction",  0, StepEngine::SEQ_DIRECTIONS - 1, 0,  PARAM_ENUM,    PARAM_DIRECTION_NAMES},
+    {"gate",       0, 100,                            0,  PARAM_PERCENT, nullptr},
+    {"scale low",  0, 255,                            0,  PARAM_BITFIELD, nullptr},
+    {"scale high", 0, 15,                             0,  PARAM_BITFIELD, nullptr},
+    {"root",       0, 127,                            60, PARAM_PITCH,   nullptr},
+    {"vel scale",  1, 255,                            100, PARAM_PERCENT, nullptr},
+    {"vel offset", 0, 255,                            0,  PARAM_SIGNED,  nullptr},
+    {"channel",    1, 16,                             1,  PARAM_CHANNEL, nullptr},
+    {"accent",     0, 127,                            30, PARAM_NUMBER,  nullptr},
+    {"stall",      0, 255,                            4,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+};
+
+// A step is described as one group of MAX_SEQUENCE_LEN repeats whose field
+// array is the whole step: the voice pairs then the two tail bytes. The tail
+// does not repeat with the pairs, so the step - not the pair - is the unit
+// that recurs.
+static const ParamDescriptor MONO_STEP[NoteSequencerBase::stride(1)] = {
+    {"degree",   0, 255, 0,   PARAM_SIGNED,   nullptr},
+    {"velocity", 0, 127, 0,   PARAM_NUMBER,   nullptr},
+    {"length/flags", 0, 255, 0, PARAM_BITFIELD, nullptr},
+    {"probability",  0, 100, 100, PARAM_PERCENT, nullptr},
+};
+
+static const ParamDescriptor POLY_STEP[NoteSequencerBase::stride(NOTE_SEQ_VOICES)] = {
+    {"degree 1",   0, 255, 0, PARAM_SIGNED, nullptr},
+    {"velocity 1", 0, 127, 0, PARAM_NUMBER, nullptr},
+    {"degree 2",   0, 255, 0, PARAM_SIGNED, nullptr},
+    {"velocity 2", 0, 127, 0, PARAM_NUMBER, nullptr},
+    {"degree 3",   0, 255, 0, PARAM_SIGNED, nullptr},
+    {"velocity 3", 0, 127, 0, PARAM_NUMBER, nullptr},
+    {"degree 4",   0, 255, 0, PARAM_SIGNED, nullptr},
+    {"velocity 4", 0, 127, 0, PARAM_NUMBER, nullptr},
+    {"length/flags", 0, 255, 0, PARAM_BITFIELD, nullptr},
+    {"probability",  0, 100, 100, PARAM_PERCENT, nullptr},
+};
+
+static_assert(NOTE_SEQ_VOICES == 4, "POLY_STEP lists one degree/velocity pair per voice");
+
+static const ParamGroup MONO_GROUPS[2] = {
+    {0, 1, 16, NoteSequencerBase::HEADER},
+    {NoteSequencerBase::STEP_BASE, MAX_SEQUENCE_LEN, NoteSequencerBase::stride(1), MONO_STEP},
+};
+
+static const ParamGroup POLY_GROUPS[2] = {
+    {0, 1, 16, NoteSequencerBase::HEADER},
+    {NoteSequencerBase::STEP_BASE, MAX_SEQUENCE_LEN, NoteSequencerBase::stride(NOTE_SEQ_VOICES), POLY_STEP},
+};
+
 const AlgorithmDescriptor NoteSequencer::descriptor = {
     ALGO_NOTE_SEQ, "NoteSequencer", 3, 1, 1, NoteSequencerBase::param_count(1),
-    IN, OUT, sizeof(NoteSequencer), false, construct_node<NoteSequencer> };
+    IN, OUT, sizeof(NoteSequencer), false, construct_node<NoteSequencer>,
+    MONO_GROUPS, 2 };
 
 const AlgorithmDescriptor PolySequencer::descriptor = {
     ALGO_POLY_SEQ, "PolySequencer", 3, 1, 1, NoteSequencerBase::param_count(NOTE_SEQ_VOICES),
-    IN, OUT, sizeof(PolySequencer), false, construct_node<PolySequencer> };
+    IN, OUT, sizeof(PolySequencer), false, construct_node<PolySequencer>,
+    POLY_GROUPS, 2 };
 
 static_assert(NoteSequencerBase::param_count(NOTE_SEQ_VOICES) <= N_PARAM, "PolySequencer's steps do not fit N_PARAM");
 
@@ -59,6 +120,76 @@ uint8_t NoteSequencerBase::flags(uint8_t step) const {
 uint8_t NoteSequencerBase::probability(uint8_t step) const {
     if (step >= MAX_SEQUENCE_LEN) return 100;
     return step_probability(step_bytes(step)[n_voices * 2u + 1u]);
+}
+
+// Parameters ----------------------------------------------------------------
+
+bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
+    switch (index){
+        case P_LENGTH:
+            if (value > MAX_SEQUENCE_LEN) return false;
+            engine.set_length(value, DEFAULT_LENGTH);
+            return true;
+        case P_DIRECTION:
+            if (value >= StepEngine::SEQ_DIRECTIONS) return false;
+            engine.set_direction(value);
+            return true;
+        case P_GATE:
+            if (value > 100) return false;
+            gate_pct = value;
+            return true;
+        case P_SCALE_LO:
+            scale_mask = (uint16_t)((scale_mask & 0x0F00u) | value);
+            return true;
+        case P_SCALE_HI:
+            if (value > 0x0F) return false;
+            scale_mask = (uint16_t)((scale_mask & 0x00FFu) | ((uint16_t)value << 8));
+            return true;
+        case P_ROOT:
+            // Sounding notes are released from the ledger at the pitch they
+            // were sent at, so the root can move under a held note.
+            root = value ? (uint8_t)(value & 0x7F) : DEFAULT_ROOT;
+            return true;
+        case P_VEL_SCALE:  vel_scale = value ? value : 100; return true;
+        case P_VEL_OFFSET: vel_offset = (int8_t)value; return true;
+        case P_CHANNEL:
+            if (value > 16) return false;
+            channel = value ? value : 1;
+            return true;
+        case P_ACCENT:
+            if (value > 127) return false;
+            accent = value ? value : DEFAULT_ACCENT;
+            return true;
+        case P_STALL:
+            stall_periods = value ? value : DEFAULT_STALL;
+            return true;
+        default:
+            break;
+    }
+    if (index >= STEP_BASE && index < param_count(n_voices)){
+        steps[index - STEP_BASE] = value;
+        return true;
+    }
+    return false;                     // params[11..15] are reserved
+}
+
+uint8_t NoteSequencerBase::get_param(uint16_t index) const {
+    switch (index){
+        case P_LENGTH:     return engine.length();
+        case P_DIRECTION:  return engine.direction();
+        case P_GATE:       return gate_pct;
+        case P_SCALE_LO:   return (uint8_t)(scale_mask & 0xFFu);
+        case P_SCALE_HI:   return (uint8_t)((scale_mask >> 8) & 0x0Fu);
+        case P_ROOT:       return root;
+        case P_VEL_SCALE:  return vel_scale;
+        case P_VEL_OFFSET: return (uint8_t)vel_offset;
+        case P_CHANNEL:    return channel;
+        case P_ACCENT:     return accent;
+        case P_STALL:      return stall_periods;
+        default:           break;
+    }
+    if (index >= STEP_BASE && index < param_count(n_voices)) return steps[index - STEP_BASE];
+    return 0;
 }
 
 void NoteSequencerBase::set_step(uint8_t step, uint8_t v, int8_t deg, uint8_t vel){

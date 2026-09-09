@@ -22,6 +22,8 @@ class NotePriority : public Node{
         explicit NotePriority(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         uint8_t held_count() const { return held.count(); }
 

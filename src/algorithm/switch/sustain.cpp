@@ -5,8 +5,16 @@
 static const Domain SUSTAIN_IN[1] = {Domain::Gate};
 static const Domain SUSTAIN_OUT[1] = {Domain::Note};
 
+static const ParamDescriptor SUSTAIN_PARAMS[3] = {
+    {"channel",    1, 16,  1, PARAM_CHANNEL, nullptr},
+    {"controller", 0, 127, 64, PARAM_NUMBER, nullptr},
+    {"invert",     0, 1,   0, PARAM_BOOL,    nullptr},
+};
+static const ParamGroup SUSTAIN_GROUPS[1] = {{0, 1, 3, SUSTAIN_PARAMS}};
+
 const AlgorithmDescriptor Sustain::descriptor = {
-    ALGO_SUSTAIN, "Sustain", 1, 1, 1, 3, SUSTAIN_IN, SUSTAIN_OUT, sizeof(Sustain), false, construct_node<Sustain> };
+    ALGO_SUSTAIN, "Sustain", 1, 1, 1, 3, SUSTAIN_IN, SUSTAIN_OUT, sizeof(Sustain), false, construct_node<Sustain>,
+    SUSTAIN_GROUPS, 1 };
 
 Sustain::Sustain(const NodeConfig& config) :
     in(config.in_bus[0]),
@@ -33,6 +41,26 @@ void Sustain::process(BusManager& bus, uint32_t now_us){
     if (raw != state && (uint32_t)(now_us - last_change_us) >= DEBOUNCE_US){
         state = raw;
         send(bus);
+    }
+}
+
+// Inverting the pedal re-reads as a level change and settles through the
+// debounce like any other, so nothing special is needed here.
+bool Sustain::set_param(uint16_t index, uint8_t value){
+    switch (index){
+        case 0: channel = value ? value : 1; return true;
+        case 1: controller = value; return true;
+        case 2: invert = (value != 0); return true;
+        default: return false;
+    }
+}
+
+uint8_t Sustain::get_param(uint16_t index) const {
+    switch (index){
+        case 0: return channel;
+        case 1: return controller;
+        case 2: return invert ? 1 : 0;
+        default: return 0;
     }
 }
 

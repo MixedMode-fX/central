@@ -98,12 +98,25 @@ class NoteSequencerBase : public Node{
 
         void process(BusManager& bus, uint32_t now_us) override;
         void silence(BusManager& bus) override;
+        // The whole parameter space (#20): the 16-byte header and every step
+        // byte. A sounding note is released from the ledger at the pitch it
+        // was sent at, so root, scale, length and the pattern itself can all
+        // move underneath one without stranding it.
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
-        // The seams #11's live edits will use, and what the tests move
-        // under a sounding note.
+        // The 16-byte header block, shared by the mono and poly variants.
+        // The step block differs (its stride is the voice count) and lives
+        // in the .cpp beside each descriptor.
+        static const ParamDescriptor HEADER[16];
+
+        // The typed seams, kept because they read better in a test.
         void set_root(uint8_t note){ root = note & 0x7F; }
         void set_scale_mask(uint16_t mask){ scale_mask = mask & 0x0FFF; }
-        void set_length(uint8_t length){ engine.configure(length, engine.direction(), DEFAULT_LENGTH); }
+        // Live length change: the cursor is left alone and clamped on the
+        // next advance (StepEngine::set_length), so the pattern does not jump
+        // under a running sequence.
+        void set_length(uint8_t length){ engine.set_length(length, DEFAULT_LENGTH); }
         void set_step(uint8_t step, uint8_t voice, int8_t degree, uint8_t velocity);
 
         uint8_t voices() const { return n_voices; }
@@ -139,6 +152,7 @@ class NoteSequencerBase : public Node{
         };
 
         const uint8_t* step_bytes(uint8_t step) const { return &steps[(uint16_t)step * stride(n_voices)]; }
+        uint8_t* step_bytes(uint8_t step){ return &steps[(uint16_t)step * stride(n_voices)]; }
         bool any_sounding() const;
         void play_step(BusManager& bus, uint8_t step, uint32_t now_us);
         void release_voice(BusManager& bus, uint8_t v);

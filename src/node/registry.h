@@ -41,6 +41,7 @@ enum ConfigError : uint8_t {
     CONFIG_INLET_OUT_OF_RANGE,     // bus index not valid for that inlet's domain
     CONFIG_INLET_NOT_CONNECTED,    // required inlet is NO_BUS
     CONFIG_OUTLET_OUT_OF_RANGE,    // an outlet may be NO_BUS (unused), never out of range
+    CONFIG_PARAM_OUT_OF_RANGE,     // a parameter byte outside its ParamDescriptor (#20)
 };
 
 namespace registry {
@@ -49,8 +50,22 @@ namespace registry {
     // Iteration, for the editor (#11) and the tests.
     uint8_t count();
     const AlgorithmDescriptor* at(uint8_t index);
-    // Range-checks every bus index against its inlet's / outlet's domain.
+    // Range-checks every bus index against its inlet's / outlet's domain,
+    // and every parameter against its ParamDescriptor (#20). A stored 0 is
+    // always accepted: it means the descriptor's default (see param.h).
     ConfigError validate(const NodeConfig& config);
+    // Which parameter failed, after validate() returned
+    // CONFIG_PARAM_OUT_OF_RANGE. Only meaningful for that error.
+    uint16_t last_bad_param();
+
+    // The descriptor for one parameter of one algorithm, or nullptr when the
+    // index is beyond n_params or no group covers it.
+    const ParamDescriptor* param(const AlgorithmDescriptor& algorithm, uint16_t index);
+    const ParamDescriptor* param(uint8_t algorithm_id, uint16_t index);
+    // True when `value` is a legal write for that parameter. Zero is legal
+    // for every parameter (it means the default); anything else must be
+    // inside [min, max].
+    bool param_in_range(const ParamDescriptor& descriptor, uint8_t value);
 }
 
 #endif

@@ -22,10 +22,16 @@ class Metronome : public GateSequencer{
 //
 // params[3..6] the pattern, step 0 in the low bit of params[3], so all
 //              MAX_SEQUENCE_LEN steps fit in four bytes of the preset.
+//
+// Steps beyond the current length are stored but not played, so shortening
+// and lengthening a pattern from a knob is lossless and get_param reports
+// what was written (#20).
 class StepSequencer : public GateSequencer{
     public:
         static const AlgorithmDescriptor descriptor;
         explicit StepSequencer(const NodeConfig& config);
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
     protected:
         bool step_on(uint8_t step) const override {
             return (bits & ((uint32_t)1u << step)) != 0;
@@ -39,16 +45,30 @@ class StepSequencer : public GateSequencer{
 // edge (see sequencer/euclid.h).
 //
 // params[0] steps (n)   params[3] pulses (k)   params[4] rotation
+//
+// All three re-derive the pattern at runtime (#20), so turning k from a
+// controller is one Bjorklund run per *change* - not per message - and the
+// step cursor is left where it is.
 class EuclidianSequencer : public GateSequencer{
     public:
         static const AlgorithmDescriptor descriptor;
         explicit EuclidianSequencer(const NodeConfig& config);
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
+
+        uint8_t pulses() const { return k; }
+        uint8_t rotation() const { return rot; }
     protected:
         bool step_on(uint8_t step) const override {
             return (bits & ((uint32_t)1u << step)) != 0;
         }
+        void on_length_changed() override { derive(); }
     private:
+        void derive();
+
         uint32_t bits;
+        uint8_t k;
+        uint8_t rot;
 };
 
 // Shred and load a random pattern.
@@ -68,6 +88,12 @@ class RandomSequencer : public GateSequencer{
         explicit RandomSequencer(const NodeConfig& config);
         // Draws a new pattern. Also reachable from the shred inlet.
         void shred();
+        // Density and the seed offset move at runtime, but neither shreds:
+        // a pattern that redrew itself every time a knob twitched would be
+        // unplayable. The new density applies to the next shred, from the
+        // inlet or from a host.
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
     protected:
         bool step_on(uint8_t step) const override {
             return (bits & ((uint32_t)1u << step)) != 0;
@@ -76,6 +102,7 @@ class RandomSequencer : public GateSequencer{
     private:
         uint32_t bits;
         uint8_t density;
+        uint8_t seed_offset;
 };
 
 #endif

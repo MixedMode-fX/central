@@ -45,9 +45,19 @@ class DrumSequencer : public Node{
         static constexpr uint8_t LANE_STRIDE = 8;
         static constexpr uint8_t DEFAULT_LENGTH = 16;
 
+        // The 16-byte header, shared by both variants. The lane block
+        // differs and lives beside each descriptor in the .cpp.
+        static const ParamDescriptor HEADER[16];
+
         DrumSequencer(const NodeConfig& config);
 
         void process(BusManager& bus, uint32_t now_us) override;
+        // The header block, params[0..15]. A subclass handles its own lane
+        // data and calls this for the rest (#20). A length or direction
+        // change leaves every lane's cursor where it is, clamped on the next
+        // advance, so a polyrhythm does not stumble when a knob moves.
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         uint8_t lane_length(uint8_t lane) const { return lane < LANES ? lanes[lane].length() : 0; }
         uint8_t lane_position(uint8_t lane) const { return lane < LANES ? lanes[lane].position() : 0; }
@@ -64,9 +74,17 @@ class DrumSequencer : public Node{
         // Every pass, after the edge logic: outputs that outlast the edge.
         virtual void run(BusManager& bus, uint32_t now_us) = 0;
 
+        // The header's own length and direction, as stored: a lane whose own
+        // length byte is zero follows these, so set_param has to know them.
+        uint8_t header_length;
+        uint8_t header_direction;
+        uint8_t gate_param;
+
         StepEngine lanes[LANES];
         Xorshift32 rng;
         uint8_t chance[LANES];
+        // A lane's own length byte, 0 when it follows the header's.
+        uint8_t lane_len[LANES];
 
     private:
         EdgeIn advance_in;
@@ -86,6 +104,8 @@ class DrumSeqGate : public DrumSequencer{
 
         static const AlgorithmDescriptor descriptor;
         explicit DrumSeqGate(const NodeConfig& config);
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         bool hit(uint8_t lane, uint8_t step) const override {
             return lane < LANES && step < MAX_SEQUENCE_LEN && (bits[lane] & ((uint32_t)1u << step)) != 0;
@@ -100,6 +120,7 @@ class DrumSeqGate : public DrumSequencer{
     private:
         uint8_t out[LANES];
         uint32_t bits[LANES];
+        uint8_t width_param;
         TriggerPulse pulse[LANES];
 };
 
@@ -128,6 +149,8 @@ class DrumSeqMidi : public DrumSequencer{
 
         static const AlgorithmDescriptor descriptor;
         explicit DrumSeqMidi(const NodeConfig& config);
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         void silence(BusManager& bus) override;
 

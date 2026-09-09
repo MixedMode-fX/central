@@ -7,6 +7,7 @@
 #include "config.h"
 #include "bus/domain.h"
 #include "bus/bus_manager.h"
+#include "node/param.h"
 
 // Every algorithm and every hardware port is a Node. A node reads and writes
 // bus indices; it never names a pin or a transport (only the hardware port
@@ -27,6 +28,27 @@ class Node {
         // what is written here reaches the transports. A node that owns no
         // notes has nothing to do.
         virtual void silence(BusManager&) {}
+
+        // Set one parameter after construction (#20). `index` is < the
+        // descriptor's n_params; `value` has already been range-checked
+        // against the ParamDescriptor by MixedModeMaster::set_node_param,
+        // which is the one entry point every control-plane caller uses.
+        // Returns false if the node itself refused the write - the caller
+        // reports, it never guesses.
+        //
+        // A subclass overrides this to re-derive whatever it cached in its
+        // constructor: EuclidianSequencer recomputes its pattern, ClockDiv
+        // its period. Re-derivation is explicit, per algorithm, and a set
+        // that does not change the value returns early - a knob sweep is
+        // ~100 messages a second per controller (#21) and nothing should pay
+        // for Bjorklund on every one of them.
+        //
+        // Never called from interrupt context: the transport enqueues, the
+        // pass applies, before process().
+        virtual bool set_param(uint16_t index, uint8_t value){ (void)index; (void)value; return false; }
+        // What the node is *running*, not what the patch said at load time,
+        // so #11's dump is honest for free.
+        virtual uint8_t get_param(uint16_t index) const { (void)index; return 0; }
 };
 
 // One pool node's configuration. This is also the preset format.
@@ -55,6 +77,8 @@ struct AlgorithmDescriptor {
     uint16_t      state_size;   // sizeof the node class
     bool          wants_tick;   // subscribes to the master clock
     Node*       (*construct)(void* storage, const NodeConfig&);
+    const ParamGroup* param_groups;   // n_param_groups entries; covers n_params
+    uint8_t       n_param_groups;
 };
 
 // Placement-new factory used by every descriptor. Slot overflow is a compile

@@ -29,8 +29,12 @@ class Quantise : public Node{
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
 
-        // As with Transpose, the seam #11's live edits will use - and what
-        // proves a root or scale change cannot strand a sounding note.
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
+
+        // The typed spellings of set_param, kept because they read better in
+        // a test - and what proves a root or scale change cannot strand a
+        // sounding note.
         void set_scale(uint8_t id){ scale = id; }
         void set_root(uint8_t pitch_class){ root = (uint8_t)(pitch_class % 12u); }
         uint8_t root_note() const { return root; }

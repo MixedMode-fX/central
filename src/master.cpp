@@ -110,6 +110,26 @@ void MixedModeMaster::pass(uint32_t now_us){
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, now_us);
 }
 
+ParamError MixedModeMaster::set_node_param(uint8_t node_index, uint16_t param_index, uint8_t value){
+    Node* n = pool.node(node_index);
+    const AlgorithmDescriptor* d = pool.descriptor(node_index);
+    if (n == nullptr || d == nullptr) return PARAM_NO_SUCH_NODE;
+
+    const ParamDescriptor* p = registry::param(*d, param_index);
+    if (p == nullptr) return PARAM_NO_SUCH_PARAM;
+    if (!registry::param_in_range(*p, value)) return PARAM_VALUE_OUT_OF_RANGE;
+    return n->set_param(param_index, value) ? PARAM_SET_OK : PARAM_REFUSED;
+}
+
+bool MixedModeMaster::get_node_param(uint8_t node_index, uint16_t param_index, uint8_t& value_out) const {
+    const Node* n = pool.node(node_index);
+    const AlgorithmDescriptor* d = pool.descriptor(node_index);
+    if (n == nullptr || d == nullptr) return false;
+    if (registry::param(*d, param_index) == nullptr) return false;
+    value_out = n->get_param(param_index);
+    return true;
+}
+
 uint8_t MixedModeMaster::deliver_midi(uint8_t source, const MidiEvent& event, uint32_t now_us){
     // System messages are not channel-voice traffic and have no business on
     // a note bus: a MidiOutPort would re-send them with a channel attached.

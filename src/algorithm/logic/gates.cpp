@@ -6,7 +6,8 @@ static const Domain GATE_OUTLET[1] = {Domain::Gate};
 
 #define GATE_DESCRIPTOR(Class, Id, Name, NIn) \
     const AlgorithmDescriptor Class::descriptor = { \
-        Id, Name, NIn, 1, 1, 0, GATE_INLETS, GATE_OUTLET, sizeof(Class), false, construct_node<Class> };
+        Id, Name, NIn, 1, 1, 0, GATE_INLETS, GATE_OUTLET, sizeof(Class), false, construct_node<Class>, \
+        nullptr, 0 };
 
 GATE_DESCRIPTOR(LogicNot,  ALGO_LOGIC_NOT,  "NOT",  1)
 GATE_DESCRIPTOR(LogicAND,  ALGO_LOGIC_AND,  "AND",  MAX_IN)

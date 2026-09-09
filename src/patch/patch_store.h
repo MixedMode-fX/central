@@ -67,8 +67,15 @@ class PatchStore {
         StoreError save(uint8_t slot, const Patch& patch, const GlobalSettings& globals);
         // Reads and decodes. On any error `patch` and `globals` are left
         // alone: the caller falls back to the default patch (#7) rather than
-        // running something partially valid.
+        // running something partially valid. Decoding goes through a scratch
+        // Patch the store owns, never one on the stack: sizeof(Patch) is
+        // over 11 KB, and callers should pass the buffer they mean to run.
         StoreError load(uint8_t slot, Patch& patch, GlobalSettings& globals) const;
+        // Whether the slot holds an image whose magic, version, length and
+        // CRC check out, and how many bytes it occupies - without decoding
+        // it. What the slot list and the console ask, several slots at a
+        // time.
+        StoreError probe(uint8_t slot, uint16_t& used_out) const;
         // True when the slot holds a decodable image.
         bool occupied(uint8_t slot) const;
         // Bytes the slot's image occupies, 0 when it is empty or corrupt.

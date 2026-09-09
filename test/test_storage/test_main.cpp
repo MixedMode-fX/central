@@ -718,6 +718,33 @@ static void test_console_clock_edits_go_through_the_globals() {
     TEST_ASSERT_EQUAL(150, rig.patches.globals().bpm);
 }
 
+
+// probe() judges a slot the way load() does - empty, corrupt or whole, and
+// how big - without decoding it, so the slot list costs no Patch at all.
+static void test_probe_agrees_with_load_without_decoding() {
+    FakeEeprom eeprom;
+    PatchStore store(eeprom);
+    GlobalSettings g = default_globals();
+    uint16_t bytes = 0;
+    TEST_ASSERT_EQUAL(STORE_EMPTY, store.probe(1, bytes));
+    TEST_ASSERT_EQUAL(0, bytes);
+    TEST_ASSERT_EQUAL(STORE_NO_SUCH_SLOT, store.probe(PATCH_SLOTS, bytes));
+
+    TEST_ASSERT_EQUAL(STORE_OK, store.save(1, three_node_patch(), g));
+    TEST_ASSERT_EQUAL(STORE_OK, store.probe(1, bytes));
+    TEST_ASSERT_TRUE(bytes > 8);
+    TEST_ASSERT_EQUAL(bytes, store.used(1));
+
+    // One payload byte flipped: the CRC catches it and probe says corrupt.
+    const size_t base = (size_t)1 * PATCH_SLOT_BYTES;
+    eeprom.write(base + 20, (uint8_t)(eeprom.read(base + 20) ^ 0x55));
+    TEST_ASSERT_EQUAL(STORE_CORRUPT, store.probe(1, bytes));
+    TEST_ASSERT_EQUAL(0, bytes);
+    TEST_ASSERT_FALSE(store.occupied(1));
+    Patch p;
+    TEST_ASSERT_EQUAL(STORE_CORRUPT, store.load(1, p, g));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_patch_round_trips_through_the_codec);
@@ -753,5 +780,6 @@ int main() {
     RUN_TEST(test_an_overlong_console_line_is_refused_not_overrun);
     RUN_TEST(test_leds_store_and_console_never_allocate);
     RUN_TEST(test_console_clock_edits_go_through_the_globals);
+    RUN_TEST(test_probe_agrees_with_load_without_decoding);
     return UNITY_END();
 }

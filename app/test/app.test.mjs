@@ -9,6 +9,7 @@
 //     says so rather than losing a patch quietly;
 //   * an incoming CC takes main.cpp's path through the control plane, which is
 //     what makes learn work from a controller plugged into the browser;
+//   * a slider does not take a value from a finger that was scrolling past it;
 //   * the built page still contains every module, wired up.
 //
 //   node app/test/app.test.mjs [path/to/mmmc.wasm]
@@ -28,6 +29,7 @@ import { validate } from '../src/validate.js';
 import { SCALES, scaleMaskOf } from '../src/names.js';
 import { EXAMPLES } from '../src/examples.js';
 import { EmbeddedModule } from '../src/module.js';
+import { slider } from '../src/views.js';
 import { bundle } from '../tools/bundle.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -288,6 +290,78 @@ await test('the scale names name the firmware\'s scales', async () => {
   }
 });
 
+// --- the slider guard -------------------------------------------------------
+
+// The event sequences below are the ones a phone actually produces - they were
+// read off Chromium with touch emulation, on this page, at 390px - which is
+// the only way this is testable without a browser in CI. What matters is the
+// first one: a finger that lands on a slider and then scrolls the page leaves
+// with the parameter unchanged. Everything else is the check that the cure did
+// not kill the patient.
+await test('a slider ignores a scrolling finger and obeys a deliberate one', async () => {
+  const made = () => {
+    const seen = [];
+    const range = withDom(() => slider(
+      { class: 'slider', min: '0', max: '127', value: '1', 'aria-label': 'test' },
+      { onInput: (v) => seen.push(`input ${v}`), onCommit: (v) => seen.push(`commit ${v}`) }));
+    return { range, seen };
+  };
+
+  // 1. A swipe down the page that begins on the slider. The input jumps to the
+  //    finger on touchdown, the browser then takes the gesture for scrolling
+  //    and cancels the pointer: nothing here is an edit.
+  {
+    const { range, seen } = made();
+    range.fire('pointerdown', { pointerType: 'touch', clientX: 100, clientY: 400 });
+    range.value = '9'; range.fire('input');
+    range.fire('pointermove', { clientX: 101, clientY: 386 });
+    range.fire('pointercancel');
+    range.fire('change');
+    assert.equal(range.value, '1', 'a scroll moved the slider');
+    assert.deepEqual(seen, [], 'a scroll wrote the parameter');
+  }
+
+  // 2. A drag along the slider, which is what a slider is for.
+  {
+    const { range, seen } = made();
+    range.fire('pointerdown', { pointerType: 'touch', clientX: 100, clientY: 400 });
+    range.value = '9'; range.fire('input');                       // the landing jump, refused
+    range.fire('pointermove', { clientX: 122, clientY: 402 });     // claimed: along it
+    range.value = '40'; range.fire('input');
+    range.fire('pointerup');
+    range.fire('change');
+    assert.equal(range.value, '40');
+    assert.deepEqual(seen, ['input 40', 'commit 40']);
+  }
+
+  // 3. A press held still on the slider, then nudged: also deliberate.
+  {
+    const { range, seen } = made();
+    range.fire('pointerdown', { pointerType: 'touch', clientX: 100, clientY: 400 });
+    await new Promise((done) => setTimeout(done, 300));
+    range.fire('pointermove', { clientX: 104, clientY: 400 });
+    range.value = '12'; range.fire('input');
+    range.fire('pointerup');
+    range.fire('change');
+    assert.deepEqual(seen, ['input 12', 'commit 12']);
+  }
+
+  // 4. A mouse, and the keyboard: neither is trying to scroll anything.
+  {
+    const { range, seen } = made();
+    range.fire('pointerdown', { pointerType: 'mouse', clientX: 100, clientY: 400 });
+    range.value = '77'; range.fire('input');
+    range.fire('pointerup');
+    range.fire('change');
+    assert.deepEqual(seen, ['input 77', 'commit 77']);
+  }
+  {
+    const { range, seen } = made();
+    range.value = '5'; range.fire('input'); range.fire('change');
+    assert.deepEqual(seen, ['input 5', 'commit 5']);
+  }
+});
+
 // --- the single-file build --------------------------------------------------
 
 await test('the built page contains every module, with nothing left to import', async () => {
@@ -310,6 +384,35 @@ await test('the built page contains every module, with nothing left to import', 
 });
 
 // --- the harness ------------------------------------------------------------
+
+// Enough of a document for `el()` to build an element and for a test to fire
+// events at it. views.js touches nothing else, and a fake this small is
+// honest: the sequences fired at it come from a real browser.
+function fakeDocument() {
+  return {
+    createElement(tag) {
+      const listeners = new Map();
+      return {
+        tag, nodeType: 1, className: '', attrs: {}, value: '',
+        setAttribute(key, value) { this.attrs[key] = String(value); if (key === 'value') this.value = String(value); },
+        addEventListener(type, fn) {
+          if (!listeners.has(type)) listeners.set(type, []);
+          listeners.get(type).push(fn);
+        },
+        append() {},
+        fire(type, event = {}) { for (const fn of listeners.get(type) ?? []) fn({ type, ...event }); },
+      };
+    },
+  };
+}
+
+// views.js reads `document` when it builds something, not when it loads, so
+// the fake only has to stand up for the call itself.
+function withDom(fn) {
+  const had = globalThis.document;
+  globalThis.document = fakeDocument();
+  try { return fn(); } finally { globalThis.document = had; }
+}
 
 async function instantiate() {
   // `let`, and assigned after the instance exists: the module may send MIDI

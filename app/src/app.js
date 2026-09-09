@@ -93,6 +93,21 @@ class App {
     // A binding editor that folded shut the moment you set its CC number was
     // not usable.
     this.opened = new Set();
+    // Where each horizontal scroller - a step lane - had been scrolled to, by
+    // the key `views.js` gave it. Same reason, and it bites hardest on a
+    // phone: a 32-step lane is several screens wide, so without this a tap on
+    // step 20 rebuilds the page, scrolls the pattern back to step 1, and puts
+    // the step after the one just edited off the screen.
+    this.scrolled = new Map();
+  }
+
+  // Put every remembered scroller back where it was, before the frame is
+  // painted: see `scrolled`.
+  restoreScroll() {
+    for (const box of document.querySelectorAll('[data-scroll]')) {
+      const at = this.scrolled.get(box.dataset.scroll);
+      if (at) box.scrollLeft = at;
+    }
   }
 
   isOpen(key) { return this.opened.has(key); }
@@ -616,6 +631,7 @@ class App {
     queueMicrotask(() => {
       this.renderScheduled = false;
       document.getElementById('app').replaceChildren(this.view());
+      this.restoreScroll();
       this.autosave();
       this.refreshLive();
     });

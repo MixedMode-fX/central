@@ -23,6 +23,77 @@ const el = (tag, attrs = {}, ...children) => {
 };
 export { el };
 
+// A slider a scrolling finger cannot change.
+//
+// A native range input takes any touch that lands on it: the value jumps to
+// where the finger touched down, the page then starts scrolling under it, and
+// the gesture ends with a `change` that writes a value nobody chose. On a
+// phone, where the whole editor is one long scroll and every parameter has a
+// slider across it, that is not an edge case - it is what scrolling the patch
+// tab does. The event trace is plain: `pointerdown`, `input` (jumped),
+// `pointercancel` (the page took the gesture), `touchend`, `change`.
+//
+// So a touch has to *claim* the slider before it may move it: either by
+// dragging along it - the axis it reads - or by holding still on it for a
+// moment, which is a press rather than the start of a swipe. Until then every
+// value the input produces is put straight back, and a gesture the browser
+// cancels for scrolling puts it back too and commits nothing. A mouse or a
+// stylus claims it on contact: neither is trying to scroll the page.
+const CLAIM_PX = 8;    // a drag along the slider, far enough not to be a flick
+const CLAIM_MS = 250;  // or a press held still, which is not a swipe either
+
+export function slider(attrs, { onInput, onCommit } = {}) {
+  const range = el('input', { type: 'range', ...attrs });
+  let gesture = null;   // a pointer is down on it: where it started, and whether it has claimed it
+  let refuse = false;   // the gesture ended unclaimed, so the `change` it fires is not an edit
+  let start = null;     // the value the gesture began from
+  const revert = () => { if (start !== null && range.value !== start) range.value = start; };
+  const end = () => { if (gesture?.timer) clearTimeout(gesture.timer); gesture = null; };
+
+  range.addEventListener('pointerdown', (e) => {
+    start = range.value;
+    refuse = false;
+    gesture = { x: e.clientX, y: e.clientY, claimed: e.pointerType !== 'touch', timer: 0 };
+    if (!gesture.claimed) {
+      gesture.timer = setTimeout(() => { if (gesture) gesture.claimed = true; }, CLAIM_MS);
+    }
+  });
+  range.addEventListener('pointermove', (e) => {
+    if (!gesture || gesture.claimed) return;
+    const dx = Math.abs(e.clientX - gesture.x);
+    const dy = Math.abs(e.clientY - gesture.y);
+    if (dx >= CLAIM_PX && dx > dy) gesture.claimed = true;
+    else if (dy >= CLAIM_PX) revert();          // this is a scroll, not an edit
+  });
+  // The browser takes the gesture the moment the page scrolls under the
+  // finger. Whatever the slider did with it before that is undone.
+  range.addEventListener('pointercancel', () => { revert(); refuse = true; end(); });
+  range.addEventListener('pointerup', () => { refuse = !gesture?.claimed; end(); });
+  range.addEventListener('input', () => {
+    if (gesture && !gesture.claimed) { revert(); return; }
+    onInput?.(range.value);
+  });
+  range.addEventListener('change', () => {
+    if (refuse) { refuse = false; revert(); return; }
+    onCommit?.(range.value);
+  });
+  return range;
+}
+
+// The box a pattern lives in. On a phone its lanes wrap onto as many rows as
+// they need and there is nothing here to scroll; on a screen wide enough to
+// hold the whole pattern on one line they do that instead, and the leftover -
+// a wide grid in a narrow window - scrolls inside this box rather than
+// widening the page. It is remembered because the page is rebuilt wholesale on
+// every edit: without that, toggling step 20 would scroll the pattern back to
+// step 1 and put the next step off the screen.
+function scroller(app, key, ...children) {
+  return el('div', {
+    class: 'lane-scroll', 'data-scroll': key,
+    onscroll: (e) => app.scrolled?.set(key, e.target.scrollLeft),
+  }, ...children);
+}
+
 // What a port is called, from the device, falling back to the index for a
 // module whose firmware predates port names.
 export const inletName = (d, i) => d.inName?.[i] || `in ${i}`;
@@ -219,18 +290,21 @@ function paramControl(app, index, at, pd) {
     // A slider *and* a number field. A slider is unusable for a precise value
     // and hopeless on a phone, where a 1px drag is a whole step of a 255-wide
     // range; a number field alone loses the sweep. Neither replaces the
-    // other, so both write the same parameter.
+    // other, so both write the same parameter - the slider across a row of
+    // its own, which is what buys back the pixels a step is worth, and
+    // through `slider`, so a finger scrolling the tab does not write one.
     const shown = value === 0 ? pd.def : value;
-    const range = el('input', {
-      type: 'range', class: 'grow', min: String(pd.min), max: String(pd.max), step: '1',
-      value: String(shown), 'aria-label': pd.name,
-    });
     const number = el('input', {
       type: 'number', class: 'number', min: String(pd.min), max: String(pd.max), step: '1',
       value: String(shown), 'aria-label': `${pd.name}, as a number`, inputmode: 'numeric',
     });
-    range.addEventListener('input', (e) => { number.value = e.target.value; });
-    range.addEventListener('change', (e) => write(Number(e.target.value)));
+    const range = slider({
+      class: 'slider', min: String(pd.min), max: String(pd.max), step: '1',
+      value: String(shown), 'aria-label': pd.name,
+    }, {
+      onInput: (v) => { number.value = v; },
+      onCommit: (v) => write(Number(v)),
+    });
     number.addEventListener('change', (e) => {
       const v = Math.max(pd.min, Math.min(pd.max, Number(e.target.value) || 0));
       range.value = String(v);
@@ -295,7 +369,9 @@ function stepGrid(app, index) {
   }
   return el('div', { class: 'grid' },
     el('div', { class: 'grid-title' }, `steps — ${length} of ${P.MAX_SEQUENCE_LEN} play; the rest are kept`),
-    el('div', { class: 'lane-scroll' }, el('div', { class: 'lane' }, cells)));
+    scroller(app, `grid-${index}`,
+      el('div', { class: 'lanes' },
+        el('div', { class: 'lane-row' }, el('div', { class: 'lane' }, cells)))));
 }
 
 // Lanes down, steps across, with each lane's own length visible: lanes can
@@ -345,9 +421,17 @@ function drumGrid(app, index, isMidi) {
     const outlet = !isMidi && lane < d.nOut ? outletName(d, lane) : `lane ${lane + 1}`;
     lanes.push(el('div', { class: 'lane-row' },
       el('span', { class: 'lane-name' }, `${outlet} (${length})`),
-      el('div', { class: 'lane-scroll' }, el('div', { class: 'lane' }, cells))));
+      el('div', { class: 'lane' }, cells)));
   }
-  return el('div', { class: 'grid' }, el('div', { class: 'grid-title' }, 'pattern'), lanes);
+  // Every lane in one box, not one each: on a wide screen eight lanes that
+  // scroll separately are eight patterns you cannot read against each other,
+  // and the polyrhythm is the whole point of the node. Where they fit on one
+  // line the names stay put at the left while the steps move under them
+  // (`.lane-name` is sticky); where they do not - a phone - each lane wraps
+  // instead and its name sits above it, so no width is spent on the label.
+  return el('div', { class: 'grid' },
+    el('div', { class: 'grid-title' }, 'pattern'),
+    scroller(app, `grid-${index}`, el('div', { class: 'lanes' }, lanes)));
 }
 
 // A lane over **scale degrees**, because that is what the sequencer stores.
@@ -400,12 +484,12 @@ function noteLane(app, index, isPoly) {
     }
     rows.push(el('div', { class: 'lane-row' },
       el('span', { class: 'lane-name' }, isPoly ? `voice ${voice + 1}` : 'notes'),
-      el('div', { class: 'lane-scroll' }, el('div', { class: 'lane notes' }, cells))));
+      el('div', { class: 'lane notes' }, cells)));
   }
   return el('div', { class: 'grid' },
     el('div', { class: 'grid-title' },
       `degrees against root ${noteName(root)} — the stored pattern does not change when the root does`),
-    rows);
+    scroller(app, `grid-${index}`, el('div', { class: 'lanes' }, rows)));
 }
 
 // Mirrors midi/scale.h so the displayed pitch is the one the module will play.

@@ -9,11 +9,22 @@
 
 
 // DIN MIDI Settings
-struct MidiSettings : public midi::DefaultSerialSettings
+//
+// MIDI_CREATE_CUSTOM_INSTANCE hands this one struct to both MidiInterface,
+// which reads DefaultSettings (SysExMaxSize, running status, ...), and
+// SerialMIDI, which reads DefaultSerialSettings (BaudRate). Inheriting from
+// DefaultSerialSettings alone leaves SysExMaxSize undefined and the build
+// fails, so inherit DefaultSettings and restate the baud rate here.
+//
+// MIDI Library 5.0.2 has no SerialFormat hook, so the TX inversion the DIN
+// circuit needs is applied by reopening the UART in mm_midi_setup().
+struct MidiSettings : public midi::DefaultSettings
 {
     static const bool HandleNullVelocityNoteOnAsNoteOff = true;
-    static const uint16_t SerialFormat = SERIAL_8N1_TXINV; // TX needs inverting due to the circuit
+    static const long BaudRate = 31250;
 };
+
+#define MIDI_SERIAL_FORMAT SERIAL_8N1_TXINV // TX needs inverting due to the circuit
 
 
 

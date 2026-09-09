@@ -3,6 +3,7 @@
 #include "hardware.h"
 #include "gpio.h"
 #include "mm_midi.h"
+#include "version.h"
 
 #include "algorithm/switch/sustain.h"
 #include "algorithm/logic/gates.h"
@@ -12,6 +13,7 @@ uint8_t GPIO[GPIO_N] = {GPIO_PINS};
 
 void setup(){
     Serial.begin(115200);
+    Serial.println("MMMC " MMMC_BUILD);
     
     // GPIO Initialisation
     gpioSetup(GPIO);

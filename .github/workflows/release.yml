@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The tag and the VERSION file are two claims about the same number, and
+      # a release where they disagree is a release nobody can trace. Checking
+      # first means a mismatch costs a re-tag, not a withdrawn release.
+      - name: Check the tag matches VERSION
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          file_version="$(tr -d '[:space:]' < VERSION)"
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION (${file_version}). Update VERSION and re-tag."
+            exit 1
+          fi
+          echo "Releasing ${file_version}"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-teensy-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-teensy-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Run tests
+        run: pio test -e native
+
+      - name: Build firmware
+        run: pio run -e teensy41
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp .pio/build/teensy41/*.hex "dist/mmmc-${GITHUB_REF_NAME}-teensy41.hex"
+          cp .pio/build/teensy41/*.elf "dist/mmmc-${GITHUB_REF_NAME}-teensy41.elf"
+          cd dist
+          sha256sum mmmc-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "MMMC ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag

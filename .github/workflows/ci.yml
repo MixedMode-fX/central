@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Native unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-native-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-native-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Run tests
+        run: pio test -e native
+
+  firmware:
+    name: Teensy 4.1 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # scripts/version.py runs `git describe`, which needs tags and
+          # history that a shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-teensy-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-teensy-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware
+        run: pio run -e teensy41
+
+      - name: Report size
+        run: pio run -e teensy41 -t size
+
+      # Every build is downloadable, so a branch can be flashed and tried on
+      # hardware without cutting a release for it. On a pull_request event
+      # github.sha is the ephemeral merge commit, which names no commit on the
+      # branch, so prefer the head SHA — the point of the artifact is to be
+      # traceable to something you can check out.
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            .pio/build/teensy41/*.hex
+            .pio/build/teensy41/*.elf
+          if-no-files-found: error
+          retention-days: 14

@@ -19,14 +19,39 @@
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/drum_sequencer.h"
 #include "midi/scale.h"
+#include "patch/patch_manager.h"
+#include "patch/patch_store.h"
+#include "patch/default_patch.h"
+#include "protocol/sysex_handler.h"
+#include "control/cc_mapper.h"
+#include "control/nrpn.h"
+#include "led/status_leds.h"
 #include "web_hal.h"
 
 #define EMU_EXPORT extern "C" __attribute__((visibility("default")))
 
 static WebGpio gpio;
 static WebMidiOut midi;
+static WebEeprom eeprom;
+static WebLeds led_driver;
 static MixedModeMaster master(gpio, midi);
+
+// The control plane, exactly as main.cpp wires it (#7, #11, #21, #22). The
+// page can therefore drive the module the way a host does - identity request,
+// dump, incremental edit, CC, NRPN - against the firmware's own protocol
+// implementation rather than a JavaScript imitation of it, which is what lets
+// the editor's tests check themselves against the real validator (#12).
+static StatusLeds leds(led_driver);
+static PatchStore store(eeprom);
+static PatchManager patches(master, store, leds);
+static CcMapper cc_map(patches, master);
+static NrpnDecoder nrpn(patches, cc_map);
+static SysexHandler protocol(patches, master, store, leds, midi, cc_map);
+
+// The patch under construction. Separate from what is running: the page fills
+// this through the emu_patch_* setters and calls emu_load() to make it live.
 static Patch patch = empty_patch();
+static GlobalSettings globals = default_globals();
 
 // Build identity ----------------------------------------------------------
 
@@ -111,9 +136,11 @@ EMU_EXPORT void emu_patch_n_nodes(uint32_t n){ patch.n_nodes = (uint8_t)(n > N_N
 // Loads the patch under construction. Returns LoadError; on success the
 // hardware nodes have run setup() and the patch is live.
 EMU_EXPORT uint32_t emu_load(){
-    const LoadError e = master.load(patch);
-    if (e == LOAD_OK) master.setup();
-    return e;
+    // Through PatchManager, so the store, the LEDs and everything the
+    // protocol reports stay in step with what is running.
+    if (patches.apply(patch, globals, 0) != APPLY_OK) return master.last_error();
+    cc_map.reset();
+    return LOAD_OK;
 }
 EMU_EXPORT void emu_unload(){ master.unload(); }
 EMU_EXPORT uint32_t emu_last_error(){ return master.last_error(); }
@@ -290,4 +317,114 @@ EMU_EXPORT uint32_t emu_seq_lane_channel(uint32_t i, uint32_t lane){
 EMU_EXPORT uint32_t emu_node_algo(uint32_t i){
     const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
     return d ? d->id : 0;
+}
+
+
+// The control plane (#7, #11, #21, #22) -----------------------------------
+//
+// The page gets the firmware's own protocol handler rather than a JavaScript
+// reimplementation, so an editor tested against the emulator is tested
+// against the validator that will reject or accept its patches on hardware.
+
+// Boot as the module does: slot 0 if it checks out, the flash default if not.
+EMU_EXPORT uint32_t emu_boot(uint32_t now_us){
+    patches.boot(now_us);
+    cc_map.reset();
+    patch = patches.active();
+    globals = patches.globals();
+    return patches.running_defaults() ? 1 : 0;
+}
+
+// Feeds one complete SysEx message, F0 to F7 inclusive, from `source`.
+EMU_EXPORT void emu_sysex_in(uint32_t source, const uint8_t* data, uint32_t length){
+    protocol.deliver_sysex((uint8_t)source, data, (uint16_t)length);
+}
+// Replies, concatenated in the order they were sent. The page reads them out
+// and clears the buffer.
+EMU_EXPORT const uint8_t* emu_sysex_out_ptr(){ return midi.sysex_bytes; }
+EMU_EXPORT uint32_t emu_sysex_out_len(){ return midi.sysex_used; }
+EMU_EXPORT uint32_t emu_sysex_out_dropped(){ return midi.sysex_dropped; }
+EMU_EXPORT void emu_sysex_out_clear(){ midi.drain_sysex(); }
+
+// One incoming CC through the control path, as main.cpp's loop offers it:
+// NRPN first where it is enabled, then the mapping table. Returns 1 when the
+// event was consumed and must not reach a note bus.
+EMU_EXPORT uint32_t emu_control_cc(uint32_t source, uint32_t channel, uint32_t cc,
+                                  uint32_t value, uint32_t now_us){
+    if (nrpn.observe((uint8_t)source, (uint8_t)channel, (uint8_t)cc, (uint8_t)value, now_us)) return 1;
+    if (cc_map.observe((uint8_t)source, (uint8_t)channel, (uint8_t)cc, (uint8_t)value, now_us)) return 1;
+    return 0;
+}
+// A Program Change offered to preset recall; 1 when it was consumed.
+EMU_EXPORT uint32_t emu_control_program_change(uint32_t source, uint32_t channel,
+                                              uint32_t program, uint32_t now_us){
+    return protocol.program_change((uint8_t)source, (uint8_t)channel, (uint8_t)program, now_us) ? 1 : 0;
+}
+// Once per loop, before the pass: applies whatever the controllers moved, and
+// services the protocol's timeouts and any pending quantised swap.
+EMU_EXPORT void emu_control_service(uint32_t now_us){
+    cc_map.apply(now_us);
+    protocol.service(now_us);
+    nrpn.service(now_us);
+    patches.service(now_us);
+    leds.service(now_us);
+}
+
+EMU_EXPORT uint32_t emu_led(uint32_t which){ return which < LED_COUNT ? led_driver.levels[which] : 0; }
+EMU_EXPORT uint32_t emu_slot_used(uint32_t slot){ return store.used((uint8_t)slot); }
+EMU_EXPORT uint32_t emu_slot_occupied(uint32_t slot){ return store.occupied((uint8_t)slot) ? 1 : 0; }
+EMU_EXPORT uint32_t emu_running_defaults(){ return patches.running_defaults() ? 1 : 0; }
+EMU_EXPORT uint32_t emu_const_patch_slots(){ return PATCH_SLOTS; }
+EMU_EXPORT uint32_t emu_const_patch_slot_bytes(){ return PATCH_SLOT_BYTES; }
+EMU_EXPORT uint32_t emu_const_n_cc_map(){ return N_CC_MAP; }
+EMU_EXPORT uint32_t emu_const_control_port(){ return MIDI_CONTROL_PORT; }
+EMU_EXPORT uint32_t emu_const_sysex_manufacturer(){ return SYSEX_MANUFACTURER; }
+EMU_EXPORT uint32_t emu_const_protocol_version(){ return SYSEX_PROTOCOL_VERSION; }
+EMU_EXPORT uint32_t emu_const_chunk_payload(){ return SYSEX_CHUNK_PAYLOAD; }
+EMU_EXPORT uint32_t emu_const_patch_format_version(){ return PATCH_FORMAT_VERSION; }
+
+// Parameter descriptors (#20), so the page can draw a control for a
+// parameter without hardcoding a table that drifts.
+EMU_EXPORT uint32_t emu_algo_n_param_groups(uint32_t i){
+    const AlgorithmDescriptor* d = registry::at((uint8_t)i);
+    return d ? d->n_param_groups : 0;
+}
+EMU_EXPORT uint32_t emu_param_group_first(uint32_t i, uint32_t g){
+    const AlgorithmDescriptor* d = registry::at((uint8_t)i);
+    return (d && g < d->n_param_groups) ? d->param_groups[g].first : 0;
+}
+EMU_EXPORT uint32_t emu_param_group_repeat(uint32_t i, uint32_t g){
+    const AlgorithmDescriptor* d = registry::at((uint8_t)i);
+    return (d && g < d->n_param_groups) ? d->param_groups[g].repeat : 0;
+}
+EMU_EXPORT uint32_t emu_param_group_fields(uint32_t i, uint32_t g){
+    const AlgorithmDescriptor* d = registry::at((uint8_t)i);
+    return (d && g < d->n_param_groups) ? d->param_groups[g].n_fields : 0;
+}
+static const ParamDescriptor* group_field(uint32_t i, uint32_t g, uint32_t f){
+    const AlgorithmDescriptor* d = registry::at((uint8_t)i);
+    if (d == nullptr || g >= d->n_param_groups) return nullptr;
+    const ParamGroup& grp = d->param_groups[g];
+    return f < grp.n_fields ? &grp.fields[f] : nullptr;
+}
+EMU_EXPORT const char* emu_param_name(uint32_t i, uint32_t g, uint32_t f){
+    const ParamDescriptor* p = group_field(i, g, f);
+    return p ? p->name : "";
+}
+EMU_EXPORT uint32_t emu_param_min(uint32_t i, uint32_t g, uint32_t f){
+    const ParamDescriptor* p = group_field(i, g, f); return p ? p->min : 0;
+}
+EMU_EXPORT uint32_t emu_param_max(uint32_t i, uint32_t g, uint32_t f){
+    const ParamDescriptor* p = group_field(i, g, f); return p ? p->max : 0;
+}
+EMU_EXPORT uint32_t emu_param_default(uint32_t i, uint32_t g, uint32_t f){
+    const ParamDescriptor* p = group_field(i, g, f); return p ? p->def : 0;
+}
+EMU_EXPORT uint32_t emu_param_kind(uint32_t i, uint32_t g, uint32_t f){
+    const ParamDescriptor* p = group_field(i, g, f); return p ? p->kind : 0;
+}
+EMU_EXPORT const char* emu_param_option(uint32_t i, uint32_t g, uint32_t f, uint32_t o){
+    const ParamDescriptor* p = group_field(i, g, f);
+    if (p == nullptr || p->kind != PARAM_ENUM || p->options == nullptr) return "";
+    return (o <= (uint32_t)(p->max - p->min)) ? p->options[o] : "";
 }

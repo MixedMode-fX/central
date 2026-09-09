@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMMC patch editor</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #12141a; --panel: #1b1e26; --line: #2c313d; --ink: #e6e9f0;
+    --dim: #8b93a7; --accent: #6ea8fe; --gate: #7bd88f; --note: #d8a67b; --cv: #b78bd8;
+    --bad: #ff8a8a; --warn: #e8c46a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .shell { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  h2 { font-size: 0.95rem; margin: 0 0 .6rem; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+  h3 { font-size: 1rem; margin: 0; }
+  h4 { margin: 0 0 .3rem; font-size: .9rem; }
+
+  .top { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+  .status { flex: 1 1 20rem; color: var(--dim); }
+  .status.online { color: var(--gate); }
+  button, select, input[type=file] { font: inherit; }
+  button {
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: .35rem .7rem; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.ghost { background: none; border-color: transparent; color: var(--dim); padding: .2rem .45rem; }
+  button.ghost:hover { color: var(--ink); border-color: var(--line); }
+  select { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+           border-radius: 6px; padding: .25rem .4rem; }
+  label.file { border: 1px solid var(--line); border-radius: 6px; padding: .35rem .7rem; cursor: pointer; }
+  label.file input { display: none; }
+
+  .caps { color: var(--dim); font-size: .85rem; margin-bottom: 1rem; }
+  .hint { color: var(--dim); font-size: .85rem; }
+  .error, .problems, .notes {
+    border-radius: 8px; padding: .6rem .8rem; margin-bottom: 1rem; border: 1px solid;
+  }
+  .error { border-color: var(--bad); color: var(--bad); cursor: pointer; }
+  .problems { border-color: var(--bad); }
+  .problems h4 { color: var(--bad); }
+  .notes { border-color: var(--warn); }
+  .notes h4 { color: var(--warn); }
+  .problems ul, .notes ul { margin: 0; padding-left: 1.1rem; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 1rem; margin-bottom: 1rem; }
+  .jacks { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .5rem; }
+  .jack { display: flex; gap: .5rem; align-items: center; justify-content: space-between; }
+  .jack span { color: var(--dim); }
+
+  .nodes { display: grid; gap: 1rem; }
+  .node { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; }
+  .node.bad { border-color: var(--bad); }
+  .node header { display: flex; gap: .6rem; align-items: center; margin-bottom: .8rem; }
+  .node-index {
+    background: var(--line); border-radius: 5px; padding: .05rem .45rem;
+    color: var(--dim); font-variant-numeric: tabular-nums;
+  }
+  .tag { font-size: .75rem; color: var(--accent); border: 1px solid var(--accent);
+         border-radius: 4px; padding: 0 .35rem; }
+  .node header button { margin-left: auto; }
+
+  .ports { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem 2rem; margin-bottom: .8rem; }
+  .port { display: flex; gap: .5rem; align-items: center; justify-content: space-between; margin-bottom: .3rem; }
+  .port-name { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .bus-gate { border-left: 3px solid var(--gate); }
+  .bus-note { border-left: 3px solid var(--note); }
+  .bus-CV   { border-left: 3px solid var(--cv); }
+
+  .params { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .4rem 1rem; }
+  .param { display: grid; grid-template-columns: 7rem 1fr 2.5rem auto; gap: .5rem; align-items: center; }
+  .param-name { color: var(--dim); }
+  .param-value { font-variant-numeric: tabular-nums; text-align: right; }
+  .param input[type=range] { width: 100%; }
+
+  .grid { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .8rem; }
+  .grid-title { color: var(--dim); font-size: .85rem; margin-bottom: .4rem; }
+  .lane-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .25rem; }
+  .lane-name { width: 7rem; color: var(--dim); font-size: .8rem; flex: none; }
+  .lane { display: flex; gap: 2px; overflow-x: auto; }
+  .cell {
+    width: 20px; height: 24px; padding: 0; border-radius: 3px;
+    background: #232833; border: 1px solid var(--line); flex: none;
+  }
+  .cell.on { background: var(--gate); border-color: var(--gate); }
+  .cell.beyond { opacity: .3; }
+  .note-cell {
+    display: grid; gap: 1px; width: 46px; flex: none; text-align: center;
+    border: 1px solid var(--line); border-radius: 3px; padding: 2px; background: #232833;
+  }
+  .note-cell.on { border-color: var(--note); }
+  .note-cell.beyond { opacity: .35; }
+  .note-cell.rest { border-style: dashed; }
+  .note-cell.tie { border-color: var(--accent); }
+  .note-cell input {
+    width: 100%; background: none; border: none; color: var(--ink);
+    font: inherit; text-align: center; padding: 0;
+  }
+  .note-cell .pitch { font-size: .7rem; color: var(--dim); }
+
+  .add { display: flex; gap: .5rem; margin: 1rem 0; }
+  .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .5rem; }
+  .slot { display: flex; gap: .4rem; align-items: center; }
+  .slot span { width: 4rem; color: var(--dim); }
+
+  noscript, .fallback { display: block; padding: 1rem; border: 1px solid var(--warn); border-radius: 8px; }
+</style>
+
+<div id="app"></div>
+
+<noscript>
+  This editor is a JavaScript application. With scripting off you can still configure a
+  module through its serial console, or send it a <code>.syx</code> patch file with any
+  standard SysEx librarian.
+</noscript>
+
+<script type="module" src="./src/app.js"></script>

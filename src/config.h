@@ -39,7 +39,12 @@
 // algorithm/sequencer/note_sequencer.h and drum_sequencer.h). Every other
 // algorithm uses the first few bytes and leaves the rest zero, which the
 // patch protocol (#11) can exploit by not sending trailing zeros.
-#define MAX_IN 4
+// MAX_IN went from 4 to 5 for the note sequencers' step-record inlets (#22):
+// advance, reset, root, record and record-enable is five, and a sequencer
+// that could not be played into would make step-record a host-only feature.
+// It costs one byte per NodeConfig - 32 bytes of RAM and one byte per node on
+// the wire - and gives the logic gates a fifth input for free.
+#define MAX_IN 5
 #define MAX_OUT 8
 #define N_PARAM 336
 
@@ -101,6 +106,15 @@
 // the total. An emission that would not fit is refused rather than left
 // unreleasable.
 #define MAX_SOUNDING_NOTES 32
+
+// Controller bindings a patch can carry (#21).
+//
+// Thirty-two is a controller's worth - every knob and fader on a typical
+// 16-knob box, twice over - and costs 32 x sizeof(CcMapping) = 384 bytes of
+// RAM inside Patch. Unused entries are not stored or transmitted at all
+// (patch_codec trims them), so a patch with no mappings pays nothing on the
+// wire or in EEPROM.
+#define N_CC_MAP 32
 
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per

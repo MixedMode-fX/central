@@ -29,6 +29,8 @@ class Probability : public Node{
         explicit Probability(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         uint8_t sounding_count() const { return sounding.count(); }
 
@@ -36,6 +38,7 @@ class Probability : public Node{
         uint8_t in;
         uint8_t out;
         uint8_t percent;
+        uint8_t seed_offset;
         Xorshift32 rng;
         SoundingNotes sounding;
 };

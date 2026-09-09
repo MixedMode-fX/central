@@ -25,9 +25,11 @@ class Transpose : public Node{
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
 
-        // Live parameter edits arrive with the patch protocol (#11); this is
-        // the seam they will use, and what makes "the offset moved while
-        // notes were held" a test rather than a promise.
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
+
+        // The typed spelling of set_param(0, ...), kept because it reads
+        // better in a test than a byte cast does.
         void set_semitones(int8_t value){ semitones = value; }
         int8_t offset() const { return semitones; }
         uint8_t sounding_count() const { return sounding.count(); }

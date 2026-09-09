@@ -22,6 +22,8 @@ class VelocityCurve : public Node{
         static const AlgorithmDescriptor descriptor;
         explicit VelocityCurve(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         uint8_t apply(uint8_t velocity) const;
 

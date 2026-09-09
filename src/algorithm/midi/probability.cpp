@@ -5,13 +5,45 @@
 static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
+static const ParamDescriptor PARAMS[2] = {
+    {"chance", 1, 100, 100, PARAM_PERCENT, nullptr},
+    {"seed",   0, 255, 0,   PARAM_NUMBER,  nullptr},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, 2, PARAMS}};
+
 const AlgorithmDescriptor Probability::descriptor = {
-    ALGO_PROBABILITY, "Probability", 1, 1, 1, 2, IN, OUT, sizeof(Probability), false, construct_node<Probability> };
+    ALGO_PROBABILITY, "Probability", 1, 1, 1, 2, IN, OUT, sizeof(Probability), false, construct_node<Probability>,
+    GROUPS, 1 };
+
+// The odds move freely: the pass/drop decision is taken on the note-on and
+// remembered, so a note already passed is always released whatever the
+// chance has become. Writing the seed re-seeds, which is the point of a knob
+// on it - two nodes at the same odds are made to disagree from the host.
+bool Probability::set_param(uint16_t index, uint8_t value){
+    switch (index){
+        case 0: percent = value ? value : 100; return true;
+        case 1:
+            if (value == seed_offset) return true;
+            seed_offset = value;
+            rng.reseed(entropy::seed() + seed_offset);
+            return true;
+        default: return false;
+    }
+}
+
+uint8_t Probability::get_param(uint16_t index) const {
+    switch (index){
+        case 0: return percent;
+        case 1: return seed_offset;
+        default: return 0;
+    }
+}
 
 Probability::Probability(const NodeConfig& config) :
     in(config.in_bus[0]),
     out(config.out_bus[0]),
     percent(config.params[0] ? config.params[0] : 100),
+    seed_offset(config.params[1]),
     rng(entropy::seed() + config.params[1]),
     sounding()
 {}

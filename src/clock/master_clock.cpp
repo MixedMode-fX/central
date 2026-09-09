@@ -4,7 +4,8 @@
 MasterClock::MasterClock() :
     subticks(0), interval_us(0), edge_index(0), last_edge_us(0), rejected(0),
     interval_dirty(true), is_running(true), have_edge(false),
-    last_consumed(0), tempo(CLOCK_DEFAULT_BPM),
+    last_consumed(0), last_tap_us(0), tap_intervals(), tap_count(0),
+    tempo(CLOCK_DEFAULT_BPM),
     src(CLOCK_INTERNAL), cv_pulses(4)
 {
     recompute_internal_interval();
@@ -132,4 +133,38 @@ bool MasterClock::consume(uint32_t& count_out){
     last_consumed = now;
     count_out = now;
     return true;
+}
+
+// Tap tempo. The header comment has promised "tapped or set in BPM" since #4;
+// this is the entry point, reached from a CC bound to CC_TRANSPORT_TAP (#21)
+// or from the console.
+void MasterClock::tap(uint32_t now_us){
+    const uint32_t gap = (uint32_t)(now_us - last_tap_us);
+    last_tap_us = now_us;
+
+    // A long gap is a new tempo, not a slow one: averaging across a pause
+    // would make the first tap after a break drag everything down.
+    if (tap_count == 0 || gap > TAP_TIMEOUT_US){
+        tap_count = 1;                 // this tap starts the measurement
+        return;
+    }
+
+    // Keep the last few intervals and average them: two taps by hand are not
+    // an accurate beat, four are much closer.
+    for (uint8_t i = TAP_AVERAGE - 1u; i > 0; i--) tap_intervals[i] = tap_intervals[i - 1u];
+    tap_intervals[0] = gap;
+    if (tap_count < TAP_AVERAGE + 1u) tap_count++;
+
+    const uint8_t n = (uint8_t)(tap_count - 1u);
+    uint32_t total = 0;
+    for (uint8_t i = 0; i < n && i < TAP_AVERAGE; i++) total += tap_intervals[i];
+    const uint32_t mean = total / (n < TAP_AVERAGE ? n : TAP_AVERAGE);
+    if (mean == 0) return;
+
+    const uint32_t bpm = 60000000u / mean;
+    // Outside the limits the tap was a mistake - a double-hit, or the first
+    // of a new phrase - and pinning the tempo to a limit would be worse than
+    // ignoring it.
+    if (bpm < CLOCK_MIN_BPM || bpm > CLOCK_MAX_BPM) return;
+    set_bpm((uint16_t)bpm);
 }

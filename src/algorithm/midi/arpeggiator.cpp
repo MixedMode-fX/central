@@ -5,8 +5,45 @@
 static const Domain IN[3] = {Domain::Note, Domain::Gate, Domain::Gate};
 static const Domain OUT[1] = {Domain::Note};
 
+static const char* const MODE_NAMES[5] = {"up", "down", "up-down", "random", "as played"};
+static const ParamDescriptor PARAMS[4] = {
+    {"mode",     0, 4,                       0, PARAM_ENUM,   MODE_NAMES},
+    {"octaves",  1, Arpeggiator::MAX_OCTAVES, 1, PARAM_NUMBER, nullptr},
+    {"gate",     0, 255,                     0, PARAM_MILLIS, nullptr},
+    {"velocity", 0, 127,                     0, PARAM_NUMBER, nullptr},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, 4, PARAMS}};
+
 const AlgorithmDescriptor Arpeggiator::descriptor = {
-    ALGO_ARPEGGIATOR, "Arpeggiator", 3, 2, 1, 4, IN, OUT, sizeof(Arpeggiator), false, construct_node<Arpeggiator> };
+    ALGO_ARPEGGIATOR, "Arpeggiator", 3, 2, 1, 4, IN, OUT, sizeof(Arpeggiator), false, construct_node<Arpeggiator>,
+    GROUPS, 1 };
+
+// The cursor is a position in a figure whose length is held notes x octaves,
+// and step() takes it modulo that length, so narrowing the octave range under
+// a running arpeggio lands on a defined step at the next advance rather than
+// immediately. The sounding note is released from the ledger either way.
+bool Arpeggiator::set_param(uint16_t index, uint8_t value){
+    switch (index){
+        case 0: if (value > ARP_AS_PLAYED) return false; mode = value; return true;
+        case 1:
+            if (value > MAX_OCTAVES) return false;
+            octaves = value ? value : 1;
+            return true;
+        case 2: gate_ms = value; return true;
+        case 3: fixed_velocity = value & 0x7F; return true;
+        default: return false;
+    }
+}
+
+uint8_t Arpeggiator::get_param(uint16_t index) const {
+    switch (index){
+        case 0: return mode;
+        case 1: return octaves;
+        case 2: return (uint8_t)(gate_ms > 255 ? 255 : gate_ms);
+        case 3: return fixed_velocity;
+        default: return 0;
+    }
+}
 
 Arpeggiator::Arpeggiator(const NodeConfig& config) :
     held_in(config.in_bus[0]),

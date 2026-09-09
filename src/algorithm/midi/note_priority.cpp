@@ -5,8 +5,27 @@
 static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
+static const char* const MODE_NAMES[3] = {"lowest", "highest", "latest"};
+static const ParamDescriptor PARAMS[1] = {
+    {"mode", 0, 2, 0, PARAM_ENUM, MODE_NAMES},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, 1, PARAMS}};
+
 const AlgorithmDescriptor NotePriority::descriptor = {
-    ALGO_NOTE_PRIORITY, "NotePriority", 1, 1, 1, 1, IN, OUT, sizeof(NotePriority), false, construct_node<NotePriority> };
+    ALGO_NOTE_PRIORITY, "NotePriority", 1, 1, 1, 1, IN, OUT, sizeof(NotePriority), false, construct_node<NotePriority>,
+    GROUPS, 1 };
+
+// The new winner is taken on the next pass by follow(), which releases the
+// old voice from the ledger, so the mode can move under a held chord.
+bool NotePriority::set_param(uint16_t index, uint8_t value){
+    if (index != 0 || value > PRIORITY_LATEST) return false;
+    mode = value;
+    return true;
+}
+
+uint8_t NotePriority::get_param(uint16_t index) const {
+    return index == 0 ? mode : 0;
+}
 
 NotePriority::NotePriority(const NodeConfig& config) :
     in(config.in_bus[0]),

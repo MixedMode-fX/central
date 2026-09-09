@@ -524,8 +524,348 @@ classDiagram
 
 # Control & Feedback
 
-The module has one encoder and two switches.
-Each output has an RGB LED indicating the signal status and algorithm used.
-A small square OLED is present to help with settings
+**There is no human input on this module at all.** `src/hardware.h` declares
+eight jacks, two DIN MIDI ports, four USB MIDI cables, a USB host port, a CV
+expansion header, a KeyMech header, two consoles and two status LEDs. No
+encoder, no switches, no display, and no per-output RGB LEDs. Earlier drafts
+of this README promised all four; the hardware does not have them, and this
+project is not going to design them in.
 
-A tight integration with Novation Launchpads using the DAW mode would be great. This would allow for additional control and feedback.
+Two things follow, and they shape everything downstream.
+
+**Configuration is entirely host-side.** The serial console and the SysEx
+patch protocol are not conveniences sitting next to a panel menu — between
+them they are the only way to configure the module.
+
+**A bad patch must never be able to lock you out.** With no button to hold at
+power-on there is no hardware recovery path, so the console and the protocol
+run independently of whatever patch is loaded: neither is a graph node,
+neither is reachable from a bus, and a patch cannot disable either or reroute
+the port it talks through. A module that could be bricked by a malformed patch
+would be a module you have to reflash over USB to recover.
+
+## The two status LEDs
+
+`GREEN_LED` (pin 36) and `RED_LED` (pin 37) are the module's entire feedback
+surface. Both are PWM-capable on a Teensy 4.1, so brightness is a second
+dimension and the vocabulary uses it. It is worth learning, because it is the
+only way the module explains itself without a host attached:
+
+| What you see | What it means |
+|---|---|
+| Green, bright flash on the beat | The clock is running. The flash rate *is* the tempo. |
+| Green, slow dim pulse | Alive, but no clock is running. |
+| Red, solid | No valid patch: the module is running the built-in default. |
+| Red, brief flash | Something was dropped or refused — a MIDI message, a full note bus, a rejected transfer or parameter write. `errors` on the console has the counters. |
+| Both, alternating | Boot, and the answer to a device inquiry, so you can tell two modules apart. |
+
+Nothing in the LED path blocks: no delays, no busy waits, and no LED work
+inside a node's `process()` or `tick()`.
+
+## Boot behaviour
+
+There is no screen to explain a silence, so a module that appears to do
+nothing must not be the normal case:
+
+- Slot 0 of the EEPROM is loaded if it checks out.
+- If it is missing or fails to validate, the **built-in default patch** runs
+  instead — MIDI thru across every musical transport, a metronome on jack 1 at
+  the default tempo, and a sustain pedal input on jack 8. A freshly flashed
+  module is therefore observably alive out of the box.
+- A *corrupt* stored patch also lights the red LED solid; an *empty* store
+  does not, because a new module is not a fault.
+- Restoring defaults is a host-side command (`defaults` on the console, or
+  SysEx) — there is no button to hold at power-on.
+
+## Patch storage
+
+A patch is the node list plus the bus each inlet and outlet is assigned to,
+plus the global settings — clock source, tempo, PPQN. It is stored in the
+Teensy 4.1's flash-emulated EEPROM (`EEPROM_BYTES` = 4284) as
+`PATCH_SLOTS` = 4 independent images, each with its own magic, format version
+and CRC. Slot 0 is the current patch; the rest are presets for Program Change
+recall. A slot that fails its CRC cannot make the others unreadable.
+
+`sizeof(Patch)` is about 11 KB — `N_PARAM` is 336 because the poly and drum
+sequencers carry a 32-step grid — so the stored image trims every node's
+parameter block at its last non-zero byte. A patch of logic and dividers is a
+couple of hundred bytes. The same encoding goes on the wire, so a patch that
+round-trips through the store round-trips over SysEx byte for byte.
+
+Writes are deliberate: nothing writes flash on a parameter change. An edit
+marks the patch dirty and the autosave writes slot 0 once, two seconds later,
+collapsing a whole knob sweep into a single write.
+
+> **Deferred, not rejected:** the Teensy's microSD socket would hold hundreds
+> of presets, sits on dedicated SDIO pins and needs no pin from `hardware.h`,
+> so it can be added later without touching the hardware surface. Out of scope
+> for now because it is not declared hardware.
+
+## The serial console
+
+USB serial and `SERIAL_UART` (`Serial6`, 115200) both carry the same text
+console. It is how anyone sees inside a running module, and it is the interim
+configuration path until the SysEx protocol is finished.
+
+| Command | What it does |
+|---|---|
+| `info` | Firmware build, node count, store state |
+| `clock [bpm] [source]` | Show or set tempo and clock source |
+| `patch` | The running patch: jacks, MIDI ports, nodes and their connections |
+| `buses` | Live bus state, with the overflow counters |
+| `errors` | Every counter behind the red LED |
+| `algos` | Every algorithm this firmware has, with inlet and outlet counts |
+| `params <node>` | One node's parameters, with ranges, defaults and enum names |
+| `get` / `set <node> <param> [value]` | Read or write one parameter |
+| `slots` | What each preset slot holds |
+| `save` / `load` / `erase <slot>` | Preset management |
+| `defaults` | Back to the built-in patch |
+
+## The patch protocol (SysEx)
+
+Everything the console can do, a host can do over SysEx — and a few things it
+cannot. The wire format *is* the patch format: a bulk transfer carries exactly
+the bytes the EEPROM stores, so a patch that round-trips through the store
+round-trips over the wire byte for byte, and there is no second
+representation to drift.
+
+Framing is `F0 7D <device> <command> <version> … F7`. `0x7D` is the MIDI
+specification's non-commercial manufacturer ID: **it must never ship in a
+product**, and a real ID from the MIDI Association is a decision for whoever
+ships hardware. The version byte is in every message, not just a handshake, so
+an older editor talking to newer firmware is refused per message instead of
+getting half a transfer in first. Binary payloads are 7-in-8 packed, so every
+byte on the wire is `<= 0x7F`.
+
+**Discovery.** The module answers the standard Universal identity request
+(`F0 7E <dev> 06 01 F7`) and blinks both LEDs, so an editor finds it among the
+host's ports and a user with two modules can see which one answered. It then
+reports its capabilities (`N_NODE`, bus counts per domain, `MAX_IN`/`MAX_OUT`,
+`N_PARAM`, slot count and size) and enumerates every algorithm and every
+parameter descriptor straight off the compiled table — so an algorithm added
+to the firmware appears in an editor with no editor change, and a hardcoded
+list cannot silently drift.
+
+**Two tiers of write.** A bulk transfer is chunked, with a sequence number and
+a checksum per chunk, and accumulates into a staging buffer: the live graph is
+untouched until the last chunk has arrived and the whole image has passed the
+magic, version, CRC and validator checks. An incremental edit is one message
+changing one field — *node 4, inlet 0, now reads bus 6* — which under the bus
+model is one byte, with no re-sort, no graph rebuild and no cycle re-check.
+
+**What survives a change**, written down once because it is the part that
+bites:
+
+| Change | What is reconstructed |
+|---|---|
+| A parameter | Nothing. A running sequencer keeps its step position, a divider its phase. |
+| A connection | Only the node whose connection changed. It gets its handover — every note it owns is released — and starts fresh; every other node keeps its state. |
+| A port | Nothing. Port nodes are configured, not constructed. |
+| A whole patch | Everything. Sequencers restart, dividers re-phase onto the master count. |
+
+**Program Change recall** is **off by default**, and both the listening
+channel and the port are configurable. Otherwise a Program Change intended for
+a downstream synth silently switches the user's patch, which would be the most
+likely field complaint in the whole feature. A recall can be immediate,
+quantised to the next beat, or quantised to the next bar (four beats); with
+the clock stopped it is immediate, because a recall that never happens is
+worse than one that glitches. The module announces a recall to the host, so an
+editor follows along without polling.
+
+**A bad patch cannot lock the module out.** The handler is not a node, holds no
+bus index, and nothing a patch can express reaches it. A malformed transfer
+never touches the active patch, a partial one is abandoned on a timeout, and
+the test for all of it is to send garbage — an unknown command, a chunk from
+nowhere, a bad checksum, a lost chunk, a patch that fails validation — and
+then a good patch, and watch the good one land.
+
+## Controller mapping (MIDI CC)
+
+SysEx is the right answer for an editor and the wrong answer for a
+performance. A CC is what a musician already has under their fingers, and with
+no encoder and no display it is the only way to change anything while playing.
+
+A mapping table lives in the patch, applies at the MIDI input layer before the
+graph runs, and writes through the same validated entry point SysEx edits and
+the console use. It is deliberately **not** a node: a parameter is not a bus
+signal — it has no domain, no fan-in rule and no per-pass value — so routing it
+through the graph would mean a mapping only worked when the CC's port happened
+to be patched to a bus, and stopped existing the moment a swap removed the
+node.
+
+`N_CC_MAP` = 32 bindings, a controller's worth. Unused entries cost nothing in
+the stored image or on the wire.
+
+**What a mapping can reach.** A node's parameter is the common case, but the
+master clock is not a node, so the target space has a kind: `node` (index plus
+parameter), `clock` (tempo, source, CV PPQN), and `transport` (start, stop,
+continue, and tap tempo — `MasterClock`'s header has promised tap since the
+clock was built and this is the entry point). `port` is reserved.
+
+**Tempo does not fit in seven bits.** 20 to 300 BPM over 128 CC steps is 2.2
+BPM per step, which is unusable for anything but a coarse sweep. A mapping can
+be flagged 14-bit — CC *n* as the MSB, CC *n*+32 as the LSB, the standard
+convention — which resolves the full range finely enough to be worth turning.
+A lone MSB with no LSB is applied rather than stalling, which costs one message
+of latency on a controller that sends LSB first.
+
+**Takeover**, because a patch recall or a SysEx edit moves a value while the
+physical knob stays put, and with no display the user cannot see it coming:
+
+- **Jump** (the default) takes the value immediately. Loud, but it is the only
+  mode that always responds, and a silent knob is a worse first impression.
+- **Pickup** ignores the knob until it crosses the current value. Correct, and
+  confusing the first time a knob does nothing.
+- **Scale** freezes an anchor when the knob is first moved and maps the travel
+  either side of it onto the range either side of the value, so the knob still
+  reaches both ends and the move is reversible.
+
+**Relative encoders** send an increment, not a position, in one of three
+incompatible encodings (two's complement, signed bit, offset-64). All three are
+supported: an encoder read as absolute makes a parameter jump to the extremes
+with nothing to diagnose it by. A relative mapping sidesteps takeover
+entirely, which is why it is the mode worth recommending.
+
+**Pass-through** is off by default — the user bound this CC deliberately — and
+is one flag away. A consumed CC never reaches a note bus; a forwarded one does
+and reaches a `MidiOutPort` as well as moving the parameter.
+
+**Learn**, without a panel: the editor or the console says *the next CC you see
+binds to node 4 parameter 1*, and the module answers with what it bound. It
+times out, and it ignores the reserved control cable — a learn that bound to
+its own control port would be a trap.
+
+**Rate limiting is at the pass boundary, not per event.** A stuck controller or
+a MIDI loop can hammer a CC thousands of times a second; only the newest value
+per mapping survives to the next pass, so a full-rate sweep costs exactly one
+parameter write per mapping per pass. That is the same "collapse the subticks"
+discipline the master clock already uses.
+
+Console: `maps`, `map <slot> <cc> <node> <param> [min] [max]`,
+`learn <slot> <node> <param>`, `unmap <slot>`.
+
+## What CC cannot reach: NRPN and pattern data
+
+The rule that decides the tier is address space and payload width, not
+importance: **if it changes the graph's shape it is SysEx; if it changes a
+value inside a node it is CC or NRPN.**
+
+| Tier | Carries | Use |
+|---|---|---|
+| CC | one 7-bit scalar, or 14-bit as a pair | performance: turn a knob, move a parameter |
+| NRPN | 14-bit address + 14-bit value | every parameter of every node, addressed |
+| SysEx | arbitrary length | structure, pattern data, bulk transfer, enumeration |
+
+CC has 120 usable numbers and a 7-bit value; this module has
+`N_NODE` × `N_PARAM` = 10 752 parameters before the clock and the transport
+are counted, so CC cannot address the parameter space even if every value
+fitted.
+
+**The NRPN address space**, written down here and reported in the capability
+message so an editor reads it rather than hardcoding it:
+
+```
+0x0000 .. 0x29FF   a node's parameter: node = address / N_PARAM,
+                                       param = address % N_PARAM
+0x2A00 .. 0x2A0F   the master clock (tempo, source, CV PPQN)
+0x2A10 .. 0x2A1F   the transport (start, stop, continue, tap)
+0x2A20 .. 0x3FFF   reserved
+```
+
+It reaches the same target space CC mapping defines and ends at the same
+`set_param`, so NRPN and CC writing one parameter produce identical results
+and are rejected identically. Data Increment and Decrement (CC 96/97) are
+supported, reading the current value rather than tracking it.
+
+**NRPN is off by default, and enabled per port and channel.** CC 99, 98, 6 and
+38 look like ordinary CCs to everything upstream, so a module that always
+consumed them would silently eat a stream on its way to a downstream synth. A
+partial sequence writes nothing: the address is buffered, the write happens on
+the data MSB, and a sequence that stops halfway times out rather than pairing
+one gesture's address with the next one's value.
+
+**Pattern data.** `N_PARAM` is 336 because the poly and drum sequencers carry
+a 32-step grid, so a note sequence is already inside `NodeConfig::params` and
+travels with the patch — no separate arena is needed, and a full four-voice
+32-step grid fits a preset slot with room to spare. Two SysEx messages read
+and write a run of a node's parameter bytes, going through the same validated
+`set_param` as everything else.
+
+## Entering notes: step-record
+
+A note sequencer stores **scale degrees** and a keyboard sends **pitches**, so
+entry is a real conversion. Two inlets do it: a `record` note inlet and a
+`record enable` gate inlet. A note-on writes the step under the record cursor
+and advances it; reset returns both the playback and the record cursor to the
+first step. It works with any keyboard patched to any port and needs no host.
+
+**A played note outside the current scale snaps to the nearest tone in it** —
+the same rule `Quantise` follows — rather than being refused, because a
+step-record that silently dropped a note would be worse than one that put it a
+semitone away. Snaps are counted so a user can see it happening.
+
+**Rest and tie** are enterable, or step-record is only good for continuous
+runs: two note numbers are reserved for them (`rest key`, default MIDI note 0;
+`tie key`, default note 1), both below anything a keyboard plays and both
+configurable.
+
+**Real-time record** — capturing against the running clock, quantised to the
+step grid — is specified but deliberately not built. It needs the same period
+estimate the sub-step gate does, and that should prove itself on hardware
+first.
+
+## The patch editor
+
+`editor/` is a browser editor over Web MIDI. With no encoder, no switches and
+no display, it is not a nicer alternative to a panel menu — between it and the
+console, it is how the module gets configured, so it is a shipping deliverable
+rather than a companion app. It is served from GitHub Pages alongside the
+emulator, which is also what satisfies Web MIDI's secure-context requirement:
+a `file://` copy cannot reach a module.
+
+It is a client of the protocol and nothing more. Everything it knows about what
+the firmware *has* — the algorithms, their inlets and outlets and domains,
+every parameter's range, default, display kind and enum options, and the
+module's real capacities — is read from the device, so an algorithm added to
+the firmware appears in the editor with a working panel and no editor change.
+
+Three things keep it honest, and all three are checked in CI:
+
+- **The message layout is generated, not copied.** `editor/src/protocol.js` is
+  derived from the firmware headers; `make editor` fails if the checked-in copy
+  has drifted. A protocol change breaks both builds at once, which is the
+  reason the editor lives in this repository.
+- **Client-side validation uses the same rules** the firmware enforces, so an
+  error surfaces while editing rather than on send. An editor that lets you
+  build a patch the module will reject is worse than no editor.
+- **It is tested against the real firmware.** The module is compiled to
+  WebAssembly by the emulator build, and the editor's own transport and codec
+  drive it over the actual SysEx protocol — so "a patch the editor accepts is
+  never rejected by the firmware's validator" is a check, not a hope.
+
+Buses are the connections: every inlet and outlet is a selector offering only
+the buses of its own domain. Dragging one sends a single message rather than a
+full dump. The sequencers get purpose-built views — a step grid for the gate
+and drum sequencers, with each lane's own length visible, and a note lane over
+**scale degrees** for the note sequencers, showing the pitch each degree
+resolves to so changing the root visibly moves the pitches without touching the
+stored pattern.
+
+Browser reach is a real constraint: Chrome, Edge and Opera have Web MIDI,
+Firefox asks permission for it, Safari does not have it. A browser without it
+is not a degraded experience, it is a user who cannot set their module up — so
+the page says plainly what is wrong and **`.syx` export is a first-class path**,
+loadable by any standard SysEx librarian.
+
+## Still open
+
+**The KeyMech header is undocumented.** `SERIAL_KEYMECH` on `Serial8` with
+boot and reset lines on pins 30 and 31 is declared in `hardware.h` and nothing
+in this repository says what it connects to. If it is an input device it is
+the module's only candidate for panel control, and that changes the whole
+picture above. Still unanswered.
+
+**Launchpad DAW mode over the USB host port** needs no new pins, so it is
+within the hardware surface, and it remains the module's only realistic
+hands-on control surface. Still last in the queue — but it is the eventual
+answer to "no panel controls", not a luxury.

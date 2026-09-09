@@ -20,6 +20,11 @@ class NodePool {
         // Constructs `config` in the next free slot. Assumes the config has
         // been validated; returns nullptr only when the pool is full.
         Node* load(const NodeConfig& config);
+        // Destroys the node in `index` and constructs `config` in the same
+        // slot, leaving every other node untouched (#11's incremental edits).
+        // The caller is responsible for the handover - giving the old node
+        // its chance to release what it owns - before calling this.
+        Node* replace(uint8_t index, const NodeConfig& config);
         // Destroys every node.
         void unload_all();
 

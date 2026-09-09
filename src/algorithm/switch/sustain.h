@@ -18,6 +18,8 @@ class Sustain : public Node{
 
         explicit Sustain(const NodeConfig& config);
         void process(BusManager& bus, uint32_t now_us) override;
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         uint8_t pedal_down() const { return state == UNKNOWN ? 0 : state; }
 

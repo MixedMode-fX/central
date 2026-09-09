@@ -6,8 +6,36 @@
 static const Domain IN[2] = {Domain::Note, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
+static const ParamDescriptor PARAMS[2] = {
+    {"scale", 0, SCALE_COUNT - 1, 0, PARAM_ENUM,        PARAM_SCALE_NAMES},
+    {"root",  0, 11,              0, PARAM_PITCH_CLASS, nullptr},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, 2, PARAMS}};
+
+static_assert(SCALE_COUNT == 14, "PARAM_SCALE_NAMES lists one name per ScaleId");
+
 const AlgorithmDescriptor Quantise::descriptor = {
-    ALGO_QUANTISE, "Quantise", 2, 1, 1, 2, IN, OUT, sizeof(Quantise), false, construct_node<Quantise> };
+    ALGO_QUANTISE, "Quantise", 2, 1, 1, 2, IN, OUT, sizeof(Quantise), false, construct_node<Quantise>,
+    GROUPS, 1 };
+
+// Root and scale can both move under a sounding note: the release is taken
+// from the ledger, so it is the pitch that was actually sent and never a
+// re-quantised one.
+bool Quantise::set_param(uint16_t index, uint8_t value){
+    switch (index){
+        case 0: if (value >= SCALE_COUNT) return false; scale = value; return true;
+        case 1: set_root(value); return true;
+        default: return false;
+    }
+}
+
+uint8_t Quantise::get_param(uint16_t index) const {
+    switch (index){
+        case 0: return scale;
+        case 1: return root;
+        default: return 0;
+    }
+}
 
 Quantise::Quantise(const NodeConfig& config) :
     in(config.in_bus[0]),

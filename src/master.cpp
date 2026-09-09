@@ -5,7 +5,7 @@ MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
     gpio(gpio_if), midi(midi_if), clk(), bus(), pool(),
     gate_in(), gate_out(), midi_in(), midi_out(),
     tick_pending(false), tick_count(0),
-    error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0)
+    error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0)
 {}
 
 LoadError MixedModeMaster::validate(const Patch& patch){
@@ -33,7 +33,34 @@ LoadError MixedModeMaster::validate(const Patch& patch){
             return LOAD_NODE_INVALID;
         }
     }
+    for (uint8_t i = 0; i < N_CC_MAP; i++){
+        if (patch.cc_map[i].source_mask == 0) continue;
+        if (!mapping_valid(patch, patch.cc_map[i])){
+            mapping_error_index = i;
+            return LOAD_CC_MAPPING_INVALID;
+        }
+    }
     return LOAD_OK;
+}
+
+bool MixedModeMaster::mapping_valid(const Patch& patch, const CcMapping& m){
+    if (m.cc > 119) return false;                       // 120..127 are channel mode
+    if (m.channel > 16) return false;
+    if (m.min > m.max) return false;
+    // A mapping cannot target the control cable: the protocol's own port is
+    // not something a patch gets to reach (#11, #21).
+    if (m.source_mask & MIDI_CONTROL_PORT) return false;
+    switch (m.target_kind){
+        case CC_TARGET_NODE: {
+            if (m.target_index >= patch.n_nodes) return false;
+            const AlgorithmDescriptor* d = registry::find(patch.nodes[m.target_index].algorithm_id);
+            if (d == nullptr) return false;
+            return registry::param(*d, m.param) != nullptr;
+        }
+        case CC_TARGET_CLOCK:     return m.param < CC_CLOCK_TARGETS;
+        case CC_TARGET_TRANSPORT: return m.param < CC_TRANSPORT_TARGETS;
+        default:                  return false;         // CC_TARGET_PORT is reserved
+    }
 }
 
 LoadError MixedModeMaster::load(const Patch& patch){
@@ -108,6 +135,87 @@ void MixedModeMaster::pass(uint32_t now_us){
     // 5. hardware outputs
     for (uint8_t i = 0; i < GPIO_N; i++) gate_out[i].process(bus, now_us);
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, now_us);
+}
+
+LoadError MixedModeMaster::replace_node(uint8_t index, const NodeConfig& config){
+    if (index >= pool.count()) return error = LOAD_NODE_INVALID;
+    const ConfigError e = registry::validate(config);
+    if (e != CONFIG_OK){
+        node_error = e;
+        node_error_index = index;
+        return error = LOAD_NODE_INVALID;
+    }
+    // Handover at node scope: the node about to go releases what it has
+    // sounding and the note-offs reach the transports before it is destroyed,
+    // exactly as unload() does at patch scope.
+    Node* old = pool.node(index);
+    old->silence(bus);
+    bus.swap();
+    for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, 0);
+
+    Node* fresh = pool.replace(index, config);
+    if (fresh == nullptr) return error = LOAD_NODE_INVALID;
+    fresh->setup();
+    return error = LOAD_OK;
+}
+
+LoadError MixedModeMaster::set_gate_port(uint8_t jack, const GatePortConfig& config){
+    if (jack >= GPIO_N) return error = LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
+    if (config.direction != GATE_PORT_UNUSED && config.bus >= N_GATE_BUS){
+        return error = LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
+    }
+    // A jack changing direction must stop driving before it starts reading,
+    // or a moment of contention is possible on the pin.
+    gate_in[jack].release();
+    gate_out[jack].release();
+    if (config.direction == GATE_PORT_IN){
+        gate_in[jack].configure(&gpio, jack, config.bus);
+        gate_in[jack].setup();
+    } else if (config.direction == GATE_PORT_OUT){
+        gate_out[jack].configure(&gpio, jack, config.bus);
+        gate_out[jack].setup();
+    }
+    return error = LOAD_OK;
+}
+
+LoadError MixedModeMaster::set_midi_in(uint8_t index, const MidiInConfig& config){
+    if (index >= N_MIDI_IN_NODES) return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
+    if (config.source_mask != 0 && config.bus >= N_NOTE_BUS){
+        return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
+    }
+    if (config.source_mask == 0) midi_in[index].release();
+    else midi_in[index].configure(config.source_mask, config.channel, config.bus);
+    return error = LOAD_OK;
+}
+
+LoadError MixedModeMaster::set_midi_out(uint8_t index, const MidiOutConfig& config){
+    if (index >= N_MIDI_OUT_NODES) return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
+    if (config.target_mask != 0 && config.bus >= N_NOTE_BUS){
+        return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
+    }
+    if (config.target_mask == 0) midi_out[index].release();
+    else midi_out[index].configure(&midi, config.target_mask, config.channel, config.bus);
+    return error = LOAD_OK;
+}
+
+ParamError MixedModeMaster::set_node_param(uint8_t node_index, uint16_t param_index, uint8_t value){
+    Node* n = pool.node(node_index);
+    const AlgorithmDescriptor* d = pool.descriptor(node_index);
+    if (n == nullptr || d == nullptr) return PARAM_NO_SUCH_NODE;
+
+    const ParamDescriptor* p = registry::param(*d, param_index);
+    if (p == nullptr) return PARAM_NO_SUCH_PARAM;
+    if (!registry::param_in_range(*p, value)) return PARAM_VALUE_OUT_OF_RANGE;
+    return n->set_param(param_index, value) ? PARAM_SET_OK : PARAM_REFUSED;
+}
+
+bool MixedModeMaster::get_node_param(uint8_t node_index, uint16_t param_index, uint8_t& value_out) const {
+    const Node* n = pool.node(node_index);
+    const AlgorithmDescriptor* d = pool.descriptor(node_index);
+    if (n == nullptr || d == nullptr) return false;
+    if (registry::param(*d, param_index) == nullptr) return false;
+    value_out = n->get_param(param_index);
+    return true;
 }
 
 uint8_t MixedModeMaster::deliver_midi(uint8_t source, const MidiEvent& event, uint32_t now_us){

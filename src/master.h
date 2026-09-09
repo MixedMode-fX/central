@@ -12,12 +12,23 @@
 #include "hal/igpio.h"
 #include "hal/imidi_out.h"
 
+// Why a parameter write was refused (#20). The caller reports; it never
+// guesses, and it never silently clamps.
+enum ParamError : uint8_t {
+    PARAM_SET_OK = 0,
+    PARAM_NO_SUCH_NODE,
+    PARAM_NO_SUCH_PARAM,      // index beyond n_params, or a reserved byte
+    PARAM_VALUE_OUT_OF_RANGE, // outside the ParamDescriptor's [min, max]
+    PARAM_REFUSED,            // the node itself refused it
+};
+
 enum LoadError : uint8_t {
     LOAD_OK = 0,
     LOAD_TOO_MANY_NODES,
     LOAD_GATE_PORT_BUS_OUT_OF_RANGE,
     LOAD_MIDI_PORT_BUS_OUT_OF_RANGE,
     LOAD_NODE_INVALID,         // see last_node_error() / last_node_index()
+    LOAD_CC_MAPPING_INVALID,   // see last_mapping_index() (#21)
 };
 
 // Owns the master clock, the buses, the reserved hardware port nodes and the
@@ -50,6 +61,46 @@ class MixedModeMaster {
         // One evaluation pass.
         void pass(uint32_t now_us);
 
+        // The one public entry point for a runtime parameter write (#20).
+        // Every control-plane caller - #11's incremental SysEx edits, #21's
+        // CC mapping, the console - goes through it, so there is one
+        // validator and one set of tests rather than one per transport.
+        //
+        // The value is range-checked against the ParamDescriptor before it
+        // reaches the node. Out of range is **rejected, not clamped**: the
+        // node keeps its previous value and the caller is told. A controller
+        // never produces an out-of-range value because #21 scales it onto
+        // [min, max] first.
+        //
+        // Called from the main loop between passes, never from an interrupt.
+        ParamError set_node_param(uint8_t node_index, uint16_t param_index, uint8_t value);
+        // What the node is running. False when the node or the parameter
+        // does not exist.
+        bool get_node_param(uint8_t node_index, uint16_t param_index, uint8_t& value_out) const;
+
+        // Incremental edits (#11) -------------------------------------------
+        //
+        // **The state rule**, written down once and relied on everywhere:
+        //
+        //   * A parameter edit (set_node_param) preserves all node state. A
+        //     running sequencer keeps its step position, a divider its phase.
+        //   * A connection edit reconstructs **the node whose connection
+        //     changed, and only that one**: it gets its handover, releases
+        //     what it owns and starts fresh, while every other node in the
+        //     patch keeps its state. Nodes copy their bus indices at
+        //     construction, so a rebind is a reconstruction; making it
+        //     anything else would mean a re-bind seam on all 25 algorithms.
+        //   * A port edit reconstructs nothing at all - port nodes are
+        //     configured, not constructed.
+        //   * A full load() reconstructs everything.
+        //
+        // Each of these validates before it changes anything, so a rejected
+        // edit leaves the running graph exactly as it was.
+        LoadError replace_node(uint8_t index, const NodeConfig& config);
+        LoadError set_gate_port(uint8_t jack, const GatePortConfig& config);
+        LoadError set_midi_in(uint8_t index, const MidiInConfig& config);
+        LoadError set_midi_out(uint8_t index, const MidiOutConfig& config);
+
         // Transport input path (#5): offers an incoming message to every
         // MidiInPort. Returns how many accepted it. System messages never
         // reach a bus: the realtime ones (clock, start, stop, continue) are
@@ -70,6 +121,12 @@ class MixedModeMaster {
         LoadError last_error() const { return error; }
         ConfigError last_node_error() const { return node_error; }
         uint8_t last_node_index() const { return node_error_index; }
+        uint8_t last_mapping_index() const { return mapping_error_index; }
+        // Range-checks one controller binding against the patch it belongs
+        // to: unknown target, a node index beyond n_nodes, a parameter index
+        // beyond the descriptor, min > max. A patch with a bad mapping is
+        // rejected whole (#11's rule), never partially applied.
+        static bool mapping_valid(const Patch& patch, const CcMapping& mapping);
         uint8_t node_count() const { return pool.count(); }
         Node* node(uint8_t index) const { return pool.node(index); }
         const AlgorithmDescriptor* node_descriptor(uint8_t index) const { return pool.descriptor(index); }
@@ -92,6 +149,7 @@ class MixedModeMaster {
         LoadError error;
         ConfigError node_error;
         uint8_t node_error_index;
+        uint8_t mapping_error_index;
 };
 
 #endif

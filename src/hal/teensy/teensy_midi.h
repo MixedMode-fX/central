@@ -3,6 +3,7 @@
 
 #include "hal/teensy/teensy_includes.h"
 #include "hal/imidi_out.h"
+#include "hal/isysex_in.h"
 #include "midi/midi_queue.h"
 #include "hardware.h"
 
@@ -53,9 +54,14 @@ void mm_midi_setup();
 // Pumps every compiled-in parser and enqueues whatever it produced, tagged
 // with the transport it arrived on. Nothing else happens here: the pass that
 // follows is where messages are dispatched. Call once per main-loop pass.
-void mm_midi_read(MidiInputQueue& queue);
+//
+// SysEx never reaches the queue: it is control-plane traffic, not a bus
+// event, so a complete message goes straight to `sysex` (#11).
+void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex);
 // Sends to every port whose bit is set in `target`.
 void mm_send(uint8_t target, uint8_t type, uint8_t data1, uint8_t data2, uint8_t channel);
+// Sends one complete SysEx message, F0 to F7 inclusive.
+void mm_send_sysex(uint8_t target, const uint8_t* data, uint16_t length);
 
 // IMidiOut over the transports above.
 class TeensyMidiOut : public IMidiOut {
@@ -63,6 +69,9 @@ class TeensyMidiOut : public IMidiOut {
         void send(uint8_t target, uint8_t type,
                   uint8_t d1, uint8_t d2, uint8_t channel) override {
             mm_send(target, type, d1, d2, channel);
+        }
+        void send_sysex(uint8_t target, const uint8_t* data, uint16_t length) override {
+            mm_send_sysex(target, data, length);
         }
 };
 

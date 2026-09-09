@@ -59,6 +59,30 @@ const AlgorithmDescriptor* registry::at(uint8_t index){
     return index < TABLE_SIZE ? TABLE[index] : nullptr;
 }
 
+const ParamDescriptor* registry::param(const AlgorithmDescriptor& algorithm, uint16_t index){
+    if (index >= algorithm.n_params) return nullptr;
+    return param_lookup(algorithm.param_groups, algorithm.n_param_groups, index);
+}
+
+const ParamDescriptor* registry::param(uint8_t algorithm_id, uint16_t index){
+    const AlgorithmDescriptor* d = find(algorithm_id);
+    return d == nullptr ? nullptr : param(*d, index);
+}
+
+bool registry::param_in_range(const ParamDescriptor& d, uint8_t value){
+    // Zero always means "the default" (param.h), so a zeroed preset is valid
+    // whatever the parameter's real minimum is.
+    if (value == 0) return true;
+    return value >= d.min && value <= d.max;
+}
+
+// Set by validate() when it returns CONFIG_PARAM_OUT_OF_RANGE, so the caller
+// - the console, #11's SysEx reply - can say *which* parameter was wrong
+// rather than only that one was.
+static uint16_t bad_param = 0;
+
+uint16_t registry::last_bad_param(){ return bad_param; }
+
 ConfigError registry::validate(const NodeConfig& config){
     const AlgorithmDescriptor* d = find(config.algorithm_id);
     if (d == nullptr) return CONFIG_UNKNOWN_ALGORITHM;
@@ -76,6 +100,17 @@ ConfigError registry::validate(const NodeConfig& config){
     for (uint8_t i = 0; i < d->n_out && i < MAX_OUT; i++){
         const uint8_t bus = config.out_bus[i];
         if (bus != NO_BUS && bus >= bus_count(d->out_domain[i])) return CONFIG_OUTLET_OUT_OF_RANGE;
+    }
+    // Parameters (#20). Bytes beyond n_params are not checked: an algorithm
+    // uses the first few and leaves the rest zero, and #11 exploits that by
+    // not sending trailing zeros.
+    for (uint16_t i = 0; i < d->n_params && i < N_PARAM; i++){
+        const ParamDescriptor* p = param(*d, i);
+        if (p == nullptr) continue;              // no group covers it: reserved
+        if (!param_in_range(*p, config.params[i])){
+            bad_param = i;
+            return CONFIG_PARAM_OUT_OF_RANGE;
+        }
     }
     return CONFIG_OK;
 }

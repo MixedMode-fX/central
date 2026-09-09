@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMMC emulator</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2026; --edge: #2c3038; --text: #d7dae0; --muted: #8a909c;
+    --on: #5be27a; --off: #3a3f48; --in: #58a6ff; --out: #ffb454; --err: #ff6b6b; --accent: #7aa2f7;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--edge); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .muted { color: var(--muted); }
+  main { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); gap: 12px; padding: 12px 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+  section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .wide { grid-column: 1 / -1; }
+  button, select, input { font: inherit; color: var(--text); background: #262a32; border: 1px solid var(--edge); border-radius: 4px; padding: 4px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); } button.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); }
+  button.latched { background: var(--on); color: #0b0d12; border-color: var(--on); }
+  input[type=number] { width: 6em; }
+  textarea { width: 100%; min-height: 220px; font: inherit; font-size: 12px; background: #0f1114; color: var(--text); border: 1px solid var(--edge); border-radius: 4px; padding: 8px; resize: vertical; white-space: pre; overflow: auto; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .jacks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .jack { border: 1px solid var(--edge); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+  .jack .name { display: flex; justify-content: space-between; color: var(--muted); }
+  .jack .tag { padding: 0 6px; border-radius: 3px; font-size: 11px; }
+  .jack.in .tag { background: var(--in); color: #0b0d12; } .jack.out .tag { background: var(--out); color: #0b0d12; }
+  .led { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: var(--off); box-shadow: inset 0 0 2px #000; vertical-align: middle; }
+  .led.on { background: var(--on); box-shadow: 0 0 8px var(--on); }
+  .led.out.on { background: var(--out); box-shadow: 0 0 8px var(--out); }
+  .leds { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .leds .lbl { color: var(--muted); font-size: 11px; width: 100%; }
+  .leds .cell { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; color: var(--muted); }
+  canvas { width: 100%; height: 260px; background: #0f1114; border: 1px solid var(--edge); border-radius: 4px; display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  .scroll { max-height: 220px; overflow: auto; }
+  .err { color: var(--err); } .ok { color: var(--on); }
+  .keys { display: flex; gap: 3px; flex-wrap: wrap; }
+  .keys button { min-width: 38px; padding: 6px 4px; }
+  .keys button.black { background: #0f1114; }
+  .keys button.held { background: var(--accent); color: #0b0d12; }
+  code { color: var(--accent); }
+  details summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>MMMC emulator</h1>
+  <span class="muted">firmware <span id="version">…</span></span>
+  <span class="muted">sim time <span id="simtime">0.000</span> s</span>
+  <span class="muted"><span id="passrate">0</span> passes/s</span>
+  <span id="status" class="muted">loading module…</span>
+</header>
+<main>
+  <section>
+    <h2>Patch</h2>
+    <div class="row">
+      <select id="presets"></select>
+      <button id="load" class="primary">Load patch</button>
+      <span id="loadresult" class="muted"></span>
+    </div>
+    <textarea id="patch" spellcheck="false"></textarea>
+    <details>
+      <summary>Algorithms compiled into this firmware (from the registry)</summary>
+      <div class="scroll"><table id="registry"><thead><tr><th>id</th><th>name</th><th>inlets</th><th>outlets</th><th>params</th><th>tick</th><th>state</th></tr></thead><tbody></tbody></table></div>
+      <p class="muted" id="limits"></p>
+    </details>
+  </section>
+
+  <section>
+    <h2>Run</h2>
+    <div class="row">
+      <button id="run" class="primary">Run</button>
+      <button id="step">Step 1 pass</button>
+      <button id="step100">Step 100</button>
+      <button id="resettime">Reset time</button>
+    </div>
+    <div class="row">
+      <label>pass interval <input id="passus" type="number" value="100" min="1"> µs</label>
+      <label>speed <select id="speed"><option>0.01</option><option>0.1</option><option selected>1</option><option>10</option></select>×</label>
+    </div>
+    <div class="row">
+      <label><input id="autotick" type="checkbox"> master tick at <input id="bpm" type="number" value="120" min="1"> BPM × 24 PPQN</label>
+      <button id="tick">Tick once</button>
+      <span class="muted">ticks: <span id="tickcount">0</span></span>
+    </div>
+    <p class="muted">Passes are <code>MixedModeMaster::pass(now_us)</code> on simulated time. The page is the main loop and, until the master clock lands, the clock.</p>
+  </section>
+
+  <section class="wide">
+    <h2>Jacks</h2>
+    <div class="jacks" id="jacks"></div>
+  </section>
+
+  <section>
+    <h2>Buses (what readers saw this pass)</h2>
+    <div class="leds" id="gatebuses"><span class="lbl">gate</span></div>
+    <div class="scroll"><table id="notebuses"><thead><tr><th>note bus</th><th>events</th><th>overflows</th><th>last event</th></tr></thead><tbody></tbody></table></div>
+    <div class="leds" id="cvbuses"><span class="lbl">cv</span></div>
+  </section>
+
+  <section>
+    <h2>MIDI in → <code>deliver_midi()</code></h2>
+    <div class="row">
+      <label>source <select id="midisrc"></select></label>
+      <label>channel <input id="midich" type="number" value="1" min="1" max="16"></label>
+      <label>velocity <input id="midivel" type="number" value="100" min="1" max="127"></label>
+      <span class="muted">accepted by <span id="accepted">–</span> port(s)</span>
+    </div>
+    <div class="keys" id="keys"></div>
+    <div class="row">
+      <label>CC <input id="ccnum" type="number" value="64" min="0" max="127"></label>
+      <label>value <input id="ccval" type="number" value="127" min="0" max="127"></label>
+      <button id="sendcc">Send CC</button>
+    </div>
+    <div class="row" id="webmidi">
+      <button id="webmidi-connect">Connect Web MIDI</button>
+      <label>in <select id="webmidi-in"><option value="">–</option></select></label>
+      <label>out <select id="webmidi-out"><option value="">–</option></select></label>
+    </div>
+  </section>
+
+  <section class="wide">
+    <h2>Scope — jacks and gate buses, last <span id="scopewindow">2.0</span> s</h2>
+    <canvas id="scope" width="1600" height="520"></canvas>
+  </section>
+
+  <section class="wide">
+    <h2>MIDI out ← <code>IMidiOut::send()</code> <button id="clearlog" style="float:right">Clear</button></h2>
+    <div class="scroll"><table id="midilog"><thead><tr><th>sim time</th><th>targets</th><th>type</th><th>ch</th><th>data1</th><th>data2</th></tr></thead><tbody></tbody></table></div>
+  </section>
+</main>
+
+<script id="wasm-b64" type="text/plain">/*MMMC_WASM_BASE64*/</script>
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// Names for the values that cross the bridge as numbers. These mirror
+// firmware enums that are part of the preset format and are stable.
+// ---------------------------------------------------------------------------
+const MIDI_PORTS = { USB_0: 0x01, USB_1: 0x02, USB_2: 0x04, USB_3: 0x08, SERIAL_1: 0x10, SERIAL_2: 0x20, SERIAL_3: 0x40, HOST_1: 0x80 };  // hal/midi_types.h MidiPort
+const MIDI_TYPES = { 0x80: 'NoteOff', 0x90: 'NoteOn', 0xA0: 'PolyAT', 0xB0: 'CC', 0xC0: 'Program', 0xD0: 'ChanAT', 0xE0: 'Bend', 0xF8: 'Clock', 0xFA: 'Start', 0xFB: 'Continue', 0xFC: 'Stop' };
+const GATE_DIR = { unused: 0, in: 1, out: 2 };                                  // node/patch.h GatePortDirection
+const GPIO_MODE = { 0: 'input', 1: 'input', 2: 'output' };                      // hal/igpio.h GpioMode
+const DOMAIN = ['gate', 'note', 'cv'];                                          // bus/domain.h Domain
+const LOAD_ERROR = ['OK', 'TOO_MANY_NODES', 'GATE_PORT_BUS_OUT_OF_RANGE', 'MIDI_PORT_BUS_OUT_OF_RANGE', 'NODE_INVALID'];   // master.h
+const CONFIG_ERROR = ['OK', 'UNKNOWN_ALGORITHM', 'INLET_OUT_OF_RANGE', 'INLET_NOT_CONNECTED', 'OUTLET_OUT_OF_RANGE'];   // node/registry.h
+
+// ---------------------------------------------------------------------------
+// Presets. Written the way a user would write one; the loader resolves names
+// through the registry, so an id never appears here.
+// ---------------------------------------------------------------------------
+const PRESETS = {
+  'Default patch (main.cpp): sustain pedal on jack 8 to every MIDI port': {
+    gate_ports: [{ port: 8, dir: 'in', bus: 0 }],
+    nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }],
+    midi_out: [{ targets: ['ALL'], channel: 0, bus: 0 }],
+  },
+  'Jack 1 → NOT → GateToNote → USB 0 (test_master)': {
+    gate_ports: [{ port: 1, dir: 'in', bus: 0 }, { port: 2, dir: 'out', bus: 1 }],
+    nodes: [{ algo: 'NOT', in: [0], out: [1] }, { algo: 'GateToNote', in: [1], out: [0], params: [60, 100, 1] }],
+    midi_out: [{ targets: ['USB_0'], channel: 0, bus: 0 }],
+  },
+  'Logic: AND, OR, XOR of jacks 1 & 2 on jacks 3, 4, 5; NOT of jack 1 on jack 6': {
+    gate_ports: [{ port: 1, dir: 'in', bus: 0 }, { port: 2, dir: 'in', bus: 1 }, { port: 3, dir: 'out', bus: 2 }, { port: 4, dir: 'out', bus: 3 }, { port: 5, dir: 'out', bus: 4 }, { port: 6, dir: 'out', bus: 5 }],
+    nodes: [{ algo: 'AND', in: [0, 1], out: [2] }, { algo: 'OR', in: [0, 1], out: [3] }, { algo: 'XOR', in: [0, 1], out: [4] }, { algo: 'NOT', in: [0], out: [5] }],
+  },
+  'Arpeggiator: chord from DIN 1, advance on jack 1, +12 to DIN 2 (worked example)': {
+    gate_ports: [{ port: 1, dir: 'in', bus: 0 }],
+    midi_in: [{ sources: ['SERIAL_1'], channel: 0, bus: 0 }],
+    nodes: [{ algo: 'Arpeggiator', in: [0, 0], out: [1] }, { algo: 'Transpose', in: [1], out: [2], params: [12] }],
+    midi_out: [{ targets: ['USB_0'], channel: 1, bus: 1 }, { targets: ['SERIAL_2'], channel: 2, bus: 2 }],
+  },
+  'Feedback: NOT feeding itself oscillates at half the pass rate': {
+    gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
+    nodes: [{ algo: 'NOT', in: [0], out: [0] }],
+  },
+  'Rejected on purpose: gate bus 99 (validator keeps the running patch)': {
+    gate_ports: [{ port: 1, dir: 'in', bus: 99 }],
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Module loading. Prefers mmmc.wasm next to the page (a static host); falls
+// back to the base64 copy build.sh embeds, so the file:// case works too.
+// ---------------------------------------------------------------------------
+const midiLog = [];
+let E = null;            // wasm exports
+let mem = null;          // Uint8Array over wasm memory (refreshed on growth)
+let C = {};              // firmware constants
+let ALGOS = [];          // registry
+let now = 0;             // simulated µs
+let tickCount = 0, nextTickAt = 0;
+let running = false, lastFrame = 0, passAccumulator = 0, passesThisSecond = 0, lastRateAt = 0;
+let jackSource = [];     // per jack: { kind: 'manual'|'clock', hz, pulseUntil }
+
+const imports = { env: { mmmc_midi_send: (target, type, d1, d2, channel) => {
+  midiLog.push({ t: now, target, type, d1, d2, channel });
+  if (midiLog.length > 500) midiLog.shift();
+  webMidiForward(type, d1, d2, channel);
+} } };
+
+async function loadModule() {
+  let bytes = null;
+  try {
+    const r = await fetch('mmmc.wasm');
+    if (r.ok) bytes = new Uint8Array(await r.arrayBuffer());
+  } catch (e) { /* file:// or no sibling file: use the embedded copy */ }
+  if (!bytes) {
+    const b64 = document.getElementById('wasm-b64').textContent.trim();
+    if (!b64 || b64.startsWith('/*')) throw new Error('no mmmc.wasm next to the page and none embedded: run emulator/build.sh');
+    const bin = atob(b64);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  }
+  const { instance } = await WebAssembly.instantiate(bytes, imports);
+  E = instance.exports;
+  mem = new Uint8Array(E.memory.buffer);
+  if (E.__wasm_call_ctors) E.__wasm_call_ctors();
+}
+
+function cstr(ptr) {
+  mem = new Uint8Array(E.memory.buffer);
+  let s = '';
+  for (let i = ptr; mem[i] !== 0; i++) s += String.fromCharCode(mem[i]);
+  return s;
+}
+
+function readConstants() {
+  C = {
+    GPIO_N: E.emu_const_gpio_n(), N_GATE_BUS: E.emu_const_n_gate_bus(), N_NOTE_BUS: E.emu_const_n_note_bus(), N_CV_BUS: E.emu_const_n_cv_bus(),
+    N_NODE: E.emu_const_n_node(), MAX_IN: E.emu_const_max_in(), MAX_OUT: E.emu_const_max_out(), N_PARAM: E.emu_const_n_param(),
+    N_MIDI_IN: E.emu_const_n_midi_in(), N_MIDI_OUT: E.emu_const_n_midi_out(), NO_BUS: E.emu_const_no_bus(),
+  };
+  ALGOS = [];
+  for (let i = 0; i < E.emu_algo_count(); i++) {
+    const a = { index: i, id: E.emu_algo_id(i), name: cstr(E.emu_algo_name(i)), n_in: E.emu_algo_n_in(i), min_in: E.emu_algo_min_in(i), n_out: E.emu_algo_n_out(i), n_params: E.emu_algo_n_params(i), tick: !!E.emu_algo_wants_tick(i), state: E.emu_algo_state_size(i), in: [], out: [] };
+    for (let k = 0; k < a.n_in; k++) a.in.push(DOMAIN[E.emu_algo_in_domain(i, k)]);
+    for (let k = 0; k < a.n_out; k++) a.out.push(DOMAIN[E.emu_algo_out_domain(i, k)]);
+    ALGOS.push(a);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Patch JSON -> bridge calls -> MixedModeMaster::load()
+// ---------------------------------------------------------------------------
+function portMask(names) {
+  let m = 0;
+  for (const n of names || []) {
+    if (n === 'ALL') m |= 0xFF;
+    else if (n in MIDI_PORTS) m |= MIDI_PORTS[n];
+    else throw new Error(`unknown MIDI port "${n}" (one of ${Object.keys(MIDI_PORTS).join(', ')}, ALL)`);
+  }
+  return m;
+}
+
+function applyPatch(p) {
+  E.emu_patch_reset();
+  for (const g of p.gate_ports || []) {
+    if (!(g.dir in GATE_DIR)) throw new Error(`gate port dir must be in|out|unused`);
+    if (!(g.port >= 1 && g.port <= C.GPIO_N)) throw new Error(`jack ${g.port} does not exist (1..${C.GPIO_N})`);
+    E.emu_patch_gate_port(g.port - 1, GATE_DIR[g.dir], g.bus ?? C.NO_BUS);
+  }
+  (p.midi_in || []).forEach((m, i) => E.emu_patch_midi_in(i, portMask(m.sources), m.channel ?? 0, m.bus ?? C.NO_BUS));
+  (p.midi_out || []).forEach((m, i) => E.emu_patch_midi_out(i, portMask(m.targets), m.channel ?? 0, m.bus ?? C.NO_BUS));
+  if ((p.midi_in || []).length > C.N_MIDI_IN) throw new Error(`at most ${C.N_MIDI_IN} MIDI in ports`);
+  if ((p.midi_out || []).length > C.N_MIDI_OUT) throw new Error(`at most ${C.N_MIDI_OUT} MIDI out ports`);
+  (p.nodes || []).forEach((n, i) => {
+    const a = ALGOS.find(x => x.name === n.algo) || ALGOS.find(x => x.id === n.algo);
+    if (!a) throw new Error(`node ${i}: unknown algorithm "${n.algo}" (registry: ${ALGOS.map(x => x.name).join(', ')})`);
+    E.emu_patch_node(i, a.id);
+    (n.in || []).forEach((b, k) => E.emu_patch_node_in(i, k, b === null ? C.NO_BUS : b));
+    (n.out || []).forEach((b, k) => E.emu_patch_node_out(i, k, b === null ? C.NO_BUS : b));
+    (n.params || []).forEach((v, k) => E.emu_patch_node_param(i, k, v));
+  });
+  E.emu_patch_n_nodes((p.nodes || []).length);
+  const e = E.emu_load();
+  if (e !== 0) {
+    let msg = `rejected: LOAD_${LOAD_ERROR[e] || e}`;
+    if (e === 4) msg += ` (node ${E.emu_last_node_index()}: CONFIG_${CONFIG_ERROR[E.emu_last_node_error()]})`;
+    msg += ' — the previous patch keeps running';
+    return { ok: false, msg };
+  }
+  return { ok: true, msg: `loaded: ${E.emu_node_count()} node(s)` };
+}
+
+function loadFromTextarea() {
+  const out = document.getElementById('loadresult');
+  try {
+    const p = JSON.parse(document.getElementById('patch').value);
+    const r = applyPatch(p);
+    out.textContent = r.msg; out.className = r.ok ? 'ok' : 'err';
+    buildJacks();
+  } catch (err) {
+    out.textContent = String(err.message || err); out.className = 'err';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Running: the page is the main loop.
+// ---------------------------------------------------------------------------
+function passUs() { return Math.max(1, Number(document.getElementById('passus').value) || 100); }
+
+function driveInputs() {
+  for (let j = 0; j < C.GPIO_N; j++) {
+    const s = jackSource[j];
+    if (!s) continue;
+    if (s.pulseUntil !== undefined && now >= s.pulseUntil) { s.pulseUntil = undefined; E.emu_jack_set_input(j, s.level ? 1 : 0); }
+    if (s.kind === 'clock' && s.pulseUntil === undefined) {
+      const period = 1e6 / Math.max(0.01, s.hz);
+      E.emu_jack_set_input(j, (now % period) < period / 2 ? 1 : 0);
+    }
+  }
+}
+
+function onePass() {
+  driveInputs();
+  if (document.getElementById('autotick').checked) {
+    const bpm = Math.max(1, Number(document.getElementById('bpm').value) || 120);
+    const interval = 60e6 / (bpm * 24);
+    if (now >= nextTickAt) { E.emu_tick(++tickCount); nextTickAt = now + interval; }
+  }
+  E.emu_pass(now);
+  scopeSample();
+  now += passUs();
+  passesThisSecond++;
+}
+
+function runPasses(n) { for (let i = 0; i < n; i++) onePass(); }
+
+function frame(ts) {
+  if (running) {
+    const dt = lastFrame ? Math.min(100, ts - lastFrame) : 0;
+    lastFrame = ts;
+    passAccumulator += dt * 1000 * Number(document.getElementById('speed').value);
+    const p = passUs();
+    let n = Math.floor(passAccumulator / p);
+    if (n > 50000) { n = 50000; passAccumulator = 0; } else passAccumulator -= n * p;
+    runPasses(n);
+  }
+  if (ts - lastRateAt > 500) {
+    document.getElementById('passrate').textContent = Math.round(passesThisSecond * 1000 / (ts - lastRateAt));
+    passesThisSecond = 0; lastRateAt = ts;
+  }
+  render();
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------------------
+// Scope: one sample per SCOPE_US of simulated time, levels OR-accumulated so a
+// pulse shorter than a sample still shows.
+// ---------------------------------------------------------------------------
+const SCOPE_US = 1000, SCOPE_LEN = 2000;
+const scopeJackIn = new Uint8Array(SCOPE_LEN), scopeJackOut = new Uint8Array(SCOPE_LEN), scopeGate = new Uint32Array(SCOPE_LEN);
+let scopeHead = 0, scopeNextAt = 0, accIn = 0, accOut = 0, accGate = 0;
+
+function scopeSample() {
+  let inMask = 0, outMask = 0;
+  for (let j = 0; j < C.GPIO_N; j++) { if (E.emu_jack_input(j)) inMask |= 1 << j; if (E.emu_jack_output(j)) outMask |= 1 << j; }
+  accIn |= inMask; accOut |= outMask; accGate |= E.emu_gate_buses();
+  if (now >= scopeNextAt) {
+    scopeJackIn[scopeHead] = accIn; scopeJackOut[scopeHead] = accOut; scopeGate[scopeHead] = accGate;
+    scopeHead = (scopeHead + 1) % SCOPE_LEN;
+    accIn = inMask; accOut = outMask; accGate = 0;
+    scopeNextAt = now + SCOPE_US;
+  }
+}
+
+function drawScope() {
+  const cv = document.getElementById('scope'), ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, rows = C.GPIO_N + C.N_GATE_BUS, rh = H / rows;
+  ctx.fillStyle = '#0f1114'; ctx.fillRect(0, 0, W, H);
+  ctx.font = '11px ui-monospace, monospace'; ctx.textBaseline = 'middle';
+  const modes = []; for (let j = 0; j < C.GPIO_N; j++) modes.push(E.emu_jack_mode(j));
+  for (let r = 0; r < rows; r++) {
+    const isJack = r < C.GPIO_N, y0 = r * rh;
+    ctx.fillStyle = '#1a1d23'; ctx.fillRect(0, y0, W, 1);
+    const isOut = isJack && modes[r] === 2;
+    ctx.fillStyle = isJack ? (isOut ? '#ffb454' : '#58a6ff') : '#5be27a';
+    ctx.fillText(isJack ? `J${r + 1} ${isOut ? 'out' : 'in'}` : `bus ${r - C.GPIO_N}`, 4, y0 + rh / 2);
+    ctx.beginPath();
+    const x0 = 60, span = W - x0, hi = y0 + 3, lo = y0 + rh - 3;
+    for (let i = 0; i < SCOPE_LEN; i++) {
+      const idx = (scopeHead + i) % SCOPE_LEN;
+      const v = isJack ? ((isOut ? scopeJackOut[idx] : scopeJackIn[idx]) >> r) & 1 : (scopeGate[idx] >> (r - C.GPIO_N)) & 1;
+      const x = x0 + i * span / SCOPE_LEN, y = v ? hi : lo;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 1; ctx.stroke();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UI
+// ---------------------------------------------------------------------------
+function buildJacks() {
+  const host = document.getElementById('jacks'); host.innerHTML = '';
+  for (let j = 0; j < C.GPIO_N; j++) {
+    jackSource[j] = jackSource[j] || { kind: 'manual', hz: 2, level: 0 };
+    const mode = E.emu_jack_mode(j), isOut = mode === 2;
+    const d = document.createElement('div'); d.className = 'jack ' + (isOut ? 'out' : 'in'); d.dataset.jack = j;
+    d.innerHTML = `<div class="name"><span>jack ${j + 1}</span><span class="tag">${isOut ? 'OUT' : 'IN'}</span></div>`;
+    if (isOut) {
+      d.innerHTML += `<div class="row"><span class="led out" id="jo${j}"></span><span class="muted">driven by the firmware</span></div>`;
+    } else {
+      d.innerHTML += `<div class="row"><span class="led" id="ji${j}"></span>
+        <button id="jt${j}">Toggle</button><button id="jp${j}">Pulse 20 ms</button></div>
+        <div class="row"><select id="js${j}"><option value="manual">manual</option><option value="clock">square wave</option></select>
+        <input id="jh${j}" type="number" value="${jackSource[j].hz}" min="0.01" step="0.5" style="width:5em"> Hz</div>`;
+    }
+    host.appendChild(d);
+    if (!isOut) {
+      document.getElementById(`js${j}`).value = jackSource[j].kind;
+      document.getElementById(`jt${j}`).onclick = () => { const s = jackSource[j]; s.kind = 'manual'; document.getElementById(`js${j}`).value = 'manual'; s.level = s.level ? 0 : 1; E.emu_jack_set_input(j, s.level); };
+      document.getElementById(`jp${j}`).onclick = () => { const s = jackSource[j]; E.emu_jack_set_input(j, 1); s.pulseUntil = now + 20000; };
+      document.getElementById(`js${j}`).onchange = ev => { jackSource[j].kind = ev.target.value; if (ev.target.value === 'manual') E.emu_jack_set_input(j, jackSource[j].level); };
+      document.getElementById(`jh${j}`).onchange = ev => { jackSource[j].hz = Number(ev.target.value) || 1; };
+    }
+  }
+}
+
+function buildRegistry() {
+  const tb = document.querySelector('#registry tbody'); tb.innerHTML = '';
+  for (const a of ALGOS) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${a.id}</td><td>${a.name}</td><td>${a.in.map((d, k) => k < a.min_in ? d : `[${d}]`).join(' ')}</td><td>${a.out.join(' ')}</td><td>${a.n_params}</td><td>${a.tick ? 'yes' : ''}</td><td>${a.state} B</td>`;
+    tb.appendChild(tr);
+  }
+  document.getElementById('limits').textContent = `Limits from config.h: ${C.GPIO_N} jacks, ${C.N_GATE_BUS} gate / ${C.N_NOTE_BUS} note / ${C.N_CV_BUS} CV buses, ${C.N_NODE} nodes, ${C.MAX_IN} inlets and ${C.MAX_OUT} outlets per node, ${C.N_PARAM} params, ${C.N_MIDI_IN} MIDI in and ${C.N_MIDI_OUT} MIDI out ports. Bracketed inlets are optional.`;
+  const sel = document.getElementById('presets');
+  for (const name of Object.keys(PRESETS)) { const o = document.createElement('option'); o.textContent = name; sel.appendChild(o); }
+  sel.onchange = () => { document.getElementById('patch').value = JSON.stringify(PRESETS[sel.value], null, 2); };
+  sel.onchange();
+  const src = document.getElementById('midisrc');
+  for (const [n, v] of Object.entries(MIDI_PORTS)) { const o = document.createElement('option'); o.value = v; o.textContent = n; src.appendChild(o); }
+  src.value = MIDI_PORTS.SERIAL_1;
+  const bg = document.getElementById('gatebuses');
+  for (let b = 0; b < C.N_GATE_BUS; b++) bg.insertAdjacentHTML('beforeend', `<span class="cell"><span class="led" id="gb${b}"></span>${b}</span>`);
+  const cvh = document.getElementById('cvbuses');
+  for (let b = 0; b < C.N_CV_BUS; b++) cvh.insertAdjacentHTML('beforeend', `<span class="cell"><span id="cv${b}">0</span>${b}</span>`);
+  const nb = document.querySelector('#notebuses tbody');
+  for (let b = 0; b < C.N_NOTE_BUS; b++) nb.insertAdjacentHTML('beforeend', `<tr><td>${b}</td><td id="nc${b}">0</td><td id="no${b}">0</td><td id="nl${b}" class="muted"></td></tr>`);
+  const keys = document.getElementById('keys'), names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  for (let n = 60; n <= 72; n++) {
+    const b = document.createElement('button'); const black = names[n % 12].includes('#');
+    b.textContent = `${names[n % 12]}${Math.floor(n / 12) - 1}`; b.className = black ? 'black' : '';
+    b.onmousedown = () => { b.classList.add('held'); sendMidi(0x90, n, Number(document.getElementById('midivel').value)); };
+    const up = () => { if (b.classList.contains('held')) { b.classList.remove('held'); sendMidi(0x80, n, 0); } };
+    b.onmouseup = up; b.onmouseleave = up;
+    keys.appendChild(b);
+  }
+}
+
+function sendMidi(type, d1, d2, channel, source) {
+  const src = source ?? Number(document.getElementById('midisrc').value);
+  const ch = channel ?? Number(document.getElementById('midich').value);
+  const n = E.emu_deliver_midi(src, type, ch, d1, d2);
+  document.getElementById('accepted').textContent = n;
+}
+
+const lastNote = [];
+function render() {
+  document.getElementById('simtime').textContent = (now / 1e6).toFixed(3);
+  document.getElementById('tickcount').textContent = tickCount;
+  for (let j = 0; j < C.GPIO_N; j++) {
+    const i = document.getElementById(`ji${j}`), o = document.getElementById(`jo${j}`);
+    if (i) i.classList.toggle('on', !!E.emu_jack_input(j));
+    if (o) o.classList.toggle('on', !!E.emu_jack_output(j));
+    const card = document.querySelector(`.jack[data-jack="${j}"]`);
+    if (card) { const isOut = E.emu_jack_mode(j) === 2; if (card.classList.contains('out') !== isOut) { buildJacks(); break; } }
+  }
+  const gm = E.emu_gate_buses();
+  for (let b = 0; b < C.N_GATE_BUS; b++) document.getElementById(`gb${b}`).classList.toggle('on', !!((gm >> b) & 1));
+  for (let b = 0; b < C.N_NOTE_BUS; b++) {
+    const n = E.emu_note_count(b);
+    document.getElementById(`nc${b}`).textContent = n;
+    document.getElementById(`no${b}`).textContent = E.emu_note_overflows(b);
+    if (n) { const e = E.emu_note_event(b, n - 1) >>> 0; lastNote[b] = `${MIDI_TYPES[e >>> 24] || (e >>> 24).toString(16)} ch${(e >> 16) & 0xFF} ${(e >> 8) & 0xFF} ${e & 0xFF}`; }
+    document.getElementById(`nl${b}`).textContent = lastNote[b] || '';
+  }
+  for (let b = 0; b < C.N_CV_BUS; b++) document.getElementById(`cv${b}`).textContent = E.emu_cv(b);
+  const tb = document.querySelector('#midilog tbody');
+  if (tb.childElementCount !== midiLog.length || (midiLog.length && tb.lastChild.dataset.t !== String(midiLog[midiLog.length - 1].t))) {
+    tb.innerHTML = '';
+    for (const m of midiLog.slice(-200)) {
+      const targets = Object.entries(MIDI_PORTS).filter(([, v]) => m.target & v).map(([k]) => k).join('+') || m.target;
+      const tr = document.createElement('tr'); tr.dataset.t = m.t;
+      tr.innerHTML = `<td>${(m.t / 1e6).toFixed(4)}</td><td>${targets}</td><td>${MIDI_TYPES[m.type] || '0x' + m.type.toString(16)}</td><td>${m.channel}</td><td>${m.d1}</td><td>${m.d2}</td>`;
+      tb.appendChild(tr);
+    }
+    tb.parentElement.scrollTop = tb.parentElement.scrollHeight;
+  }
+  drawScope();
+}
+
+// ---------------------------------------------------------------------------
+// Web MIDI (optional): a real controller into deliver_midi(), the firmware's
+// output to a real port. Chrome/Edge; needs https:// or localhost or file://.
+// ---------------------------------------------------------------------------
+let webMidiOut = null;
+function webMidiForward(type, d1, d2, channel) {
+  if (!webMidiOut) return;
+  try { webMidiOut.send([type | ((channel - 1) & 0x0F), d1 & 0x7F, d2 & 0x7F]); } catch (e) { /* ignore */ }
+}
+document.getElementById('webmidi-connect').onclick = async () => {
+  if (!navigator.requestMIDIAccess) { document.getElementById('status').textContent = 'Web MIDI is not available in this browser'; return; }
+  const access = await navigator.requestMIDIAccess({ sysex: false });
+  const inSel = document.getElementById('webmidi-in'), outSel = document.getElementById('webmidi-out');
+  for (const p of access.inputs.values()) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; inSel.appendChild(o); }
+  for (const p of access.outputs.values()) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; outSel.appendChild(o); }
+  inSel.onchange = () => {
+    for (const p of access.inputs.values()) p.onmidimessage = null;
+    const p = access.inputs.get(inSel.value);
+    if (p) p.onmidimessage = ev => { const [s, d1, d2] = ev.data; if (s < 0xF0) sendMidi(s & 0xF0, d1 || 0, d2 || 0, (s & 0x0F) + 1); };
+  };
+  outSel.onchange = () => { webMidiOut = access.outputs.get(outSel.value) || null; };
+};
+
+// ---------------------------------------------------------------------------
+document.getElementById('load').onclick = loadFromTextarea;
+document.getElementById('run').onclick = () => { running = !running; lastFrame = 0; document.getElementById('run').textContent = running ? 'Pause' : 'Run'; };
+document.getElementById('step').onclick = () => runPasses(1);
+document.getElementById('step100').onclick = () => runPasses(100);
+document.getElementById('resettime').onclick = () => { now = 0; nextTickAt = 0; tickCount = 0; };
+document.getElementById('tick').onclick = () => E.emu_tick(++tickCount);
+document.getElementById('sendcc').onclick = () => sendMidi(0xB0, Number(document.getElementById('ccnum').value), Number(document.getElementById('ccval').value));
+document.getElementById('clearlog').onclick = () => { midiLog.length = 0; };
+
+loadModule().then(() => {
+  readConstants();
+  document.getElementById('version').textContent = cstr(E.emu_version());
+  document.getElementById('status').textContent = `${ALGOS.length} algorithms in the registry`;
+  buildRegistry();
+  loadFromTextarea();
+  requestAnimationFrame(frame);
+}).catch(err => {
+  document.getElementById('status').textContent = String(err.message || err);
+  document.getElementById('status').className = 'err';
+});
+</script>
+</body>
+</html>

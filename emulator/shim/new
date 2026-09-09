@@ -1,0 +1,18 @@
+// Freestanding stand-in for the C++ <new> header.
+//
+// The firmware core includes <new> for placement new only (node/node.h, to
+// construct nodes into pool slots). The WebAssembly build is compiled with
+// -nostdinc++ so no standard library headers exist; this file supplies the
+// one declaration the firmware uses. Nothing else from <new> is needed: the
+// firmware never allocates after boot.
+#ifndef MMMC_EMULATOR_SHIM_NEW
+#define MMMC_EMULATOR_SHIM_NEW
+
+#include <stddef.h>
+
+inline void* operator new(size_t, void* place) noexcept { return place; }
+inline void* operator new[](size_t, void* place) noexcept { return place; }
+inline void operator delete(void*, void*) noexcept {}
+inline void operator delete[](void*, void*) noexcept {}
+
+#endif

@@ -5,13 +5,14 @@ PIO := .venv/bin/pio
 FIRMWARE_ENV := teensy41
 VERSION := $(shell cat VERSION)
 
-.PHONY: help setup build test size upload clean distclean
+.PHONY: help setup build test size upload emulator clean distclean
 
 help:
 	@echo "make setup    - install PlatformIO and pre-fetch the toolchains"
 	@echo "make build    - build firmware for $(FIRMWARE_ENV)"
 	@echo "make test     - run the native unit tests"
 	@echo "make size     - report firmware flash and RAM usage"
+	@echo "make emulator - build the browser emulator (needs clang + lld) and smoke-test it"
 	@echo "make upload   - flash an attached Teensy"
 	@echo "make clean    - remove build output"
 	@echo ""
@@ -34,6 +35,12 @@ size: $(PIO)
 
 upload: $(PIO)
 	$(PIO) run -e $(FIRMWARE_ENV) -t upload
+
+# The firmware core compiled to WebAssembly with the browser as the hardware.
+# See emulator/README.md. PlatformIO is not involved: stock clang and lld.
+emulator:
+	emulator/build.sh
+	node emulator/test/smoke.mjs
 
 clean: $(PIO)
 	$(PIO) run -t clean

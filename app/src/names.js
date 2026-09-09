@@ -110,6 +110,19 @@ export function scaleMaskOf(name) {
 // not parse, so the order is spelled out and the comment says where from.
 export const STEP_DIRECTIONS = ['forward', 'reverse', 'pingpong', 'random', 'brownian'];
 
+// Metronome::Division and Metronome::Feel, spelled out for the same reason
+// and in the same order - slowest first - as algorithm/clock/metronome.h. Both
+// enums count from 1, so the index into these arrays is the stored byte minus
+// one; a stored 0 is the descriptor's default, as it is everywhere (param.h).
+//
+// The editor never reads these: it draws the enum from the options the device
+// sends with the parameter. They are here so that a patch *file* can say
+// "1/8" and "triplet" rather than 7 and 3, and `app/test/app.test.mjs` checks
+// them against the module's own option names.
+export const METRONOME_DIVISIONS = ['8 bars', '4 bars', '2 bars', '1 bar',
+                                    '1/2', '1/4', '1/8', '1/16', '1/32', '1/64'];
+export const METRONOME_FEELS = ['straight', 'dotted', 'triplet'];
+
 // MasterClock::Source. Not in a generated enum - master_clock.h is a class
 // body, which the generator deliberately does not parse - so the values are
 // spelled out and the comment says where they come from.

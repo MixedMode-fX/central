@@ -17,9 +17,9 @@
 //   * **MIDI thru.** Every transport in, every transport out, omni. Plug a
 //     keyboard into either DIN port or USB and it plays whatever is
 //     downstream, immediately.
-//   * **A metronome on jack 1.** The internal clock divided to one pulse per
-//     beat, so a scope, an LED or an envelope generator on jack 1 shows the
-//     module is alive and running at CLOCK_DEFAULT_BPM.
+//   * **A metronome on jack 1.** A `Metronome` at a quarter note, so a scope,
+//     an LED or an envelope generator on jack 1 shows the module is alive and
+//     running at CLOCK_DEFAULT_BPM.
 //   * **A sustain pedal on jack 8.** The one jack whose default direction
 //     cannot be guessed wrong: an unpatched input reads as no gate.
 //

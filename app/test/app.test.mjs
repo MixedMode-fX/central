@@ -26,7 +26,7 @@ import * as codec from '../src/codec.js';
 import { Library, toBase64, fromBase64, ago } from '../src/storage.js';
 import { fromPatchJson, toPatchJson } from '../src/patchjson.js';
 import { validate } from '../src/validate.js';
-import { SCALES, scaleMaskOf } from '../src/names.js';
+import { SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS } from '../src/names.js';
 import { EXAMPLES } from '../src/examples.js';
 import { EmbeddedModule } from '../src/module.js';
 import { slider } from '../src/views.js';
@@ -434,6 +434,25 @@ await test('the scale names name the firmware\'s scales', async () => {
     assert.equal(scaleMaskOf(scale.label), E.emu_scale_mask(scale.value),
                  `${scale.label} (${scale.key}) is not the mask the firmware uses`);
   }
+});
+
+// The enums that live in a class body rather than in a generated header are
+// spelled out in names.js, so nothing but a test keeps them honest. These are
+// the words a patch *file* is written in - "1/8", "triplet", "pingpong" - so a
+// division renamed or reordered in the firmware would silently repoint every
+// file that names one.
+await test('the note values and directions name the firmware\'s own options', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const optionsOf = (algorithm, param) =>
+    device.describeParam(device.algorithms.find((d) => d?.name === algorithm).id, param).options;
+
+  assert.deepEqual(optionsOf('Metronome', 0), METRONOME_DIVISIONS,
+                   'Metronome::Division moved under names.js');
+  assert.deepEqual(optionsOf('Metronome', 1), METRONOME_FEELS,
+                   'Metronome::Feel moved under names.js');
+  assert.deepEqual(optionsOf('StepSequencer', 1), STEP_DIRECTIONS,
+                   'StepEngine::Direction moved under names.js');
 });
 
 // --- the slider guard -------------------------------------------------------

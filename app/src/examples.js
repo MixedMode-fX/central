@@ -17,20 +17,20 @@
 
 export const EXAMPLES = {
   'Default patch (main.cpp)': {
-    about: 'What a freshly flashed module runs: the clock divided by 4 ticks pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. It is already running: watch jack 1 under play.',
+    about: 'What a freshly flashed module runs: a metronome at a quarter note pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. It is already running: watch jack 1 under play.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 8, dir: 'in', bus: 0 }],
-      nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }, { algo: 'ClockDiv', out: [1], params: [0, 4] }],
+      nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }, { algo: 'Metronome', out: [1], seq: { division: '1/4' } }],
       midi_out: [{ targets: ['ALL'], channel: 0, bus: 0 }],
     },
   },
-  'Metronome: quarters on jack 1, bars on jack 2, and as notes': {
-    about: 'Two dividers off the master clock: /24 is one pulse per beat, /96 one per bar. Both also become notes so you can hear them. Enable audio under play, then change the tempo while it runs.',
+  'Metronome: quarters on jack 1, eighth-note triplets on jack 2, and as notes': {
+    about: 'Two metronomes off the master clock, set by note value rather than by divisor: 1/4 is the beat, and 1/8 triplet is three in the space of two. Both also become notes so you can hear them play against each other. Enable audio under play, then change the tempo \u2014 or either division \u2014 while it runs.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }, { port: 2, dir: 'out', bus: 1 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 24] },
-        { algo: 'ClockDiv', out: [1], params: [0, 96] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/4' } },
+        { algo: 'Metronome', out: [1], seq: { division: '1/8', feel: 'triplet' } },
         { algo: 'GateToNote', in: [0], out: [0], params: [72, 80, 1] },
         { algo: 'GateToNote', in: [1], out: [0], params: [60, 127, 1] },
       ],
@@ -77,24 +77,24 @@ export const EXAMPLES = {
     },
   },
   'Arpeggiator clocked by the module: hold a chord': {
-    about: 'A /6 divider (sixteenths) advances the arpeggiator, up-down over two octaves with 60 ms gates. Enable audio under play and hold two or three keys. Change the tempo while it plays — or turn the hold parameter on and let go of the keys.',
+    about: 'A metronome at a sixteenth advances the arpeggiator, up-down over two octaves with 60 ms gates. Enable audio under play and hold two or three keys. Change the tempo while it plays — or turn the hold parameter on and let go of the keys.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'Arpeggiator', in: [0, 0], out: [1], params: [2, 2, 60, 0] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'In key: a chord voiced from the module\u2019s scale, arpeggiated and held': {
-    about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad (0, 2 and 4 steps of the scale), the arpeggiator holds it, and a /6 divider plays it. Press one key and let go: it keeps running. Change the key under \u201cMIDI\u201d and the whole patch moves.',
+    about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad (0, 2 and 4 steps of the scale), the arpeggiator holds it, and a sixteenth-note metronome plays it. Press one key and let go: it keeps running. Change the key under \u201cMIDI\u201d and the whole patch moves.',
     patch: {
       globals: { scale: 'minor', root: 9 },
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'Chord', in: [0], out: [1], params: [2, 2, 4] },
         { algo: 'Arpeggiator', in: [1, 0], out: [2], params: [0, 2, 60, 0, 1] },
       ],
@@ -102,11 +102,11 @@ export const EXAMPLES = {
     },
   },
   'Euclidean drums: E(3,8), E(5,8), E(2,8) on jacks 1-3 and as notes': {
-    about: 'One /6 divider advances three Euclidean sequencers in lock-step. Each fires a jack and a note (36, 42, 38). Enable audio under play; jacks 1 to 3 light in turn, and the three lanes are audible as a kit.',
+    about: 'One sixteenth-note metronome advances three Euclidean sequencers in lock-step. Each fires a jack and a note (36, 42, 38). Enable audio under play; jacks 1 to 3 light in turn, and the three lanes are audible as a kit.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 2 }, { port: 3, dir: 'out', bus: 3 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'EuclidianSequencer', in: [0], out: [1], params: [8, 0, 0, 3, 0] },
         { algo: 'EuclidianSequencer', in: [0], out: [2], params: [8, 0, 0, 5, 2] },
         { algo: 'EuclidianSequencer', in: [0], out: [3], params: [8, 0, 0, 2, 4] },
@@ -118,11 +118,11 @@ export const EXAMPLES = {
     },
   },
   'Step sequencer with probability: 16 steps, 70 % of them get through': {
-    about: 'A 16-step pattern, written as hits, on a /6 divider, turned into notes and thinned by Probability. Jack 1 shows the full pattern, the notes what survived — and the step grid on the patch tab outlines the step being played.',
+    about: 'A 16-step pattern, written as hits, at a sixteenth, turned into notes and thinned by Probability. Jack 1 shows the full pattern, the notes what survived — and the step grid on the patch tab outlines the step being played.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'StepSequencer', in: [0], out: [1], seq: { hits: 'x.x.x..xx.x..x.x' } },
         { algo: 'GateToNote', in: [1], out: [0], params: [60, 100, 1] },
         { algo: 'Probability', in: [0], out: [1], params: [70, 0] },
@@ -131,12 +131,12 @@ export const EXAMPLES = {
     },
   },
   'Note sequencer: a bass line in C minor, transposed from the keyboard': {
-    about: 'Degrees, not notes: an 8-step line in C minor on a /6 divider, with a rest, an accent, a two-step note and a tie. Enable audio under play, then play a key: the root inlet re-pitches the running line and the note lane on the patch tab, without changing the stored degrees.',
+    about: 'Degrees, not notes: an 8-step line in C minor at a sixteenth, with a rest, an accent, a two-step note and a tie. Enable audio under play, then play a key: the root inlet re-pitches the running line and the note lane on the patch tab, without changing the stored degrees.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'NoteSequencer', in: [0, null, 0], out: [1], seq: { scale: 'minor', root: 48, channel: 1,
             steps: [0, { deg: 0, accent: true }, '-', 3, { deg: 5, len: 2 }, '-', { deg: 4, vel: 80 }, '='] } },
       ],
@@ -148,7 +148,7 @@ export const EXAMPLES = {
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 24] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/4' } },
         { algo: 'PolySequencer', in: [0], out: [1], seq: { scale: 'major', root: 60, gate: 60,
             steps: [{ deg: [0, 2, 4, 7] }, { deg: [3, 5, 7], vel: [90, 70, 70] }, { deg: [4, 6, 8, 11], vel: [100, 80, 80, 60] }, { deg: [3, 5, 7, 9], len: 1, accent: true }] } },
       ],
@@ -160,7 +160,7 @@ export const EXAMPLES = {
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 2 }, { port: 3, dir: 'out', bus: 3 }, { port: 4, dir: 'out', bus: 4 }, { port: 5, dir: 'in', bus: 5 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'DrumSeqGate', in: [0, 5], out: [1, 2, 3, 4, null, null, null, null], seq: { length: 16,
             lanes: ['x...x...x...x...', '....x.......x...', { hits: 'x.x.x.x.x.x.', length: 12 }, 'x.......x.......'] } },
       ],
@@ -171,7 +171,7 @@ export const EXAMPLES = {
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'DrumSeqMidi', in: [0], out: [1], seq: { length: 16, gate: 20, lanes: [
             { note: 36, hits: 'X...x..X..x.X...' },
             { note: 38, hits: '....X.......X..o' },
@@ -183,22 +183,22 @@ export const EXAMPLES = {
     },
   },
   'Random sequencer: pulse jack 2 to shred a new pattern': {
-    about: 'A 16-step random pattern at 40 % density on a /6 divider, to jack 1 and to a note. Tap jack 2 under play to draw a new pattern; hold jack 3 to reset it to step 1.',
+    about: 'A 16-step random pattern at 40 % density at a sixteenth, to jack 1 and to a note. Tap jack 2 under play to draw a new pattern; hold jack 3 to reset it to step 1.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'in', bus: 5 }, { port: 3, dir: 'in', bus: 6 }],
       nodes: [
-        { algo: 'ClockDiv', out: [0], params: [0, 6] },
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'RandomSequencer', in: [0, 6, 5], out: [1], params: [16, 0, 0, 40, 0] },
         { algo: 'GateToNote', in: [1], out: [0], params: [48, 100, 1] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
-  'Divider chain: /24 on jack 1, then /4 of that on jack 2': {
-    about: 'The second ClockDiv has its inlet connected, so it divides rising edges of the first instead of the master count. Jack 2 pulses once per bar.',
+  'Divider chain: a beat on jack 1, then /4 of that on jack 2': {
+    about: 'The ClockDiv has its inlet connected, so it divides rising edges of the metronome instead of the master count \u2014 which is how a rate this module does not name by note value still gets built. Jack 1 is the beat, jack 2 pulses once per bar.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }, { port: 2, dir: 'out', bus: 1 }],
-      nodes: [{ algo: 'ClockDiv', out: [0], params: [0, 24] }, { algo: 'ClockDiv', in: [0], out: [1], params: [0, 4] }],
+      nodes: [{ algo: 'Metronome', out: [0], seq: { division: '1/4' } }, { algo: 'ClockDiv', in: [0], out: [1], params: [0, 4] }],
     },
   },
   'Logic: AND, OR, XOR of jacks 1 and 2 on jacks 3-5, NOT of jack 1 on jack 6': {

@@ -7,7 +7,7 @@ static const Domain IN3[3] = {Domain::Gate, Domain::Gate, Domain::Gate};
 static const Domain OUT[1] = {Domain::Gate};
 
 // Parameter descriptors (#20). Every gate sequencer shares the same header
-// and the same per-step probability run; the four differ only in params[3..7].
+// and the same per-step probability run; the three differ only in params[3..7].
 // Each descriptor is therefore the shared header, the subclass's own block
 // padded out to params[7] with reserved bytes, and the shared probability
 // run - so the table covers every index and an editor is never handed a
@@ -33,12 +33,6 @@ static const ParamDescriptor RANDOM_PARAMS[2] = {
 // The shared header, the subclass's own params[3..7] (padded out with
 // reserved bytes so the table covers every index), then the shared
 // probability run.
-static const ParamGroup METRONOME_GROUPS[3] = {
-    {0, 1, 3, GateSequencer::HEADER},
-    {3, 5, 1, GateSequencer::RESERVED},
-    {GateSequencer::PROBABILITY_BASE, MAX_SEQUENCE_LEN, 1, GateSequencer::PROBABILITY},
-};
-
 static const ParamGroup STEP_GROUPS[4] = {
     {0, 1, 3, GateSequencer::HEADER},
     {3, 1, 4, STEP_PATTERN},
@@ -61,18 +55,13 @@ static const ParamGroup RANDOM_GROUPS[4] = {
 };
 
 // Every gate sequencer takes the per-step probability block at params[8..],
-// so n_params is the same for all four whatever their own params[3..7] use.
+// so n_params is the same for all three whatever their own params[3..7] use.
 // Inlet and outlet names, so a patch says what each connection *means*
 // rather than "in 0" and "in 1". Reset is the second inlet in every
 // sequencer, which is the shape being able to read the names makes visible.
 static const char* const SEQ_IN_NAMES[2] = {"advance", "reset"};
 static const char* const RANDOM_IN_NAMES[3] = {"advance", "reset", "shred"};
 static const char* const SEQ_OUT_NAMES[1] = {"trigger"};
-
-const AlgorithmDescriptor Metronome::descriptor = {
-    ALGO_METRONOME, "Metronome", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(Metronome), false, construct_node<Metronome>,
-    METRONOME_GROUPS, 3, SEQ_IN_NAMES, SEQ_OUT_NAMES,
-    "One trigger per advance edge. A GateSequencer of length one: the divider sets the rate." };
 
 const AlgorithmDescriptor StepSequencer::descriptor = {
     ALGO_STEP_SEQ, "StepSequencer", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(StepSequencer), false, construct_node<StepSequencer>,

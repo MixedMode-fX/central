@@ -15,6 +15,8 @@
 #include "patch/patch_store.h"
 #include "patch/patch_manager.h"
 #include "console/console.h"
+#include "protocol/sysex_handler.h"
+#include "hal/midi_types.h"
 #include "version.h"
 
 static const uint8_t GPIO_PIN_TABLE[GPIO_N] = {GPIO_PINS};
@@ -33,6 +35,11 @@ static StatusLeds leds(led_driver);
 static PatchStore store(eeprom);
 static PatchManager patches(master, store, leds);
 static Console console(console_io, patches, master, store, leds);
+
+// The patch protocol (#11). Not a node, not reachable from a bus: with no
+// button to hold at power-on, a patch that could take this down would leave
+// reflashing over USB as the only way to recover.
+static SysexHandler protocol(patches, master, store, leds, midi_out);
 
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
@@ -75,12 +82,19 @@ void loop(){
     const uint32_t now = micros();
 
     // 1. transports in: parse and enqueue, nothing more.
-    mm_midi_read(midi_in_queue);
+    mm_midi_read(midi_in_queue, protocol);
 
     // 2. hand every queued message to the ports that want it. Realtime
     //    messages go to the clock instead of onto a bus (#4, #5).
     SourcedMidiEvent in;
-    while (midi_in_queue.pop(in)) master.deliver_midi(in.source, in.event, now);
+    while (midi_in_queue.pop(in)){
+        // A Program Change the module is listening for recalls a preset and
+        // is consumed; every other one carries on to the graph, so a Program
+        // Change meant for a downstream synth is not silently swallowed.
+        if (in.event.type == MIDI_PROGRAM_CHANGE &&
+            protocol.program_change(in.source, in.event.channel, in.event.data1, now)) continue;
+        master.deliver_midi(in.source, in.event, now);
+    }
 
     // 3. one evaluation pass, which also collects the clock's subticks.
     master.pass(now);
@@ -101,5 +115,6 @@ void loop(){
     leds.set_clock_running(master.clock().running());
     leds.service(now);
     console.service(now);
+    protocol.service(now);
     patches.service(now);
 }

@@ -56,15 +56,23 @@ void mm_midi_setup(){
 // not be able to hold the loop inside one parser for ever.
 static const uint8_t MAX_MESSAGES_PER_TRANSPORT = 16;
 
+// SysEx is pulled out here rather than queued: MidiEvent has nowhere to put a
+// variable-length payload, and the control plane must not share a buffer with
+// musical traffic that a busy note stream could fill (#11).
 #define MM_DRAIN(parser, source_bit) \
     for (uint8_t i = 0; i < MAX_MESSAGES_PER_TRANSPORT && parser.read(); i++){ \
+        if ((uint8_t)parser.getType() == midi::SystemExclusive){ \
+            sysex.deliver_sysex((source_bit), parser.getSysExArray(), \
+                                (uint16_t)parser.getSysExArrayLength()); \
+            continue; \
+        } \
         queue.push((source_bit), MidiEvent{(uint8_t)parser.getType(), \
                                            (uint8_t)parser.getChannel(), \
                                            (uint8_t)parser.getData1(), \
                                            (uint8_t)parser.getData2()}); \
     }
 
-void mm_midi_read(MidiInputQueue& queue){
+void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex){
     #ifdef MMMC_USB_HOST
     mm_usb.Task();
     MM_DRAIN(midi_hosted, mmMIDI_HOST_1)
@@ -75,7 +83,13 @@ void mm_midi_read(MidiInputQueue& queue){
     // the message came in on.
     for (uint8_t i = 0; i < MAX_MESSAGES_PER_TRANSPORT && usbMIDI.read(); i++){
         const uint8_t cable = usbMIDI.getCable() & 0x03;
-        queue.push((uint8_t)(mmMIDI_USB_0 << cable),
+        const uint8_t source = (uint8_t)(mmMIDI_USB_0 << cable);
+        if ((uint8_t)usbMIDI.getType() == usbMIDI.SystemExclusive){
+            sysex.deliver_sysex(source, usbMIDI.getSysExArray(),
+                                (uint16_t)usbMIDI.getSysExArrayLength());
+            continue;
+        }
+        queue.push(source,
                    MidiEvent{(uint8_t)usbMIDI.getType(),
                              (uint8_t)usbMIDI.getChannel(),
                              (uint8_t)usbMIDI.getData1(),
@@ -120,4 +134,33 @@ void mm_send(uint8_t target, uint8_t type, uint8_t data1, uint8_t data2, uint8_t
     if ((target & mmMIDI_HOST_1) == mmMIDI_HOST_1) midi_hosted.send(type, data1, data2, channel);
     #endif
 
+}
+
+// One complete message, F0 to F7 inclusive, to every port in the mask. Each
+// library wants it slightly differently: the Arduino MIDI Library takes the
+// array with a flag saying the framing bytes are already there.
+void mm_send_sysex(uint8_t target, const uint8_t* data, uint16_t length){
+    if (data == nullptr || length < 2) return;
+
+    #ifdef MIDI_INTERFACE
+    for (uint8_t cable = 0; cable < 4; cable++){
+        if (target & (uint8_t)(mmMIDI_USB_0 << cable)) usbMIDI.sendSysEx(length, data, true, cable);
+    }
+    #endif
+
+    #ifdef SERIAL_MIDI_1
+    if (target & mmMIDI_SERIAL_1) midi1.sendSysEx(length, data, true);
+    #endif
+
+    #ifdef SERIAL_MIDI_2
+    if (target & mmMIDI_SERIAL_2) midi2.sendSysEx(length, data, true);
+    #endif
+
+    #ifdef SERIAL_MIDI_3
+    if (target & mmMIDI_SERIAL_3) midi3.sendSysEx(length, data, true);
+    #endif
+
+    #ifdef MMMC_USB_HOST
+    if (target & mmMIDI_HOST_1) midi_hosted.sendSysEx(length, data, true);
+    #endif
 }

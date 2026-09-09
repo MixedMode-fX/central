@@ -32,11 +32,31 @@ extern "C" __attribute__((import_module("env"), import_name("mmmc_midi_send")))
 void mmmc_midi_send(uint32_t target, uint32_t type, uint32_t d1, uint32_t d2, uint32_t channel);
 
 // IMidiOut that hands every message to JavaScript with its target mask.
+//
+// SysEx replies are buffered rather than handed over one call at a time: the
+// page reads them out through emu_api, the same way it reads jack levels, so
+// the emulator needs no second import and a patch editor running against it
+// sees exactly the bytes the firmware would put on the wire.
 class WebMidiOut : public IMidiOut {
     public:
+        static constexpr uint32_t SYSEX_BUFFER = 4096;
+
+        WebMidiOut() : sysex_bytes(), sysex_used(0), sysex_dropped(0) {}
+
         void send(uint8_t target, uint8_t type, uint8_t d1, uint8_t d2, uint8_t channel) override {
             mmmc_midi_send(target, type, d1, d2, channel);
         }
+
+        void send_sysex(uint8_t, const uint8_t* data, uint16_t length) override {
+            if (sysex_used + length > SYSEX_BUFFER){ sysex_dropped++; return; }
+            for (uint16_t i = 0; i < length; i++) sysex_bytes[sysex_used++] = data[i];
+        }
+
+        void drain_sysex(){ sysex_used = 0; }
+
+        uint8_t sysex_bytes[SYSEX_BUFFER];
+        uint32_t sysex_used;
+        uint32_t sysex_dropped;
 };
 
 #endif

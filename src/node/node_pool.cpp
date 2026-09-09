@@ -29,3 +29,16 @@ void NodePool::unload_all(){
         descriptors[n] = nullptr;
     }
 }
+
+// One slot, rebuilt in place. The slot is uniform, so the new algorithm need
+// not be the old one; what does not change is any other node's state, which
+// is the whole point of an incremental edit (#11).
+Node* NodePool::replace(uint8_t index, const NodeConfig& config){
+    if (index >= n) return nullptr;
+    const AlgorithmDescriptor* d = registry::find(config.algorithm_id);
+    if (d == nullptr) return nullptr;
+    nodes[index]->~Node();
+    nodes[index] = d->construct(slots[index], config);
+    descriptors[index] = d;
+    return nodes[index];
+}

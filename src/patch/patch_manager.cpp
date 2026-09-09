@@ -14,21 +14,6 @@ void PatchManager::push_globals(){
     mm.clock().set_cv_ppqn(live_globals.cv_ppqn);
 }
 
-// After a load the nodes have applied their own zero-means-default rules, so
-// the active image is refreshed from what each node is actually running.
-// Then a save round-trips to the same graph, and a dump reports the running
-// value rather than the byte the patch happened to carry (#20).
-void PatchManager::refresh_active_params(){
-    for (uint8_t n = 0; n < mm.node_count(); n++){
-        const AlgorithmDescriptor* d = mm.node_descriptor(n);
-        if (d == nullptr) continue;
-        for (uint16_t p = 0; p < d->n_params && p < N_PARAM; p++){
-            uint8_t v = 0;
-            if (mm.get_node_param(n, p, v)) live.nodes[n].params[p] = v;
-        }
-    }
-}
-
 ApplyError PatchManager::commit(uint32_t now_us){
     // Validated whole before anything is touched: on failure the running
     // patch keeps running and nothing has been half-applied.
@@ -41,7 +26,6 @@ ApplyError PatchManager::commit(uint32_t now_us){
     live = stage;
     live_globals = stage_globals;
     push_globals();
-    refresh_active_params();
     on_defaults = false;
     leds.set_running_defaults(false);
     store.mark_dirty(now_us);
@@ -97,6 +81,53 @@ ApplyError PatchManager::recall_slot(uint8_t slot, uint32_t now_us){
     if (s == STORE_EMPTY) return error = APPLY_SLOT_EMPTY;
     if (s != STORE_OK) return error = APPLY_SLOT_CORRUPT;
     return apply(p, g, now_us);
+}
+
+ApplyError PatchManager::commit_node(uint8_t node_index, uint32_t now_us){
+    if (node_index >= live.n_nodes) return error = APPLY_INVALID;
+    if (mm.replace_node(node_index, stage.nodes[node_index]) != LOAD_OK){
+        leds.error(now_us);
+        return error = APPLY_INVALID;
+    }
+    live.nodes[node_index] = stage.nodes[node_index];
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
+ApplyError PatchManager::commit_gate_port(uint8_t jack, const GatePortConfig& config, uint32_t now_us){
+    if (jack >= GPIO_N || mm.set_gate_port(jack, config) != LOAD_OK){
+        leds.error(now_us);
+        return error = APPLY_INVALID;
+    }
+    live.gate_ports[jack] = config;
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
+ApplyError PatchManager::commit_midi_in(uint8_t index, const MidiInConfig& config, uint32_t now_us){
+    if (index >= N_MIDI_IN_NODES || mm.set_midi_in(index, config) != LOAD_OK){
+        leds.error(now_us);
+        return error = APPLY_INVALID;
+    }
+    live.midi_in[index] = config;
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
+ApplyError PatchManager::commit_midi_out(uint8_t index, const MidiOutConfig& config, uint32_t now_us){
+    if (index >= N_MIDI_OUT_NODES || mm.set_midi_out(index, config) != LOAD_OK){
+        leds.error(now_us);
+        return error = APPLY_INVALID;
+    }
+    live.midi_out[index] = config;
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
+void PatchManager::set_globals(const GlobalSettings& g, uint32_t now_us){
+    live_globals = g;
+    push_globals();
+    store.mark_dirty(now_us);
 }
 
 ParamError PatchManager::set_param(uint8_t node_index, uint16_t param_index,

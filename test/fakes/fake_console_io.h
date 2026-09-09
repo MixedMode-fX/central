@@ -15,9 +15,9 @@ class FakeConsoleIo : public IConsoleIo {
             in.reserve(4096);
         }
 
-        bool read(uint8_t& out) override {
+        bool read(uint8_t& byte_out) override {
             if (at >= in.size()) return false;
-            out = (uint8_t)in[at++];
+            byte_out = (uint8_t)in[at++];
             return true;
         }
         void write(const char* text) override { out += text; }

@@ -77,6 +77,29 @@ class MixedModeMaster {
         // does not exist.
         bool get_node_param(uint8_t node_index, uint16_t param_index, uint8_t& value_out) const;
 
+        // Incremental edits (#11) -------------------------------------------
+        //
+        // **The state rule**, written down once and relied on everywhere:
+        //
+        //   * A parameter edit (set_node_param) preserves all node state. A
+        //     running sequencer keeps its step position, a divider its phase.
+        //   * A connection edit reconstructs **the node whose connection
+        //     changed, and only that one**: it gets its handover, releases
+        //     what it owns and starts fresh, while every other node in the
+        //     patch keeps its state. Nodes copy their bus indices at
+        //     construction, so a rebind is a reconstruction; making it
+        //     anything else would mean a re-bind seam on all 25 algorithms.
+        //   * A port edit reconstructs nothing at all - port nodes are
+        //     configured, not constructed.
+        //   * A full load() reconstructs everything.
+        //
+        // Each of these validates before it changes anything, so a rejected
+        // edit leaves the running graph exactly as it was.
+        LoadError replace_node(uint8_t index, const NodeConfig& config);
+        LoadError set_gate_port(uint8_t jack, const GatePortConfig& config);
+        LoadError set_midi_in(uint8_t index, const MidiInConfig& config);
+        LoadError set_midi_out(uint8_t index, const MidiOutConfig& config);
+
         // Transport input path (#5): offers an incoming message to every
         // MidiInPort. Returns how many accepted it. System messages never
         // reach a bus: the realtime ones (clock, start, stop, continue) are

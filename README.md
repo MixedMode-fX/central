@@ -621,6 +621,64 @@ configuration path until the SysEx protocol is finished.
 | `save` / `load` / `erase <slot>` | Preset management |
 | `defaults` | Back to the built-in patch |
 
+## The patch protocol (SysEx)
+
+Everything the console can do, a host can do over SysEx — and a few things it
+cannot. The wire format *is* the patch format: a bulk transfer carries exactly
+the bytes the EEPROM stores, so a patch that round-trips through the store
+round-trips over the wire byte for byte, and there is no second
+representation to drift.
+
+Framing is `F0 7D <device> <command> <version> … F7`. `0x7D` is the MIDI
+specification's non-commercial manufacturer ID: **it must never ship in a
+product**, and a real ID from the MIDI Association is a decision for whoever
+ships hardware. The version byte is in every message, not just a handshake, so
+an older editor talking to newer firmware is refused per message instead of
+getting half a transfer in first. Binary payloads are 7-in-8 packed, so every
+byte on the wire is `<= 0x7F`.
+
+**Discovery.** The module answers the standard Universal identity request
+(`F0 7E <dev> 06 01 F7`) and blinks both LEDs, so an editor finds it among the
+host's ports and a user with two modules can see which one answered. It then
+reports its capabilities (`N_NODE`, bus counts per domain, `MAX_IN`/`MAX_OUT`,
+`N_PARAM`, slot count and size) and enumerates every algorithm and every
+parameter descriptor straight off the compiled table — so an algorithm added
+to the firmware appears in an editor with no editor change, and a hardcoded
+list cannot silently drift.
+
+**Two tiers of write.** A bulk transfer is chunked, with a sequence number and
+a checksum per chunk, and accumulates into a staging buffer: the live graph is
+untouched until the last chunk has arrived and the whole image has passed the
+magic, version, CRC and validator checks. An incremental edit is one message
+changing one field — *node 4, inlet 0, now reads bus 6* — which under the bus
+model is one byte, with no re-sort, no graph rebuild and no cycle re-check.
+
+**What survives a change**, written down once because it is the part that
+bites:
+
+| Change | What is reconstructed |
+|---|---|
+| A parameter | Nothing. A running sequencer keeps its step position, a divider its phase. |
+| A connection | Only the node whose connection changed. It gets its handover — every note it owns is released — and starts fresh; every other node keeps its state. |
+| A port | Nothing. Port nodes are configured, not constructed. |
+| A whole patch | Everything. Sequencers restart, dividers re-phase onto the master count. |
+
+**Program Change recall** is **off by default**, and both the listening
+channel and the port are configurable. Otherwise a Program Change intended for
+a downstream synth silently switches the user's patch, which would be the most
+likely field complaint in the whole feature. A recall can be immediate,
+quantised to the next beat, or quantised to the next bar (four beats); with
+the clock stopped it is immediate, because a recall that never happens is
+worse than one that glitches. The module announces a recall to the host, so an
+editor follows along without polling.
+
+**A bad patch cannot lock the module out.** The handler is not a node, holds no
+bus index, and nothing a patch can express reaches it. A malformed transfer
+never touches the active patch, a partial one is abandoned on a timeout, and
+the test for all of it is to send garbage — an unknown command, a chunk from
+nowhere, a bad checksum, a lost chunk, a patch that fails validation — and
+then a good patch, and watch the good one land.
+
 ## Still open
 
 **The KeyMech header is undocumented.** `SERIAL_KEYMECH` on `Serial8` with

@@ -77,6 +77,18 @@ class PatchManager {
         ApplyError save_slot(uint8_t slot);
         ApplyError recall_slot(uint8_t slot, uint32_t now_us);
 
+        // Incremental edits (#11). Each validates and applies the smallest
+        // thing that can change - see the state rule in master.h - then
+        // mirrors the result into the active image so a dump or a save
+        // reports what is running. On failure nothing changes.
+        ApplyError commit_node(uint8_t node_index, uint32_t now_us);
+        ApplyError commit_gate_port(uint8_t jack, const GatePortConfig& config, uint32_t now_us);
+        ApplyError commit_midi_in(uint8_t index, const MidiInConfig& config, uint32_t now_us);
+        ApplyError commit_midi_out(uint8_t index, const MidiOutConfig& config, uint32_t now_us);
+        // Globals only: no node is reconstructed, so a tempo change cannot
+        // restart a sequencer.
+        void set_globals(const GlobalSettings& globals, uint32_t now_us);
+
         // One live parameter write (#20), mirrored into the active patch
         // image so a save or a dump reports what is running. Marks the store
         // dirty rather than writing: a knob sweep must not cost flash.
@@ -85,7 +97,15 @@ class PatchManager {
         // Once per main loop: the debounced autosave.
         void service(uint32_t now_us);
 
-        // The patch that is running. Its parameter bytes track live edits.
+        // The patch that is running: what was loaded, plus every parameter
+        // explicitly written since. It is deliberately **not** refreshed from
+        // every node's get_param after a load. A node's zero-means-default
+        // rule turns a zeroed block into real values - a gate sequencer's 32
+        // unset step probabilities all read back as 100 - and writing those
+        // back would triple the stored image for no change in behaviour,
+        // against a 1 KB preset slot. A host that wants the running value
+        // asks for it (#11's GET_PARAM), which is honest per parameter; what
+        // is stored is what reproduces this graph.
         const Patch& active() const { return live; }
         const GlobalSettings& globals() const { return live_globals; }
         // The buffer a caller fills before commit(). Pre-loaded with the
@@ -100,7 +120,6 @@ class PatchManager {
 
     private:
         void push_globals();
-        void refresh_active_params();
 
         MixedModeMaster& mm;
         PatchStore& store;

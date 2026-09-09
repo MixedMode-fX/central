@@ -165,22 +165,28 @@ with no controller present, and `.syx` export is a first-class path.
 there is no cable to plug in, so a phone is a complete app — and the only one
 iOS can have. Every control is finger-sized, every numeric parameter has a
 number field below its slider (a slider cannot hit a value, and on a touch
-screen a 1px drag is a whole step of a 255-wide range), and anything that
-cannot shrink — a 32-step lane, the bindings table — scrolls inside its own box
-rather than pushing the page sideways.
+screen a 1px drag is a whole step of a 255-wide range), a sequencer's steps
+wrap onto as many rows as they need rather than running off the side, and
+anything that genuinely cannot wrap — the bindings table — scrolls inside its
+own box rather than pushing the page sideways.
 
 Two things that takes, which are not obvious:
 
 * **A grid or flex child is `min-width: auto`**, meaning "at least as wide as
-  what is inside me". A 32-step lane is 925px of inside, so without a
-  `min-width: 0` on every box between the lane and the page, that width
+  what is inside me". A 32-step lane on one line is 925px of inside, so without
+  a `min-width: 0` on every box between the lane and the page, that width
   propagates out through the node card and past the screen — where the page's
   `overflow-x: hidden` clips it. The lane does not scroll: it and half the card
-  around it are simply unreachable. Every lane of a pattern lives in *one*
-  scroller with its name stuck to the left edge, so the lanes stay readable
-  against each other, and the app puts each scroller back where it was after a
-  render, because the page is rebuilt on every edit and a pattern that jumps
-  back to step 1 whenever you tap a step cannot be written on a phone.
+  around it are simply unreachable.
+
+  On a phone a lane does not run off the side at all: it **wraps**, eight steps
+  to a row so the break always falls where a bar line would, sixteen on a
+  tablet, and the whole pattern on one line only where one line fits. A step
+  you have to scroll to is a step you tap by mistake. Where the pattern does go
+  on one line, every lane shares *one* scroller with its name stuck to the left
+  edge, so the lanes stay readable against each other — and the app puts each
+  scroller back where it was after a render, because the page is rebuilt on
+  every edit.
 * **A native range input takes any touch that lands on it**: the value jumps to
   the finger, the page then scrolls under it, and the gesture ends by writing a
   value nobody chose. So a touch has to claim a slider before it may move it —

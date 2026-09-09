@@ -18,7 +18,10 @@
          propagates out through the node card and past the screen, where the
          overflow-x: hidden below *clips* it: the lane does not scroll in its
          box, it is simply unreachable, and so is half the card around it;
-       * anything that cannot shrink - a step grid, a bindings table - lives in
+       * a pattern wraps onto as many rows as it needs rather than running off
+         the side: a step you have to scroll to is a step you tap by mistake.
+         Anything that genuinely cannot wrap - a bindings table, and a lane on
+         a screen wide enough to hold the whole pattern on one line - lives in
          its own overflow-x container;
        * controls are at least 2.75rem tall, which is a finger rather than a
          mouse pointer;
@@ -33,9 +36,9 @@
   }
   * { box-sizing: border-box; }
   /* The children of every grid and flex container in this page, allowed to be
-     narrower than their contents. Anything that then does not fit scrolls in
-     its own box - a lane, a table - which is the only shape a 32-step pattern
-     can have on a phone. */
+     narrower than their contents. Anything that then does not fit wraps, or
+     scrolls in its own box - which is the difference between a card that fits
+     the screen and one that is clipped off the side of it. */
   .nodes > *, .ports > *, .port-group > *, .params > *, .fields > *, .jacks > *,
   .jack-cards > *, .routes > *, .slots > *, .saved-list > *, .lane-row > *,
   .row > *, .grid > * { min-width: 0; }
@@ -261,21 +264,29 @@
   /* --- grids --- */
   .grid { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .8rem; }
   .grid-title { color: var(--dim); font-size: .8rem; margin-bottom: .4rem; }
-  /* Every lane of a pattern in one scroller, so they stay in step with each
-     other, and the lane names ride along at the left edge rather than
-     disappearing off it. `width: max-content` on the rows is what gives the
-     sticky name something to stick to. */
-  .lanes { display: grid; gap: .3rem; width: max-content; min-width: 100%; }
-  .lane-row { display: flex; gap: .4rem; align-items: center; width: max-content; }
-  .lane-name {
-    position: sticky; left: 0; z-index: 1; flex: none;
-    width: 5rem; padding-right: .3rem; background: var(--panel);
-    color: var(--dim); font-size: .72rem; line-height: 1.25;
+  /* On a phone a lane *wraps*; it does not scroll. Thirty-two steps in a row
+     is four screens wide, and a pattern you have to scroll to see is one you
+     cannot read: you lose which step you are on the moment it leaves the
+     screen, and the tap that follows lands on the wrong one. So the steps go
+     on as many rows as they need, eight to a row - two beats of sixteenths,
+     so a wrap always falls where a bar line would - and the lane's name goes
+     above it, because the width spent on a name is width taken from the
+     steps. The cells then take whatever is left rather than staying 26px on a
+     390px screen, which makes them easier to hit as well as to read.
+
+     The wide layout, below, is the one that scrolls: there the whole pattern
+     fits on one line, and one line is better still. */
+  .lanes { display: grid; gap: .55rem; }
+  .lane-row { display: grid; gap: .2rem; }
+  .lane-name { color: var(--dim); font-size: .72rem; line-height: 1.25; }
+  .lane {
+    --per-row: 8;
+    display: grid; grid-template-columns: repeat(var(--per-row), minmax(0, 1fr)); gap: 3px;
   }
-  .lane { display: flex; gap: 3px; width: max-content; padding-bottom: 2px; }
+  .lane.notes { --per-row: 4; }
   .cell {
-    width: 26px; height: 30px; min-height: 0; padding: 0; border-radius: 3px;
-    background: var(--raised); border: 1px solid var(--line); flex: none;
+    height: 30px; min-height: 0; padding: 0; border-radius: 3px;
+    background: var(--raised); border: 1px solid var(--line);
   }
   .cell.on { background: var(--gate); border-color: var(--gate); }
   .cell.beyond { opacity: .3; }
@@ -283,7 +294,7 @@
      being played are the same square: that is what makes this one app. */
   .cell.playing, .note-cell.playing { outline: 2px solid var(--accent); outline-offset: 1px; }
   .note-cell {
-    display: grid; gap: 1px; width: 52px; flex: none; text-align: center;
+    display: grid; gap: 1px; text-align: center;
     border: 1px solid var(--line); border-radius: 3px; padding: 2px; background: var(--raised);
   }
   .note-cell.on { border-color: var(--note); }
@@ -374,12 +385,29 @@
     .log-line { grid-template-columns: 4rem 5rem 1fr auto; }
     .log-where { grid-column: auto; }
     .slots { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
-    .lane-name { width: 8rem; font-size: .8rem; }
+    /* Twice the room, so twice the steps to a row - still a power of two, so
+       still a bar line. */
+    .lane-name { font-size: .8rem; }
+    .lane { --per-row: 16; }
+    .lane.notes { --per-row: 8; }
   }
   @media (min-width: 52rem) {
     .ports { grid-template-columns: 1fr 1fr; gap: 1rem 1.5rem; }
     .routes { grid-template-columns: 1fr 1fr; }
     .port-head { grid-template-columns: 8rem 1fr; align-items: center; gap: .5rem; }
+    /* Wide enough for the whole pattern on one line, which is how a pattern
+       is meant to be read: every lane in one scroller so they stay in step
+       with each other, the names beside them rather than above, and stuck to
+       the left edge so they survive the scroll that is left. */
+    .lanes { width: max-content; min-width: 100%; }
+    .lane-row { display: flex; gap: .4rem; align-items: center; width: max-content; }
+    .lane-name {
+      position: sticky; left: 0; z-index: 1; flex: none;
+      width: 8rem; padding-right: .3rem; background: var(--panel);
+    }
+    .lane { display: flex; gap: 3px; width: max-content; padding-bottom: 2px; }
+    .cell { width: 26px; flex: none; }
+    .note-cell { width: 52px; flex: none; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .tab, button, .chip { transition: border-color .12s ease, background .12s ease, color .12s ease; }

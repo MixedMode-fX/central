@@ -80,11 +80,13 @@ export function slider(attrs, { onInput, onCommit } = {}) {
   return range;
 }
 
-// One horizontal scroller, remembered. A lane is wider than a phone - 32 steps
-// is several screens of it - so it scrolls inside its own box rather than
-// widening the page; and because the page is rebuilt wholesale on every edit,
-// the box has to be told where it was, or toggling step 20 would scroll the
-// pattern back to step 1 and put the next step off the screen.
+// The box a pattern lives in. On a phone its lanes wrap onto as many rows as
+// they need and there is nothing here to scroll; on a screen wide enough to
+// hold the whole pattern on one line they do that instead, and the leftover -
+// a wide grid in a narrow window - scrolls inside this box rather than
+// widening the page. It is remembered because the page is rebuilt wholesale on
+// every edit: without that, toggling step 20 would scroll the pattern back to
+// step 1 and put the next step off the screen.
 function scroller(app, key, ...children) {
   return el('div', {
     class: 'lane-scroll', 'data-scroll': key,
@@ -421,11 +423,12 @@ function drumGrid(app, index, isMidi) {
       el('span', { class: 'lane-name' }, `${outlet} (${length})`),
       el('div', { class: 'lane' }, cells)));
   }
-  // Every lane in one scroller, not one each: eight lanes that scroll
-  // separately are eight patterns you cannot read against each other, and the
-  // polyrhythm is the whole point of the node. The names stay put while the
-  // steps move under them (`.lane-name` is sticky), which is what makes the
-  // grid readable on a screen narrower than the pattern.
+  // Every lane in one box, not one each: on a wide screen eight lanes that
+  // scroll separately are eight patterns you cannot read against each other,
+  // and the polyrhythm is the whole point of the node. Where they fit on one
+  // line the names stay put at the left while the steps move under them
+  // (`.lane-name` is sticky); where they do not - a phone - each lane wraps
+  // instead and its name sits above it, so no width is spent on the label.
   return el('div', { class: 'grid' },
     el('div', { class: 'grid-title' }, 'pattern'),
     scroller(app, `grid-${index}`, el('div', { class: 'lanes' }, lanes)));

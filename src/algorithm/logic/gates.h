@@ -1,14 +1,12 @@
 #ifndef __AND_H_
 #define __AND_H_
 
-#include "hardware.h"
-#include "gpio.h"
 #include "algorithm/algorithm.h"
 
 class LogicNot : public Algorithm{
     public:
-        LogicNot(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            Algorithm(midi_in, midi_out, gate_in, gate_out),
+        LogicNot(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            Algorithm(gpio_if, midi_in, midi_out, gate_in, gate_out),
             input_pin_index(0)
             {
                 for(uint8_t i=0; i<GPIO_N; i++){
@@ -20,16 +18,16 @@ class LogicNot : public Algorithm{
     private:
         uint8_t input_pin_index;
         void _update(){
-            uint8_t state = !gpioDigitalRead(LogicNot::input_pin_index);
-            gpioMapDigitalWrite(LogicNot::gate_outputs, state);
+            uint8_t state = !gpio.read(LogicNot::input_pin_index);
+            gpio_map_write(gpio, LogicNot::gate_outputs, state);
         };
 
 };
 
 class LogicGate : public Algorithm{
     public:
-        LogicGate(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            Algorithm(midi_in, midi_out, gate_in, gate_out){};
+        LogicGate(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            Algorithm(gpio_if, midi_in, midi_out, gate_in, gate_out){};
 
     protected:
         uint8_t state = 0;
@@ -38,7 +36,7 @@ class LogicGate : public Algorithm{
     private:
         void _update(){
             uint8_t input_state[GPIO_N] = {0};
-            gpioMapDigitalRead(LogicGate::gate_inputs, &input_state[0]);
+            gpio_map_read(gpio, LogicGate::gate_inputs, &input_state[0]);
 
             uint8_t mask = 0;
             state = 1;
@@ -51,7 +49,7 @@ class LogicGate : public Algorithm{
                 }
             }
             if (inverted) state = !state;
-            gpioMapDigitalWrite(LogicGate::gate_outputs, state);
+            gpio_map_write(gpio, LogicGate::gate_outputs, state);
         };
 
         uint8_t operate(uint8_t acc, uint8_t input){
@@ -62,8 +60,8 @@ class LogicGate : public Algorithm{
 
 class LogicAND : public LogicGate{
     public:
-        LogicAND(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            LogicGate(midi_in, midi_out, gate_in, gate_out){};
+        LogicAND(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicGate(gpio_if, midi_in, midi_out, gate_in, gate_out){};
 
         uint8_t operate(uint8_t acc, uint8_t input){
             acc &= input;
@@ -73,15 +71,15 @@ class LogicAND : public LogicGate{
 
 class LogicNAND : public LogicAND{
     public:
-        LogicNAND(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            LogicAND(midi_in, midi_out, gate_in, gate_out){ inverted = true; };
+        LogicNAND(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicAND(gpio_if, midi_in, midi_out, gate_in, gate_out){ inverted = true; };
 };
 
 
 class LogicOR : public LogicGate{
     public:
-        LogicOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            LogicGate(midi_in, midi_out, gate_in, gate_out){};
+        LogicOR(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicGate(gpio_if, midi_in, midi_out, gate_in, gate_out){};
 
         uint8_t operate(uint8_t acc, uint8_t input){
             acc |= input;
@@ -91,14 +89,14 @@ class LogicOR : public LogicGate{
 
 class LogicNOR : public LogicOR{
     public:
-        LogicNOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            LogicOR(midi_in, midi_out, gate_in, gate_out){ inverted = true; };
+        LogicNOR(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicOR(gpio_if, midi_in, midi_out, gate_in, gate_out){ inverted = true; };
 };
 
 class LogicXOR : public LogicGate{
     public:
-        LogicXOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            LogicGate(midi_in, midi_out, gate_in, gate_out){};
+        LogicXOR(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicGate(gpio_if, midi_in, midi_out, gate_in, gate_out){};
 
         uint8_t operate(uint8_t acc, uint8_t input){
             acc ^= input;
@@ -108,8 +106,8 @@ class LogicXOR : public LogicGate{
 
 class LogicXNOR : public LogicXOR{
     public:
-        LogicXNOR(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            LogicXOR(midi_in, midi_out, gate_in, gate_out){ inverted = true; };
+        LogicXNOR(IGpio& gpio_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            LogicXOR(gpio_if, midi_in, midi_out, gate_in, gate_out){ inverted = true; };
 };
 
 #endif

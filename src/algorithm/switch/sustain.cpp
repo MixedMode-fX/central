@@ -2,10 +2,10 @@
 
 
 void Sustain::_update(){
-    uint8_t new_state = gpioDigitalRead(input_pin_index);
+    uint8_t new_state = gpio.read(input_pin_index);
     if (new_state != state){
         uint8_t value = Sustain::invert ? (new_state << 6) : (!new_state << 6);
-        mm_send(midi_outputs, midi::ControlChange, 64, value, 1);
+        midi.send(midi_outputs, MIDI_CONTROL_CHANGE, 64, value, 1);
         state = new_state;
     }
 }

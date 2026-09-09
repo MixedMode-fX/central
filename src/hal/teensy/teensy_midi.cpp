@@ -1,4 +1,4 @@
-#include "mm_midi.h"
+#include "hal/teensy/teensy_midi.h"
 
 #ifdef SERIAL_MIDI_1
 MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_1, midi1, MidiSettings);

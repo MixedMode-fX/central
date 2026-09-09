@@ -115,6 +115,20 @@ The release workflow refuses to publish if the tag and `VERSION` disagree, then
 runs the tests, builds firmware, and publishes a GitHub Release carrying
 `mmmc-v<version>-teensy41.hex`, the matching `.elf`, and `SHA256SUMS`.
 
+## Tests
+
+The hardware is behind two narrow interfaces, `IGpio` (`src/hal/igpio.h`) and
+`IMidiOut` (`src/hal/imidi_out.h`). The Teensy implementations live in
+`src/hal/teensy/`; the fakes used by the tests (`FakeGpio`, `RecordingMidiOut`)
+live in `test/fakes/`. Everything else is framework-free and is built on the
+host by the `native` environment:
+
+```sh
+pio test -e native
+```
+
+Nothing under `src/algorithm/` includes `Arduino.h`.
+
 # Code structure
 
 `Setters` and `Getters` are not represented in the diagram below. 

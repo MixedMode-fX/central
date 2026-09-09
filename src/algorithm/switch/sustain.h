@@ -1,15 +1,14 @@
 #ifndef __SUSTAIN_H_
 #define __SUSTAIN_H_
 
-#include "hardware.h"
-#include "gpio.h"
-#include "mm_midi.h"
 #include "algorithm/algorithm.h"
+#include "hal/imidi_out.h"
 
 class Sustain : public Algorithm{
     public:
-        Sustain(uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
-            Algorithm(midi_in, midi_out, gate_in, gate_out),
+        Sustain(IGpio& gpio_if, IMidiOut& midi_if, uint8_t midi_in, uint8_t midi_out, uint16_t gate_in, uint16_t gate_out) :
+            Algorithm(gpio_if, midi_in, midi_out, gate_in, gate_out),
+            midi(midi_if),
             input_pin_index(0)
             {
                 for(uint8_t i=0; i<GPIO_N; i++){
@@ -20,6 +19,7 @@ class Sustain : public Algorithm{
 
     private:
         void _update();
+        IMidiOut& midi;
         uint8_t input_pin_index;
         uint8_t state = 1;
         bool invert = false;

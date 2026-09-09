@@ -1,6 +1,7 @@
 #ifndef HARDWARE_H
 #define HARDWARE_H
 
+#include "config.h"
 #include "hal/teensy/teensy_includes.h"
 
 #define BOARD_ID 1
@@ -22,7 +23,6 @@
  * 
  */
 
-#define GPIO_N 8
 #define GPIO_PIN_1 2
 #define GPIO_PIN_2 3
 #define GPIO_PIN_3 4
@@ -33,8 +33,6 @@
 #define GPIO_PIN_8 33
 
 #define GPIO_PINS GPIO_PIN_1,GPIO_PIN_2,GPIO_PIN_3,GPIO_PIN_4,GPIO_PIN_5,GPIO_PIN_6,GPIO_PIN_7,GPIO_PIN_8
-
-#define ALL_GPIO_MAP 0xFF
 
 /*
  *

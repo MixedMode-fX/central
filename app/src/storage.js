@@ -18,6 +18,12 @@
 const LIBRARY_KEY = 'mmmc.library.v1';
 const WORKING_KEY = 'mmmc.working.v1';
 const LISTEN_KEY = 'mmmc.listen.v1';
+const CANVAS_KEY = 'mmmc.canvas.v1';
+
+// How many patches keep hand-placed blocks. A layout is a few hundred bytes
+// and only exists for a patch somebody arranged by hand, but the store must
+// not grow without a bound either, so the least recently arranged fall off.
+const LAYOUTS_KEPT = 24;
 
 export const toBase64 = (bytes) => {
   let binary = '';
@@ -178,6 +184,67 @@ export class Library {
     } catch {
       return null;
     }
+  }
+
+  // How the patch is being *looked at*: blocks or list, and where a block was
+  // dragged to. Not part of a patch - a `.syx` file and the module's own slots
+  // have nowhere to put a coordinate and should not gain one - so this is kept
+  // beside the library rather than in it, keyed per patch, and a patch with
+  // nothing here simply gets the automatic layout.
+  readCanvas() {
+    if (!this.available) return { view: null, layouts: {} };
+    try {
+      const raw = this.storage.getItem(CANVAS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return {
+        view: parsed?.view ?? null,
+        layouts: parsed && typeof parsed.layouts === 'object' ? parsed.layouts : {},
+      };
+    } catch {
+      return { view: null, layouts: {} };
+    }
+  }
+
+  writeCanvas(state) {
+    if (!this.available) return;
+    try {
+      this.storage.setItem(CANVAS_KEY, JSON.stringify(state));
+    } catch { /* a full quota must never break editing */ }
+  }
+
+  saveView(view) {
+    this.writeCanvas({ ...this.readCanvas(), view });
+  }
+
+  layoutFor(key) {
+    return this.readCanvas().layouts[key] ?? null;
+  }
+
+  // Written newest last, so trimming from the front drops the patch nobody has
+  // arranged for longest.
+  saveLayout(key, positions) {
+    const state = this.readCanvas();
+    delete state.layouts[key];
+    const entries = Object.entries(state.layouts).slice(-(LAYOUTS_KEPT - 1));
+    entries.push([key, positions]);
+    this.writeCanvas({ ...state, layouts: Object.fromEntries(entries) });
+  }
+
+  dropLayout(key) {
+    const state = this.readCanvas();
+    if (!(key in state.layouts)) return;
+    delete state.layouts[key];
+    this.writeCanvas(state);
+  }
+
+  // A patch saved for the first time was until then the working patch, so the
+  // arrangement follows it to the identity it has just been given.
+  moveLayout(from, to) {
+    const state = this.readCanvas();
+    if (from === to || !state.layouts[from]) return;
+    state.layouts[to] = state.layouts[from];
+    delete state.layouts[from];
+    this.writeCanvas(state);
   }
 }
 

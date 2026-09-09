@@ -63,13 +63,18 @@ it was entered from.
 The library was called *patches*, with a button in the header that went to the
 tab of that name directly below it. One name for one thing, in one place.
 
-**patch** — the graph. Buses are the connections: every inlet and outlet is a
-selector offering only the buses of its own domain, under the name the firmware
-gives it, and each one says what else is on its bus, because that is what a
-patch cable would have shown. A sequencer gets a purpose-built view — a step
-grid for the gate and drum sequencers, a note lane over scale degrees for the
-note sequencers — and while the patch runs, **the step being played is outlined
-in the same grid you are editing**.
+**patch** — the graph, drawn or spelled out. **blocks** is the canvas: a box
+per node, jack and MIDI port, a socket per inlet and outlet, and an arrow
+wherever two of them are on the same bus. Drag from a socket to another to
+connect them, drag a block to move it, click one to edit it in full below the
+picture. **list** is what the tab always was: every node's card, one after
+another, with a selector per port. The two are one patch and one set of edits —
+see below.
+
+Either way, a sequencer gets a purpose-built view — a step grid for the gate
+and drum sequencers, a note lane over scale degrees for the note sequencers —
+and while the patch runs, **the step being played is outlined in the same grid
+you are editing**.
 
 **play** — the module, running. Two LEDs and the gate buses, the clock's
 transport and tempo, the eight jacks (tap, hold or free-run an input; an output
@@ -131,6 +136,62 @@ clock and Program Change recall.
 
 **library** — where a patch lives: this browser, a file, or the module's own
 preset slots.
+
+## Two ways of reading one patch
+
+The list of cards says what a patch *contains*. It cannot say what a patch
+*is*, because the shape of a patch is which thing feeds which — and under the
+bus model that shape is spread across a dozen selectors reading "gate bus 2".
+Following a signal meant reading every card and matching numbers. The canvas
+draws the matching.
+
+**An arrow is drawn, not stored.** There is no cable in this machine: an outlet
+writes a bus and an inlet reads one, so an arrow is the *observation* that two
+ports are on the same bus. The canvas is therefore a rendering of the patch
+itself and never a second model beside it — there is nothing in it that can
+drift out of step with what the module is running, a bus changed from a
+selector in the list moves the arrow, and a patch that arrives from a file or
+off a module is drawn without having been drawn before.
+
+That honesty costs three things a cable would have hidden, and each is shown
+rather than papered over:
+
+* one outlet on a bus two inlets read is **two arrows**, made by one bus
+  selection. A drag onto a socket that is already on a bus adds a listener to
+  it rather than moving it, which is what makes "one sequencer, three things
+  reading it" the easy shape to build;
+* two outlets on one bus are **two sources merged** — legal, occasionally
+  deliberate, and what a patch that "plays two sequences at once" usually turns
+  out to be. Those arrows are dashed and the bus is marked `×2` below the
+  canvas;
+* removing one arrow of either shape **cannot be done without moving a port off
+  its bus**, which changes the other arrows. Disconnecting takes the *inlet*
+  off, and says in words what else that inlet has stopped hearing.
+
+A drag is refused before it is made rather than after: a domain mismatch is
+something the module rejects, so while a connection is being dragged only the
+sockets that could take it are lit. And a jack or a MIDI port is only in a
+patch while it is on a bus — the module validates the pair — so those have no
+disconnection, only another bus or removal. `app/test/app.test.mjs` drives all
+of this against the firmware's own validator: what a drag produces, the module
+accepts.
+
+**Where a block sits is not part of a patch.** The image the module stores, the
+`.syx` file and the JSON dialect describe a graph and say nothing about a
+canvas, and adding a coordinate to any of them would be a change to the
+firmware's format for the benefit of one view in one app. So the canvas lays a
+patch out from its own shape — signal left to right, each block one column
+right of the furthest-right thing that writes to it, with cycles laid flat
+rather than hung on — and a block dragged somewhere by hand is remembered
+beside the patch in `localStorage`, as a preference about looking at it. A
+patch nobody has arranged simply gets the automatic layout, which is what makes
+one pasted from a chat readable the moment it opens.
+
+**And the list did not go away.** A phone opens on it: a 200px block is not
+where a 32-step lane or a slider per parameter belongs, and a canvas that took
+every one-finger drag would be a page you could not scroll past. The canvas is
+the default where there is room to draw one, either can be chosen at any width,
+and the choice is remembered.
 
 ## Patches are kept in the browser
 
@@ -333,8 +394,11 @@ app/
     protocol.js       GENERATED from the firmware headers
     codec.js          the patch image and the SysEx framing
     validate.js       the firmware's own rules, client side
-    graph.js          how a node arrives connected
-    views.js          the patch tab: nodes, parameters, sequencer grids
+    graph.js          the patch's shape: how a node arrives connected, what
+                      blocks and arrows a patch has, and what a drag means
+    layout.js         where a block sits, and where its sockets are
+    canvas.js         the patch drawn: blocks, arrows, dragging, the inspector
+    views.js          the node cards: parameters and sequencer grids
     midi.js           routing, bindings, the clock, the external controller
     perform.js        the play surface, and everything that updates live
     scope.js          the two time views: the scope and the piano roll
@@ -365,6 +429,9 @@ it valid sends the whole patch instead of an addressed one.
 
 **Dragging a connection sends one message**, not a full dump — under the bus
 model a connection change is one byte, with no re-sort and no graph rebuild.
+That is as true of a connection dragged between two sockets on the canvas as of
+one chosen from a selector in the list: both are the same edit, planned by the
+same code in `graph.js`, and neither is a wire the app then has to remember.
 Adding or removing a node changes the graph's *shape*, so that is a whole
 patch.
 

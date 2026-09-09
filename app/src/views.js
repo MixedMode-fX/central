@@ -7,6 +7,10 @@
 
 import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
+// The port names live with the patch-shape code, because the canvas needs them
+// too and it must not have to reach through the views to get them.
+import { inletName, outletName } from './graph.js';
+export { inletName, outletName };
 
 const el = (tag, attrs = {}, ...children) => {
   const node = document.createElement(tag);
@@ -94,10 +98,6 @@ function scroller(app, key, ...children) {
   }, ...children);
 }
 
-// What a port is called, from the device, falling back to the index for a
-// module whose firmware predates port names.
-export const inletName = (d, i) => d.inName?.[i] || `in ${i}`;
-export const outletName = (d, i) => d.outName?.[i] || `out ${i}`;
 
 // A bus selector for one inlet or outlet. The options are only the buses of
 // the right domain, because the editor only offers domain-compatible

@@ -40,7 +40,13 @@ import { Listener } from './audio.js';
 import { Controller } from './controller.js';
 import { Library, toBase64 } from './storage.js';
 import { el, nodeCard, busUsers } from './views.js';
-import { connectNewNode } from './graph.js';
+import {
+  connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
+} from './graph.js';
+import { forgetNode } from './layout.js';
+import {
+  canvasPanel, canvasInspector, geometry, addBar, busCapacity, ENDPOINTS,
+} from './canvas.js';
 import { routingPanel, globalsPanel, mappingPanel, controllerPanel } from './midi.js';
 import { toPatchJsonText, fromPatchJson } from './patchjson.js';
 import { libraryTab } from './library.js';
@@ -105,6 +111,24 @@ class App {
     this.diverged = false;
     this.addPick = null;
     this.example = null;
+    // How the patch is being looked at. **Blocks and list are one patch seen
+    // two ways, not two editors**: the canvas draws the buses as arrows, the
+    // list spells them out as selectors, and both write the same patch through
+    // the same messages. The canvas is the default where there is room to draw
+    // one; a phone opens on the list, where a 32-step lane and a slider per
+    // parameter are legible and a 200px block is not, and either can be chosen
+    // at any width - the choice is remembered, because it is a preference
+    // about reading a patch rather than a property of one.
+    this.patchView = this.library.readCanvas().view
+      ?? (globalThis.matchMedia?.('(min-width: 52rem)').matches ? 'blocks' : 'list');
+    // The canvas: where it is looked at from, what is selected on it, and the
+    // geometry of the last thing drawn - which the drag handlers read, since
+    // they run between renders.
+    this.canvas = { view: { x: 0, y: 0, k: 1 }, selected: null, fit: true, geom: null };
+    // Blocks somebody dragged somewhere, for the patch being edited. A patch
+    // with none is laid out from its own shape; see layout.js for why a
+    // position is never part of a patch.
+    this.canvasPositions = {};
     // Which disclosure sections are open. The page is rebuilt wholesale on
     // every edit, so anything the DOM remembers by itself - a <details>, the
     // scroll position inside a lane - is lost unless the app remembers it.
@@ -206,6 +230,7 @@ class App {
     this.usingModule = true;
     this.current = { id: null, name: 'untitled', dirty: false, savedAt: 0 };
     this.savedImage = null;
+    this.resetCanvas();
     // Painted once per animation frame, off the module's own frame callback,
     // rather than on a timer of its own. A timer is the wrong clock for this:
     // the lights, the scope and the playheads are showing what the module did
@@ -245,6 +270,7 @@ class App {
       await this.adopt(new WebMidiTransport(port.input, port.output), port.name, port.deviceId);
       this.current = { id: null, name: `on ${port.name}`, dirty: true, savedAt: 0 };
       this.savedImage = null;
+      this.resetCanvas();
       if (kept) this.status += ` — what you were editing is kept as “${kept.name}”`;
     } catch (error) {
       this.status = `could not connect: ${error.message}`;
@@ -272,6 +298,7 @@ class App {
       this.patch = dumped.patch;
       this.globals = dumped.globals;
       this.diverged = false;
+      this.resetCanvas();
       this.status = event === P.SysexEvent.SYSEX_EVENT_PROGRAM_CHANGE
         ? `the module recalled preset ${detail}`
         : 'the module applied a pending patch';
@@ -327,11 +354,26 @@ class App {
     this.status = said.length
       ? `added ${d.name} — ${said.join(', ')}`
       : `added ${d?.name ?? algorithmId}`;
+    // A block that arrives selected is one whose parameters are already on
+    // screen, which is what "add a sequencer" is usually the first half of.
+    this.canvas.selected = { kind: 'block', id: `node:${this.patch.nodes.length - 1}` };
     this.sendWhole();
   }
 
   removeNode(index) {
     this.patch.nodes.splice(index, 1);
+    // The nodes after it are renumbered, so where they were drawn has to move
+    // with them or deleting one block rearranges the rest of the canvas.
+    this.rememberLayout(forgetNode(this.canvasPositions, index));
+    // And so does whatever was selected: keeping the selection on "node 5"
+    // through a deletion would leave a different node's parameters on screen
+    // under the name of the one that was being edited.
+    const selected = /^node:(\d+)$/.exec(this.canvas.selected?.id ?? '');
+    if (selected) {
+      const was = Number(selected[1]);
+      this.canvas.selected = was === index ? null
+        : { kind: 'block', id: `node:${was > index ? was - 1 : was}` };
+    }
     // Removing a node renumbers the ones after it, so bindings that pointed
     // past it would point at the wrong node. Drop them rather than silently
     // rebinding somebody's knob to something else.
@@ -375,6 +417,162 @@ class App {
       })
       .catch((error) => { this.diverged = true; this.pendingError = error.message; })
       .finally(() => this.render());
+  }
+
+  // --- the canvas ----------------------------------------------------------
+
+  // Which patch the remembered block positions belong to. A patch nobody has
+  // named yet is "working", the same identity the autosave uses, and it
+  // follows the patch into the library the moment it is saved.
+  layoutKey() { return this.current.id ?? 'working'; }
+
+  rememberLayout(positions) {
+    this.canvasPositions = positions;
+    this.library.saveLayout(this.layoutKey(), positions);
+  }
+
+  // A block dragged somewhere. No render: the element is already there, and
+  // rebuilding the page under a pointer that has only just been let go takes
+  // the selection and the scroll with it.
+  placeBlock(id, at) {
+    this.rememberLayout({ ...this.canvasPositions,
+                          [id]: [Math.round(at.x), Math.round(at.y)] });
+  }
+
+  select(selection) {
+    this.canvas.selected = selection;
+    this.render();
+  }
+
+  say(message) {
+    this.status = message;
+    this.render();
+  }
+
+  // The patch on screen was replaced by one nobody typed - loaded, imported,
+  // dumped off a module. Take that patch's own arrangement, and put the view
+  // back over the whole of it.
+  resetCanvas() {
+    this.canvas.selected = null;
+    this.canvas.fit = true;
+    this.canvasPositions = this.library.layoutFor(this.layoutKey()) ?? {};
+  }
+
+  setPatchView(view) {
+    this.patchView = view;
+    this.library.saveView(view);
+    this.render();
+  }
+
+  // One port onto one bus - the same edit the inspector's selector makes, and
+  // the same single message, whichever end of the patch the port is at. The
+  // patch is changed by `applyWrite`, which the tests use too; what is left
+  // here is which message says so.
+  writePort(write) {
+    const target = applyWrite(this.patch, write);
+    if (!target) return;
+    const { kind, index, port } = target;
+    if (kind === BlockKind.Node) {
+      this.edit(() => this.device.setConnection(index, Boolean(write.isOutlet), write.at, write.bus),
+                'connection');
+      return;
+    }
+    if (kind === BlockKind.Jack) {
+      this.edit(() => this.device.setGatePort(index, port.direction, port.bus), 'jack');
+      return;
+    }
+    const isOut = kind === BlockKind.MidiOut;
+    const mask = isOut ? port.targetMask : port.sourceMask;
+    this.edit(() => this.device.setMidiPort(index, isOut, mask, port.channel, port.bus),
+              isOut ? 'MIDI out' : 'MIDI in');
+  }
+
+  // What a drag decided, applied. The decision is `graph.js`'s and is tested
+  // against the firmware's validator; this is only the writing of it.
+  applyPlan(plan) {
+    if (!plan) return;
+    if (!plan.ok) { this.status = plan.why; this.render(); return; }
+    for (const write of plan.writes) this.writePort(write);
+    this.status = plan.said;
+    this.render();
+  }
+
+  // "add", for anything that can be on the canvas: an algorithm by its id, or
+  // one of the four edges of a patch by name.
+  add(value) {
+    const endpoint = ENDPOINTS.find((e) => e.key === value);
+    if (endpoint) this.addEndpoint(endpoint);
+    else this.addNode(Number(value));
+  }
+
+  // A jack or a MIDI port is not added so much as *taken into use*: the module
+  // has a fixed eight of the first and four each of the second, so this claims
+  // the first unused one and puts it on a bus - connected on arrival, for the
+  // same reason a node is.
+  addEndpoint(endpoint) {
+    const caps = this.device?.capabilities;
+    const blocks = patchBlocks(this.device, this.patch);
+    const writesGate = endpoint.direction === P.GatePortDirection.GATE_PORT_IN;
+
+    if (endpoint.kind === BlockKind.Jack) {
+      const index = this.patch.gatePorts.findIndex(
+        (port) => port.direction === P.GatePortDirection.GATE_PORT_UNUSED);
+      if (index < 0) { this.pendingError = 'every jack is already in use'; this.render(); return; }
+      const bus = writesGate
+        ? (waitingBus(blocks, Domain.Gate) ?? freeBus(blocks, caps, Domain.Gate))
+        : (writtenBus(blocks, Domain.Gate) ?? 0);
+      if (bus === null) { this.pendingError = 'every gate bus is already written'; this.render(); return; }
+      this.patch.gatePorts[index] = { direction: endpoint.direction, bus };
+      this.canvas.selected = { kind: 'block', id: `jack:${index}` };
+      this.edit(() => this.device.setGatePort(index, endpoint.direction, bus), 'jack');
+      this.status = `jack ${index + 1} ${writesGate ? 'in' : 'out'}, on gate bus ${bus}`;
+      this.render();
+      return;
+    }
+
+    const isOut = endpoint.kind === BlockKind.MidiOut;
+    const ports = isOut ? this.patch.midiOut : this.patch.midiIn;
+    const limit = (isOut ? caps?.midiOut : caps?.midiIn) ?? ports.length;
+    const index = ports.findIndex((port, i) => i < limit && !(isOut ? port.targetMask : port.sourceMask));
+    if (index < 0) {
+      this.pendingError = `every MIDI ${isOut ? 'output' : 'input'} port is already in use`;
+      this.render();
+      return;
+    }
+    const bus = isOut
+      ? (writtenBus(blocks, Domain.Note) ?? 0)
+      : (waitingBus(blocks, Domain.Note) ?? freeBus(blocks, caps, Domain.Note));
+    if (bus === null) { this.pendingError = 'every note bus is already written'; this.render(); return; }
+    const mask = P.MidiPort.mmMIDI_USB_0;
+    ports[index] = { ...ports[index], bus, [isOut ? 'targetMask' : 'sourceMask']: mask };
+    this.canvas.selected = { kind: 'block', id: `${endpoint.kind}:${index}` };
+    this.edit(() => this.device.setMidiPort(index, isOut, mask, ports[index].channel, bus),
+              isOut ? 'MIDI out' : 'MIDI in');
+    this.status = `MIDI ${isOut ? 'out' : 'in'} ${index + 1} on USB 1, note bus ${bus}`
+                + ' — choose its ports and channel below';
+    this.render();
+  }
+
+  // Removing whatever kind of block it is. A node leaves the patch; a jack or
+  // a MIDI port goes back to being unused, because the module has a fixed
+  // number of them and they are not the patch's to delete.
+  removeBlock(block) {
+    if (block.kind === BlockKind.Node) { this.removeNode(block.index); return; }
+    this.canvas.selected = null;
+    if (block.kind === BlockKind.Jack) {
+      this.patch.gatePorts[block.index] = { direction: P.GatePortDirection.GATE_PORT_UNUSED, bus: P.NO_BUS };
+      this.edit(() => this.device.setGatePort(block.index, P.GatePortDirection.GATE_PORT_UNUSED, P.NO_BUS), 'jack');
+      this.status = `jack ${block.index + 1} is unused`;
+      this.render();
+      return;
+    }
+    const isOut = block.kind === BlockKind.MidiOut;
+    const port = (isOut ? this.patch.midiOut : this.patch.midiIn)[block.index];
+    if (isOut) port.targetMask = 0; else port.sourceMask = 0;
+    this.edit(() => this.device.setMidiPort(block.index, isOut, 0, port.channel, port.bus),
+              isOut ? 'MIDI out' : 'MIDI in');
+    this.status = `MIDI ${isOut ? 'out' : 'in'} ${block.index + 1} is unused`;
+    this.render();
   }
 
   // --- controller bindings -------------------------------------------------
@@ -474,6 +672,7 @@ class App {
         dirty: entry ? toBase64(working.bytes) !== this.savedImage : false,
         savedAt: entry?.updated ?? 0,
       };
+      this.resetCanvas();
       this.sendWhole(`picked up where you left off — “${this.current.name}”`);
     } catch (error) {
       // A patch image from an older format version is not a crash: it is a
@@ -485,6 +684,7 @@ class App {
 
   savePatch({ asNew = false } = {}) {
     const bytes = this.image();
+    const was = this.layoutKey();
     try {
       const entry = this.library.save({
         id: asNew ? null : this.current.id,
@@ -492,6 +692,7 @@ class App {
         bytes,
         nodes: this.patch.nodes.length,
       });
+      this.library.moveLayout(was, entry.id);
       this.current = { id: entry.id, name: entry.name, dirty: false, savedAt: entry.updated };
       this.savedImage = toBase64(bytes);
       this.status = `saved “${entry.name}”`;
@@ -511,6 +712,7 @@ class App {
       this.globals = globals;
       this.current = { id: entry.id, name: entry.name, dirty: false, savedAt: entry.updated };
       this.savedImage = toBase64(entry.bytes);
+      this.resetCanvas();
       this.tab = this.editingTab = 'patch';
       this.autosave({ now: true });
       this.sendWhole(`loaded “${entry.name}”`);
@@ -536,6 +738,7 @@ class App {
 
   deleteSaved(id) {
     this.library.remove(id);
+    this.library.dropLayout(id);
     if (this.current.id === id) { this.current.id = null; this.savedImage = null; }
     this.status = 'deleted';
     this.render();
@@ -583,6 +786,7 @@ class App {
     this.globals = codec.emptyGlobals();
     this.current = { id: null, name: 'untitled', dirty: false, savedAt: 0 };
     this.savedImage = null;
+    this.resetCanvas();
     this.tab = this.editingTab = 'patch';
     this.autosave({ now: true });
     this.sendWhole('a new patch, empty');
@@ -637,6 +841,7 @@ class App {
       this.globals = globals;
       this.current = { id: null, name: file.name.replace(/\.[^.]+$/, ''), dirty: true, savedAt: 0 };
       this.savedImage = null;
+      this.resetCanvas();
       this.tab = this.editingTab = 'patch';
       this.sendWhole(`loaded ${file.name} — save it to keep it in this browser`);
     } catch (error) {
@@ -652,6 +857,7 @@ class App {
       this.globals = globals;
       if (name) this.current = { id: null, name, dirty: true, savedAt: 0 };
       this.savedImage = null;
+      this.resetCanvas();
       this.sendWhole(`loaded ${what}`);
     } catch (error) {
       this.pendingError = `could not read ${what}: ${error.message}`;
@@ -728,15 +934,46 @@ class App {
       this.tab === 'library' ? libraryTab(this) : null);
   }
 
+  // The patch, drawn or spelled out. Both are the same patch and the same
+  // edits; what differs is what they are good at. **Blocks** answer "what
+  // feeds what", which the bus model otherwise hides in a dozen selectors
+  // reading "gate bus 2", and put the detail of one block below the picture.
+  // **List** shows every block's every control at once, which is what a phone
+  // and a sequencer grid both want.
   patchTab() {
+    const blocks = this.patchView === 'blocks' && Boolean(this.device?.capabilities);
+    // Worked out once, before anything is built from it: the bar above the
+    // canvas counts the free buses, and it has to be counting them in the
+    // patch below it rather than in the one drawn before this edit.
+    this.canvas.geom = blocks ? geometry(this) : null;
+    if (!blocks) this.canvas.paths?.clear();
     return el('div', {},
+      this.viewSwitch(),
       this.device?.capabilities ? this.capacities() : null,
       metersPanel(this),
-      this.jacks(),
-      el('div', { class: 'nodes' }, this.patch.nodes.map((_, i) => nodeCard(this, i))),
-      this.patch.nodes.length ? null : el('p', { class: 'hint' },
-        'No nodes yet. Add one below — it arrives connected to a bus, so the patch stays valid.'),
-      this.addBar());
+      blocks ? canvasPanel(this, this.canvas.geom) : this.jacks(),
+      blocks
+        ? canvasInspector(this)
+        : el('div', { class: 'nodes' }, this.patch.nodes.map((_, i) => nodeCard(this, i))),
+      !blocks && !this.patch.nodes.length ? el('p', { class: 'hint' },
+        'No nodes yet. Add one below — it arrives connected to a bus, so the patch stays valid.') : null,
+      addBar(this));
+  }
+
+  viewSwitch() {
+    const pick = (view, label, title) => el('button', {
+      class: `chip ${this.patchView === view ? 'on' : ''}`,
+      'aria-pressed': this.patchView === view ? 'true' : 'false',
+      title,
+      onclick: () => this.setPatchView(view),
+    }, label);
+    return el('div', { class: 'view-switch' },
+      el('div', { class: 'ports-row' },
+        pick('blocks', 'blocks', 'the patch drawn: blocks, and an arrow wherever two ports share a bus'),
+        pick('list', 'list', 'every node in full, one card after another')),
+      this.patchView === 'blocks' && this.canvas.geom
+        ? el('span', { class: 'hint' }, busCapacity(this, this.canvas.geom))
+        : null);
   }
 
   midiTab() {
@@ -824,32 +1061,6 @@ class App {
         '“in” means the jack drives a gate bus; “out” means a gate bus drives the jack. '
         + 'Play them under play, at the top of the page.'),
       el('div', { class: 'jacks' }, jacks));
-  }
-
-  addBar() {
-    if (!this.device?.algorithms?.length) {
-      return el('div', { class: 'hint' },
-        'The algorithms come from the module, so there is no list here that can have drifted '
-        + 'from the firmware.');
-    }
-    // The summary follows the selection, so what an algorithm is for is read
-    // before it is added rather than after it has been patched in.
-    const select = el('select', { id: 'algo-pick', class: 'grow',
-                                  onchange: (e) => { this.addPick = e.target.value; this.render(); } });
-    for (const d of this.device.algorithms) {
-      if (!d) continue;
-      const option = el('option', { value: String(d.id), title: d.summary ?? '' },
-        `${d.name} — ${d.nIn} in, ${d.nOut} out`);
-      if (String(d.id) === this.addPick) option.selected = true;
-      select.append(option);
-    }
-    this.addPick ??= select.value;
-    const chosen = this.device.byId.get(Number(this.addPick));
-    return el('section', { class: 'panel add' },
-      el('h2', {}, 'add a node'),
-      el('div', { class: 'row' }, select,
-        el('button', { onclick: () => this.addNode(Number(select.value)) }, 'add')),
-      chosen?.summary ? el('p', { class: 'summary' }, chosen.summary) : null);
   }
 }
 

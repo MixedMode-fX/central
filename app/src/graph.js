@@ -2,7 +2,7 @@
 // signal, and what a node added to this patch should be connected to.
 //
 // These live apart from the views because they are the part of "add a node"
-// that has to be *right*, not merely drawn - and because the editor's test
+// that has to be *right*, not merely drawn - and because the app's test
 // suite drives them against the real firmware's validator, where a mistake
 // shows up as a rejected patch rather than as a layout that looks odd.
 
@@ -45,7 +45,7 @@ export function writtenBuses(device, patch) {
 // up merged by accident. Both are ordinary bus selections shown in the node's
 // own panel: nothing here is hidden, and every one of them can be changed.
 //
-// Returns what it did, in words, so the editor can say so.
+// Returns what it did, in words, so the app can say so.
 export function connectNewNode(device, patch, node, descriptor) {
   const caps = device?.capabilities;
   if (!caps) return [];

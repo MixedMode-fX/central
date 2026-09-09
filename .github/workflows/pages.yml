@@ -1,12 +1,11 @@
 name: Pages
 
-# Publishes the browser emulator (emulator/README.md) and the patch editor
-# (editor/README.md) to GitHub Pages, so the current firmware can be tried at
-# https://mixedmode-fx.github.io/central/ with nothing to download, and a
-# module can be configured at .../editor/ .
+# Publishes the app (app/README.md) to GitHub Pages, so a module can be
+# configured - and the current firmware tried, with no module at all - at
+# https://mixedmode-fx.github.io/central/ with nothing to download.
 #
-# Pages is what makes the editor usable at all: Web MIDI needs a secure
-# context, so a file:// copy cannot reach a module. Pages must be set to
+# Pages is what makes the app able to reach hardware: Web MIDI needs a secure
+# context, so a file:// copy cannot talk to a module. Pages must be set to
 # deploy from GitHub Actions in the repository settings.
 #
 # Every push to main redeploys. Run it by hand (workflow_dispatch) on any
@@ -33,7 +32,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build the emulator
+    name: Build the app
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,20 +49,11 @@ jobs:
       - name: Smoke test the module
         run: node emulator/test/smoke.mjs
 
-      - name: Check the editor against the firmware
+      - name: Check the app against the firmware
         run: |
-          node editor/tools/generate-protocol.mjs --check
-          node editor/test/protocol.test.mjs
-
-      # The editor is served from /editor/ alongside the emulator. It has no
-      # build step - ES modules and one HTML file - so the page and its
-      # modules are copied as they are. The generator and the test are build
-      # tooling and are not part of the site.
-      - name: Stage the editor
-        run: |
-          mkdir -p emulator/dist/editor
-          cp editor/index.html editor/README.md emulator/dist/editor/
-          cp -r editor/src emulator/dist/editor/src
+          node app/tools/generate-protocol.mjs --check
+          node app/test/protocol.test.mjs
+          node app/test/app.test.mjs
 
       # index.html plus mmmc.wasm: the page fetches the module from next to
       # itself when served and falls back to its embedded copy otherwise.

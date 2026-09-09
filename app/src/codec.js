@@ -1,10 +1,10 @@
 // The patch image and the SysEx framing, in JavaScript.
 //
-// This is the one place the editor has to reimplement firmware code rather
+// This is the one place the app has to reimplement firmware code rather
 // than read it from the device, because a patch built offline - with no module
 // attached - still has to produce the exact bytes `src/patch/patch_codec.cpp`
 // produces. The constants it works from are generated (protocol.js), and
-// `editor/test/protocol.test.mjs` drives the real firmware, compiled to
+// `app/test/protocol.test.mjs` drives the real firmware, compiled to
 // WebAssembly, over this codec: what this file encodes, the firmware's own
 // decoder has to accept, and what the firmware dumps, this file has to decode
 // to the same patch. A divergence is a failing test, not a corrupted module.
@@ -217,7 +217,7 @@ export function decodePatch(image) {
   if (r.u32() !== P.PATCH_MAGIC) throw new Error('not an MMMC patch (bad magic)');
   const version = r.u8();
   if (version !== P.PATCH_FORMAT_VERSION) {
-    throw new Error(`patch format version ${version}; this editor speaks ${P.PATCH_FORMAT_VERSION}`);
+    throw new Error(`patch format version ${version}; this app speaks ${P.PATCH_FORMAT_VERSION}`);
   }
   r.u8();                        // flags
   const payload = r.u16();

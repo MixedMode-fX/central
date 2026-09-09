@@ -1,32 +1,37 @@
-# MMMC emulator
+# The module, compiled to WebAssembly
 
-The firmware core, compiled unchanged to WebAssembly, with the browser standing
-in for the Teensy. Open one HTML file, load a patch, patch the jacks with the
-mouse, send it MIDI, and watch the buses, the jacks and the MIDI it sends.
+The firmware core, built unchanged for the browser, with the page standing in
+for the Teensy. This directory is the *module*; the app that drives it is
+`app/` (see `app/README.md`), and there is no page here any more — the emulator
+and the editor are one app, because the module in the page was always both the
+thing being edited and the thing running.
 
 ```
-make emulator          # builds emulator/dist/index.html and smoke-tests it
-open emulator/dist/index.html
+make module            # builds emulator/dist/mmmc.wasm and the app page,
+                       # then replays the test_master scenarios through it
+make app               # the above, plus the app's own checks
 ```
 
 The build from `main` is live at <https://mixedmode-fx.github.io/central/>,
 deployed by `.github/workflows/pages.yml` on every push to `main`. Running that
 workflow by hand on another branch puts that branch's build on the site until
 the next push to `main`. Being served over `https://` also satisfies Web MIDI's
-secure-context requirement, so the Web MIDI bridge works from there.
+secure-context requirement, so a real module and a real controller can be
+reached from there.
 
 Nothing under `src/` is modified or duplicated: the algorithms, the buses, the
 node pool, the registry, the port nodes and `MixedModeMaster` are the same
-object code the tests run, built from the same sources. What the emulator adds
-is a second implementation of the hardware seam, next to the Teensy one:
+object code the tests run, built from the same sources. What this adds is a
+second implementation of the hardware seam, next to the Teensy one:
 
-| | Teensy 4.1 | Emulator |
+| | Teensy 4.1 | In the page |
 |---|---|---|
 | `IGpio` (the 8 jacks) | `src/hal/teensy/teensy_gpio.cpp` | `emulator/src/web_hal.h` `WebGpio`: eight bytes the page reads and writes |
 | `IMidiOut` (the transports) | `src/hal/teensy/teensy_midi.cpp` | `WebMidiOut`: one call into JavaScript |
-| main loop | `src/main.cpp` | `index.html`: passes on simulated time |
-| clock timer and sync pin | `src/hal/teensy/teensy_clock.cpp` | `index.html`: `MasterClock::advance()` every `subtick_interval_us()`, `sync_edge()` from a simulated jack |
+| main loop | `src/main.cpp` | `app/src/module.js`: passes on simulated time |
+| clock timer and sync pin | `src/hal/teensy/teensy_clock.cpp` | `module.js`: `MasterClock::advance()` every `subtick_interval_us()`, `sync_edge()` from a simulated jack |
 | MIDI input | `mm_midi_read()` and the input queue | `MixedModeMaster::deliver_midi()` from the page |
+| the control plane (`main.cpp` step 5) | the loop's tail | `emu_control_service()`, the same five calls in the same order |
 | entropy at boot | cycle counter, floating ADC | `Math.random()` |
 
 ## Why this works with no rewrite
@@ -103,15 +108,15 @@ It does not model:
 
 ```
 emulator/
-  build.sh          clang + wasm-ld; produces dist/mmmc.wasm and dist/index.html
-  index.html        the page; fetches mmmc.wasm or uses the copy build.sh embeds
+  build.sh          clang + wasm-ld, then app/tools/bundle.mjs for the page
   shim/new          placement new, the one thing <new> is needed for
   src/web_hal.h     WebGpio and WebMidiOut: the seam, browser side
   src/emu_api.cpp   the C ABI the page calls; owns one MixedModeMaster
   src/runtime.cpp   memcpy, memset and the two C++ ABI hooks the compiler emits
   test/smoke.mjs    the test_master scenarios, replayed through the module
-  dist/             build output (ignored by git; CI uploads index.html,
-                    the Pages workflow publishes the directory)
+  dist/             build output (ignored by git): mmmc.wasm, and index.html -
+                    the whole app as one file. CI uploads the page, the Pages
+                    workflow publishes the directory.
 ```
 
 `build.sh` compiles the same file set as `build_src_filter` in the `native`
@@ -126,103 +131,31 @@ format is picked up by rebuilding. The only firmware values written into
 JavaScript are enum names: MIDI port bits, gate directions, domains and the
 error codes.
 
-## Using the page
+## What the page may do
 
-- **Patch.** A JSON patch, resolved by algorithm *name* through the registry.
-  Each preset is a simple patch that exercises one part of the machine, with
-  a line saying what to do and what to expect: the default patch from
-  `main.cpp`, a metronome off two dividers, MIDI thru with the sustain pedal,
-  a pure router, a channel split with a merge, chord and transpose, mono note
-  priority, an arpeggiator on a divider, three Euclidean sequencers in
-  lock-step, a step sequencer thinned by Probability, a random sequencer with
-  a shred jack, a divider chain, the logic gates, a feedback loop and a patch
-  the validator rejects. Loading is `MixedModeMaster::load()` followed by
-  `setup()`; a rejected patch leaves the running one in place, as on the module.
+The page never sees a struct. It builds a patch through the `emu_patch_*`
+setters, reads the registry through `emu_algo_*` and the sizing constants
+through `emu_const_*`, so a change to `config.h`, to the registry or to the
+preset format is picked up by rebuilding. The only firmware values written into
+JavaScript are enum names: MIDI port bits, gate directions, domains and the
+error codes — and even those are generated from the headers, in
+`app/src/protocol.js`.
 
-  ```json
-  {
-    "gate_ports": [{ "port": 1, "dir": "out", "bus": 0 }],
-    "midi_in":    [{ "sources": ["DIN 1"], "channel": 0, "bus": 0 }],
-    "nodes":      [{ "algo": "ClockDiv", "out": [0], "params": [0, 6] },
-                   { "algo": "Arpeggiator", "in": [0, 0], "out": [1], "params": [2, 2, 60, 0] }],
-    "midi_out":   [{ "targets": ["USB 1", "DIN 2"], "channel": 0, "bus": 1 }]
-  }
-  ```
+Two rules keep the seam a seam:
 
-  A sequencer node can carry a `seq` block instead of raw `params`, which
-  the page packs into the parameter layout the firmware documents in
-  `note_sequencer.h`, `drum_sequencer.h` and `gate_sequencer.h`:
+- **the page decides nothing the firmware decides.** It calls
+  `emu_control_service()` once per pass, which is `main.cpp`'s five tail calls
+  in `main.cpp`'s order, including the beat flash and the clock-running state
+  behind the green LED: the LED vocabulary is `led/status_leds.h`'s, and a page
+  that chose for itself when to flash would be showing something the module
+  does not do.
+- **an incoming MIDI event takes the loop's path.** Program Change to preset
+  recall, then NRPN, then the binding table, then `deliver_midi()` — so a
+  controller played into the page is played into the firmware's control plane,
+  not into a JavaScript imitation of it.
 
-  ```json
-  { "algo": "NoteSequencer", "in": [0, null, 0], "out": [1],
-    "seq": { "scale": "minor", "root": 48, "gate": 0,
-             "steps": [0, { "deg": 0, "accent": true }, "-", 3, { "deg": 5, "len": 2 }, "=",
-                       { "deg": [0, 2, 4], "vel": [100, 80, 80] }] } }
-  { "algo": "DrumSeqMidi", "in": [0], "out": [1],
-    "seq": { "length": 16, "gate": 20,
-             "lanes": [{ "note": 36, "hits": "X...x..X..x.X..." }, { "note": 42, "hits": "o.x.o.x.", "length": 8, "prob": 60 }] } }
-  ```
-
-  A step is a degree, `"-"` for a rest, `"="` for a tie, or an object with
-  `deg`, `vel`, `len`, `rest`, `tie`, `accent`, `prob`; a poly step takes
-  arrays for `deg` and `vel`. A drum lane is a string of hits (`x` 100, `X`
-  127, `o` 60, `1`–`9` for 14–126, anything else off) or an object with
-  `hits`, `note`, `channel`, `length`, `prob`. Scales go by name
-  (`major`, `minor`, `dorian`, ...) or as a 12-bit mask, and the mask comes
-  from the firmware's own table. The gate sequencers take `hits`, `prob`,
-  `pulses`, `rotation`, `density` the same way.
-
-  Jacks are numbered 1 to 8 as on the panel. MIDI ports go by the names a
-  user knows: `DIN 1`, `DIN 2`, `USB 1` to `USB 4` (the device cables, counted
-  from 1 as a DAW lists them; the firmware enum counts them from 0) and
-  `USB Host`; the firmware's enum names (`SERIAL_1`, `USB_0`, ...) are
-  accepted too, and the mapping is listed under "Algorithms" on the page.
-  Bus indices are in the domain the algorithm declares for that inlet, as in
-  `NodeConfig`. `null` leaves an optional inlet unconnected. `"ALL"` is every
-  port bit; the firmware's `ALL_MIDI_PORTS` depends on which transports a
-  build compiles in. `ClockDiv`'s amount is in PPQN ticks: `/24` is a quarter
-  note, `/6` a sixteenth.
-- **Clock & run.** The page is the main loop: it calls `pass(now_us)` on
-  simulated time at the chosen pass interval, at up to the chosen multiple of
-  real time, or one pass at a time. It is also the interval timer for the
-  master clock, so BPM, source and transport are the real `MasterClock`:
-  internal, CV (a simulated sync jack, pulsed by hand or at a rate, with the
-  pulses-per-quarter setting) or MIDI (the page can send MIDI clock at the
-  BPM into a chosen port). A beat LED and the subtick count show it running.
-- **Jacks.** Inputs can be toggled, pulsed for 20 ms, or driven by a square
-  wave at a chosen frequency. Outputs light when the firmware drives them
-  high. A jack's card follows the mode the port node claimed.
-- **Sequencers.** One grid per loaded sequencer node, read from the node
-  every frame: the pattern, the step each lane is on, and for the note
-  sequencers the pitch every degree resolves to against the node's *current*
-  root and scale — play a key into a root inlet and the grid re-pitches while
-  the stored pattern stays put, which is #12's "show the resulting pitches"
-  with no editor yet. Drum lanes show their note number, channel and length.
-- **Buses.** The front buffer after each pass: which gate buses are high, how
-  many events each note bus carried and the last one, the overflow counters,
-  the CV values.
-- **Scope.** The last two seconds of every jack and every gate bus, sampled
-  every millisecond of simulated time with short pulses held so they show.
-- **Play.** An on-screen keyboard with octave shift, built for touch as much
-  as for the mouse, a CC sender and an all-notes-off, all going through
-  `deliver_midi()` into the chosen port and channel. The count of ports that
-  accepted the message is shown, so a routing or channel filter is visible.
-  The page lays out in one column on a phone, so it can be played from one.
-- **MIDI out.** Every `IMidiOut::send()` with its simulated timestamp, the
-  target ports by name, the type, channel and data.
-- **Listen.** A small Web Audio synth stands in for whatever would be
-  downstream of the module: one oscillator per note on the chosen MIDI
-  target(s), with a short envelope, CC 64 sustain, pitch bend, and CC 120/123
-  silence. Channel 10 gets a percussive voice, so a drum sequencer is
-  audible as drums. Events are scheduled on the audio clock at the simulated
-  time they happened, so an arpeggio sounds at the rate the patch produced it. Output
-  jacks can click on every rising edge, pitched by jack number, which makes a
-  clock division or a logic gate audible. None of this is firmware: it plays
-  what `IMidiOut::send()` and the jacks emit. Audio has to be enabled with the
-  button because browsers only start sound from a user gesture.
-- **Web MIDI.** Optional. In Chrome or Edge, a real controller can feed
-  `deliver_midi()` and the firmware's output can drive a real port, so a DAW
-  can be pointed at the emulated module.
+What the app does with all this — the tabs, the patch library, the audio — is
+`app/README.md`.
 
 ## Keeping it true to the firmware
 
@@ -243,12 +176,9 @@ error codes.
     the note-offs that arrive when a patch is loaded over a sounding one.
   - **#7, LEDs and console:** whatever interface the LEDs get, the page gets
     two more LEDs; console output can go to a text panel.
-  - **#11, the patch protocol:** `N_PARAM` is now 336 bytes, of which most
-    algorithms use a handful; the wire format will want to elide trailing
-    zeros, and the emulator's `emu_patch_node_param` already only sets the
-    non-zero ones. Feeding SysEx bytes to the same handler
-    makes the emulator a device for #12's editor to talk to, with no hardware
-    attached. The editor's acceptance criterion "a patch the editor accepts
-    is never rejected by the firmware's validator" then holds by
-    construction, because the validator in the page *is* the firmware's, and
-    it can run in CI.
+  - **#11 and #12 (done):** `emu_sysex_in()` feeds the firmware's own
+    `SysexHandler`, which makes the module in the page a device for the app to
+    talk to with no hardware attached. The app's acceptance criterion "a patch
+    the app accepts is never rejected by the firmware's validator" holds by
+    construction, because the validator in the page *is* the firmware's — and
+    `app/test/protocol.test.mjs` runs it in CI.

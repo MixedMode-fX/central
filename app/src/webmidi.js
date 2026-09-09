@@ -1,6 +1,6 @@
 // The Web MIDI transport, and an honest account of where it works.
 //
-// Browser reach is a real constraint, not a footnote: this editor is the
+// Browser reach is a real constraint, not a footnote: this app is the
 // primary way to configure a module with no panel controls, so a browser
 // without Web MIDI is not a degraded experience, it is a user who cannot set
 // their module up. Hence `describeSupport()`, which the page shows before
@@ -35,11 +35,30 @@ export function describeSupport() {
   return { ok: true };
 }
 
-export async function requestAccess() {
-  // sysex: true is the whole point; without it the browser hands back a MIDI
-  // access that silently drops every message this editor sends.
-  return navigator.requestMIDIAccess({ sysex: true });
+// One MIDI access for the whole app, asked for once.
+//
+// Two things want it - the control transport that talks to a module, and the
+// external controller that plays the built-in one - and asking twice means a
+// second permission prompt for something the user already allowed.
+//
+// `sysex: true` is what the control transport needs; without it the browser
+// hands back an access that silently drops every message it sends. If that is
+// refused we fall back to a plain access, because a controller playing the
+// built-in module needs no SysEx at all and should not be lost to a permission
+// that was only ever for hardware.
+let pending = null;
+export async function access() {
+  pending ??= navigator.requestMIDIAccess({ sysex: true })
+    .catch(() => navigator.requestMIDIAccess({ sysex: false }));
+  try {
+    return await pending;
+  } catch (error) {
+    pending = null;
+    throw error;
+  }
 }
+
+export async function requestAccess() { return access(); }
 
 // One MIDI input/output pair, as a transport the Device can use.
 export class WebMidiTransport {

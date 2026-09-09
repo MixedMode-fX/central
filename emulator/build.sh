@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the firmware core to WebAssembly and wrap it in a single HTML page.
+# Build the firmware core to WebAssembly, and the app that runs it.
 #
 # Compiles every source the native test environment compiles (src/ minus
 # main.cpp and hal/teensy/) with the project's warning flags, plus the web
@@ -10,10 +10,15 @@
 #
 # Output:
 #   emulator/dist/mmmc.wasm     the module
-#   emulator/dist/index.html    the page with the module embedded, so it
-#                               opens from a file:// URL or any static host
+#   emulator/dist/index.html    app/ as one file, with the module embedded,
+#                               so it opens from a file:// URL or any host
 #
-# Requirements: clang (>= 15) and lld. On Debian/Ubuntu: apt install clang lld.
+# The app itself has no build step - it is ES modules, served as they are
+# (see app/README.md). This produces the single-file build of it, which is
+# what CI uploads and what GitHub Pages publishes.
+#
+# Requirements: clang (>= 15) and lld, plus node for the page. On
+# Debian/Ubuntu: apt install clang lld nodejs.
 
 set -euo pipefail
 
@@ -81,16 +86,9 @@ if command -v llvm-nm >/dev/null 2>&1; then
     fi
 fi
 
-# Single-file page: the module goes in as base64 where index.html expects it.
-python3 - "$EMU/index.html" "$DIST/mmmc.wasm" "$DIST/index.html" <<'PY'
-import base64, sys
-page, wasm, out = sys.argv[1:4]
-html = open(page, encoding="utf-8").read()
-b64 = base64.b64encode(open(wasm, "rb").read()).decode("ascii")
-marker = "/*MMMC_WASM_BASE64*/"
-assert marker in html, "index.html lost its embed marker"
-open(out, "w", encoding="utf-8").write(html.replace(marker, b64, 1))
-PY
+# The app as one file: its modules wrapped and the wasm embedded, so the
+# built page needs nothing served next to it.
+node "$ROOT/app/tools/bundle.mjs" "$DIST/mmmc.wasm" "$DIST/index.html"
 
 rm -rf "$OBJ"
-echo "emulator: $VERSION+$GIT_REV -> $DIST/mmmc.wasm ($(wc -c < "$DIST/mmmc.wasm") bytes), $DIST/index.html"
+echo "module: $VERSION+$GIT_REV -> $DIST/mmmc.wasm ($(wc -c < "$DIST/mmmc.wasm") bytes)"

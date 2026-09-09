@@ -280,6 +280,9 @@ function stepGrid(app, index) {
     const bit = 1 << (step & 7);
     const on = (node.params[byte] & bit) !== 0;
     cells.push(el('button', {
+      // The id is how the running node's position is painted onto the grid
+      // every tick without re-rendering it: see perform.js.
+      id: `cell-${index}-0-${step}`,
       class: `cell ${on ? 'on' : ''} ${step >= length ? 'beyond' : ''}`,
       title: `step ${step + 1}${step >= length ? ' (past the length, kept but not played)' : ''}`,
       onclick: () => {
@@ -331,6 +334,7 @@ function drumGrid(app, index, isMidi) {
         };
       }
       cells.push(el('button', {
+        id: `cell-${index}-${lane}-${step}`,
         class: `cell ${on ? 'on' : ''} ${step >= length ? 'beyond' : ''}`,
         title: `lane ${lane + 1}, step ${step + 1}`,
         onclick: () => { write(); app.render(); },
@@ -371,6 +375,7 @@ function noteLane(app, index, isPoly) {
       const tie = (flags & 0x40) !== 0;
       const pitch = velocity ? root + degreeToSemitone(degree, mask) : null;
       cells.push(el('div', {
+        id: voice === 0 ? `cell-${index}-0-${step}` : null,
         class: `note-cell ${velocity ? 'on' : ''} ${step >= length ? 'beyond' : ''}`
              + `${rest ? ' rest' : ''}${tie ? ' tie' : ''}`,
         title: pitch === null ? `step ${step + 1}: silent` : `step ${step + 1}: degree ${degree} → ${noteName(pitch)}`,

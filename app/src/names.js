@@ -25,7 +25,7 @@ function labelled(enumeration, labels, what) {
 
 // The MIDI endpoints, as a DAW lists them: the four USB device cables are
 // numbered from 1 here and from 0 in the firmware, which is the one place the
-// editor deliberately renumbers something.
+// app deliberately renumbers something.
 export const MIDI_PORTS = labelled(P.MidiPort, {
   mmMIDI_USB_0: 'USB 1',
   mmMIDI_USB_1: 'USB 2',
@@ -50,6 +50,40 @@ export function portNames(mask) {
 export const portMaskOf = (names) => MIDI_PORTS
   .filter((p) => names.includes(p.label))
   .reduce((mask, p) => mask | p.value, 0);
+
+// The scales, by the names a musician uses. The *masks* are generated from
+// midi/scale.h (P.ScaleMask), so only the words are here - and `labelled`
+// fails the moment the firmware gains or renames one.
+export const SCALES = labelled(P.ScaleId, {
+  SCALE_CHROMATIC: 'chromatic',
+  SCALE_MAJOR: 'major',
+  SCALE_NATURAL_MINOR: 'minor',
+  SCALE_HARMONIC_MINOR: 'harmonic minor',
+  SCALE_MELODIC_MINOR: 'melodic minor',
+  SCALE_PENTATONIC_MAJOR: 'pentatonic major',
+  SCALE_PENTATONIC_MINOR: 'pentatonic minor',
+  SCALE_BLUES: 'blues',
+  SCALE_DORIAN: 'dorian',
+  SCALE_PHRYGIAN: 'phrygian',
+  SCALE_LYDIAN: 'lydian',
+  SCALE_MIXOLYDIAN: 'mixolydian',
+  SCALE_LOCRIAN: 'locrian',
+  SCALE_WHOLE_TONE: 'whole tone',
+  SCALE_COUNT: '',
+}, 'ScaleId').filter((s) => s.label);
+
+export function scaleMaskOf(name) {
+  const found = SCALES.find((s) => s.label === String(name).toLowerCase().replace(/[_-]+/g, ' ').trim());
+  if (!found) {
+    throw new Error(`unknown scale "${name}" `
+                  + `(one of ${SCALES.map((s) => s.label).join(', ')}, or a 12-bit mask)`);
+  }
+  return P.ScaleMask[found.key];
+}
+
+// StepEngine::Direction. A class body, which the generator deliberately does
+// not parse, so the order is spelled out and the comment says where from.
+export const STEP_DIRECTIONS = ['forward', 'reverse', 'pingpong', 'random', 'brownian'];
 
 // MasterClock::Source. Not in a generated enum - master_clock.h is a class
 // body, which the generator deliberately does not parse - so the values are

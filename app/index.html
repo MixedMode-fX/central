@@ -2,9 +2,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
-<title>MMMC patch editor</title>
+<title>MMMC</title>
 <!-- Inline, so the page makes no request for it: there is nothing else to
-     fetch here but the modules and the wasm. -->
+     fetch here but the modules and the module itself. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2312141a'/%3E%3Cpath d='M3 11V5h2l1.5 3L8 5h2v6H8.5V7.5L7 10H6L4.5 7.5V11z' fill='%236ea8fe'/%3E%3Ccircle cx='12.5' cy='9.5' r='1.5' fill='%237bd88f'/%3E%3C/svg%3E">
 <style>
   /* Mobile first, and not as a courtesy: the module embeds in this page, so a
@@ -54,6 +54,9 @@
 
   /* --- header and tabs --- */
   .top { display: grid; gap: .6rem; margin-bottom: .75rem; }
+  .title { display: flex; align-items: baseline; gap: .6rem; min-width: 0; }
+  .patch-name { color: var(--dim); font-size: .95rem; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
   .top-buttons { display: flex; gap: .5rem; flex-wrap: wrap; }
   .top-buttons button { flex: 1 1 auto; min-width: 0; }
   .status { color: var(--dim); font-size: .9rem; margin: 0; }
@@ -89,6 +92,7 @@
   button.ghost:hover { color: var(--ink); border-color: var(--line); }
   button.danger:hover { border-color: var(--bad); color: var(--bad); }
   button.active { border-color: var(--gate); color: var(--gate); }
+  button.primary { border-color: var(--accent); color: var(--accent); }
   select {
     min-height: var(--tap); max-width: 100%;
     background: var(--raised); border: 1px solid var(--line);
@@ -246,6 +250,9 @@
   }
   .cell.on { background: var(--gate); border-color: var(--gate); }
   .cell.beyond { opacity: .3; }
+  /* Where the running node is, right now. The step being edited and the step
+     being played are the same square: that is what makes this one app. */
+  .cell.playing, .note-cell.playing { outline: 2px solid var(--accent); outline-offset: 1px; }
   .note-cell {
     display: grid; gap: 1px; width: 52px; flex: none; text-align: center;
     border: 1px solid var(--line); border-radius: 3px; padding: 2px; background: var(--raised);
@@ -259,6 +266,39 @@
     font: inherit; font-size: .85rem; text-align: center; padding: 0;
   }
   .note-cell .pitch { font-size: .65rem; color: var(--dim); }
+
+  /* --- the play tab --- */
+  /* A jack is a socket: a lamp, a name, and whatever drives it. Cards rather
+     than a table, because on a phone a table of eight jacks is a sideways
+     scroll and a card is not. */
+  .jack-cards { display: grid; gap: .5rem; }
+  .jack-card { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
+  .jack-head { display: flex; gap: .5rem; align-items: center; margin-bottom: .3rem; }
+  .led.jack-lamp { background: var(--gate); }
+  .led.jack-lamp.out { background: var(--warn); }
+  .led.lit { opacity: 1; }
+
+  /* One octave, playable with a thumb. Not a picture of a piano - the black
+     keys are in the row, named, because a 26px key on a phone cannot be hit
+     between two others. */
+  .keys { display: flex; gap: 3px; overflow-x: auto; padding-bottom: .3rem; -webkit-overflow-scrolling: touch; }
+  .key { flex: 1 0 3rem; min-height: 3.5rem; font-size: .75rem; touch-action: none; }
+  .key.black { background: var(--raised); color: var(--dim); }
+  .key.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+  .log-scroll { max-height: 16rem; overflow-y: auto; -webkit-overflow-scrolling: touch;
+                border: 1px solid var(--line); border-radius: var(--radius); }
+  .log { display: grid; font-size: .8rem; font-variant-numeric: tabular-nums; }
+  .log-line { display: grid; grid-template-columns: 3.5rem 4.5rem 1fr; gap: .4rem;
+              padding: .3rem .5rem; border-bottom: 1px solid var(--line); }
+  .log-line:last-child { border-bottom: none; }
+  .log-time, .log-where { color: var(--dim); }
+  .log-where { grid-column: 1 / -1; font-size: .75rem; }
+
+  /* --- the patches tab --- */
+  .saved-list { display: grid; gap: .5rem; }
+  .saved { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
+  .saved.current { border-color: var(--accent); }
 
   /* --- meters --- */
   .meters .meter-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
@@ -297,6 +337,9 @@
     .params { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem 1.5rem; }
     .fields { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
     .jacks { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+    .jack-cards { grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+    .log-line { grid-template-columns: 4rem 5rem 1fr auto; }
+    .log-where { grid-column: auto; }
     .slots { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
     .lane-name { width: 8rem; font-size: .8rem; }
   }
@@ -313,9 +356,15 @@
 <div id="app"></div>
 
 <noscript>
-  This editor is a JavaScript application. With scripting off you can still configure a
-  module through its serial console, or send it a <code>.syx</code> patch file with any
-  standard SysEx librarian.
+  This app is a JavaScript application: it runs the module's own firmware, compiled to
+  WebAssembly, in this page. With scripting off you can still configure a module through
+  its serial console, or send it a <code>.syx</code> patch file with any standard SysEx
+  librarian.
 </noscript>
+
+<!-- Where the build puts the module, base64, so the built page opens from a
+     file:// URL with nothing serving it. A page served next to mmmc.wasm
+     fetches that instead and never reads this. -->
+<script id="mmmc-wasm" type="text/plain">/*MMMC_WASM_BASE64*/</script>
 
 <script type="module" src="./src/app.js"></script>

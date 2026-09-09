@@ -1,8 +1,8 @@
 // The module, over Web MIDI.
 //
-// **The editor is a client of the protocol and nothing more.** If it needs
+// **The app is a client of the protocol and nothing more.** If it needs
 // something the protocol does not have, the protocol gains a message - never a
-// private side channel - so the console, this editor and an eventual Launchpad
+// private side channel - so the console, this app and an eventual Launchpad
 // stay interchangeable.
 //
 // **The device is the source of truth.** This mirrors device state; it does
@@ -11,7 +11,7 @@
 // Change recall, a CC learn, an error behind the red LED - and those arrive as
 // events rather than being polled for.
 //
-// Everything the editor knows about what the firmware *has* - the algorithms,
+// Everything the app knows about what the firmware *has* - the algorithms,
 // their inlets and outlets and domains, every parameter's range and meaning,
 // and the module's capacities - is read from the device. An algorithm added to
 // the firmware appears here with no change to this file.
@@ -23,7 +23,7 @@ const REPLY_TIMEOUT_MS = 2000;
 
 // A transport is anything that can send a SysEx message and report the ones it
 // receives. Web MIDI is one; the wasm emulator in the tests is another, which
-// is how the editor is tested against the real firmware.
+// is how the app is tested against the real firmware.
 export class Device extends EventTarget {
   constructor(transport) {
     super();
@@ -125,7 +125,7 @@ export class Device extends EventTarget {
   }
 
   // The registry, read rather than hardcoded: an algorithm added to the
-  // firmware appears in the editor with no editor change.
+  // firmware appears in the app with no change here.
   async readAlgorithms() {
     const replies = await this.request(
       this.msg(P.SysexCommand.SYSEX_ALGO_REQUEST),
@@ -172,7 +172,7 @@ export class Device extends EventTarget {
       descriptor.name = string() ?? `algorithm ${descriptor.id}`;
       // What each connection means, and what the algorithm is for. These come
       // after the name, so a module whose firmware predates them simply runs
-      // out of record here and the editor falls back to the index - the
+      // out of record here and the app falls back to the index - the
       // reason string() reports the end rather than reading past it.
       for (let i = 0; i < descriptor.nIn; i++) descriptor.inName.push(string());
       for (let i = 0; i < descriptor.nOut; i++) descriptor.outName.push(string());
@@ -222,9 +222,12 @@ export class Device extends EventTarget {
       const repeat = codec.readU14(reply, at); at += 2;
       const nFields = codec.readU14(reply, at); at += 2;
       const fieldIndex = codec.readU14(reply, at); at += 2;
-      const min = reply[at++];
-      const max = reply[at++];
-      const def = reply[at++];
+      // 14-bit, as the firmware sends them: a range reaching 255 does not fit
+      // in a SysEx data byte, and a max reported as 127 makes the validator
+      // here refuse a pattern byte with step 8 in it.
+      const min = codec.readU14(reply, at); at += 2;
+      const max = codec.readU14(reply, at); at += 2;
+      const def = codec.readU14(reply, at); at += 2;
       const kind = reply[at++];
       const nameLength = reply[at++];
       const name = String.fromCharCode(...reply.subarray(at, at + nameLength));

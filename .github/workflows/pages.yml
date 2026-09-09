@@ -56,9 +56,14 @@ jobs:
           node editor/test/protocol.test.mjs
 
       # The editor is served from /editor/ alongside the emulator. It has no
-      # build step - ES modules and one HTML file - so it is copied as it is.
+      # build step - ES modules and one HTML file - so the page and its
+      # modules are copied as they are. The generator and the test are build
+      # tooling and are not part of the site.
       - name: Stage the editor
-        run: cp -r editor emulator/dist/editor
+        run: |
+          mkdir -p emulator/dist/editor
+          cp editor/index.html editor/README.md emulator/dist/editor/
+          cp -r editor/src emulator/dist/editor/src
 
       # index.html plus mmmc.wasm: the page fetches the module from next to
       # itself when served and falls back to its embedded copy otherwise.

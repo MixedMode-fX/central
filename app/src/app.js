@@ -19,7 +19,7 @@
 //     LEDs, sequencer positions and MIDI output the page can show. So an edit
 //     is heard as it is made: there is nothing to load, because the thing
 //     being edited is the thing that is running.
-//   * **a patch is kept in the browser** (`library.js`), because neither the
+//   * **a patch is kept in the browser** (`storage.js`), because neither the
 //     module's four EEPROM slots nor the built-in module's RAM is somewhere to
 //     keep work.
 //   * **a controller plugged into the computer plays it** (`controller.js`),
@@ -33,28 +33,38 @@
 import * as P from './protocol.js';
 import * as codec from './codec.js';
 import { Device } from './device.js';
-import { validate, advise } from './validate.js';
+import { validate, advise, Domain } from './validate.js';
 import { describeSupport, discover, requestAccess, WebMidiTransport } from './webmidi.js';
 import { EmbeddedModule } from './module.js';
 import { Listener } from './audio.js';
 import { Controller } from './controller.js';
-import { Library, toBase64 } from './library.js';
-import { el, nodeCard } from './views.js';
+import { Library, toBase64 } from './storage.js';
+import { el, nodeCard, busUsers } from './views.js';
 import { connectNewNode } from './graph.js';
 import { routingPanel, globalsPanel, mappingPanel, controllerPanel } from './midi.js';
 import { toPatchJsonText, fromPatchJson } from './patchjson.js';
-import { patchesTab } from './patches.js';
+import { libraryTab } from './library.js';
 import { EXAMPLES } from './examples.js';
 import { playTab, metersPanel, refreshLive } from './perform.js';
 
+// What the app is *for*, in the order the work happens: build the patch, route
+// the MIDI around it, keep it somewhere.
+//
+// **play is not one of them.** It is the emulator - the module running, with
+// its jacks, its scope, its keyboard and its ears - and it is a *place you go
+// to*, alongside the module on the end of a cable, not a fourth thing to edit.
+// So it sits with "connect a module" at the top of the page: the two buttons
+// there are the two answers to "which module am I listening to?".
+//
+// And the library was called "patches", with a button in the top row that went
+// to the tab of the same name sitting right below it. One name for one thing,
+// in one place.
 const TABS = [
   { key: 'patch', label: 'patch' },
-  { key: 'play', label: 'play' },
   { key: 'midi', label: 'MIDI' },
-  { key: 'patches', label: 'patches' },
+  { key: 'library', label: 'library' },
 ];
 
-const LIVE_MS = 100;
 const AUTOSAVE_MS = 400;
 
 class App {
@@ -72,11 +82,19 @@ class App {
     this.offline = true;
     this.learnTarget = null;
     this.tab = 'patch';
+    // Where "play" came from, so leaving it goes back rather than guessing.
+    this.editingTab = 'patch';
+    this.scopeAll = false;
+    // The note buses the piano roll is reading. A bus is only read when
+    // something asks for it, and what the roll asks for is "every bus this
+    // patch writes" - so the roll follows the patch rather than needing to be
+    // told, and a bus nothing writes costs nothing.
+    this.watchedBuses = new Set();
     // The patch being edited: its name, and where it came from in the library.
     this.current = { id: null, name: 'untitled', dirty: false, savedAt: 0 };
     this.savedImage = null;        // the image as last saved, for the dirty mark
     this.autosaveTimer = null;
-    this.liveTimer = null;
+    this.stopLive = null;          // unsubscribes the per-frame repaint
     this.renderScheduled = false;
     // What the on-screen keyboard sends.
     this.play = { port: P.MidiPort.mmMIDI_USB_0, channel: 1, velocity: 100, octave: 4, cc: 74, ccValue: 64 };
@@ -99,6 +117,28 @@ class App {
     // step 20 rebuilds the page, scrolls the pattern back to step 1, and puts
     // the step after the one just edited off the screen.
     this.scrolled = new Map();
+  }
+
+  // Keep the roll's note-bus watches in step with the patch. Called on every
+  // render, which is every edit: a connection dragged onto a new bus is a new
+  // bus to show, and one dragged off is one to stop reading.
+  syncNoteBuses() {
+    const wanted = new Set();
+    if (this.module && this.usingModule && this.device?.capabilities) {
+      for (let bus = 0; bus < this.device.capabilities.noteBuses; bus++) {
+        if (busUsers(this, Domain.Note, bus).writers.length) wanted.add(bus);
+      }
+    }
+    for (const bus of [...this.watchedBuses]) {
+      if (wanted.has(bus)) continue;
+      this.module?.unwatchNoteBus(bus);
+      this.watchedBuses.delete(bus);
+    }
+    for (const bus of wanted) {
+      if (this.watchedBuses.has(bus)) continue;
+      this.module.watchNoteBus(bus);
+      this.watchedBuses.add(bus);
+    }
   }
 
   // Put every remembered scroller back where it was, before the frame is
@@ -126,6 +166,7 @@ class App {
       this.module = await EmbeddedModule.load();
       this.module.start();
       this.listener = new Listener(this.module);
+      this.listener.restore(this.library.readListen());
       this.controller = new Controller(this.module);
       this.controller.onChange = () => this.render();
       await this.useModule({ silent: true });
@@ -165,8 +206,13 @@ class App {
     this.usingModule = true;
     this.current = { id: null, name: 'untitled', dirty: false, savedAt: 0 };
     this.savedImage = null;
-    clearInterval(this.liveTimer);
-    this.liveTimer = setInterval(() => this.refreshLive(), LIVE_MS);
+    // Painted once per animation frame, off the module's own frame callback,
+    // rather than on a timer of its own. A timer is the wrong clock for this:
+    // the lights, the scope and the playheads are showing what the module did
+    // *between two frames*, and the module is the thing that knows when a
+    // frame's worth of passes has just run.
+    this.stopLive?.();
+    this.stopLive = this.module.onFrame(() => this.refreshLive());
     if (!silent) {
       this.status = 'editing the built-in module';
       this.render();
@@ -194,7 +240,8 @@ class App {
       const port = found[0];
       this.module?.stop();
       this.usingModule = false;
-      clearInterval(this.liveTimer);
+      this.stopLive?.();
+      this.stopLive = null;
       await this.adopt(new WebMidiTransport(port.input, port.output), port.name, port.deviceId);
       this.current = { id: null, name: `on ${port.name}`, dirty: true, savedAt: 0 };
       this.savedImage = null;
@@ -317,7 +364,15 @@ class App {
     }
     Promise.resolve()
       .then(() => this.device.sendPatch(this.patch, this.globals))
-      .then(() => { this.diverged = false; this.status = said; })
+      .then(() => {
+        this.diverged = false;
+        this.status = said;
+        // The nodes that were sounding are gone. A node handed over mid-note
+        // publishes its note off outside a pass, where nothing is reading the
+        // buses, so a player listening to one would drone on a note whose
+        // owner no longer exists.
+        this.listener?.panic();
+      })
       .catch((error) => { this.diverged = true; this.pendingError = error.message; })
       .finally(() => this.render());
   }
@@ -394,6 +449,13 @@ class App {
     if (now) write(); else this.autosaveTimer = setTimeout(write, AUTOSAVE_MS);
   }
 
+  // The monitor setup, kept across a reload like the patch is. It is written
+  // on the change itself rather than debounced: these are a handful of
+  // deliberate choices, not a slider sweep.
+  saveListen() {
+    if (this.listener) this.library.saveListen(this.listener.toJSON());
+  }
+
   restoreWorking() {
     const working = this.library.readWorking();
     if (!working) return;
@@ -449,7 +511,7 @@ class App {
       this.globals = globals;
       this.current = { id: entry.id, name: entry.name, dirty: false, savedAt: entry.updated };
       this.savedImage = toBase64(entry.bytes);
-      this.tab = 'patch';
+      this.tab = this.editingTab = 'patch';
       this.autosave({ now: true });
       this.sendWhole(`loaded “${entry.name}”`);
     } catch (error) {
@@ -512,7 +574,7 @@ class App {
     this.current = { id: null, name, dirty: true, savedAt: 0 };
     this.savedImage = null;
     this.loadJson(JSON.stringify(example.patch), `the “${name}” example`);
-    this.tab = 'patch';
+    this.tab = this.editingTab = 'patch';
   }
 
   newPatch() {
@@ -521,7 +583,7 @@ class App {
     this.globals = codec.emptyGlobals();
     this.current = { id: null, name: 'untitled', dirty: false, savedAt: 0 };
     this.savedImage = null;
-    this.tab = 'patch';
+    this.tab = this.editingTab = 'patch';
     this.autosave({ now: true });
     this.sendWhole('a new patch, empty');
   }
@@ -575,7 +637,7 @@ class App {
       this.globals = globals;
       this.current = { id: null, name: file.name.replace(/\.[^.]+$/, ''), dirty: true, savedAt: 0 };
       this.savedImage = null;
-      this.tab = 'patch';
+      this.tab = this.editingTab = 'patch';
       this.sendWhole(`loaded ${file.name} — save it to keep it in this browser`);
     } catch (error) {
       this.pendingError = `could not read that file: ${error.message}`;
@@ -630,6 +692,7 @@ class App {
     this.renderScheduled = true;
     queueMicrotask(() => {
       this.renderScheduled = false;
+      this.syncNoteBuses();
       document.getElementById('app').replaceChildren(this.view());
       this.restoreScroll();
       this.autosave();
@@ -662,7 +725,7 @@ class App {
       this.tab === 'patch' ? this.patchTab() : null,
       this.tab === 'play' ? playTab(this) : null,
       this.tab === 'midi' ? this.midiTab() : null,
-      this.tab === 'patches' ? patchesTab(this) : null);
+      this.tab === 'library' ? libraryTab(this) : null);
   }
 
   patchTab() {
@@ -693,11 +756,24 @@ class App {
         el('h1', {}, 'MMMC'),
         el('span', { class: 'patch-name' }, this.current.name, this.current.dirty ? ' •' : '')),
       el('div', { class: 'top-buttons' },
-        el('button', { class: 'ghost', onclick: () => { this.tab = 'patches'; this.render(); } }, 'patches'),
+        el('button', {
+          class: this.tab === 'play' ? 'active' : '',
+          'aria-pressed': this.tab === 'play' ? 'true' : 'false',
+          onclick: () => this.togglePlay(),
+        }, this.tab === 'play' ? 'back to editing' : 'play'),
         el('button', { onclick: () => this.connect() },
           this.usingModule ? 'connect a module' : 'reconnect')),
       el('p', { class: `status ${this.offline ? 'offline' : 'online'}${this.diverged ? ' warn' : ''}` },
         this.status, el('span', { class: 'hint' }, ` · editing ${where}`)));
+  }
+
+  // play is the module running, not a fourth thing to edit, so it is a button
+  // at the top rather than a tab - and leaving it goes back to whichever tab it
+  // was entered from.
+  togglePlay() {
+    if (this.tab === 'play') this.tab = this.editingTab;
+    else { this.editingTab = this.tab; this.tab = 'play'; }
+    this.render();
   }
 
   tabs() {
@@ -705,7 +781,7 @@ class App {
       TABS.map((t) => el('button', {
         class: `tab ${this.tab === t.key ? 'active' : ''}`,
         role: 'tab', 'aria-selected': this.tab === t.key ? 'true' : 'false',
-        onclick: () => { this.tab = t.key; this.render(); },
+        onclick: () => { this.tab = t.key; this.editingTab = t.key; this.render(); },
       }, t.label)));
   }
 
@@ -746,7 +822,7 @@ class App {
       el('h2', {}, 'jacks'),
       el('p', { class: 'hint' },
         '“in” means the jack drives a gate bus; “out” means a gate bus drives the jack. '
-        + 'Play them under play.'),
+        + 'Play them under play, at the top of the page.'),
       el('div', { class: 'jacks' }, jacks));
   }
 

@@ -1,21 +1,24 @@
-// The play tab: the module, running, with the few controls a module has.
+// The play surface: the module, running, with the few controls a module has.
 //
-// This is the emulator's surface, reduced to what a musician needs while
-// building a patch. The old page also exposed the pass interval, a speed
-// multiplier, single-stepping, a scope, the bus tables and the registry -
-// instruments for debugging the emulator itself. They answered questions about
-// the *simulation*; this tab answers questions about the *patch*: is the clock
-// running, is that jack firing, what is it sending, what does it sound like.
-// Anything that needs the other questions has the native tests, `smoke.mjs`
-// and a debugger.
+// This is the emulator's surface: what a module in a rack gives you - two
+// LEDs, eight jacks, a clock and its MIDI - plus the three things a rack
+// cannot. Ears, an on-screen keyboard, and a *time* axis.
 //
-// What is left is what a module in a rack gives you - two LEDs, eight jacks, a
-// clock and its MIDI - plus the two things a rack cannot: an on-screen
-// keyboard, and ears.
+// The pass interval, the speed multiplier, single-stepping, the bus tables and
+// the registry listing stayed behind when the emulator page became this tab:
+// they answer questions about the *simulation*, and this tab answers questions
+// about the patch. The scope did not belong in that list and should never have
+// gone with them. A divider, a Euclidean sequencer and a logic gate are things
+// whose output only exists over time - a lamp can say a gate is high, it
+// cannot say the pattern is right - and the piano roll beside it does the same
+// job for the notes. Both are in `scope.js`.
 
 import * as P from './protocol.js';
-import { el, noteName, slider } from './views.js';
+import { el, noteName, slider, busUsers } from './views.js';
 import { portNames, MUSICAL_PORTS, CLOCK_SOURCES } from './names.js';
+import { scopePanel, drawScope, rollPanel, drawRoll } from './scope.js';
+import { WAVES } from './audio.js';
+import { Domain } from './validate.js';
 
 const MIDI_TYPES = {
   0x80: 'note off', 0x90: 'note on', 0xa0: 'poly AT', 0xb0: 'CC', 0xc0: 'program',
@@ -45,6 +48,8 @@ export function playTab(app) {
   return el('div', {},
     metersPanel(app),
     transportPanel(app),
+    scopePanel(app),
+    rollPanel(app),
     jacksPanel(app),
     keyboardPanel(app),
     listenPanel(app),
@@ -266,14 +271,19 @@ function keyboardPanel(app) {
 function listenPanel(app) {
   const listener = app.listener;
   const clicks = el('input', { type: 'checkbox', class: 'switch',
-    onchange: (e) => { listener.clicks = e.target.checked; } });
+    onchange: (e) => { listener.clicks = e.target.checked; app.saveListen(); app.render(); } });
   clicks.checked = listener.clicks;
   // Through `slider`, like every other one: a finger scrolling the play tab
   // must not set the volume on its way past.
   const volume = slider({
     class: 'grow', min: '0', max: '100', value: String(Math.round(listener.volume * 100)),
-    'aria-label': 'volume',
-  }, { onInput: (v) => listener.setVolume(Number(v) / 100) });
+    'aria-label': 'master volume',
+  }, { onInput: (v) => listener.setVolume(Number(v) / 100), onCommit: () => app.saveListen() });
+  const clickVolume = slider({
+    class: 'grow', min: '0', max: '100', value: String(Math.round(listener.clickVolume * 100)),
+    'aria-label': 'volume of the gate clicks',
+  }, { onInput: (v) => listener.setClickVolume(Number(v) / 100), onCommit: () => app.saveListen() });
+
   return el('section', { class: 'panel' },
     el('h2', {}, 'listen'),
     el('div', { class: 'row' },
@@ -281,13 +291,123 @@ function listenPanel(app) {
         try { await listener.toggle(); } catch (error) { app.pendingError = error.message; }
         app.render();
       } }, listener.enabled ? 'audio on' : 'enable audio'),
-      volume,
-      el('label', { class: 'bool' }, clicks, el('span', {}, 'click on output jacks')),
+      el('span', { class: 'field-name' }, 'master'), volume,
       el('span', { class: 'hint', id: 'voices' }, '')),
+
+    el('h4', { class: 'spaced' }, 'players'),
+    el('div', { class: 'players' }, listener.players.map((player) => playerRow(app, player))),
+    el('div', { class: 'row' },
+      el('button', { class: 'ghost', onclick: () => {
+        // A new player starts on a bus rather than on the output: one of those
+        // exists already, and a second copy of it is not what anybody is
+        // adding a player for.
+        listener.addPlayer({ source: 'bus', bus: firstBusInUse(app), wave: nextWave(listener) });
+        app.saveListen();
+        app.render();
+      } }, 'add a player'),
+      listener.players.length ? null : el('span', { class: 'hint' }, 'nothing is being listened to')),
     el('p', { class: 'hint' },
-      'A small synth standing in for whatever would be downstream: it plays what the module '
-      + 'sends and clicks when an output jack goes high. None of it is firmware. '
+      'A player is one voice pointed at one thing. “What the module sends” is the MIDI leaving a '
+      + 'MIDI output node — what a synth on the far end of the cable would receive. A “note bus” is '
+      + 'the patch’s own signal, read straight off the bus, patched to an output or not: that is how '
+      + 'an unfinished patch is heard at all. Give two buses two players and two waveforms to tell '
+      + 'them apart.'),
+
+    el('h4', { class: 'spaced' }, 'gate clicks'),
+    el('div', { class: 'row' },
+      el('label', { class: 'bool' }, clicks, el('span', {}, 'click on output jacks'))),
+    el('div', { class: 'row' },
+      el('span', { class: 'field-name' }, 'level'), clickVolume),
+    el('p', { class: 'hint' },
+      'A blip on every rising edge of an output jack, pitched by jack number — which is what makes a '
+      + 'clock division or a logic gate audible at all, since those patches send no MIDI. Its own level, '
+      + 'because it is percussion under the notes rather than part of them.'),
+    el('p', { class: 'hint' },
+      'None of this is firmware: it is a small synth standing in for whatever would be downstream. '
       + 'Browsers only start audio from a button, which is why this is one.'));
+}
+
+// One player: what it listens to, what it sounds like, and how loud.
+function playerRow(app, player) {
+  const listener = app.listener;
+  const buses = app.device?.capabilities?.noteBuses ?? P.N_NOTE_BUS;
+
+  const source = el('select', { class: 'grow', 'aria-label': 'what this player listens to',
+    onchange: (e) => {
+      const value = e.target.value;
+      listener.setPlayerSource(player.id, value === 'out' ? 'out' : 'bus',
+                               value === 'out' ? 0 : Number(value));
+      app.saveListen();
+      app.render();
+    } });
+  const out = el('option', { value: 'out' }, 'what the module sends');
+  if (player.source === 'out') out.selected = true;
+  source.append(out);
+  for (let b = 0; b < buses; b++) {
+    const option = el('option', { value: String(b) }, `note bus ${b}`);
+    if (player.source === 'bus' && player.bus === b) option.selected = true;
+    source.append(option);
+  }
+
+  const wave = el('select', { 'aria-label': 'timbre',
+    onchange: (e) => { player.setWave(e.target.value); app.saveListen(); } });
+  for (const shape of WAVES) {
+    const option = el('option', { value: shape }, shape);
+    if (shape === player.wave) option.selected = true;
+    wave.append(option);
+  }
+
+  const volume = slider({
+    class: 'grow', min: '0', max: '100', value: String(Math.round(player.volume * 100)),
+    'aria-label': `volume of ${player.describe()}`,
+  }, { onInput: (v) => player.setVolume(Number(v) / 100), onCommit: () => app.saveListen() });
+
+  return el('div', { class: 'player' },
+    el('div', { class: 'row' }, source, wave,
+      el('button', { class: 'ghost danger', 'aria-label': `remove the player on ${player.describe()}`,
+        onclick: () => { listener.removePlayer(player.id); app.saveListen(); app.render(); } }, 'remove')),
+    el('div', { class: 'row' },
+      el('span', { class: 'field-name' }, 'level'), volume,
+      el('span', { class: 'hint', id: `voices-${player.id}` }, '')),
+    el('p', { class: 'hint' }, playerHint(app, player)));
+}
+
+// What the chosen source actually carries, in the patch on screen. A list of
+// eight identical "note bus N" is a guess; "from NoteSeq 1 out" is an answer.
+function playerHint(app, player) {
+  if (player.source !== 'bus') {
+    const outs = app.patch.midiOut.filter((port) => port.targetMask).length;
+    return outs
+      ? 'the MIDI leaving the module, as a synth on the far end of the cable would hear it'
+      : 'nothing is patched to a MIDI output, so the module is sending nothing — '
+        + 'point this at a note bus instead';
+  }
+  const { writers, readers } = busUsers(app, Domain.Note, player.bus);
+  if (!writers.length) return `nothing writes note bus ${player.bus} yet`;
+  return `from ${writers.join(', ')}${readers.length ? ` · to ${readers.join(', ')}` : ''}`;
+}
+
+// The bus a new player should open on, so adding one is a press rather than a
+// press and a hunt: the first bus a *node* writes - a sequencer's output, an
+// arpeggiator's - in preference to one only a MIDI input writes, which carries
+// what you just played rather than what the patch made of it.
+function firstBusInUse(app) {
+  const buses = app.device?.capabilities?.noteBuses ?? P.N_NOTE_BUS;
+  let fallback = -1;
+  for (let b = 0; b < buses; b++) {
+    const { writers } = busUsers(app, Domain.Note, b);
+    if (!writers.length) continue;
+    if (writers.some((who) => !who.startsWith('MIDI in '))) return b;
+    if (fallback < 0) fallback = b;
+  }
+  return fallback < 0 ? 0 : fallback;
+}
+
+// Two players on one waveform are one player as far as the ear is concerned,
+// which defeats the point of having two.
+function nextWave(listener) {
+  const used = new Set(listener.players.map((p) => p.wave));
+  return WAVES.find((wave) => !used.has(wave)) ?? WAVES[0];
 }
 
 function monitorPanel(app) {
@@ -300,38 +420,51 @@ function monitorPanel(app) {
 
 // --- the live bits ----------------------------------------------------------
 //
-// Everything above is rebuilt only when the patch changes. What moves at 10 Hz
-// is written straight into the DOM here: re-rendering the page for a blinking
-// LED would fight every open <select> and every held key.
+// Everything above is rebuilt only when the patch changes. What moves is
+// written straight into the DOM here, once per animation frame: re-rendering
+// the page for a blinking LED would fight every open <select> and every held
+// key.
+//
+// **Per frame, and from the module's own per-pass sampling** - not from a
+// timer reading the levels for itself. This used to run ten times a second and
+// read whatever was high at that instant, which is the wrong shape for the
+// thing it was showing: a trigger is high for one or two passes, an animation
+// frame is sixteen, and a tenth of a second is a hundred. A gate dot lit when
+// the poll happened to land inside a pulse and stayed dark otherwise, so the
+// lights were somewhere between late and fictional. `takeActivity()` hands
+// over everything that has been high since the last paint, folded together
+// with what is high now, so an edge can be one frame late but can no longer be
+// missed.
 export function refreshLive(app) {
   const module = app.module;
   if (!module || !app.usingModule) return;
 
-  const leds = module.leds();
+  const live = module.takeActivity();
   const clock = module.clock();
   const green = document.getElementById('led-green');
   const red = document.getElementById('led-red');
-  if (green) green.style.opacity = String(Math.max(0.08, leds.green / 255));
-  if (red) red.style.opacity = String(Math.max(0.08, leds.red / 255));
+  if (green) green.style.opacity = String(Math.max(0.08, live.green / 255));
+  if (red) red.style.opacity = String(Math.max(0.08, live.red / 255));
 
   const readout = document.getElementById('clock-readout');
   if (readout) {
     readout.textContent = clock.running
-      ? `${clock.bpm} BPM · beat ${Math.floor(clock.count / (P.MASTER_PPQN * P.CLOCK_SUBTICK)) + 1}`
+      ? `${clock.bpm} BPM \u00b7 beat ${Math.floor(clock.count / (P.MASTER_PPQN * P.CLOCK_SUBTICK)) + 1}`
       : 'clock stopped';
   }
 
-  const buses = module.gateBuses();
   for (let b = 0; b < P.N_GATE_BUS; b++) {
     const dot = document.getElementById(`gate-${b}`);
-    if (dot) dot.classList.toggle('lit', (buses & (1 << b)) !== 0);
+    if (dot) dot.classList.toggle('lit', (live.gate & (1 << b)) !== 0);
   }
 
   for (let j = 0; j < P.GPIO_N; j++) {
     const lamp = document.getElementById(`jack-lamp-${j}`);
     if (!lamp) continue;
     const mode = app.patch.gatePorts[j]?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
-    const high = mode === P.GatePortDirection.GATE_PORT_OUT ? module.jackOutput(j) : module.jackInput(j);
+    const high = mode === P.GatePortDirection.GATE_PORT_OUT
+      ? live.jackOut & (1 << j)
+      : live.jackIn & (1 << j);
     lamp.classList.toggle('lit', Boolean(high));
     lamp.classList.toggle('out', mode === P.GatePortDirection.GATE_PORT_OUT);
   }
@@ -342,32 +475,66 @@ export function refreshLive(app) {
   }
   const voices = document.getElementById('voices');
   if (voices && app.listener) {
-    voices.textContent = app.listener.enabled ? `${app.listener.voices.size} voices` : '';
+    voices.textContent = app.listener.enabled ? `${app.listener.voiceCount()} voices` : '';
+  }
+  // Per player, so a bus that is silent when it should not be says so where
+  // the choice that made it silent is.
+  for (const player of app.listener?.players ?? []) {
+    const readout = document.getElementById(`voices-${player.id}`);
+    if (readout) readout.textContent = app.listener.enabled ? `${player.voices.size} sounding` : 'audio is off';
   }
 
+  drawScope(app);
+  drawRoll(app);
   refreshLog(app);
   refreshPlayheads(app);
 }
 
-let shownLog = -1;
+// The log, rebuilt when there is something new in it.
+//
+// "Something new" is the sequence number, not the length. The log is a ring of
+// two hundred events: once it is full, every further event shifts one off the
+// front and leaves the length at two hundred for ever. Comparing lengths -
+// which is what this did - therefore froze the view after the two hundredth
+// event and only ever thawed when *clear* took the length back to zero, which
+// is exactly the "it fills up, stops, and refills when I clear it" that was
+// reported. `midiSeq` counts every event the module has ever sent.
+//
+// The mark lives on the element rather than in a variable here, so a rebuilt
+// panel - the page is replaced wholesale on every edit - draws itself again
+// instead of waiting for the next event to notice it is empty.
+const LOG_MS = 60;
 function refreshLog(app) {
   const box = document.getElementById('midi-log');
   if (!box) return;
-  const log = app.module.midiLog;
-  if (log.length === shownLog) return;
-  shownLog = log.length;
+  const module = app.module;
+  const seq = module.midiSeq;
+  if (Number(box.dataset.seq) === seq) return;
+  // A stream of MIDI clock is forty events a second; there is no reading a
+  // list that is rebuilt under the eye any faster than this.
+  const at = (globalThis.performance ?? Date).now();
+  if (box.dataset.seq !== undefined && at - Number(box.dataset.at ?? 0) < LOG_MS) return;
+  box.dataset.seq = String(seq);
+  box.dataset.at = String(at);
+
+  const log = module.midiLog;
   if (!log.length) {
-    box.replaceChildren(el('p', { class: 'hint' }, 'nothing yet — the module has sent no MIDI'));
+    box.replaceChildren(el('p', { class: 'hint' }, 'nothing yet \u2014 the module has sent no MIDI'));
     return;
   }
+  // Whether to follow the tail is the reader's choice: scrolling back through
+  // what just went past must not be undone by the next event. The scroller is
+  // the box around the log, not the log - which is why this never worked.
+  const scroll = box.parentElement;
+  const following = !scroll || scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
   box.replaceChildren(...log.slice(-LOG_SHOWN).map((event) => el('div', { class: 'log-line' },
     el('span', { class: 'log-time' }, `${(event.t / 1e6).toFixed(2)}s`),
     el('span', { class: 'log-what' }, MIDI_TYPES[event.type] ?? `0x${event.type.toString(16)}`),
-    el('span', { class: 'log-data' }, app.module.isNote(event.type)
+    el('span', { class: 'log-data' }, module.isNote(event.type)
       ? `${noteName(event.d1)} vel ${event.d2}`
       : `${event.d1} ${event.d2}`),
-    el('span', { class: 'log-where' }, `ch ${event.channel} → ${portNames(event.target).join(', ') || event.target}`))));
-  box.scrollTop = box.scrollHeight;
+    el('span', { class: 'log-where' }, `ch ${event.channel} \u2192 ${portNames(event.target).join(', ') || event.target}`))));
+  if (scroll && following) scroll.scrollTop = scroll.scrollHeight;
 }
 
 // A playhead on the step grids in the patch tab, read from the running node.

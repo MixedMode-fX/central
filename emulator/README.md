@@ -126,7 +126,8 @@ error codes.
 ## Using the page
 
 - **Patch.** A JSON patch, resolved by algorithm *name* through the registry.
-  The presets cover the default patch from `main.cpp`, the scenarios from
+  The presets cover the default patch from `main.cpp`, a MIDI thru with the
+  sustain pedal (play the keys, toggle jack 8, listen), the scenarios from
   `test/test_master`, a logic-gate demo, a feedback loop and a patch the
   validator rejects. Loading is `MixedModeMaster::load()` followed by
   `setup()`; a rejected patch leaves the running one in place, as on the module.
@@ -162,6 +163,15 @@ error codes.
   shown, so a source or channel filter is visible.
 - **MIDI out.** Every `IMidiOut::send()` with its simulated timestamp, the
   target ports decoded from the mask, the type, channel and data.
+- **Listen.** A small Web Audio synth stands in for whatever would be
+  downstream of the module: one oscillator per note on the chosen MIDI
+  target(s), with a short envelope, CC 64 sustain, pitch bend, and CC 120/123
+  silence. Events are scheduled on the audio clock at the simulated time they
+  happened, so an arpeggio sounds at the rate the patch produced it. Output
+  jacks can click on every rising edge, pitched by jack number, which makes a
+  clock division or a logic gate audible. None of this is firmware: it plays
+  what `IMidiOut::send()` and the jacks emit. Audio has to be enabled with the
+  button because browsers only start sound from a user gesture.
 - **Web MIDI.** Optional. In Chrome or Edge, a real controller can feed
   `deliver_midi()` and the firmware's output can drive a real port, so a DAW
   can be pointed at the emulated module.

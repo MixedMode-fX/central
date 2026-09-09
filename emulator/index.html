@@ -129,6 +129,19 @@
   </section>
 
   <section class="wide">
+    <h2>Listen — a stand-in for whatever is downstream of the module</h2>
+    <div class="row">
+      <button id="audio" class="primary">Enable audio</button>
+      <label>wave <select id="wave"><option>sawtooth</option><option>square</option><option>triangle</option><option>sine</option></select></label>
+      <label>volume <input id="volume" type="range" min="0" max="100" value="40" style="width:8em"></label>
+      <label>from <select id="listen"><option value="255">any MIDI target</option></select></label>
+      <label><input id="clicks" type="checkbox" checked> click when an output jack goes high</label>
+      <span class="muted">voices: <span id="voices">0</span></span>
+    </div>
+    <p class="muted">A polyphonic oscillator per note with a short envelope; CC 64 sustains, pitch bend bends, CC 120/123 silence. Not part of the firmware: it plays what <code>IMidiOut::send()</code> emits, with the timing the passes gave it.</p>
+  </section>
+
+  <section class="wide">
     <h2>Scope — jacks and gate buses, last <span id="scopewindow">2.0</span> s</h2>
     <canvas id="scope" width="1600" height="520"></canvas>
   </section>
@@ -164,6 +177,12 @@ const PRESETS = {
     gate_ports: [{ port: 8, dir: 'in', bus: 0 }],
     nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }],
     midi_out: [{ targets: ['ALL'], channel: 0, bus: 0 }],
+  },
+  'MIDI thru with a sustain pedal on jack 8: play the keys, toggle jack 8': {
+    gate_ports: [{ port: 8, dir: 'in', bus: 0 }],
+    midi_in: [{ sources: ['SERIAL_1'], channel: 0, bus: 0 }],
+    nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }],
+    midi_out: [{ targets: ['USB_0'], channel: 0, bus: 0 }],
   },
   'Jack 1 → NOT → GateToNote → USB 0 (test_master)': {
     gate_ports: [{ port: 1, dir: 'in', bus: 0 }, { port: 2, dir: 'out', bus: 1 }],
@@ -207,6 +226,7 @@ const imports = { env: { mmmc_midi_send: (target, type, d1, d2, channel) => {
   midiLog.push({ t: now, target, type, d1, d2, channel });
   if (midiLog.length > 500) midiLog.shift();
   webMidiForward(type, d1, d2, channel);
+  synthMidi(target, type, d1, d2, channel);
 } } };
 
 async function loadModule() {
@@ -330,6 +350,7 @@ function onePass() {
     if (now >= nextTickAt) { E.emu_tick(++tickCount); nextTickAt = now + interval; }
   }
   E.emu_pass(now);
+  synthJackEdges();
   scopeSample();
   now += passUs();
   passesThisSecond++;
@@ -343,6 +364,7 @@ function frame(ts) {
     lastFrame = ts;
     passAccumulator += dt * 1000 * Number(document.getElementById('speed').value);
     const p = passUs();
+    synthAnchor();
     let n = Math.floor(passAccumulator / p);
     if (n > 50000) { n = 50000; passAccumulator = 0; } else passAccumulator -= n * p;
     runPasses(n);
@@ -443,6 +465,8 @@ function buildRegistry() {
   const src = document.getElementById('midisrc');
   for (const [n, v] of Object.entries(MIDI_PORTS)) { const o = document.createElement('option'); o.value = v; o.textContent = n; src.appendChild(o); }
   src.value = MIDI_PORTS.SERIAL_1;
+  const listen = document.getElementById('listen');
+  for (const [n, v] of Object.entries(MIDI_PORTS)) { const o = document.createElement('option'); o.value = v; o.textContent = n; listen.appendChild(o); }
   const bg = document.getElementById('gatebuses');
   for (let b = 0; b < C.N_GATE_BUS; b++) bg.insertAdjacentHTML('beforeend', `<span class="cell"><span class="led" id="gb${b}"></span>${b}</span>`);
   const cvh = document.getElementById('cvbuses');
@@ -471,6 +495,7 @@ const lastNote = [];
 function render() {
   document.getElementById('simtime').textContent = (now / 1e6).toFixed(3);
   document.getElementById('tickcount').textContent = tickCount;
+  document.getElementById('voices').textContent = synth.voices.size;
   for (let j = 0; j < C.GPIO_N; j++) {
     const i = document.getElementById(`ji${j}`), o = document.getElementById(`jo${j}`);
     if (i) i.classList.toggle('on', !!E.emu_jack_input(j));
@@ -501,6 +526,117 @@ function render() {
   }
   drawScope();
 }
+
+// ---------------------------------------------------------------------------
+// Synth: Web Audio, one oscillator per sounding note. Events are scheduled on
+// the audio clock at the simulated time they happened, relative to the start
+// of the current frame, so an arpeggio at 10 Hz sounds like one even though
+// the passes run in bursts.
+// ---------------------------------------------------------------------------
+const synth = { ctx: null, master: null, voices: new Map(), sustain: {}, pending: new Set(), frameSim: 0, frameAudio: 0, lastOut: 0 };
+const MAX_VOICES = 32, LATENCY = 0.03;
+
+function synthEnabled() { return synth.ctx !== null && synth.ctx.state === 'running'; }
+
+async function synthToggle() {
+  if (!synth.ctx) {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    synth.ctx = ctx;
+    synth.master = ctx.createGain();
+    synth.master.gain.value = Number(document.getElementById('volume').value) / 100;
+    synth.master.connect(ctx.destination);
+  }
+  if (synth.ctx.state === 'running') { await synth.ctx.suspend(); synthAllOff(synth.ctx.currentTime); }
+  else await synth.ctx.resume();
+  document.getElementById('audio').textContent = synthEnabled() ? 'Mute audio' : 'Enable audio';
+}
+
+// Called once per frame before the passes run: sim `now` maps to this audio time.
+function synthAnchor() {
+  if (!synthEnabled()) return;
+  synth.frameSim = now;
+  synth.frameAudio = synth.ctx.currentTime + LATENCY;
+}
+
+function synthTime(simT) {
+  const ctx = synth.ctx;
+  if (!running) return ctx.currentTime + 0.005;
+  const speed = Number(document.getElementById('speed').value) || 1;
+  return Math.max(ctx.currentTime + 0.002, synth.frameAudio + (simT - synth.frameSim) / 1e6 / speed);
+}
+
+function synthNoteOn(channel, note, velocity, at) {
+  const ctx = synth.ctx, key = channel * 128 + note;
+  if (synth.voices.has(key)) synthRelease(key, at);
+  if (synth.voices.size >= MAX_VOICES) synthRelease(synth.voices.keys().next().value, at);
+  const osc = ctx.createOscillator(), g = ctx.createGain();
+  osc.type = document.getElementById('wave').value;
+  osc.frequency.value = 440 * Math.pow(2, (note - 69) / 12);
+  osc.detune.value = synth.bend ? synth.bend[channel] || 0 : 0;
+  g.gain.setValueAtTime(0, at);
+  g.gain.linearRampToValueAtTime(0.25 * velocity / 127, at + 0.005);
+  osc.connect(g); g.connect(synth.master);
+  osc.start(at);
+  synth.voices.set(key, { osc, g, channel });
+}
+
+function synthRelease(key, at) {
+  const v = synth.voices.get(key);
+  if (!v) return;
+  v.g.gain.setTargetAtTime(0, at, 0.04);
+  v.osc.stop(at + 0.4);
+  synth.voices.delete(key);
+  synth.pending.delete(key);
+}
+
+function synthNoteOff(channel, note, at) {
+  const key = channel * 128 + note;
+  if (!synth.voices.has(key)) return;
+  if (synth.sustain[channel]) synth.pending.add(key); else synthRelease(key, at);
+}
+
+function synthAllOff(at) { for (const key of [...synth.voices.keys()]) synthRelease(key, at); }
+
+function synthMidi(target, type, d1, d2, channel) {
+  if (!synthEnabled()) return;
+  const listen = Number(document.getElementById('listen').value);
+  if (!(target & listen)) return;
+  const at = synthTime(now);
+  if (type === 0x90 && d2 > 0) synthNoteOn(channel, d1, d2, at);
+  else if (type === 0x80 || type === 0x90) synthNoteOff(channel, d1, at);
+  else if (type === 0xB0 && d1 === 64) {
+    synth.sustain[channel] = d2 >= 64;
+    if (d2 < 64) for (const key of [...synth.pending]) if (Math.floor(key / 128) === channel) synthRelease(key, at);
+  }
+  else if (type === 0xB0 && (d1 === 120 || d1 === 123)) { for (const [key, v] of synth.voices) if (v.channel === channel) synthRelease(key, at); }
+  else if (type === 0xE0) {
+    synth.bend = synth.bend || {};
+    synth.bend[channel] = (((d2 << 7) | d1) - 8192) / 8192 * 200;   // ±2 semitones, in cents
+    for (const v of synth.voices.values()) if (v.channel === channel) v.osc.detune.setValueAtTime(synth.bend[channel], at);
+  }
+}
+
+// A short blip per output jack on its rising edge, pitched by jack number.
+function synthJackEdges() {
+  let mask = 0;
+  for (let j = 0; j < C.GPIO_N; j++) if (E.emu_jack_mode(j) === 2 && E.emu_jack_output(j)) mask |= 1 << j;
+  const rising = mask & ~synth.lastOut;
+  synth.lastOut = mask;
+  if (!rising || !synthEnabled() || !document.getElementById('clicks').checked) return;
+  const at = synthTime(now), ctx = synth.ctx;
+  for (let j = 0; j < C.GPIO_N; j++) {
+    if (!((rising >> j) & 1)) continue;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = 1500 + j * 250;
+    g.gain.setValueAtTime(0.2, at);
+    g.gain.exponentialRampToValueAtTime(0.001, at + 0.02);
+    osc.connect(g); g.connect(synth.master);
+    osc.start(at); osc.stop(at + 0.03);
+  }
+}
+
+document.getElementById('audio').onclick = synthToggle;
+document.getElementById('volume').oninput = ev => { if (synth.master) synth.master.gain.value = Number(ev.target.value) / 100; };
 
 // ---------------------------------------------------------------------------
 // Web MIDI (optional): a real controller into deliver_midi(), the firmware's

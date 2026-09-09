@@ -162,8 +162,10 @@ make emulator                    # needs clang and lld; no PlatformIO involved
 open emulator/dist/index.html    # a single self-contained file
 ```
 
-CI builds it on every push and attaches `index.html` to the run. What it can
-and cannot verify, and how it was arrived at, is in `emulator/README.md`.
+The build from `main` is published at
+<https://mixedmode-fx.github.io/central/> (`.github/workflows/pages.yml`),
+and CI attaches every branch's `index.html` to its run. What it can and cannot
+verify, and how it was arrived at, is in `emulator/README.md`.
 
 # Signal bus model
 

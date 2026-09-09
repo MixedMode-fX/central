@@ -1,0 +1,65 @@
+name: Pages
+
+# Publishes the browser emulator (emulator/README.md) to GitHub Pages, so the
+# current firmware can be tried at https://mixedmode-fx.github.io/central/
+# with nothing to download. Pages must be set to deploy from GitHub Actions
+# in the repository settings.
+#
+# Every push to main redeploys. Run it by hand (workflow_dispatch) on any
+# branch to put that branch's build on the site instead, e.g. to try a pull
+# request; the next push to main puts main back. The build itself is the
+# same as the `emulator` job in ci.yml, so a branch that is green there will
+# deploy.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued one is not cancelled so the newest
+# commit always ends up on the site.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the emulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build.sh stamps `git describe` into the page like the firmware.
+          fetch-depth: 0
+
+      - name: Install clang and lld
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+
+      - name: Build
+        run: emulator/build.sh
+
+      - name: Smoke test the module
+        run: node emulator/test/smoke.mjs
+
+      # index.html plus mmmc.wasm: the page fetches the module from next to
+      # itself when served and falls back to its embedded copy otherwise.
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: emulator/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

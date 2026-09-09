@@ -9,6 +9,12 @@ make emulator          # builds emulator/dist/index.html and smoke-tests it
 open emulator/dist/index.html
 ```
 
+The build from `main` is live at <https://mixedmode-fx.github.io/central/>,
+deployed by `.github/workflows/pages.yml` on every push to `main`. Running that
+workflow by hand on another branch puts that branch's build on the site until
+the next push to `main`. Being served over `https://` also satisfies Web MIDI's
+secure-context requirement, so the Web MIDI bridge works from there.
+
 Nothing under `src/` is modified or duplicated: the algorithms, the buses, the
 node pool, the registry, the port nodes and `MixedModeMaster` are the same
 object code the tests run, built from the same sources. What the emulator adds
@@ -101,7 +107,8 @@ emulator/
   src/emu_api.cpp   the C ABI the page calls; owns one MixedModeMaster
   src/runtime.cpp   memcpy, memset and the two C++ ABI hooks the compiler emits
   test/smoke.mjs    the test_master scenarios, replayed through the module
-  dist/             build output (ignored by git; CI uploads index.html)
+  dist/             build output (ignored by git; CI uploads index.html,
+                    the Pages workflow publishes the directory)
 ```
 
 `build.sh` compiles the same file set as `build_src_filter` in the `native`

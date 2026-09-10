@@ -47,6 +47,29 @@ namespace global_scale {
         return scale_mask(scale_id) ? (uint8_t)(node_root % 12u) : root();
     }
     inline bool follows(uint8_t scale_id){ return scale_mask(scale_id) == 0; }
+
+    // The tonic for a node whose root parameter names a **pitch** rather than
+    // a pitch class.
+    //
+    // A key cannot say which octave to play in and a pitch class cannot
+    // either, so a node that has to start somewhere - a quantiser deciding
+    // where the bottom of its range is, a harmony deciding where its roots
+    // sit - keeps an absolute root of its own. What still follows the module
+    // is the *pitch class*: the tonic is the key's root taken inside the
+    // octave the parameter names, so a patch set to C3 in A minor plays from
+    // A3 and moving the key moves it. A node that names its own scale keeps
+    // its own root entirely, which is resolve_root()'s rule and therefore
+    // this one's.
+    //
+    // The note sequencers do not use this: theirs is a pattern of stored
+    // degrees whose root is the pitch the pattern was written around, and
+    // moving that under the pattern is what the root inlet is for.
+    inline uint8_t resolve_tonic(uint8_t scale_id, uint8_t root_pitch){
+        const uint8_t pc = resolve_root(scale_id, (uint8_t)(root_pitch % 12u));
+        int16_t tonic = (int16_t)(root_pitch - (root_pitch % 12u)) + (int16_t)pc;
+        if (tonic > 127) tonic -= 12;
+        return (uint8_t)tonic;
+    }
 }
 
 #endif

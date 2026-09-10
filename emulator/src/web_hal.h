@@ -42,7 +42,15 @@ void mmmc_midi_send(uint32_t target, uint32_t type, uint32_t d1, uint32_t d2, ui
 // sees exactly the bytes the firmware would put on the wire.
 class WebMidiOut : public IMidiOut {
     public:
-        static constexpr uint32_t SYSEX_BUFFER = 4096;
+        // Sized by the largest burst the firmware sends in one go, which is
+        // the algorithm list: one reply per algorithm, each carrying its port
+        // names and its summary, at up to SYSEX_TX_MAX bytes. Four kilobytes
+        // held thirty-one of them and silently dropped the rest, which read
+        // in the app as "the answer never completed" rather than as an
+        // overflow. Sixteen covers a hundred and twenty algorithms, and this
+        // is a buffer in a browser rather than anything the module has to
+        // find room for - the hardware streams to a MIDI port.
+        static constexpr uint32_t SYSEX_BUFFER = 16384;
 
         WebMidiOut() : sysex_bytes(), sysex_used(0), sysex_dropped(0) {}
 

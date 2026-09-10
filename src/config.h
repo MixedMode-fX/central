@@ -32,8 +32,23 @@
 // (#13, #14): a 32-step grid of velocities plus the note-off ledger. Every
 // node class checks itself against it with a static_assert, so raising
 // MAX_SEQUENCE_LEN or NOTE_SEQ_VOICES fails here at compile time rather than
-// on the module. 32 x 640 bytes is 20 KB against 1 MB of RAM.
-#define N_NODE 32
+// on the module. 40 x 640 bytes is 25 KB against 1 MB of RAM.
+//
+// **It was 32, and 32 stopped being enough when the algorithm table passed
+// it.** A patch could no longer hold one of every algorithm, which is a test
+// this repository has always run, and more to the point a generative patch
+// built out of the module's own parts - a clock, two dividers, a harmony, a
+// chord, a shift register, a quantiser, a comparator, a drum grid, a handful
+// of logic and a modulator each - reaches the high twenties before anything
+// interesting has been added to it.
+//
+// The ceiling is not RAM, it is the NRPN address space: node parameters
+// occupy N_NODE x N_PARAM of the fourteen bits an NRPN address has, and the
+// clock and transport blocks sit above them (control/nrpn.h). 40 x 336 is
+// 13440 and leaves 2912 addresses reserved; 48 would leave 224, which is not
+// enough room to add anything. So 40, and the next rise is a decision about
+// that address space rather than about memory.
+#define N_NODE 40
 #define NODE_SLOT_SIZE 640
 
 // Per-node connection limits (NodeConfig is also the preset format).

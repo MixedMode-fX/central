@@ -44,7 +44,6 @@ static int8_t as_signed(uint8_t stored){ return (int8_t)stored; }
 
 NoteDelay::NoteDelay(const NodeConfig& config) :
     in(config.in_bus[0]),
-    clear_in_bus(config.in_bus[1]),
     out(config.out_bus[0]),
     sync(clamp_enum(config.params[0], ND_SYNCS, ND_CLOCK)),
     div(clamp_enum(config.params[1], DIVISIONS, DIV_EIGHTH)),

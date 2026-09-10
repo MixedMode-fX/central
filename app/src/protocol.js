@@ -243,6 +243,8 @@ export const AlgorithmId = Object.freeze({
   ALGO_CV_TO_GATE: 32,
   ALGO_TURING: 33,
   ALGO_HARMONY: 34,
+  ALGO_AUTOMATON: 35,
+  ALGO_NOTE_DELAY: 36,
 });
 
 export const AlgorithmCategory = Object.freeze({

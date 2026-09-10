@@ -146,7 +146,6 @@ class NoteDelay : public Node{
         void release(BusManager& bus, Echo& e);
 
         uint8_t in;
-        uint8_t clear_in_bus;
         uint8_t out;
         uint8_t sync;
         uint8_t div;

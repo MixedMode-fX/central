@@ -74,6 +74,7 @@ export class EmbeddedModule {
     this.clockNextAt = 0;
     this.running = false;
     this.handler = () => {};
+    this.sysexDropped = 0;
     this.midiListeners = new Set();
     this.frameListeners = new Set();
     this.passListeners = new Set();
@@ -152,6 +153,18 @@ export class EmbeddedModule {
     new Uint8Array(E.memory.buffer).set(bytes, scratch);
     E.emu_sysex_out_clear();
     E.emu_sysex_in(E.emu_const_control_port(), scratch, bytes.length, this.now);
+
+    // A reply the buffer had no room for is *dropped*, and a truncated run of
+    // replies reads upstream as "the answer never completed" - which says
+    // nothing about where it went. The counter is cumulative, so a rise since
+    // the last message is this message's loss, and it is worth failing on:
+    // the emulator's buffer is a browser-side number, and the module it is
+    // standing in for streams to a port and never drops anything here.
+    const lost = E.emu_sysex_out_dropped();
+    if (lost > this.sysexDropped) {
+      this.sysexDropped = lost;
+      throw new Error('the module\'s reply did not fit its SysEx buffer; raise SYSEX_BUFFER');
+    }
 
     // Replies come back as one run of complete messages; split it on F0/F7.
     const out = new Uint8Array(E.memory.buffer, E.emu_sysex_out_ptr(), E.emu_sysex_out_len());

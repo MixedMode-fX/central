@@ -80,7 +80,8 @@ you are editing**.
 transport and tempo, the eight jacks (tap, hold or free-run an input; an output
 lights when the firmware drives it), an on-screen keyboard and CC sender that
 go in through the module's MIDI input on a chosen port and channel, a small
-synth so the patch can be heard, and the MIDI the module is sending.
+synth and a drum kit per drum sequencer so the patch can be heard, and the MIDI
+the module is sending.
 
 It also has the two views that answer a question no lamp can, because the
 answer only exists over time:
@@ -119,9 +120,52 @@ Add as many as there are things to hear: the sequencer on bus 0 through a saw,
 the arpeggiator on bus 2 through a square, each at its own level, because
 "which of these two is wrong" is a question about hearing them apart. Each
 player says in words what writes the bus it is on, so the list is not eight
-identical "note bus N". The gate clicks are a third thing — percussion made
-from jack edges, not notes — and they have their own level for the same reason:
-they are the loudest thing in the page and usually want to be under the notes.
+identical "note bus N".
+
+**Drums are not players.** A drum sequencer is an instrument, not a source
+somebody might point a sawtooth at, so it is not in that list: every drum
+sequencer in the patch gets **its own kit and its own level** — acoustic, 808,
+909, drum synth — and it is audible because it is *in the patch*, not because
+somebody added a player for it. Two drum machines in one patch are two rows,
+which is what makes "which of these two am I hearing" a question with an
+answer.
+
+What a lane plays is read from the patch rather than guessed. A `DrumSeqMidi`
+lane sends a note number, so the drum is the one General MIDI names — 36 a
+kick, 42 a closed hat — and a note number outside that map gets a tuned
+percussion voice at its own pitch. A `DrumSeqGate` lane sends a gate and no
+note number at all, so the drum is the one the *firmware* would send for that
+lane; `app/test/app.test.mjs` reads those defaults out of
+`src/algorithm/sequencer/drum_sequencer.cpp` and fails if the two ever
+disagree, because a lane renamed in the firmware and not here would be a snare
+on the kick's lane, silently, for ever.
+
+The kits are **synthesised rather than sampled**, and that is a choice rather
+than a shortcut: the build that matters is one HTML file that opens from a
+download with nothing serving it, and a sample set is megabytes of audio a
+`file://` page cannot fetch. The machines were synthesisers anyway — the 808's
+hat is six square oscillators through a high-pass, not a recording — so every
+drum here is at most four ingredients (a pitched body, a band of noise, a
+cluster of squares, a click), and a kit is those four with different numbers.
+`drums.js` has the recipes.
+
+Nothing plays a drum twice. A hit is played by the sequencer that wrote it,
+never by the player that happened to carry it, and a drum sequencer patched to
+a MIDI output — which sends the same hit down the cable as well — is heard once,
+on the bus, where the sequencer that made it is.
+
+**The gate listener is the third thing, and it says which gate.** A gate
+carries no note and no velocity, so a clock division, a Euclidean pattern or a
+logic gate sends no MIDI and cannot be heard as music — but it can be heard as
+percussion, a blip per rising edge. What it listens to is a list, of both
+kinds: a **gate bus**, the signal inside the module whether or not anything is
+patched to it, and a **jack**, that same signal on the outside where a cable
+would be. The two are worth telling apart — a bus nothing is patched to is
+exactly the one nothing else can make audible, and a jack is what says whether
+the signal made it out — and the default is what it always did, a blip on every
+output jack. It has its own level for the same reason the drums do: it is
+percussion under the notes rather than part of them.
+
 The whole setup is kept in `localStorage`, because it is a page of choices
 about a patch and losing it on every reload is the same annoyance as losing the
 patch.
@@ -406,7 +450,9 @@ app/
     storage.js        localStorage: the library, the working patch, the monitor
     examples.js       the example patches, in that JSON
     controller.js     a MIDI controller plugged into this computer
-    audio.js          the players: the synth standing in for what is downstream
+    audio.js          the ears: the players, the drum voices and the gate
+                      listener, standing in for what is downstream
+    drums.js          the drum kits, and which drum a lane or a note means
     webmidi.js        Web MIDI: support, discovery, the hardware transport
     names.js          the words for what the protocol carries as numbers
     patchjson.js      the patch as readable JSON, both ways

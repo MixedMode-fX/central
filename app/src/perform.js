@@ -18,6 +18,7 @@ import { el, noteName, slider, busUsers } from './views.js';
 import { portNames, MUSICAL_PORTS, CLOCK_SOURCES } from './names.js';
 import { scopePanel, drawScope, rollPanel, drawRoll } from './scope.js';
 import { WAVES } from './audio.js';
+import { KITS, PIECE_LABELS } from './drums.js';
 import { Domain } from './validate.js';
 import { refreshCanvasLive } from './canvas.js';
 
@@ -308,21 +309,15 @@ function listenPanel(app) {
       } }, 'add a player'),
       listener.players.length ? null : el('span', { class: 'hint' }, 'nothing is being listened to')),
     el('p', { class: 'hint' },
-      'A player is one voice pointed at one thing. “What the module sends” is the MIDI leaving a '
-      + 'MIDI output node — what a synth on the far end of the cable would receive. A “note bus” is '
-      + 'the patch’s own signal, read straight off the bus, patched to an output or not: that is how '
+      'A player is one voice pointed at one thing. \u201cWhat the module sends\u201d is the MIDI leaving a '
+      + 'MIDI output node \u2014 what a synth on the far end of the cable would receive. A \u201cnote bus\u201d is '
+      + 'the patch\u2019s own signal, read straight off the bus, patched to an output or not: that is how '
       + 'an unfinished patch is heard at all. Give two buses two players and two waveforms to tell '
       + 'them apart.'),
 
-    el('h4', { class: 'spaced' }, 'gate clicks'),
-    el('div', { class: 'row' },
-      el('label', { class: 'bool' }, clicks, el('span', {}, 'click on output jacks'))),
-    el('div', { class: 'row' },
-      el('span', { class: 'field-name' }, 'level'), clickVolume),
-    el('p', { class: 'hint' },
-      'A blip on every rising edge of an output jack, pitched by jack number — which is what makes a '
-      + 'clock division or a logic gate audible at all, since those patches send no MIDI. Its own level, '
-      + 'because it is percussion under the notes rather than part of them.'),
+    drumsSection(app),
+    gatesSection(app, clicks, clickVolume),
+
     el('p', { class: 'hint' },
       'None of this is firmware: it is a small synth standing in for whatever would be downstream. '
       + 'Browsers only start audio from a button, which is why this is one.'));
@@ -372,6 +367,196 @@ function playerRow(app, player) {
       el('span', { class: 'hint', id: `voices-${player.id}` }, '')),
     el('p', { class: 'hint' }, playerHint(app, player)));
 }
+
+// --- drums -------------------------------------------------------------------
+
+// A drum sequencer is an instrument, not a source somebody might point a
+// sawtooth at, so it is not in the players list: it is here, with a kit and a
+// level of its own, and it is audible because it is in the patch rather than
+// because somebody added a player for it.
+function drumsSection(app) {
+  const rows = app.listener.drumRows();
+  return el('div', {},
+    el('h4', { class: 'spaced' }, 'drums'),
+    el('div', { class: 'players' }, rows.map((row) => drumRow(app, row))),
+    el('p', { class: 'hint' },
+      'Every drum sequencer in the patch gets its own kit and its own level, because two drum '
+      + 'machines in one patch are two instruments \u2014 and because \u201cwhich of these two am I hearing\u201d '
+      + 'is not a question one shared voice can answer. The kits are synthesised rather than '
+      + 'sampled: the page is one file that opens from a download, and the machines these are '
+      + 'named after were synthesisers too.'));
+}
+
+function drumRow(app, { source, voice }) {
+  const kit = el('select', { 'aria-label': `kit for ${voice.label}`,
+    onchange: (e) => { voice.setKit(e.target.value); app.saveListen(); app.render(); } });
+  for (const option of KITS) {
+    const item = el('option', { value: option.id, title: option.about }, option.label);
+    if (option.id === voice.kit) item.selected = true;
+    kit.append(item);
+  }
+
+  const on = el('input', { type: 'checkbox', class: 'switch',
+    onchange: (e) => { voice.setOn(e.target.checked); app.saveListen(); app.render(); } });
+  on.checked = voice.on;
+
+  const volume = slider({
+    class: 'grow', min: '0', max: '100', value: String(Math.round(voice.volume * 100)),
+    'aria-label': `level of ${voice.label}`,
+  }, { onInput: (v) => voice.setVolume(Number(v) / 100), onCommit: () => app.saveListen() });
+
+  return el('div', { class: 'player' },
+    el('div', { class: 'row' },
+      el('span', { class: 'field-name grow' }, voice.label),
+      kit,
+      el('label', { class: 'bool' }, on, el('span', {}, 'on'))),
+    el('div', { class: 'row' },
+      el('span', { class: 'field-name' }, 'level'), volume,
+      el('span', { class: 'hint', id: `drum-${domId(voice.key)}` }, '')),
+    el('p', { class: 'hint' }, drumHint(app, source)));
+}
+
+// What this row is actually going to play, in the patch on screen. A kit
+// selector over a sequencer whose outlet is on no bus should say so rather
+// than sit there silently doing nothing.
+function drumHint(app, source) {
+  if (!source) {
+    return 'The on-screen keyboard, a controller, or any note bus on channel 10 that no drum '
+         + 'sequencer here explains. Note numbers are read as General MIDI \u2014 36 is a kick, '
+         + '38 a snare, 42 a closed hat \u2014 and anything outside that map gets a tuned percussion '
+         + 'voice at its own pitch.';
+  }
+  if (source.kind === 'note') {
+    if (source.bus === P.NO_BUS) return 'its note outlet is on no bus, so there is nothing to hear yet';
+    const { readers } = busUsers(app, Domain.Note, source.bus);
+    return `note bus ${source.bus}${readers.length ? ` \u00b7 to ${readers.join(', ')}` : ''}`
+         + ' \u2014 a note number per lane, read as General MIDI, at the velocity in the cell.';
+  }
+  if (!source.lanes.length) return 'none of its lanes is on a bus, so there is nothing to hear yet';
+  const lanes = source.lanes
+    .map((lane) => `lane ${lane.lane + 1}: ${PIECE_LABELS[lane.piece]} on gate bus ${lane.bus}`)
+    .join(' \u00b7 ');
+  return `${lanes}. A gate carries no note number and no velocity, so the lane is the drum \u2014 the `
+       + 'one the firmware sends for it when its note is left at zero \u2014 and every hit is the same '
+       + 'weight, which is what the accent lane is for.';
+}
+
+// --- the gate listener --------------------------------------------------------
+
+function gatesSection(app, clicks, clickVolume) {
+  const listener = app.listener;
+  return el('div', {},
+    el('h4', { class: 'spaced' }, 'gate listener'),
+    el('div', { class: 'row' },
+      el('label', { class: 'bool' }, clicks, el('span', {}, 'click on gate edges'))),
+    el('div', { class: 'row' },
+      el('span', { class: 'field-name' }, 'level'), clickVolume),
+    el('div', { class: 'players' }, listener.gateSources.map((source) => gateRow(app, source))),
+    el('div', { class: 'row' },
+      el('button', { class: 'ghost', onclick: () => {
+        listener.addGateSource(nextGateSource(app));
+        app.saveListen();
+        app.render();
+      } }, 'listen to another gate'),
+      listener.gateSources.length ? null : el('span', { class: 'hint' }, 'no gate is being listened to')),
+    el('p', { class: 'hint' },
+      'A blip on every rising edge, pitched by what fired \u2014 which is what makes a clock division, a '
+      + 'Euclidean pattern or a logic gate audible at all, since those patches send no MIDI. A gate '
+      + 'bus is the signal inside the module, whether or not it ever leaves; a jack is that same '
+      + 'signal on the outside, where a cable would be. The two are worth telling apart: a bus '
+      + 'nothing is patched to is exactly the one you cannot otherwise hear, and a jack says whether '
+      + 'it made it out. Its own level, because it is percussion under the notes rather than part of '
+      + 'them.'));
+}
+
+function gateRow(app, source) {
+  const listener = app.listener;
+  const select = el('select', { class: 'grow', 'aria-label': 'which gate this listens to',
+    onchange: (e) => {
+      listener.setGateSource(source.id, parseGateValue(e.target.value));
+      app.saveListen();
+      app.render();
+    } });
+  for (const option of gateOptions(app, source)) {
+    const item = el('option', { value: option.value }, option.label);
+    if (option.value === gateValue(source)) item.selected = true;
+    select.append(item);
+  }
+  return el('div', { class: 'player' },
+    el('div', { class: 'row' }, select,
+      el('button', { class: 'ghost danger', 'aria-label': 'stop listening to this gate',
+        onclick: () => { listener.removeGateSource(source.id); app.saveListen(); app.render(); } }, 'remove')),
+    el('p', { class: 'hint' }, gateHint(app, source)));
+}
+
+const gateValue = (source) => (source.kind === 'jacks' ? 'jacks' : `${source.kind}:${source.index}`);
+
+function parseGateValue(value) {
+  if (value === 'jacks') return { kind: 'jacks', index: 0 };
+  const [kind, index] = value.split(':');
+  return { kind, index: Number(index) };
+}
+
+// What there is to listen to: the jacks this patch uses, and the gate buses
+// something writes. A jack on no bus and a bus nothing writes can never fire,
+// so offering them is offering silence - but whatever this source is *already*
+// set to stays in its own list, or choosing it would look like losing it.
+function gateOptions(app, current) {
+  const options = [{ value: 'jacks', label: 'every output jack' }];
+  const D = P.GatePortDirection;
+  for (let j = 0; j < P.GPIO_N; j++) {
+    const direction = app.patch.gatePorts[j]?.direction ?? D.GATE_PORT_UNUSED;
+    const mine = current.kind === 'jack' && current.index === j;
+    if (direction === D.GATE_PORT_UNUSED && !mine) continue;
+    const side = direction === D.GATE_PORT_IN ? 'in' : direction === D.GATE_PORT_OUT ? 'out' : 'unused';
+    options.push({ value: `jack:${j}`, label: `jack ${j + 1} (${side})` });
+  }
+  const buses = app.device?.capabilities?.gateBuses ?? P.N_GATE_BUS;
+  for (let b = 0; b < buses; b++) {
+    const { writers } = busUsers(app, Domain.Gate, b);
+    const mine = current.kind === 'bus' && current.index === b;
+    if (!writers.length && !mine) continue;
+    options.push({ value: `bus:${b}`, label: `gate bus ${b}${writers.length ? ` \u2014 from ${writers[0]}` : ''}` });
+  }
+  return options;
+}
+
+function gateHint(app, source) {
+  if (source.kind === 'jacks') {
+    const outs = app.patch.gatePorts.filter((port) => port.direction === P.GatePortDirection.GATE_PORT_OUT).length;
+    return outs
+      ? `every rising edge on the ${outs === 1 ? 'one output jack' : `${outs} output jacks`}, pitched by jack number`
+      : 'this patch drives no output jack, so this is silent \u2014 point it at a gate bus instead';
+  }
+  if (source.kind === 'jack') {
+    const direction = app.patch.gatePorts[source.index]?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
+    if (direction === P.GatePortDirection.GATE_PORT_UNUSED) return `jack ${source.index + 1} is not in this patch`;
+    return direction === P.GatePortDirection.GATE_PORT_IN
+      ? `jack ${source.index + 1}, as it is driven from the jacks panel above`
+      : `jack ${source.index + 1}, as the patch drives it`;
+  }
+  const { writers, readers } = busUsers(app, Domain.Gate, source.index);
+  if (!writers.length) return `nothing writes gate bus ${source.index} yet`;
+  return `from ${writers.join(', ')}${readers.length ? ` \u00b7 to ${readers.join(', ')}` : ''}`;
+}
+
+// The gate a new row should open on, so adding one is a press rather than a
+// press and a hunt: the first gate bus a node writes, which is the signal that
+// has no other way of being heard, and the jacks only if there is none.
+function nextGateSource(app) {
+  const chosen = new Set(app.listener.gateSources.map(gateValue));
+  const buses = app.device?.capabilities?.gateBuses ?? P.N_GATE_BUS;
+  for (let b = 0; b < buses; b++) {
+    const { writers } = busUsers(app, Domain.Gate, b);
+    if (!writers.length || chosen.has(`bus:${b}`)) continue;
+    return { kind: 'bus', index: b };
+  }
+  return { kind: 'jacks', index: 0 };
+}
+
+// An element id from a voice key: `node:3` carries a colon, which is legal in
+// an id and awkward in every selector that might later be written against it.
+const domId = (key) => key.replace(/:/g, '-');
 
 // What the chosen source actually carries, in the patch on screen. A list of
 // eight identical "note bus N" is a guess; "from NoteSeq 1 out" is an answer.
@@ -483,6 +668,12 @@ export function refreshLive(app) {
   for (const player of app.listener?.players ?? []) {
     const readout = document.getElementById(`voices-${player.id}`);
     if (readout) readout.textContent = app.listener.enabled ? `${player.voices.size} sounding` : 'audio is off';
+  }
+  // And per drum sequencer, which answers the question a kit selector raises
+  // and cannot answer by itself: is this one making any sound at all?
+  for (const { voice } of app.listener?.drumRows() ?? []) {
+    const readout = document.getElementById(`drum-${domId(voice.key)}`);
+    if (readout) readout.textContent = app.listener.enabled ? `${voice.hits} hits` : 'audio is off';
   }
 
   refreshCanvasLive(app, live);

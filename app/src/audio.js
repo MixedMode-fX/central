@@ -20,21 +20,47 @@
 // So a *player* is one voice pointed at one source, and there is a list of
 // them: the sequencer on note bus 0 through a saw, the arpeggiator on bus 2
 // through a square, each at its own level, because "which of these two is
-// wrong" is a question about hearing them apart. The gate clicks are a third
-// thing entirely - percussion made from jack edges, not notes - and they have
-// their own level for the same reason: they are usually the loudest thing in
-// the page and the one you want under the notes rather than over them.
+// wrong" is a question about hearing them apart.
+//
+// **Drums are not players.** A drum sequencer is an instrument, not a source
+// somebody might point a sawtooth at: it plays a kit, and which kit and how
+// loud is a property of *that sequencer* rather than of whoever is listening
+// to it. So every drum sequencer in the patch gets a voice of its own here -
+// its own kit, its own level - and a drum note is played there rather than by
+// the player that carried it, whichever bus or cable it arrived on. Two drum
+// machines in one patch are two instruments, which is what makes "which of
+// these two is the one I can hear" answerable at all. `drums.js` is the voice
+// itself; this file is what points it at the patch.
+//
+// **The gate listener is the third thing.** A gate carries no note and no
+// velocity, so a clock division, a Euclidean pattern or a logic gate makes no
+// MIDI at all and cannot be heard as music - but it can be heard as
+// percussion, one blip per rising edge. What it listens to is a choice too,
+// and both kinds of gate are on offer: the module's own **gate buses**, which
+// is the signal itself, and the **jacks**, which is that signal where it
+// leaves the module. It has its own level because it is the loudest thing in
+// the page and usually wants to be under the notes.
 //
 // Events are scheduled on the audio clock at the *simulated* time they
 // happened, anchored once per animation frame, so an arpeggio at 10 Hz sounds
 // like one even though the passes that produced it ran in a burst.
+
+import * as P from './protocol.js';
+import { DEFAULT_KIT, KITS, hit as drumHit, kitLabel, pieceOf } from './drums.js';
 
 const NOTE_OFF = 0x80, NOTE_ON = 0x90, CONTROL_CHANGE = 0xb0, PITCH_BEND = 0xe0;
 const SUSTAIN = 64, ALL_SOUND_OFF = 120, ALL_NOTES_OFF = 123;
 const DRUM_CHANNEL = 10;
 const MAX_VOICES = 24;                 // per player
 const MAX_PLAYERS = 6;
+const MAX_GATE_SOURCES = 8;
 const LATENCY = 0.03;
+
+// The drum voice for anything on channel 10 that no drum sequencer in the
+// patch accounts for: the on-screen keyboard, a controller, a note bus written
+// by something else entirely. It is a kit like any other, so a patch with no
+// drum sequencer in it still gets drums that sound like drums.
+export const OTHER_DRUMS = 'other';
 
 export const WAVES = ['sawtooth', 'square', 'triangle', 'sine'];
 
@@ -115,29 +141,15 @@ class Player {
     }
   }
 
+  // A drum note never gets here: the listener takes it out of the stream
+  // before any player is offered it and plays it on the drum voice its
+  // sequencer owns. A player is a pitched voice, and a pitched voice is the
+  // wrong instrument for a kick drum however it is enveloped.
   noteOn(channel, note, velocity, at) {
     const ctx = this.ctx;
     const key = channel * 128 + note;
     if (this.voices.has(key)) this.release(key, at);
     if (this.voices.size >= MAX_VOICES) this.release(this.voices.keys().next().value, at);
-
-    // Channel 10 is drums by convention, and a drum sequencer that sounded
-    // like a held sawtooth would be unreadable: a percussive voice that dies
-    // on its own is what makes a pattern audible as a pattern.
-    if (channel === DRUM_CHANNEL) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const low = note < 40;
-      const base = low ? 160 : 200 + (note - 40) * 40;
-      osc.type = low ? 'sine' : (note % 2 ? 'square' : 'triangle');
-      osc.frequency.setValueAtTime(base * 2, at);
-      osc.frequency.exponentialRampToValueAtTime(Math.max(30, base / (low ? 4 : 1.5)), at + (low ? 0.12 : 0.05));
-      gain.gain.setValueAtTime(0.35 * velocity / 127, at);
-      gain.gain.exponentialRampToValueAtTime(0.001, at + (low ? 0.25 : 0.08));
-      osc.connect(gain); gain.connect(this.gain);
-      osc.start(at); osc.stop(at + 0.3);
-      return;
-    }
 
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -171,6 +183,101 @@ class Player {
   }
 }
 
+// One drum sequencer's instrument: a kit, a level, and its own gain so the
+// level means something against the notes rather than inside them.
+//
+// A voice outlives the patch it was made for. Its key is the node's index -
+// the same identity the canvas remembers a dragged block by - and the setting
+// is kept for that key whether or not the node is in the patch on screen at
+// the moment, so loading a patch back does not lose the kit chosen for it.
+class DrumVoice {
+  constructor(listener, { key, label = 'drums', kind = 'note', kit = DEFAULT_KIT, volume = 0.8, on = true } = {}) {
+    this.listener = listener;
+    this.key = key;
+    this.label = label;
+    this.kind = kind;
+    this.kit = KITS.some((k) => k.id === kit) ? kit : DEFAULT_KIT;
+    this.volume = volume;
+    this.on = on !== false;
+    this.gain = null;
+    this.hits = 0;               // what the play tab shows as activity
+  }
+
+  get ctx() { return this.listener.ctx; }
+
+  attach() {
+    if (this.gain || !this.ctx) return;
+    this.gain = this.ctx.createGain();
+    this.gain.gain.value = this.volume;
+    this.gain.connect(this.listener.master);
+  }
+
+  setKit(kit) {
+    if (KITS.some((k) => k.id === kit)) this.kit = kit;
+  }
+
+  setVolume(value) {
+    this.volume = value;
+    if (this.gain) this.gain.gain.value = value;
+  }
+
+  setOn(on) { this.on = Boolean(on); }
+
+  describe() { return `${this.label} · ${kitLabel(this.kit)}`; }
+
+  // One hit. `piece` is which drum - from the note number for a MIDI drum
+  // sequencer, from the lane for a gate one - and `note` only matters for a
+  // note number General MIDI has no name for.
+  play(piece, { velocity = 100, note = null, at = 0 } = {}) {
+    if (!this.on || !this.listener.enabled) return;
+    this.attach();
+    if (!this.gain) return;
+    this.hits++;
+    drumHit(this.ctx, this.gain, { kit: this.kit, piece, note, velocity, at });
+  }
+
+  toJSON() {
+    return { kit: this.kit, volume: this.volume, on: this.on };
+  }
+}
+
+// What a gate source is, said in words, for a selector and for a hint.
+export function gateSourceLabel(source) {
+  if (source.kind === 'jacks') return 'every output jack';
+  if (source.kind === 'jack') return `jack ${source.index + 1}`;
+  return `gate bus ${source.index}`;
+}
+
+// Which of the chosen gate sources fired, given the edges of this pass. Pure,
+// and exported for that reason: which bit lit which blip is exactly the part
+// that can be wrong in a way no amount of listening would localise.
+//
+// `rising` carries three masks - the output jacks that went high, every jack
+// that went high whichever way it faces, and the gate buses that went high.
+// One blip per thing that fired, however many sources asked for it: "every
+// output jack" and "jack 3" chosen together are one selection of jack 3, not
+// two clicks on top of each other.
+export function gateHits(sources, rising) {
+  const hits = [];
+  const seen = new Set();
+  const add = (kind, index) => {
+    const id = `${kind}:${index}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    hits.push({ kind, index });
+  };
+  for (const source of sources) {
+    if (source.kind === 'jacks') {
+      for (let j = 0; j < P.GPIO_N; j++) if ((rising.jacksOut >> j) & 1) add('jack', j);
+    } else if (source.kind === 'jack') {
+      if ((rising.jacks >> source.index) & 1) add('jack', source.index);
+    } else if (source.kind === 'bus') {
+      if ((rising.buses >> source.index) & 1) add('bus', source.index);
+    }
+  }
+  return hits;
+}
+
 export class Listener {
   constructor(module) {
     this.module = module;
@@ -180,14 +287,31 @@ export class Listener {
     this.volume = 0.4;
     this.clicks = true;
     this.clickVolume = 0.5;
+    // What the gate listener is pointed at. It opens on what it always did -
+    // a blip on every output jack - and everything else is something a user
+    // goes and asks for.
+    this.gateSources = [{ id: gateId(), kind: 'jacks', index: 0 }];
     this.players = [];
+    // Drum voices by node key, plus the one for everything on channel 10 that
+    // no drum sequencer in the patch explains.
+    this.drums = new Map();
+    this.drums.set(OTHER_DRUMS, new DrumVoice(this, {
+      key: OTHER_DRUMS, label: 'anything else on channel 10', kind: 'other',
+    }));
+    this.drumSources = [];
+    this.noteRoute = new Map();     // note bus -> drum voice key
+    this.gateRoute = new Map();     // gate bus -> { key, piece }
+    this.drumOutMask = 0;           // MIDI targets already heard on a bus
+    this.watched = new Set();       // note buses this listener is reading itself
     this.frameSim = 0;
     this.frameAudio = 0;
-    this.lastJacks = 0;
+    this.lastJackOut = 0;
+    this.lastJackAny = 0;
+    this.lastGate = 0;
     module.onMidi((event) => this.midi(event));
     module.onNoteBus((event) => this.midi(event));
     module.onFrame((now) => this.anchor(now));
-    module.onPass(() => this.jackEdges());
+    module.onPass(() => this.edges());
     // What it opens with is what it has always played: the MIDI leaving the
     // module. A note bus is something a user goes and asks for.
     this.addPlayer({ source: 'out' });
@@ -236,6 +360,121 @@ export class Listener {
 
   player(id) { return this.players.find((p) => p.id === id) ?? null; }
 
+  // --- the drum sequencers -------------------------------------------------
+
+  // The patch's drum sequencers, as `drums.js` read them out of it. Called on
+  // every render, which is every edit, so a lane dragged onto another bus is
+  // heard from that bus on the next pass.
+  //
+  // The buses a drum sequencer speaks on are read *by this listener*, not by a
+  // player: a drum sequencer is audible because it is in the patch, the same
+  // way it is visible because it is in the patch. Nobody should have to add a
+  // player to hear whether the kick is on the one.
+  setDrumSources(sources) {
+    this.drumSources = sources;
+    const wanted = new Set();
+    this.noteRoute = new Map();
+    this.gateRoute = new Map();
+    for (const source of sources) {
+      const voice = this.drumVoice(source.key, source);
+      voice.label = source.label;
+      voice.kind = source.kind;
+      if (source.kind === 'note') {
+        if (source.bus === P.NO_BUS) continue;
+        wanted.add(source.bus);
+        this.noteRoute.set(source.bus, source.key);
+      } else {
+        for (const lane of source.lanes) this.gateRoute.set(lane.bus, { key: source.key, piece: lane.piece });
+      }
+    }
+    for (const bus of [...this.watched]) {
+      if (wanted.has(bus)) continue;
+      this.module.unwatchNoteBus(bus);
+      this.watched.delete(bus);
+    }
+    for (const bus of wanted) {
+      if (this.watched.has(bus)) continue;
+      this.module.watchNoteBus(bus);
+      this.watched.add(bus);
+    }
+  }
+
+  // A node removed renumbers every node after it, and a drum voice is keyed by
+  // node index like everything else addressed here - so the kit chosen for
+  // DrumSeqMidi 3 moves down with it, or it silently becomes the kit for
+  // whatever arrives at index 3 next. Exactly `forgetNode` in `layout.js`,
+  // which does this for where a block was dragged to, for the same reason.
+  forgetDrumNode(index) {
+    const moved = new Map();
+    for (const [key, voice] of this.drums) {
+      const match = /^node:(\d+)$/.exec(key);
+      if (!match) { moved.set(key, voice); continue; }
+      const was = Number(match[1]);
+      if (was === index) { voice.gain?.disconnect(); continue; }
+      voice.key = was > index ? `node:${was - 1}` : key;
+      moved.set(voice.key, voice);
+    }
+    this.drums = moved;
+  }
+
+  // Which MIDI targets carry drums that are already being heard on their bus.
+  // A drum sequencer patched to a MIDI out sends the same hit twice as far as
+  // this page is concerned - once on the bus it writes, once on the cable -
+  // and playing both is a flam nobody programmed.
+  setDrumOutMask(mask) { this.drumOutMask = mask | 0; }
+
+  // The voice for a key, made if this is the first time it has been asked
+  // for. Settings restored from a previous session are already in the map
+  // under their key, which is what makes a kit survive a reload.
+  drumVoice(key, { label, kind } = {}) {
+    let voice = this.drums.get(key);
+    if (!voice) {
+      voice = new DrumVoice(this, { key, label, kind });
+      voice.attach();
+      this.drums.set(key, voice);
+    }
+    return voice;
+  }
+
+  // The voices worth showing: the patch's drum sequencers in patch order, and
+  // the catch-all last. A voice for a node the patch no longer has is kept -
+  // its kit is a preference, and patches come back - but it is not listed.
+  drumRows() {
+    const rows = [];
+    for (const source of this.drumSources) {
+      const voice = this.drums.get(source.key);
+      if (voice) rows.push({ source, voice });
+    }
+    rows.push({ source: null, voice: this.drums.get(OTHER_DRUMS) });
+    return rows;
+  }
+
+  // The drum sequencer that wrote this event, if one did. A note bus a drum
+  // sequencer writes is drums whatever channel it is on, because the sequencer
+  // says so - and it is heard whether or not anybody is listening to that bus,
+  // which is the point: a drum sequencer is audible because it is in the
+  // patch.
+  drumVoiceFor(event) {
+    if (event.bus === undefined) return null;
+    const key = this.noteRoute.get(event.bus);
+    return key ? this.drums.get(key) : null;
+  }
+
+  // A drum that is nobody's sequencer: channel 10, the one convention there
+  // is. This one *is* only heard where somebody is listening - a player on
+  // that bus, or the player on what the module sends - because a note bus is
+  // read for the piano roll as well, and a page that made a noise for every
+  // bus it was drawing would be playing patches nobody asked to hear.
+  //
+  // A hit already heard on the bus that produced it is dropped rather than
+  // played twice: a drum sequencer patched to a MIDI out sends the same hit
+  // down the cable, and two of them is a flam nobody programmed.
+  otherDrumFor(event) {
+    if (event.channel !== DRUM_CHANNEL) return null;
+    if (event.bus === undefined && event.target !== undefined && (event.target & this.drumOutMask)) return null;
+    return this.drums.get(OTHER_DRUMS);
+  }
+
   // --- the context ---------------------------------------------------------
 
   // Browsers only start audio from a user gesture, so this is a button and
@@ -260,6 +499,7 @@ export class Listener {
       this.clickGain.gain.value = this.clickVolume;
       this.clickGain.connect(this.master);
       for (const player of this.players) player.attach();
+      for (const voice of this.drums.values()) voice.attach();
     }
     if (!created && this.ctx.state === 'running') {
       this.allOff(this.ctx.currentTime);
@@ -290,12 +530,33 @@ export class Listener {
     return Math.max(this.ctx.currentTime + 0.002, this.frameAudio + (simTime - this.frameSim) / 1e6);
   }
 
-  // One event, offered to every player that asked for its source. An event
-  // carries a `bus` only when it came off a note bus, which is what tells the
-  // two sources apart.
+  // One event. A drum note goes to the drum voice that owns it and stops
+  // there; everything else is offered to every player that asked for its
+  // source. An event carries a `bus` only when it came off a note bus, which
+  // is what tells the two sources apart.
   midi(event) {
     if (!this.enabled) return;
-    for (const player of this.players) if (player.wants(event)) player.handle(event);
+    const isNote = event.type === NOTE_ON || event.type === NOTE_OFF;
+    // A drum has no note off: it rings for as long as its kit says it does.
+    const strike = (voice) => {
+      if (event.type === NOTE_ON && event.d2 > 0) {
+        voice?.play(pieceOf(event.d1), { velocity: event.d2, note: event.d1, at: this.when(event.t) });
+      }
+    };
+    if (isNote) {
+      const voice = this.drumVoiceFor(event);
+      if (voice) { strike(voice); return; }
+    }
+    const wanted = this.players.filter((player) => player.wants(event));
+    // A drum note is never handed to a player, even when the player is what
+    // asked for it: a pitched voice is the wrong instrument for a kick drum
+    // however it is enveloped, and two players listening to one bus are not a
+    // reason to hit the drum twice.
+    if (isNote && event.channel === DRUM_CHANNEL) {
+      if (wanted.length) strike(this.otherDrumFor(event));
+      return;
+    }
+    for (const player of wanted) player.handle(event);
   }
 
   allOff(at = this.ctx?.currentTime ?? 0) {
@@ -318,7 +579,9 @@ export class Listener {
       volume: this.volume,
       clicks: this.clicks,
       clickVolume: this.clickVolume,
+      gateSources: this.gateSources.map(({ kind, index }) => ({ kind, index })),
       players: this.players.map((player) => player.toJSON()),
+      drums: Object.fromEntries([...this.drums].map(([key, voice]) => [key, voice.toJSON()])),
     };
   }
 
@@ -331,6 +594,21 @@ export class Listener {
     if (typeof saved.volume === 'number') this.setVolume(clamp(saved.volume));
     if (typeof saved.clicks === 'boolean') this.clicks = saved.clicks;
     if (typeof saved.clickVolume === 'number') this.setClickVolume(clamp(saved.clickVolume));
+    if (Array.isArray(saved.gateSources)) {
+      // A setup saved before the gate listener could be pointed anywhere has
+      // no list at all, and the default is what it was doing.
+      const sources = saved.gateSources.map((source) => gateSource(source)).filter(Boolean);
+      this.gateSources = sources.slice(0, MAX_GATE_SOURCES);
+    }
+    if (saved.drums && typeof saved.drums === 'object') {
+      for (const [key, config] of Object.entries(saved.drums)) {
+        if (!config || typeof config !== 'object') continue;
+        const voice = this.drumVoice(key, { label: key === OTHER_DRUMS ? 'anything else on channel 10' : key });
+        voice.setKit(config.kit);
+        if (typeof config.volume === 'number') voice.setVolume(clamp(config.volume));
+        voice.setOn(config.on !== false);
+      }
+    }
     if (!Array.isArray(saved.players) || !saved.players.length) return;
     for (const player of [...this.players]) this.removePlayer(player.id);
     for (const config of saved.players.slice(0, MAX_PLAYERS)) {
@@ -343,32 +621,99 @@ export class Listener {
     }
   }
 
-  // --- the jacks -----------------------------------------------------------
+  // --- the gates -----------------------------------------------------------
 
-  // A short blip per output jack on its rising edge, pitched by jack number,
-  // which is what makes a clock division or a logic gate audible at all: those
-  // patches send no MIDI.
-  jackEdges() {
-    let mask = 0;
-    for (let j = 0; j < this.module.jackSources.length; j++) {
-      if (this.module.jackMode(j) === 2 && this.module.jackOutput(j)) mask |= 1 << j;
-    }
-    const rising = mask & ~this.lastJacks;
-    this.lastJacks = mask;
-    if (!rising || !this.clicks || !this.enabled) return;
-    const at = this.when(this.module.now);
-    for (let j = 0; j < this.module.jackSources.length; j++) {
-      if (!((rising >> j) & 1)) continue;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 1500 + j * 250;
-      gain.gain.setValueAtTime(0.2, at);
-      gain.gain.exponentialRampToValueAtTime(0.001, at + 0.02);
-      osc.connect(gain); gain.connect(this.clickGain);
-      osc.start(at); osc.stop(at + 0.03);
-    }
+  addGateSource(config) {
+    if (this.gateSources.length >= MAX_GATE_SOURCES) return null;
+    const source = gateSource(config);
+    if (!source) return null;
+    this.gateSources.push(source);
+    return source;
   }
+
+  setGateSource(id, config) {
+    const index = this.gateSources.findIndex((source) => source.id === id);
+    const source = gateSource(config);
+    if (index < 0 || !source) return;
+    this.gateSources[index] = { ...source, id };
+  }
+
+  removeGateSource(id) {
+    this.gateSources = this.gateSources.filter((source) => source.id !== id);
+  }
+
+  // Every edge this pass, once per pass rather than once per frame: a trigger
+  // on this machine is high for a pass or two and an animation frame is
+  // sixteen of them, so anything looking per frame hears one trigger in eight.
+  //
+  // Two things come out of it. A gate bus a drum sequencer's lane writes is a
+  // *drum*, played on that sequencer's kit - which is how a `DrumSeqGate`,
+  // which sends no MIDI at all and has no note numbers in it, is heard as a
+  // kit rather than as eight identical beeps. Everything the gate listener has
+  // been pointed at is a *click*, pitched by which jack or which bus it was.
+  edges() {
+    const module = this.module;
+    let jackOut = 0;
+    let jackAny = 0;
+    for (let j = 0; j < module.jackSources.length; j++) {
+      const mode = module.jackMode(j);
+      if (mode === 2 && module.jackOutput(j)) { jackOut |= 1 << j; jackAny |= 1 << j; }
+      else if (mode === 1 && module.jackInput(j)) jackAny |= 1 << j;
+    }
+    const gate = module.levels?.gate ?? 0;
+    const rising = {
+      jacksOut: jackOut & ~this.lastJackOut,
+      jacks: jackAny & ~this.lastJackAny,
+      buses: gate & ~this.lastGate,
+    };
+    this.lastJackOut = jackOut;
+    this.lastJackAny = jackAny;
+    this.lastGate = gate;
+    if (!this.enabled) return;
+    const at = this.when(module.now);
+
+    if (rising.buses && this.gateRoute.size) {
+      for (const [bus, { key, piece }] of this.gateRoute) {
+        if (!((rising.buses >> bus) & 1)) continue;
+        // A gate has no velocity: every hit is the same weight, which is the
+        // whole reason the gate variant carries an accent lane instead.
+        this.drums.get(key)?.play(piece, { velocity: 100, at });
+      }
+    }
+
+    if (!this.clicks) return;
+    for (const { kind, index } of gateHits(this.gateSources, rising)) this.click(kind, index, at);
+  }
+
+  // A blip, pitched by what fired: the jacks high and bright where they always
+  // were, the buses below them, so "which of these am I hearing" survives
+  // having both in the list at once.
+  click(kind, index, at) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = kind === 'jack' ? 1500 + index * 250 : 800 + index * 130;
+    gain.gain.setValueAtTime(0.2, at);
+    gain.gain.exponentialRampToValueAtTime(0.001, at + 0.02);
+    osc.connect(gain); gain.connect(this.clickGain);
+    osc.start(at); osc.stop(at + 0.03);
+  }
+}
+
+let gateSeq = 0;
+const gateId = () => `g${++gateSeq}`;
+
+// A gate source as this file will keep it: one of the three kinds, with an
+// index that is in range for the kind. Anything else - from an old saved
+// setup, or from a selector that has been given a value it should not have -
+// is refused rather than kept as something that can never fire.
+function gateSource(config) {
+  if (!config || typeof config !== 'object') return null;
+  const index = Number(config.index) || 0;
+  if (config.kind === 'jacks') return { id: gateId(), kind: 'jacks', index: 0 };
+  if (config.kind === 'jack' && index >= 0 && index < P.GPIO_N) return { id: gateId(), kind: 'jack', index };
+  if (config.kind === 'bus' && index >= 0 && index < P.N_GATE_BUS) return { id: gateId(), kind: 'bus', index };
+  return null;
 }
 
 const clamp = (value) => Math.max(0, Math.min(1, value));

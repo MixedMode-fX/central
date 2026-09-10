@@ -119,7 +119,7 @@ export const EXAMPLES = {
     },
   },
   'Euclidean drums: E(3,8), E(5,8), E(2,8) on jacks 1-3 and as notes': {
-    about: 'One sixteenth-note metronome advances three Euclidean sequencers in lock-step. Each fires a jack and a note (36, 42, 38). Enable audio under play; jacks 1 to 3 light in turn, and the three lanes are audible as a kit.',
+    about: 'One sixteenth-note metronome advances three Euclidean sequencers in lock-step. Each fires a jack and a note (36, 42, 38). Enable audio under play; jacks 1 to 3 light in turn, and the three note numbers are read as General MIDI \u2014 kick, closed hat, snare \u2014 by the kit under listen \u2192 drums.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 2 }, { port: 3, dir: 'out', bus: 3 }],
       nodes: [
@@ -173,7 +173,7 @@ export const EXAMPLES = {
     },
   },
   'Drum sequencer to jacks: kick, snare and a 12-step hat on jacks 1-3': {
-    about: 'One DrumSeqGate, three lanes patched to jacks and five left unconnected. The hat lane is 12 steps against 16, so the pattern realigns every 48 steps. Lane 4 is the accent for the kick: a second gate lane, the modular way. Tap jack 5 under play to reset every lane.',
+    about: 'One DrumSeqGate, three lanes patched to jacks and five left unconnected. The hat lane is 12 steps against 16, so the pattern realigns every 48 steps. Lane 4 is the accent for the kick: a second gate lane, the modular way. Tap jack 5 under play to reset every lane. Enable audio and it plays a kit: a gate lane has no note number, so the drum is the one the firmware sends for that lane.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 2 }, { port: 3, dir: 'out', bus: 3 }, { port: 4, dir: 'out', bus: 4 }, { port: 5, dir: 'in', bus: 5 }],
       nodes: [
@@ -184,7 +184,7 @@ export const EXAMPLES = {
     },
   },
   'Drum sequencer to MIDI: a General MIDI kit on channel 10': {
-    about: 'DrumSeqMidi: a note number per lane, a velocity per cell (x = 100, X = 127, o = 60), 20 ms notes, every note-off from the ledger. The open hat lane fires 60 % of the time. Enable audio under play: channel 10 gets a percussive voice.',
+    about: 'DrumSeqMidi: a note number per lane, a velocity per cell (x = 100, X = 127, o = 60), 20 ms notes, every note-off from the ledger. The open hat lane fires 60 % of the time. Enable audio under play: it gets its own kit and level under listen \u2192 drums, and each lane plays the drum its note number means.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       nodes: [

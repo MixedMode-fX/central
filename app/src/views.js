@@ -27,6 +27,41 @@ const el = (tag, attrs = {}, ...children) => {
 };
 export { el };
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const svg = (tag, attrs) => {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+  return node;
+};
+
+// A five-pin DIN, which is the one glyph a musician already reads as "a
+// controller plugs in here" - so the learn button can be a button-sized
+// square instead of a word wide enough to push the slider off its row. It
+// draws in `currentColor`, so "bound" is a colour on the button and nothing
+// more; the CC number it used to spell out is in the parameter's heading,
+// where it is read rather than pressed.
+export function midiIcon() {
+  const node = svg('svg', { viewBox: '0 0 24 24', class: 'icon', 'aria-hidden': 'true', focusable: 'false' });
+  node.append(svg('circle', { cx: 12, cy: 12, r: 9, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6 }));
+  // The pins on the socket's upper arc, and the keyway below them.
+  for (const [cx, cy] of [[6.2, 12], [7.9, 7.9], [12, 6.2], [16.1, 7.9], [17.8, 12]])
+    node.append(svg('circle', { cx, cy, r: 1.6, fill: 'currentColor' }));
+  node.append(svg('rect', { x: 9.8, y: 14.6, width: 4.4, height: 2.6, rx: 1.3, fill: 'currentColor' }));
+  return node;
+}
+
+// The learn button for one parameter: an icon, its meaning in the tooltip and
+// the accessible name, and the bound CC in both so neither a pointer nor a
+// screen reader has to go looking for it.
+export function learnButton(app, index, at, name, binding) {
+  const what = binding ? `CC ${binding.cc} is bound to ${name} - learn another` : `learn a controller for ${name}`;
+  return el('button', {
+    class: `ghost learn ${binding ? 'bound' : ''}`,
+    title: what, 'aria-label': what,
+    onclick: () => app.learn(index, at),
+  }, midiIcon());
+}
+
 // A slider a scrolling finger cannot change.
 //
 // A native range input takes any touch that lands on it: the value jumps to
@@ -383,9 +418,10 @@ function paramControl(app, index, at, pd) {
     // A slider *and* a number field. A slider is unusable for a precise value
     // and hopeless on a phone, where a 1px drag is a whole step of a 255-wide
     // range; a number field alone loses the sweep. Neither replaces the
-    // other, so both write the same parameter - the slider across a row of
-    // its own, which is what buys back the pixels a step is worth, and
-    // through `slider`, so a finger scrolling the tab does not write one.
+    // other, so both write the same parameter, side by side on one row: the
+    // slider takes whatever the compact number field and the icon-sized learn
+    // button leave it, which is most of the card. The slider is built through
+    // `slider`, so a finger scrolling the tab does not write a value.
     const shown = value === 0 ? pd.def : value;
     const number = el('input', {
       type: 'number', class: 'number', min: String(pd.min), max: String(pd.max), step: '1',
@@ -410,12 +446,10 @@ function paramControl(app, index, at, pd) {
   return el('div', { class: 'param' },
     el('div', { class: 'param-head' },
       el('span', { class: 'param-name' }, pd.name),
+      binding ? el('span', { class: 'param-cc' }, `CC ${binding.cc}`) : null,
       el('span', { class: 'param-value' }, paramText(pd, value))),
     el('div', { class: 'param-controls' }, controls,
-      el('button', {
-        class: `ghost learn ${binding ? 'bound' : ''}`,
-        onclick: () => app.learn(index, at),
-      }, binding ? `CC ${binding.cc}` : 'learn')));
+      learnButton(app, index, at, pd.name, binding)));
 }
 
 // The generic parameter view is wrong for a sequencer: nobody enters a drum

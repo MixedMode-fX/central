@@ -216,18 +216,40 @@
   /* --- parameters --- */
   .params { display: grid; gap: .7rem; }
   .param { min-width: 0; }
-  .param-head { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; }
-  .param-name { color: var(--dim); font-size: .85rem; }
+  .param-head { display: flex; gap: .5rem; align-items: baseline; }
+  /* Name at the left, everything the parameter currently *is* at the right. */
+  .param-name { color: var(--dim); font-size: .85rem; margin-right: auto; }
+  .param-cc { color: var(--accent); font-size: .7rem; letter-spacing: .04em;
+              font-variant-numeric: tabular-nums; }
   .param-value { font-variant-numeric: tabular-nums; font-size: .85rem; text-align: right; }
   .param-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; min-width: 0; }
   .param-controls > .grow { flex: 1 1 4rem; }
-  /* The slider takes a whole row of its own. Sharing one with the number
-     field and the learn button left it about 130px wide on a phone - two
-     values of a 0..255 parameter per pixel, which is not a control, it is a
-     lottery. Across the card it is twice that, and the number field below it
-     is still there for the value a finger cannot land on. */
-  .param-controls .slider { flex: 1 0 100%; }
+  /* One row: slider, value, learn. The slider used to take a row of its own
+     because the row it shared left it about 130px on a phone - two values of
+     a 0..255 parameter per pixel, which is not a control, it is a lottery.
+     What buys that width back on one line is the company it keeps: a number
+     field only as wide as three digits, and a learn button that is an icon
+     rather than a word. The slider takes everything they leave. */
+  .param-controls .slider { flex: 1 1 6rem; min-width: 0; }
+  /* Three digits wide, and no spinners: they are a mouse's affordance that
+     costs a phone the width of two of those digits, and the slider beside the
+     field already steps the value. */
+  .param-controls .number { width: 3.75rem; -moz-appearance: textfield; appearance: textfield; }
+  .param-controls .number::-webkit-inner-spin-button,
+  .param-controls .number::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  /* A square button around a square icon, at the same height as the field
+     beside it so the row sits on one baseline. */
+  button.learn {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: var(--tap); height: var(--tap); min-height: 0; padding: 0;
+    border-color: var(--line); color: var(--dim);
+  }
+  button.learn .icon { width: 1.35rem; height: 1.35rem; display: block; }
+  button.learn:hover { color: var(--ink); border-color: var(--accent); }
   .learn.bound { color: var(--accent); border-color: var(--accent); }
+  /* A modulation route is a different row: its depth slider shares with a
+     mode select and a percentage, and there is no width left to share. */
+  .mod-route .param-controls .slider { flex: 1 0 100%; }
 
   .fields { display: grid; gap: .7rem; margin-bottom: .8rem; }
   .field { display: grid; gap: .3rem; min-width: 0; }

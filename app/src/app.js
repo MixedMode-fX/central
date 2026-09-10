@@ -37,6 +37,7 @@ import { validate, advise, Domain } from './validate.js';
 import { describeSupport, discover, requestAccess, WebMidiTransport } from './webmidi.js';
 import { EmbeddedModule } from './module.js';
 import { Listener } from './audio.js';
+import { drumSources } from './drums.js';
 import { Controller } from './controller.js';
 import { Library, toBase64 } from './storage.js';
 import { el, nodeCard, busUsers } from './views.js';
@@ -165,6 +166,30 @@ class App {
       this.module.watchNoteBus(bus);
       this.watchedBuses.add(bus);
     }
+  }
+
+  // Keep the drum voices in step with the patch, on every render for the same
+  // reason as the buses above: a drum sequencer added, removed, or dragged
+  // onto another bus is a different instrument to point the kit at.
+  //
+  // A drum sequencer is heard because it is *in the patch*, not because
+  // somebody added a player for it - so this, rather than the listen panel, is
+  // what makes it audible, and it is audible while the patch tab is the one on
+  // screen. The mask is the other half of that: a drum sequencer patched to a
+  // MIDI output sends every hit twice as far as this page is concerned, once
+  // on the bus it writes and once on the cable, and two of them is a flam
+  // nobody programmed.
+  syncDrums() {
+    if (!this.listener) return;
+    const sources = this.module && this.usingModule && this.device
+      ? drumSources(this.device, this.patch) : [];
+    this.listener.setDrumSources(sources);
+    const buses = new Set(sources.filter((s) => s.kind === 'note').map((s) => s.bus));
+    let mask = 0;
+    for (const port of this.patch.midiOut) {
+      if (port.targetMask && buses.has(port.bus)) mask |= port.targetMask;
+    }
+    this.listener.setDrumOutMask(mask);
   }
 
   // Put every remembered scroller back where it was, before the frame is
@@ -367,6 +392,10 @@ class App {
     // The nodes after it are renumbered, so where they were drawn has to move
     // with them or deleting one block rearranges the rest of the canvas.
     this.rememberLayout(forgetNode(this.canvasPositions, index));
+    // A drum sequencer's kit and level are keyed by node index too, so they
+    // move with it rather than becoming the settings for whatever ends up at
+    // that index next.
+    this.listener?.forgetDrumNode(index);
     // And so does whatever was selected: keeping the selection on "node 5"
     // through a deletion would leave a different node's parameters on screen
     // under the name of the one that was being edited.
@@ -935,6 +964,7 @@ class App {
     queueMicrotask(() => {
       this.renderScheduled = false;
       this.syncNoteBuses();
+      this.syncDrums();
       document.getElementById('app').replaceChildren(this.view());
       this.restoreScroll();
       this.autosave();

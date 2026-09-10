@@ -1184,7 +1184,8 @@ sits at the top of the page next to *connect a module* because those two
 buttons answer the same question — which module am I listening to, the one in
 this page or the one on the cable. Play is the emulator's surface: the LEDs and
 the gate buses, the clock, the eight jacks, an on-screen keyboard, a small synth
-so the patch can be heard, the MIDI the module is sending — and the two views
+and a drum kit per drum sequencer so the patch can be heard, the MIDI the module
+is sending — and the two views
 that answer a question no lamp can, because their answer only exists over time.
 A **scope** draws every jack and gate bus the patch uses against the last four
 seconds, which is the only way to read a divider, a Euclidean pattern or a
@@ -1199,9 +1200,24 @@ being built: a bus only leaves the module once somebody has patched a MIDI out
 to it. *listen* is a list of players now — each one voice pointed either at
 what the module sends or at **a note bus**, read straight off the bus, with its
 own waveform and its own level, so a sequencer on one bus and an arpeggiator on
-another can be told apart by ear. The gate clicks have their own level too:
-they are percussion made from jack edges rather than part of the music, and
-they are the loudest thing in the page.
+another can be told apart by ear.
+
+**A drum sequencer is an instrument rather than a source**, so it is not one of
+those players: every drum sequencer in the patch gets **its own kit and its own
+level** — acoustic, 808, 909 or a drum synth — and is audible because it is in
+the patch rather than because somebody added a player for it. The kits are
+synthesised, not sampled, which is what lets the whole app stay one file that
+opens from a download; the machines they are named after were synthesisers too.
+A `DrumSeqMidi` lane plays the drum its note number means in General MIDI, and
+a `DrumSeqGate` lane — which carries no note number at all — plays the drum the
+firmware would send for that lane, so eight identical beeps become a kit.
+
+**The gate listener says which gate it is listening to**, internal or external:
+any of the module's own **gate buses**, whether or not anything is patched to
+one, or the **jacks**, where that signal leaves the module. A blip per rising
+edge, at its own level, because it is percussion under the notes rather than
+part of them — and it is the only way a clock division or a logic gate is
+audible at all, since those patches send no MIDI.
 
 Both are filled from the module's own sampling, **once per pass** rather than
 by the page polling at paint time. A trigger here is high for one or two

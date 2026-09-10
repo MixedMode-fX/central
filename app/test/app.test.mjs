@@ -30,6 +30,8 @@ import { SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FE
 import { EXAMPLES } from '../src/examples.js';
 import { EmbeddedModule } from '../src/module.js';
 import { slider } from '../src/views.js';
+import { Listener, gateHits } from '../src/audio.js';
+import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/drums.js';
 import {
   connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
   applyWrite, freeBus, waitingBus,
@@ -550,7 +552,8 @@ await test('a slider ignores a scrolling finger and obeys a deliberate one', asy
 await test('the built page contains every module, with nothing left to import', async () => {
   const code = bundle('app.js');
   for (const name of ['app.js', 'module.js', 'storage.js', 'perform.js', 'controller.js',
-                      'audio.js', 'library.js', 'scope.js', 'views.js', 'midi.js', 'protocol.js']) {
+                      'audio.js', 'drums.js', 'library.js', 'scope.js', 'views.js', 'midi.js',
+                      'protocol.js']) {
     assert.ok(code.includes(`__define('${name}'`), `${name} is not in the build`);
   }
   // Nothing may be left that a browser would try to fetch: the built page is
@@ -911,6 +914,252 @@ await test('a hand-placed block stays where it was put', async () => {
                    'and nothing else moved because of it');
 });
 
+// --- the drums ---------------------------------------------------------------
+//
+// The kits themselves cannot be checked here - "does this sound like a 909"
+// is not a question a test answers - so what is checked is everything around
+// them: that a kit can play every drum, that the drum a lane means is the one
+// the firmware means by it, that a patch's drum sequencers are found with the
+// buses they speak on, and that a hit is played once, by the sequencer that
+// made it, rather than by whichever player happened to carry it.
+
+await test('the drum a gate lane plays is the one the firmware names', async () => {
+  // A `DrumSeqGate` lane carries no note number at all, so the only thing that
+  // says which drum it is, is the note the firmware would send for that lane
+  // if this were the MIDI variant. Read it out of the firmware rather than
+  // trusting the copy in `drums.js`: a lane renamed there and not here would
+  // be a snare on the kick's lane, silently, for ever.
+  const source = readFileSync(join(here, '..', '..', 'src', 'algorithm', 'sequencer',
+                                   'drum_sequencer.cpp'), 'utf8');
+  const found = /GM_DEFAULT_NOTE\[DRUM_SEQ_LANES\]\s*=\s*\{([^}]*)\}/.exec(source);
+  assert.ok(found, 'the firmware no longer spells its default notes out where this can read them');
+  const notes = found[1].split(',').map((n) => Number(n.trim()));
+  assert.deepEqual(LANE_NOTES, notes, 'the lane notes in drums.js are not the firmware’s');
+  assert.equal(notes.length, P.DRUM_SEQ_LANES);
+  // And the map from note to drum has to have an opinion about every one of
+  // them, or a default lane plays the tuned fallback instead of a drum.
+  for (const note of notes) assert.notEqual(pieceOf(note), 'perc', `note ${note} has no drum`);
+});
+
+await test('every kit can play every drum, and no two kits are the same kit', async () => {
+  for (const kit of KITS) {
+    for (const piece of PIECES) {
+      const spec = voiceSpec(kit.id, piece);
+      const parts = ['body', 'noise', 'metal', 'click'].filter((part) => spec[part]);
+      assert.ok(parts.length, `${kit.id} has nothing to play ${piece} with`);
+      for (const part of parts) {
+        assert.ok((spec[part].decay ?? 0) > 0, `${kit.id} ${piece}: ${part} never decays`);
+      }
+    }
+  }
+  // The kick is the one everybody knows the difference between. If two kits
+  // agree about it, one of them is not a kit.
+  const kicks = KITS.map((kit) => JSON.stringify(voiceSpec(kit.id, 'kick')));
+  assert.equal(new Set(kicks).size, KITS.length, 'two kits have the same kick');
+  // An unknown kit is a saved setup from a version that had other kits, or a
+  // selector given a value it should not have: it plays rather than throws.
+  assert.ok(voiceSpec('no such kit', 'snare').noise, 'an unknown kit has no fallback');
+});
+
+await test('a kit builds real audio nodes for every drum in it', async () => {
+  // The recipes are data, and data with a typo in it is a kit that throws the
+  // first time somebody plays a crash. So play every drum of every kit into a
+  // stand-in for Web Audio and insist each one built something and scheduled
+  // it in the future rather than in the past.
+  const ctx = fakeAudioContext();
+  const out = ctx.createGain();
+  for (const kit of KITS) {
+    for (const piece of PIECES) {
+      const before = ctx.made.length;
+      hit(ctx, out, { kit: kit.id, piece, note: 60, velocity: 100, at: 1 });
+      assert.ok(ctx.made.length > before, `${kit.id} ${piece} made no sound`);
+    }
+  }
+  for (const node of ctx.made) {
+    if (node.startedAt === null) continue;
+    assert.ok(node.stoppedAt > node.startedAt, 'a node was stopped before it started');
+  }
+});
+
+await test('the drum sequencers of a patch are found, with the buses they speak on', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const midi = added(device, patch, idOf('DrumSeqMidi', device));
+  const gate = added(device, patch, idOf('DrumSeqGate', device));
+  // Three lanes out, five left alone - the ordinary shape of a drum patch.
+  gate.outBus[0] = 4; gate.outBus[1] = 5; gate.outBus[2] = 6;
+
+  const sources = drumSources(device, patch);
+  assert.equal(sources.length, 2, 'both drum sequencers should be found');
+  assert.deepEqual(sources.map((s) => s.key), ['node:0', 'node:1'],
+                   'a drum voice is keyed by node index, like everything else addressed');
+  assert.equal(sources[0].kind, 'note');
+  assert.equal(sources[0].bus, midi.outBus[0], 'the MIDI variant speaks on its note outlet');
+  assert.equal(sources[1].kind, 'gate');
+  assert.deepEqual(sources[1].lanes.map((lane) => [lane.bus, lane.piece]),
+                   [[4, 'kick'], [5, 'snare'], [6, 'hatClosed']],
+                   'a gate lane is the drum the firmware means by that lane');
+  assert.equal(sources[1].lanes.length, 3, 'a lane on no bus is not a lane to listen to');
+
+  // A patch with no drums in it has no drum voices to show, and nothing else
+  // in the registry may be mistaken for one.
+  added(device, patch, idOf('ClockDiv', device));
+  assert.equal(drumSources(device, patch).length, 2);
+});
+
+await test('a drum note is played by its own sequencer, not by the player that carried it', async () => {
+  const { listener, module } = await listening();
+  const kick = { t: 0, bus: 3, type: 0x90, channel: 10, d1: 36, d2: 100 };
+
+  // Nothing knows about the sequencer yet, so a drum leaving the module is
+  // still a drum: it lands on the voice for everything on channel 10 that no
+  // sequencer here explains, and never on the player carrying it.
+  listener.midi({ ...kick, bus: undefined, target: 1 });
+  assert.equal(listener.drums.get('other').hits, 1);
+  assert.equal(listener.players[0].voices.size, 0);
+
+  // On a bus, though, it is only heard where something is listening: every
+  // bus a patch writes is read for the piano roll, and a page that made a
+  // noise for each one would be playing patches nobody asked to hear.
+  listener.noteBus(kick);
+  assert.equal(listener.drums.get('other').hits, 1, 'a bus nobody listens to stays silent');
+
+  listener.setDrumSources([
+    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
+  ]);
+  assert.equal(module.watches.get(3), 1, 'a drum sequencer’s bus is read without a player on it');
+
+  listener.noteBus(kick);
+  assert.equal(listener.drums.get('node:0').hits, 1, 'the sequencer that wrote the bus plays it');
+  assert.equal(listener.drums.get('other').hits, 1, 'and the catch-all does not play it as well');
+  assert.equal(listener.players[0].voices.size, 0, 'no player may sound a drum note');
+
+  // Turned off, it is silent - and still not handed to a player.
+  listener.drums.get('node:0').setOn(false);
+  listener.noteBus(kick);
+  assert.equal(listener.drums.get('node:0').hits, 1);
+  assert.equal(listener.players[0].voices.size, 0);
+
+  // A note that is not a drum still goes where it always went.
+  listener.midi({ t: 0, type: 0x90, channel: 1, d1: 60, d2: 100, target: 1 });
+  assert.equal(listener.players[0].voices.size, 1, 'the player still plays what is not a drum');
+});
+
+await test('a hit already heard on its bus is not heard again off the cable', async () => {
+  const { listener } = await listening();
+  listener.setDrumSources([
+    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
+  ]);
+  // The app says which MIDI targets carry a drum sequencer this page is
+  // already listening to on its own bus.
+  listener.setDrumOutMask(0b0010);
+
+  listener.noteBus({ t: 0, bus: 3, type: 0x90, channel: 10, d1: 36, d2: 100 });
+  listener.midi({ t: 0, type: 0x90, channel: 10, d1: 36, d2: 100, target: 0b0010, bus: undefined });
+  assert.equal(listener.drums.get('node:0').hits, 1, 'one hit, not a flam');
+  assert.equal(listener.drums.get('other').hits, 0, 'and not a second copy on the catch-all');
+  assert.equal(listener.players[0].voices.size, 0, 'the dropped copy is dropped, not played as a note');
+
+  // A drum on a port no drum sequencer here feeds is a real hit, and is heard.
+  listener.midi({ t: 0, type: 0x90, channel: 10, d1: 38, d2: 100, target: 0b0100 });
+  assert.equal(listener.drums.get('other').hits, 1);
+});
+
+await test('a gate lane plays its drum on the edge, not while the gate is high', async () => {
+  const { listener, module } = await listening();
+  listener.setDrumSources([
+    { key: 'node:1', index: 1, label: 'DrumSeqGate 1', kind: 'gate', bus: P.NO_BUS,
+      lanes: [{ lane: 0, bus: 4, piece: 'kick' }, { lane: 1, bus: 5, piece: 'snare' }] },
+  ]);
+  const voice = listener.drums.get('node:1');
+
+  module.levels.gate = 1 << 4;
+  module.pass();
+  assert.equal(voice.hits, 1, 'the rising edge is the hit');
+  module.pass();
+  assert.equal(voice.hits, 1, 'a gate that is still high is not a second hit');
+  module.levels.gate = 0;
+  module.pass();
+  module.levels.gate = (1 << 4) | (1 << 5);
+  module.pass();
+  assert.equal(voice.hits, 3, 'two lanes rising together are two drums');
+
+  // A gate bus no lane is on is not a drum, whatever else is listening to it.
+  module.levels.gate = 1 << 9;
+  module.pass();
+  assert.equal(voice.hits, 3);
+});
+
+await test('the gate listener hears what it was pointed at, and each edge once', async () => {
+  const none = { jacksOut: 0, jacks: 0, buses: 0 };
+  assert.deepEqual(gateHits([{ kind: 'jacks' }], none), []);
+
+  // What it has always done: every output jack, pitched by jack number.
+  assert.deepEqual(gateHits([{ kind: 'jacks' }], { ...none, jacksOut: 0b101, jacks: 0b101 }),
+                   [{ kind: 'jack', index: 0 }, { kind: 'jack', index: 2 }]);
+
+  // An input jack is not an output jack, and "every output jack" does not
+  // hear the one being tapped from the jacks panel. Naming it does.
+  assert.deepEqual(gateHits([{ kind: 'jacks' }], { ...none, jacks: 0b1000 }), []);
+  assert.deepEqual(gateHits([{ kind: 'jack', index: 3 }], { ...none, jacks: 0b1000 }),
+                   [{ kind: 'jack', index: 3 }]);
+
+  // The inside of the module: a gate bus, whether or not anything is patched
+  // to it. This is the whole point of the selection.
+  assert.deepEqual(gateHits([{ kind: 'bus', index: 7 }], { ...none, buses: 1 << 7 }),
+                   [{ kind: 'bus', index: 7 }]);
+  assert.deepEqual(gateHits([{ kind: 'bus', index: 7 }], { ...none, buses: 1 << 6 }), []);
+
+  // Both kinds at once, which is what "did it make it out of the module" is
+  // asked with - and one blip per thing that fired, however many rows asked.
+  assert.deepEqual(
+    gateHits([{ kind: 'jacks' }, { kind: 'jack', index: 0 }, { kind: 'bus', index: 2 }],
+             { jacksOut: 0b1, jacks: 0b1, buses: 1 << 2 }),
+    [{ kind: 'jack', index: 0 }, { kind: 'bus', index: 2 }]);
+});
+
+await test('what is being listened to survives a reload', async () => {
+  const { listener } = await listening();
+  listener.setDrumSources([
+    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
+  ]);
+  listener.drums.get('node:0').setKit('808');
+  listener.drums.get('node:0').setVolume(0.25);
+  listener.drums.get('other').setOn(false);
+  listener.gateSources = [];
+  listener.addGateSource({ kind: 'bus', index: 5 });
+  listener.addGateSource({ kind: 'jack', index: 2 });
+  listener.addPlayer({ source: 'bus', bus: 1, wave: 'square', volume: 0.5 });
+
+  const saved = JSON.parse(JSON.stringify(listener.toJSON()));
+  const { listener: back } = await listening();
+  back.restore(saved);
+
+  assert.deepEqual(back.gateSources.map((s) => [s.kind, s.index]), [['bus', 5], ['jack', 2]]);
+  assert.equal(back.drums.get('node:0').kit, '808');
+  assert.equal(back.drums.get('node:0').volume, 0.25);
+  assert.equal(back.drums.get('other').on, false);
+  assert.deepEqual(back.players.map((p) => [p.source, p.bus, p.wave]),
+                   [['out', 0, 'sawtooth'], ['bus', 1, 'square']]);
+
+  // A node removed renumbers the ones after it, and the kit chosen for a drum
+  // sequencer has to move with it rather than stay at the index.
+  back.drums.get('node:0').setKit('acoustic');
+  back.drumVoice('node:2', { label: 'DrumSeqGate 2' }).setKit('808');
+  back.forgetDrumNode(0);
+  assert.equal(back.drums.has('node:0'), false, 'the removed node takes its voice with it');
+  assert.equal(back.drums.get('node:1').kit, '808', 'the kit moved down with its node');
+  assert.equal(back.drums.get('node:1').key, 'node:1', 'and knows its own new key');
+  assert.equal(back.drums.has('node:2'), false);
+
+  // A setup saved before any of this existed keeps working, on the defaults.
+  const { listener: old } = await listening();
+  old.restore({ volume: 0.3, clicks: true, clickVolume: 0.2, players: [{ source: 'out' }] });
+  assert.deepEqual(old.gateSources.map((s) => s.kind), ['jacks'], 'the gate listener keeps its default');
+  assert.equal(old.drums.get('other').kit, back.drums.get('other').kit);
+});
+
 // --- the harness ------------------------------------------------------------
 
 // Enough of a document for `el()` to build an element and for a test to fire
@@ -934,6 +1183,97 @@ function fakeDocument() {
       };
     },
   };
+}
+
+// Enough of Web Audio to build a drum with. Every node records when it was
+// started and stopped, because "a kit that throws on the crash" and "a hit
+// scheduled in the past" are the two ways a recipe goes wrong, and neither
+// makes a sound to notice.
+function fakeAudioContext() {
+  const made = [];
+  const param = () => ({
+    value: 0,
+    setValueAtTime() { return this; },
+    linearRampToValueAtTime() { return this; },
+    exponentialRampToValueAtTime() { return this; },
+    setTargetAtTime() { return this; },
+  });
+  const node = (kind, extra = {}) => {
+    const made_ = {
+      kind, startedAt: null, stoppedAt: null,
+      connect(to) { return to; },
+      disconnect() {},
+      start(at = 0) { this.startedAt = at; },
+      stop(at = 0) { this.stoppedAt = at; },
+      ...extra,
+    };
+    made.push(made_);
+    return made_;
+  };
+  return {
+    made,
+    state: 'running',
+    currentTime: 0,
+    sampleRate: 48000,
+    destination: node('destination'),
+    createGain: () => node('gain', { gain: param() }),
+    createOscillator: () => node('oscillator', { type: 'sine', frequency: param(), detune: param() }),
+    createBufferSource: () => node('noise', { buffer: null, loop: false, playbackRate: param() }),
+    createBiquadFilter: () => node('filter', { type: 'lowpass', frequency: param(), Q: param() }),
+    createBuffer: (channels, length) => ({ getChannelData: () => new Float32Array(length) }),
+    resume: async () => {},
+    suspend: async () => {},
+  };
+}
+
+// The module as the listener uses it: somewhere to hang the hooks, the gate
+// levels of the current pass, and the note-bus watches, so a test can say "a
+// pass happened and this bus was high" without a wasm module in the room.
+function fakeModule() {
+  const hooks = { midi: [], bus: [], frame: [], pass: [] };
+  return {
+    now: 0,
+    levels: { jackIn: 0, jackOut: 0, gate: 0, green: 0, red: 0 },
+    jackSources: Array.from({ length: P.GPIO_N }, () => ({ level: 0, hz: 0, pulseUntil: 0 })),
+    modes: new Array(P.GPIO_N).fill(0),
+    watches: new Map(),
+    jackMode(jack) { return this.modes[jack]; },
+    jackOutput(jack) { return (this.levels.jackOut >> jack) & 1; },
+    jackInput(jack) { return (this.levels.jackIn >> jack) & 1; },
+    onMidi(fn) { hooks.midi.push(fn); },
+    onNoteBus(fn) { hooks.bus.push(fn); },
+    onFrame(fn) { hooks.frame.push(fn); },
+    onPass(fn) { hooks.pass.push(fn); },
+    watchNoteBus(bus) { this.watches.set(bus, (this.watches.get(bus) ?? 0) + 1); },
+    unwatchNoteBus(bus) {
+      const held = this.watches.get(bus);
+      if (!held) return;
+      if (held <= 1) this.watches.delete(bus); else this.watches.set(bus, held - 1);
+    },
+    pass() { for (const fn of hooks.pass) fn(this.now); },
+    hooks,
+  };
+}
+
+// A listener with the audio on, over both fakes. `toggle()` is the real one:
+// it is where the master gain, the click gain and every voice get wired up,
+// and a test that skipped it would be testing a listener no user ever has.
+async function listening() {
+  const module = fakeModule();
+  const ctx = fakeAudioContext();
+  const had = globalThis.AudioContext;
+  globalThis.AudioContext = function AudioContext() { return ctx; };
+  try {
+    const listener = new Listener(module);
+    // The two ways an event reaches it, as the module delivers them: off the
+    // cable, and off a note bus.
+    listener.noteBus = (event) => { for (const fn of module.hooks.bus) fn(event); };
+    await listener.toggle();
+    assert.ok(listener.enabled, 'the fake context should come up running');
+    return { listener, module, ctx };
+  } finally {
+    globalThis.AudioContext = had;
+  }
 }
 
 // views.js reads `document` when it builds something, not when it loads, so

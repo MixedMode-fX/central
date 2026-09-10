@@ -44,6 +44,7 @@ Mirror::Mirror(const NodeConfig& config) :
                                                                     : config.params[P_AMOUNT])
                                    : DEFAULT_AMOUNT),
     snap(config.params[P_SNAP] != 0),
+    seed(config.params[P_SEED]),
     // Seeded from entropy when `seed` is zero and from the byte otherwise, so
     // a patch can be exactly reproducible or never the same twice.
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
@@ -70,6 +71,9 @@ bool Mirror::set_param(uint16_t index, uint8_t value){
             if (value > 1) return false;
             snap = value != 0; return true;
         case P_SEED:
+            // There is no reset inlet here, so a new seed takes effect at
+            // once: the stream this node draws from is the only state it has.
+            seed = value;
             rng.reseed(value ? (uint32_t)(value * 2654435761u) : entropy::seed());
             return true;
         default: return false;
@@ -83,6 +87,7 @@ uint8_t Mirror::get_param(uint16_t index) const {
         case P_ROOT:   return root;
         case P_AMOUNT: return amount;
         case P_SNAP:   return snap ? 1u : 0u;
+        case P_SEED:   return seed;
         default: return 0;
     }
 }

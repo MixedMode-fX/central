@@ -437,13 +437,18 @@ terrible default. In degree space the useful stacks are all short: triad
 interval array leaves the hand-typed case exactly where it is, as
 `quality = custom`.
 
-**A re-voice on every root note-on.** `Chord::play_free` compares the wanted
+**A re-strike on a repeated root.** `Chord::play_free` compares the wanted
 root against `voiced` and returns early when they match, so a progression that
-plays the same degree twice in a row produces no second chord. That is right
-for a parameter sweep and wrong for a note-on, which is an event and not a
-level. Setting `dirty` when the root inlet delivers a note-on is a one-line
-change, and `Harmony` repeats a degree often enough that it is required
-before the two of them work together at all.
+plays the same degree twice in a row produces no second chord — and `Harmony`
+repeats a degree whenever its style or its `gravity` says so, so one chord of
+the phrase simply does not sound.
+
+This section called that a bug and it is not one: there is a test that asserts
+it, and the reading behind it is right. A held chord that re-struck itself
+every time a sequencer resent the note it is already playing is a chord nobody
+could drone on, and droning is what a self-playing `Chord` is for. Both
+readings are wanted, so it is `retrigger`, defaulting to the behaviour that
+shipped.
 
 ### 6.6 The one thing that does not fit, and why to defer it
 
@@ -465,18 +470,24 @@ own argument, and none of the five nodes above need it.
 
 ## 7. What it costs
 
+Measured, not estimated.
+
 | | |
 |---|---|
-| `Progression` state | cursor, phrase counter, 7-byte distance table, PRNG, 8 pattern bytes, ledger — comfortably inside `NODE_SLOT_SIZE` (640) |
-| `Voicer` state | previous voicing (≤ 8 notes), ledger — small |
-| Params | every node above is under 20 bytes against `N_PARAM` = 336 |
-| New scale helpers | degree-space cycle, characteristic-tone extraction, triad quality — all inline in `midi/scale.h`, all pure functions of a mask |
-| Preset format | one appended `AlgorithmId` per node, one appended `AlgorithmCategory`. Nothing renumbered. |
+| `Voicer` state | 184 bytes — the held chord, the previous voicing, the ledger |
+| `Mirror` state | 128 bytes |
+| `Tonnetz` state | 136 bytes |
+| `Chord` state | 136 bytes, unchanged: `quality` and `retrigger` are two bytes inside the padding it already had |
+| Pool slot | `NODE_SLOT_SIZE` is 640, so the largest of the three uses under a third of one |
+| Params | 6, 6 and 9 against `N_PARAM` = 336 |
+| Algorithms | 36 to 39, against `N_NODE` = 40 — a patch can still hold one of every algorithm, which is a test this repository runs |
+| Preset format | three appended `AlgorithmId`s and two appended `Chord` parameters. Nothing renumbered, and a preset that never mentions the new parameters plays exactly what it stored |
 
-The scale helpers are worth calling out separately: `characteristic_tones(mask)`
-and `triad_quality(mask, degree)` are pure, testable, and depend on nothing but
-the twelve bits. They belong beside `scale_degree_to_semitone` in
-`midi/scale.h`, and they are what keeps the modal logic out of the nodes.
+No new category: all three are `CATEGORY_MIDI`, where `Harmony` and `Chord`
+already are. A `CATEGORY_HARMONY` would split the family across two shelves
+of the editor's list to gain nothing.
+
+The scale helpers §4.3 proposed are not here — see §8 for why.
 
 ---
 
@@ -503,6 +514,14 @@ uses it, which would be a modal mode on `Harmony`.
 
 ### What changed in the building
 
+- **The `Chord` fix was not a fix.** §6.5 called the missing re-strike on a
+  repeated root a bug; `test_a_sequenced_root_walks_a_self_playing_chord_through_the_key`
+  asserts it, in as many words — *the same root again changes nothing: the
+  chord is already there*. The test is right and the design note was wrong to
+  read a tested decision as an oversight, so the change is a parameter with
+  the shipped behaviour as its default rather than a new default. Whether the
+  hole in a repeated chord matters depends on what is downstream, which is
+  exactly the shape of thing a switch is for.
 - **`Voicer` does not take a mode with a bass constraint and a
   minimal-motion constraint at once**, because the two disagree and the
   disagreement is musical rather than a bug. Voice-lead C E G to F A C with

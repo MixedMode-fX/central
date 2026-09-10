@@ -519,6 +519,134 @@ the echoes walk off the grid; and once a bar the register goes back to the
 pattern it grew out of. Nothing in it is a sequence anybody typed, and nothing
 in it is a coin flip.
 
+## Harmonic Algorithms
+
+`Harmony` fills the first of the two holes the design note in
+[`docs/harmony.md`](docs/harmony.md) names — *which chord comes next*. These
+three fill the second and open two doors out of the key. The theory they are
+built on is in that document; what follows is what each one is for.
+
+### `Voicer`
+
+**A progression in root position is block chords.** `Harmony` chooses the
+roots and `Chord` stacks the right notes on them, and between the two every
+voice still jumps as far as the root does and every chord is struck from
+nothing. `Voicer` is the layer between them: the chord arrives, and what
+leaves is the same chord placed so the voices move as little as they can.
+
+**The notes two chords share are held, not re-struck.** Two triads a fifth
+apart share one tone and two a third apart share two, so on the fifth-walk
+`Harmony` is best at, this is the difference between a chord change and a
+chord *moving*. C E G to F A C is three semitones of motion in total, because
+C is in both chords and stays exactly where it is; the same change in root
+position is fifteen.
+
+That is also why this node's note-off ledger is keyed on the note it
+**emitted** rather than on the note that caused it, which every other modifier
+here does the other way round. A modifier that emits a function of one note
+must release exactly what that note sent. This one emits a function of the
+whole held chord, and the question it answers on every change is *is this
+pitch already sounding* — a question about what was emitted. Keyed that way,
+common-tone retention is not code but the absence of it: the shared notes are
+neither released nor emitted, because nothing asks them to be.
+
+**A chord is what is held at the end of a pass, not what arrived during it.**
+`Chord` re-voices by releasing everything it had and sounding the new chord,
+so a change reaches this node as a handful of note-offs and a handful of
+note-ons in one pass. Reading them as they arrive would voice the silence in
+between.
+
+Four modes — `closest`, `root` (what the chord did before this node existed),
+`drop 2` and `spread` — plus `low` and `high` for the range, `voices` to cap
+a ninth down to a shell, and `retrigger` to turn the retention off for a part
+that should be articulated rather than sustained.
+
+`bass` pins the lowest voice to the chord's own bass, so the root motion is
+audible. **It disagrees with minimal motion, and the disagreement is
+musical**: pinning the bass in the example above costs the twelve semitones
+the common tone was saving. Both are wanted, neither is a compromise of the
+other, so it is a switch.
+
+### `Mirror`
+
+**Negative harmony is the circle of fifths reflected.** Take the axis halfway
+between the tonic and the dominant — between E♭ and E in C — and reflect every
+pitch class through it. Relative to the tonic that is `7 − x`, and the whole
+theory is that one expression:
+
+| Chord in C | Reflected | What it became |
+|---|---|---|
+| C E G (I) | C E♭ G | i |
+| G B D (V) | F A♭ C | iv |
+| F A C (IV) | G B♭ D | v |
+
+The dominant becomes the subdominant minor and the subdominant becomes the
+minor dominant, because the reflection exchanges the two halves of the circle
+about the tonic. A progression put through it comes back as its own shadow — a
+different piece of music, derived for nothing from one that already works.
+`inversion` is the same operation about the tonic itself, which is what a
+melody wants rather than what a progression does.
+
+**It reflects the pitch class and then re-registers.** Reflecting the pitch is
+the obvious reading and the wrong one: middle C about C's axis is `7 − 60`,
+which is not a note. So the result is taken modulo twelve and placed in the
+octave nearest the note that caused it — which is also what makes `amount`
+usable, because at 50% the reflected notes sit among the ones that passed
+straight through instead of two octaves underneath them.
+
+The axis follows the module's key unless the node names its own scale, and a
+patched root inlet outranks both — the rule `NoteQuantise` sets. `snap` puts
+the reflection back in the scale and is off by default, because a reflection
+that stayed in the key would be a transposition and leaving it is the point.
+
+### `Tonnetz`
+
+**Every chord `Harmony` can reach is one of seven, because that is what a key
+is.** This is the other walk. Three transforms take a major or minor triad to
+another one, each moving exactly one voice by a semitone or a tone and leaving
+the other two alone:
+
+| | | |
+|---|---|---|
+| **P** parallel | C major ↔ C minor | the third moves a semitone |
+| **L** leading-tone | C major ↔ E minor | the root moves down a semitone |
+| **R** relative | C major ↔ A minor | the fifth moves up a tone |
+
+**The circle of fifths is one of the cycles of this object.** Alternate two of
+the three and the roots trace a symmetric division of the octave: `LR` gives
+fifths, `PL` major thirds, `PR` minor thirds. So this is not a different idea
+from `Harmony`, it is the same one with the other two axes exposed — which is
+the argument for having both. `LR` sounds like a progression; `PL` and `PR`
+leave the key at once and sound like film music, because every step is still
+one voice moving one semitone.
+
+`deviation` is the chance of taking one of the other two transforms instead of
+the cycle's next: at 0 the cycle repeats exactly — `PL` closes after six
+steps, `PR` after eight, `LR` after twenty-four — and a few percent is what
+turns a cycle into a walk. `diatonic` refuses any triad the key does not hold;
+since `P` is never diatonic, in practice it restricts the walk to `L` and `R`,
+which is the fifth cycle, which is `Harmony`'s territory arrived at from the
+other direction.
+
+**It emits a triad in root position and leaves the voice leading to
+`Voicer`.** Parsimonious voice leading is the entire point of these
+transforms, and `Tonnetz → Voicer` produces it by construction: two triads
+that share two notes are exactly the case a closest voicing holds two notes
+through. Doing it here would be a second voicer.
+
+### A harmonic patch
+
+```
+Metronome 1 bar ──> Harmony ──root──> Chord (7th) ──> Voicer (closest) ──> MIDI out
+                                                          └──> Mirror ──> MIDI out
+```
+
+`Chord` free-runs — nothing is patched to its note inlet — so the patch needs
+no keyboard. `Harmony` walks it around the key, `Voicer` keeps the common
+tones so the chords move rather than jump, and the `Mirror` branch plays the
+same progression's shadow alongside it. Swap `Harmony` for `Tonnetz` and the
+same patch leaves the key entirely without any voice moving more than a tone.
+
 ## Logic Algorithms
 
 Configurable logic gates (all gates can also be inverted) & latches:
@@ -740,10 +868,12 @@ Algorithms available today:
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` (degrees in a scale, from a root) |
 | Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
-| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator` |
-| Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off), `MidiToCV` (notes to pitch, gate, velocity, modulation and a trigger) |
+| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay` |
+| Harmony | `Harmony` (a progression in the key), `Voicer` (voice leading), `Mirror` (negative harmony), `Tonnetz` (chromatic triads) |
+| Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off), `MidiToCV` (notes to pitch, gate, velocity, modulation and a trigger), `CvToNote`, `CvToGate` |
 | Utility | `GateHold` (a switch, a latch, a toggle, or a gate of a set length) |
-| Modulators | `LFO`, `SampleHold`, `Slew` (all write a CV bus) |
+| Modulators | `LFO`, `SampleHold`, `Slew`, `Turing` (all write a CV bus) |
+| Rhythm | `Automaton` (a cellular grid of related lanes) |
 
 # Master clock
 
@@ -922,6 +1052,11 @@ either way it is saved with the patch and pushed to the graph by
 `Chord`'s intervals are **steps of that scale**, which is the same thing as
 semitones when the scale is chromatic — so 0 2 4 is a diatonic triad on every
 degree, and the fixed semitone stack it always was when nothing names a key.
+`quality` names one of nine such stacks so it does not have to be typed, in
+the same scale steps: `7th` is a dominant seventh on the fifth degree and a
+minor seventh on the second, with nothing anywhere naming either. `custom`
+is the default and a named stack does not overwrite the typed intervals, so
+switching back finds the hand-built chord as it was left.
 
 **And with nothing patched to its note inlet, `Chord` plays itself.** A voicer
 that needs a keyboard is a voicer that cannot start a patch, and "set the notes
@@ -941,6 +1076,13 @@ means what `note in` means everywhere else: the whole note rather than only its
 pitch class, and it does not touch the key. That is the difference between a
 sequenced root walking through the chords of one key and one dragging the key
 along behind it, and only the first is a chord progression.
+
+**A root that repeats is not a change**, so by default it does not re-strike
+the chord: a held chord that sounded again every time a sequencer resent the
+note it is already playing is a chord nobody could drone on. `retrigger` says
+otherwise, and `Harmony` is why it exists — that node repeats a degree
+whenever its style or its `gravity` says so, and there the silence is a hole
+in the progression rather than a held note.
 
 What the module cannot do yet is *choose* that root. Root motion and voicing
 are the two layers of the harmonic stack nothing here owns — see

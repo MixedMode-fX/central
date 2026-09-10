@@ -102,6 +102,7 @@ class Mirror : public Node{
         uint8_t root;
         uint8_t amount;
         bool snap;
+        uint8_t seed;
         Xorshift32 rng;
         SoundingNotes sounding;
 };

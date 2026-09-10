@@ -20,7 +20,8 @@ static const char* const OUT_NAMES[1] = {"trigger"};
 const AlgorithmDescriptor ClockDiv::descriptor = {
     ALGO_CLOCK_DIV, "ClockDiv", 1, 0, 1, 5, IN, OUT, sizeof(ClockDiv), true, construct_node<ClockDiv>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Divides or multiplies the clock into triggers. Leave the inlet free to use the master clock." };
+    "Divides or multiplies the clock into triggers. Leave the inlet free to use the master clock.",
+    CATEGORY_CLOCK };
 
 ClockDiv::ClockDiv(const NodeConfig& config) :
     source_in(config.in_bus[0]),

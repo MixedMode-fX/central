@@ -141,6 +141,7 @@ const enums = {
   ParamKind: enumeration(read('src/node/param.h'), 'ParamKind'),
   ConfigError: enumeration(read('src/node/registry.h'), 'ConfigError'),
   AlgorithmId: enumeration(read('src/node/registry.h'), 'AlgorithmId'),
+  AlgorithmCategory: enumeration(read('src/node/node.h'), 'AlgorithmCategory'),
   ScaleId: enumeration(read('src/midi/scale.h'), 'ScaleId'),
 };
 enums.ScaleMask = scaleMasks(read('src/midi/scale.h'), enums.ScaleId);

@@ -447,7 +447,10 @@ app/
                       blocks and arrows a patch has, and what a drag means
     layout.js         where a block sits, and where its sockets are
     canvas.js         the patch drawn: blocks, arrows, dragging, the inspector
-    views.js          the node cards: parameters and sequencer grids
+    picker.js         the add list: what can be added, shelved by what it is,
+                      and the dropdown that shows it
+    views.js          the node cards and the jack cards: parameters, sequencer
+                      grids, and which way a jack faces
     midi.js           routing, bindings, the clock, the external controller
     perform.js        the play surface, and everything that updates live
     scope.js          the two time views: the scope and the piano roll
@@ -485,6 +488,30 @@ one chosen from a selector in the list: both are the same edit, planned by the
 same code in `graph.js`, and neither is a wire the app then has to remember.
 Adding or removing a node changes the graph's *shape*, so that is a whole
 patch.
+
+**What can be added is a list you can read.** A native `<select>` can say one
+line about an option, so thirty algorithms were thirty labels doing the work of
+a description and none of them could say what the algorithm *does* — while the
+registry has carried a one-line summary for every one of them since the port
+names landed. The add list is built instead (`picker.js`): rows shelved by the
+**category the module reports** for each algorithm, each carrying its name,
+what it costs in connections and the firmware's summary, with a search over all
+of it. The shelves are the firmware's (`AlgorithmCategory`), not a table here,
+so an algorithm added to the firmware still arrives filed; one from firmware
+newer than the app lands under *other* rather than disappearing.
+
+**Which way a port faces is one of its settings.** A jack and a MIDI port used
+to be offered twice each in that list — in and out as separate things to add —
+so the direction was chosen before the port existed and changing it meant
+deleting a block and adding its opposite on the same bus. Both are now added
+facing the way most patches want, with the direction a toggle in the port's own
+card. A gate jack's direction is a field the firmware has, so the toggle writes
+it and the bus travels with the turn. A MIDI port's is not — four inputs and
+four outputs are eight different ports — so the toggle moves what the port
+carries to the first free port on the other side and leaves the one it came
+from unused. Both rules live in `graph.js` (`planJackDirection`,
+`planPortFlip`) with everything else that decides the shape of a patch, so both
+are tested against the firmware's validator rather than against a view.
 
 **Bindings are edited, not only learned.** The MIDI tab lists every controller
 binding in words and makes every field of every slot editable — CC, channel,

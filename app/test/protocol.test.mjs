@@ -29,6 +29,7 @@ import { connectNewNode, patchBlocks, connectionsOf, isModPort,
          modulationChoices, planModulation } from '../src/graph.js';
 import { toPatchJson, toPatchJsonText, fromPatchJson } from '../src/patchjson.js';
 import { layoutOf, socketPoint, blockHeight } from '../src/layout.js';
+import { ALGORITHM_CATEGORIES } from '../src/names.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const wasmPath = process.argv[2] || join(here, '..', '..', 'emulator', 'dist', 'mmmc.wasm');
@@ -239,6 +240,29 @@ await test('the registry describes every inlet, outlet and algorithm', async () 
   const drums = device.algorithms.find((a) => a.name === 'DrumSeqGate');
   assert.equal(drums.outName.length, P.DRUM_SEQ_LANES);
   assert.equal(drums.outName[0], 'lane 1');
+});
+
+// The category is the shelf the add list puts an algorithm on, and it comes
+// off the module with everything else it says about itself. An algorithm that
+// arrives without one would land under "other", which is the wall of thirty
+// names that categories were meant to remove.
+await test('every algorithm arrives on a shelf the app has a name for', async () => {
+  const known = new Set(ALGORITHM_CATEGORIES.map((c) => c.value));
+  for (const descriptor of device.algorithms) {
+    assert.ok(known.has(descriptor.category),
+              `${descriptor.name}: category ${descriptor.category} is not one this app knows`);
+    assert.notEqual(descriptor.category, P.AlgorithmCategory.CATEGORY_NONE,
+                    `${descriptor.name} arrived with no category`);
+  }
+  // And they are the shelves the source tree is already laid out as, read
+  // back off the wire rather than guessed from the names here.
+  const of = (name) => device.algorithms.find((a) => a.name === name).category;
+  assert.equal(of('AND'), P.AlgorithmCategory.CATEGORY_LOGIC);
+  assert.equal(of('ClockDiv'), P.AlgorithmCategory.CATEGORY_CLOCK);
+  assert.equal(of('EuclidianSequencer'), P.AlgorithmCategory.CATEGORY_SEQUENCER);
+  assert.equal(of('Transpose'), P.AlgorithmCategory.CATEGORY_MIDI);
+  assert.equal(of('LFO'), P.AlgorithmCategory.CATEGORY_MODULATOR);
+  assert.equal(of('GateHold'), P.AlgorithmCategory.CATEGORY_UTILITY);
 });
 
 // --- Round-trips ----------------------------------------------------------

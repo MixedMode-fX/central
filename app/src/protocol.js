@@ -240,6 +240,16 @@ export const AlgorithmId = Object.freeze({
   ALGO_SLEW: 29,
 });
 
+export const AlgorithmCategory = Object.freeze({
+  CATEGORY_NONE: 0,
+  CATEGORY_LOGIC: 1,
+  CATEGORY_CLOCK: 2,
+  CATEGORY_SEQUENCER: 3,
+  CATEGORY_MIDI: 4,
+  CATEGORY_MODULATOR: 5,
+  CATEGORY_UTILITY: 6,
+});
+
 export const ScaleId = Object.freeze({
   SCALE_GLOBAL: 0,
   SCALE_MAJOR: 1,

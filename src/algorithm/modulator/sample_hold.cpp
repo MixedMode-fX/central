@@ -20,7 +20,8 @@ static const char* const OUT_NAMES[1] = {"cv"};
 const AlgorithmDescriptor SampleHold::descriptor = {
     ALGO_SAMPLE_HOLD, "SampleHold", 2, 1, 1, 3, IN, OUT, sizeof(SampleHold), false, construct_node<SampleHold>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Holds one reading of a control signal until the next trigger. Unpatched, it holds noise." };
+    "Holds one reading of a control signal until the next trigger. Unpatched, it holds noise.",
+    CATEGORY_MODULATOR };
 
 static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
     if (stored == 0 || stored > max_value) return fallback;

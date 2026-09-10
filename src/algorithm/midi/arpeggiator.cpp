@@ -21,7 +21,8 @@ static const char* const OUT_NAMES[1] = {"notes out"};
 const AlgorithmDescriptor Arpeggiator::descriptor = {
     ALGO_ARPEGGIATOR, "Arpeggiator", 4, 2, 1, 5, IN, OUT, sizeof(Arpeggiator), false, construct_node<Arpeggiator>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Plays a held chord one note per advance edge, over a range of octaves. Hold latches it." };
+    "Plays a held chord one note per advance edge, over a range of octaves. Hold latches it.",
+    CATEGORY_MIDI };
 
 // The cursor is a position in a figure whose length is held notes x octaves,
 // and step() takes it modulo that length, so narrowing the octave range under

@@ -62,6 +62,24 @@ struct NodeConfig {
     uint8_t params[N_PARAM];
 };
 
+// What kind of thing an algorithm *is*, so a host can group thirty of them
+// into a list a musician can read. This is the same split the source tree
+// already makes (src/algorithm/logic, .../sequencer, ...) said out loud on
+// the wire, because a category worked out in the editor from an algorithm's
+// name is a guess that goes stale the moment the firmware gains one.
+//
+// Never renumber: a host may keep these, and an older one reading a category
+// it does not know shows the algorithm under "other" rather than hiding it.
+enum AlgorithmCategory : uint8_t {
+    CATEGORY_NONE      = 0,   // never shipped: test_params fails on it
+    CATEGORY_LOGIC     = 1,   // gates: what a gate bus does to another
+    CATEGORY_CLOCK     = 2,   // time: divisions, multiples, note values
+    CATEGORY_SEQUENCER = 3,   // patterns: steps, melodies, drum grids
+    CATEGORY_MIDI      = 4,   // notes: what happens to them on the way past
+    CATEGORY_MODULATOR = 5,   // control signals: shapes and smoothing
+    CATEGORY_UTILITY   = 6,   // the rest: plumbing with no better home
+};
+
 // Compile-time description of one algorithm. The validator range-checks a
 // NodeConfig against it, the node pool sizes its slots from it, the factory
 // constructs from it, and #11 exposes it over SysEx.
@@ -102,6 +120,10 @@ struct AlgorithmDescriptor {
     const char* const* in_name;
     const char* const* out_name;
     const char*   summary;
+    // Which shelf of the list this belongs on. One byte, appended to the
+    // registry reply after the strings for the same reason they were
+    // appended after the name.
+    AlgorithmCategory category;
 };
 
 // Placement-new factory used by every descriptor. Slot overflow is a compile

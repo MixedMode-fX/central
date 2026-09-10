@@ -358,6 +358,76 @@ export function connectionsOf(blocks) {
   return arrows;
 }
 
+// --- the patch's edges ------------------------------------------------------
+//
+// A jack and a MIDI port are the two things in a patch that are not
+// algorithms, and until now the app made you choose which way each one faced
+// *before* you had it: "jack in" and "jack out" were two things to add, and
+// changing your mind meant deleting one and adding the other on the same bus.
+// A direction is a setting. These two say what changing it means, and like
+// every other rule about the shape of a patch they are here rather than in a
+// view, so a test can ask them without a browser.
+
+// Which way a jack faces. The bus travels with the turn - a jack in on gate
+// bus 3 turned round is a jack out *of* gate bus 3, which is the monitoring
+// you were reaching for - and a jack in use has to be on a bus the module
+// actually has, so one coming back from unused lands on the bus it last had
+// or on the first.
+export function planJackDirection(patch, caps, index, direction) {
+  const port = patch.gatePorts?.[index];
+  if (!port) return null;
+  const buses = caps?.gateBuses ?? P.N_GATE_BUS;
+  const bus = direction === P.GatePortDirection.GATE_PORT_UNUSED
+    ? P.NO_BUS
+    : (port.bus === P.NO_BUS || port.bus >= buses ? 0 : port.bus);
+  return { index, direction, bus };
+}
+
+// Which way a MIDI port faces, which is not a field to write: the module has
+// four inputs and four outputs and they are *different ports*
+// (src/node/ports.h). So turning one round is moving it - what it carries goes
+// to the first free port on the other side, and the one it left goes back to
+// unused - and it can fail, when the other side is full.
+export function planPortFlip(patch, caps, index, isOut) {
+  const port = (isOut ? patch.midiOut : patch.midiIn)?.[index];
+  if (!port) return { ok: false, why: 'that port is no longer in the patch' };
+  const wantOut = !isOut;
+  const to = wantOut ? patch.midiOut : patch.midiIn;
+  const limit = (wantOut ? caps?.midiOut : caps?.midiIn) ?? to.length;
+  const free = to.findIndex((other, i) =>
+    i < limit && !(wantOut ? other.targetMask : other.sourceMask));
+  if (free < 0) {
+    return { ok: false, why: `every MIDI ${wantOut ? 'output' : 'input'} port is already in use` };
+  }
+  return {
+    ok: true, wantOut,
+    from: { index, isOut },
+    to: { index: free, isOut: wantOut },
+    mask: isOut ? port.targetMask : port.sourceMask,
+    channel: port.channel,
+    bus: port.bus,
+    said: `MIDI ${wantOut ? 'out' : 'in'} ${free + 1}`
+        + `${port.bus === P.NO_BUS ? '' : `, note bus ${port.bus}`}`,
+  };
+}
+
+// The flip, made to the patch. Two ports change: the one being left goes back
+// to unused, and the one being taken up gets everything the other carried.
+export function applyPortFlip(patch, plan) {
+  if (!plan?.ok) return null;
+  const from = plan.from.isOut ? patch.midiOut : patch.midiIn;
+  const to = plan.to.isOut ? patch.midiOut : patch.midiIn;
+  from[plan.from.index] = {
+    ...from[plan.from.index],
+    [plan.from.isOut ? 'targetMask' : 'sourceMask']: 0,
+  };
+  to[plan.to.index] = {
+    ...to[plan.to.index], channel: plan.channel, bus: plan.bus,
+    [plan.to.isOut ? 'targetMask' : 'sourceMask']: plan.mask,
+  };
+  return plan;
+}
+
 // A bus to put a new connection on. One nothing writes *and* nothing reads
 // first, so a fresh connection never joins two signals that had nothing to do
 // with each other; then one nothing writes, which is a merge nobody asked for

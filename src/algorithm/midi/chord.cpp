@@ -29,7 +29,8 @@ static const char* const OUT_NAMES[1] = {"chord out"};
 const AlgorithmDescriptor Chord::descriptor = {
     ALGO_CHORD, "Chord", 2, 0, 1, Chord::N_PARAMS, IN, OUT, sizeof(Chord), false, construct_node<Chord>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "A chord from one note - or from none: unpatched it plays and holds its own, in the key." };
+    "A chord from one note - or from none: unpatched it plays and holds its own, in the key.",
+    CATEGORY_MIDI };
 
 // The voicing can move under a held chord: every voice already in the air is
 // released from the ledger at the pitch it was emitted at, so re-voicing -

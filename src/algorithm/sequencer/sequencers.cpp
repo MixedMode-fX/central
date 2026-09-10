@@ -66,17 +66,20 @@ static const char* const SEQ_OUT_NAMES[1] = {"trigger"};
 const AlgorithmDescriptor StepSequencer::descriptor = {
     ALGO_STEP_SEQ, "StepSequencer", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(StepSequencer), false, construct_node<StepSequencer>,
     STEP_GROUPS, 4, SEQ_IN_NAMES, SEQ_OUT_NAMES,
-    "A pattern of on/off steps, clicked in the grid below. Steps past the length are kept." };
+    "A pattern of on/off steps, clicked in the grid below. Steps past the length are kept.",
+    CATEGORY_SEQUENCER };
 
 const AlgorithmDescriptor EuclidianSequencer::descriptor = {
     ALGO_EUCLID_SEQ, "EuclidianSequencer", 2, 1, 1, GateSequencer::PARAM_COUNT, IN2, OUT, sizeof(EuclidianSequencer), false, construct_node<EuclidianSequencer>,
     EUCLID_GROUPS, 4, SEQ_IN_NAMES, SEQ_OUT_NAMES,
-    "Bjorklund: spreads \"pulses\" evenly over \"steps\", plus a rotation." };
+    "Bjorklund: spreads \"pulses\" evenly over \"steps\", plus a rotation.",
+    CATEGORY_SEQUENCER };
 
 const AlgorithmDescriptor RandomSequencer::descriptor = {
     ALGO_RANDOM_SEQ, "RandomSequencer", 3, 1, 1, GateSequencer::PARAM_COUNT, IN3, OUT, sizeof(RandomSequencer), false, construct_node<RandomSequencer>,
     RANDOM_GROUPS, 4, RANDOM_IN_NAMES, SEQ_OUT_NAMES,
-    "A random pattern at a density, held until the shred inlet draws a new one." };
+    "A random pattern at a density, held until the shred inlet draws a new one.",
+    CATEGORY_SEQUENCER };
 
 // StepSequencer --------------------------------------------------------------
 

@@ -40,10 +40,10 @@ import { Listener } from './audio.js';
 import { drumSources } from './drums.js';
 import { Controller } from './controller.js';
 import { Library, toBase64 } from './storage.js';
-import { el, nodeCard, busUsers } from './views.js';
+import { el, nodeCard, busUsers, jackCard } from './views.js';
 import {
   connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
-  modParamName,
+  modParamName, planPortFlip, applyPortFlip,
 } from './graph.js';
 import { forgetNode } from './layout.js';
 import {
@@ -552,7 +552,7 @@ class App {
   }
 
   // "add", for anything that can be on the canvas: an algorithm by its id, or
-  // one of the four edges of a patch by name.
+  // one of the edges of a patch by name.
   add(value) {
     const endpoint = ENDPOINTS.find((e) => e.key === value);
     if (endpoint) this.addEndpoint(endpoint);
@@ -603,6 +603,38 @@ class App {
     this.edit(() => this.device.setMidiPort(index, isOut, mask, ports[index].channel, bus),
               isOut ? 'MIDI out' : 'MIDI in');
     this.status = `MIDI ${isOut ? 'out' : 'in'} ${index + 1} on USB 1, note bus ${bus}`;
+    this.render();
+  }
+
+  // A MIDI port's direction, changed where its other settings are.
+  //
+  // Unlike a jack, this is not a field to write: the module has four inputs
+  // and four outputs and they are different ports (`src/node/ports.h`), so
+  // turning one round is *moving* it. The cables it is on, its channel and its
+  // note bus travel to the first free port on the other side, and the one it
+  // came from goes back to unused - so what the patch says afterwards is the
+  // same port, pointing the other way, which is what a toggle promises.
+  //
+  // The bus travels too, and deliberately: a MIDI input on note bus 2 turned
+  // round is a MIDI output *of* note bus 2, which is usually the monitoring
+  // you were reaching for.
+  flipMidiPort(index, isOut) {
+    const plan = planPortFlip(this.patch, this.device?.capabilities, index, isOut);
+    if (!plan.ok) { this.pendingError = plan.why; this.render(); return; }
+    const left = (isOut ? this.patch.midiOut : this.patch.midiIn)[index];
+    applyPortFlip(this.patch, plan);
+    this.canvas.selected = {
+      kind: 'block',
+      id: `${plan.wantOut ? BlockKind.MidiOut : BlockKind.MidiIn}:${plan.to.index}`,
+    };
+    // Two messages, in this order: the port being left is silenced before the
+    // one taking over speaks, so no moment of the flip has both of them on the
+    // same note bus.
+    this.edit(async () => {
+      await this.device.setMidiPort(index, isOut, 0, left.channel, left.bus);
+      await this.device.setMidiPort(plan.to.index, plan.wantOut, plan.mask, plan.channel, plan.bus);
+    }, 'MIDI port direction');
+    this.status = plan.said;
     this.render();
   }
 
@@ -1086,30 +1118,14 @@ class App {
       `${c.gateBuses} gate, ${c.noteBuses} note, ${c.cvBuses} CV buses`);
   }
 
+  // Every jack at once, which is what the list view is for: the canvas shows
+  // the ones in use as blocks and puts one card below the picture, and this
+  // shows all eight whether or not anything is patched into them.
   jacks() {
-    const jacks = this.patch.gatePorts.map((port, i) => {
-      const select = el('select', { onchange: (e) => {
-        const [direction, bus] = e.target.value.split(':').map(Number);
-        this.patch.gatePorts[i] = { direction, bus: Number.isNaN(bus) ? P.NO_BUS : bus };
-        const value = this.patch.gatePorts[i];
-        this.edit(() => this.device.setGatePort(i, value.direction, value.bus), 'jack');
-        this.render();
-      } });
-      select.append(el('option', { value: '0:255' }, 'unused'));
-      const buses = this.device?.capabilities?.gateBuses ?? P.N_GATE_BUS;
-      for (const direction of [1, 2]) {
-        for (let b = 0; b < buses; b++) {
-          const option = el('option', { value: `${direction}:${b}` },
-            direction === 1 ? `in → gate bus ${b}` : `out ← gate bus ${b}`);
-          if (port.direction === direction && port.bus === b) option.selected = true;
-          select.append(option);
-        }
-      }
-      return el('label', { class: 'jack' }, el('span', {}, `jack ${i + 1}`), select);
-    });
     return el('section', { class: 'panel' },
       el('h2', {}, 'jacks'),
-      el('div', { class: 'jacks' }, jacks));
+      el('div', { class: 'jack-cards' },
+        this.patch.gatePorts.map((_, i) => jackCard(this, i))));
   }
 }
 

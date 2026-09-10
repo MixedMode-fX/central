@@ -96,6 +96,11 @@ static void test_every_port_and_algorithm_is_named() {
         // budget is checked here rather than discovered as a truncated
         // descriptor on a module.
         TEST_ASSERT_TRUE_MESSAGE(strlen(d->summary) <= 96, d->name);
+        // A category is not decoration either: an algorithm that ships
+        // without one lands under "other" in every editor that groups the
+        // list, which is the wall grouping was meant to remove.
+        TEST_ASSERT_TRUE_MESSAGE(d->category != CATEGORY_NONE, d->name);
+        TEST_ASSERT_TRUE_MESSAGE(d->category <= CATEGORY_UTILITY, d->name);
         TEST_ASSERT_NOT_NULL_MESSAGE(d->in_name, d->name);
         TEST_ASSERT_NOT_NULL_MESSAGE(d->out_name, d->name);
         for (uint8_t k = 0; k < d->n_in && k < MAX_IN; k++) {

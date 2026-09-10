@@ -7,9 +7,10 @@
 
 import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
+import { GATE_DIRECTIONS } from './names.js';
 // The port names live with the patch-shape code, because the canvas needs them
 // too and it must not have to reach through the views to get them.
-import { inletName, outletName, modParamName } from './graph.js';
+import { inletName, outletName, modParamName, planJackDirection } from './graph.js';
 export { inletName, outletName };
 
 const el = (tag, attrs = {}, ...children) => {
@@ -137,13 +138,21 @@ function scroller(app, key, ...children) {
 // A bus selector for one inlet or outlet. The options are only the buses of
 // the right domain, because the editor only offers domain-compatible
 // connections - the module would refuse anything else.
-function busSelect(caps, domain, value, optional, onChange) {
+//
+// `none` is what the "on no bus" row says, and `null` leaves it out: a jack's
+// bus selector has no such row, because a jack that is on no bus is a jack
+// that is *unused*, and that is its direction toggle's word to say. Offering
+// it here as well would be a second control for the same thing, and one that
+// snapped back - the module refuses a jack in use and on no bus.
+function busSelect(caps, domain, value, none, onChange) {
   const select = el('select', { class: `bus bus-${domainName(domain)}`, onchange: (e) => {
     onChange(e.target.value === 'none' ? P.NO_BUS : Number(e.target.value));
   } });
-  const none = el('option', { value: 'none' }, optional ? 'not connected' : '— must be connected');
-  if (value === P.NO_BUS) none.selected = true;
-  select.append(none);
+  if (none !== null) {
+    const row = el('option', { value: 'none' }, none);
+    if (value === P.NO_BUS) row.selected = true;
+    select.append(row);
+  }
   for (let b = 0; b < busCount(caps, domain); b++) {
     const option = el('option', { value: String(b) }, `${domainName(domain)} bus ${b}`);
     if (b === value) option.selected = true;
@@ -223,7 +232,7 @@ function port(app, index, isOutlet, i) {
     el('label', { class: 'port-head' },
       el('span', { class: 'port-name' }, name,
         optional ? null : el('span', { class: 'required' }, '*')),
-      busSelect(caps, domain, bus, optional, (chosen) => {
+      busSelect(caps, domain, bus, optional ? 'not connected' : '— must be connected', (chosen) => {
         if (isOutlet) node.outBus[i] = chosen; else node.inBus[i] = chosen;
         app.edit(() => app.device.setConnection(index, isOutlet, i, chosen), 'connection');
         app.render();
@@ -259,6 +268,85 @@ export function nodeCard(app, index) {
     paramPanel(app, index),
     modPanel(app, index),
     gridPanel(app, index));
+}
+
+// --- the patch's edges ------------------------------------------------------
+
+// A row of chips, one of which is on: a choice small enough that every option
+// can be on screen at once, which is what a two- or three-way setting should
+// look like. The MIDI port toggles are the same shape (`portToggles`), so a
+// setting that reads as a switch is a switch everywhere in the app.
+export function segmented(options, value, onChange, { label }) {
+  return el('div', { class: 'ports-row', role: 'group', 'aria-label': label },
+    options.map((option) => el('button', {
+      type: 'button', class: `chip ${option.value === value ? 'on' : ''}`,
+      'aria-pressed': option.value === value ? 'true' : 'false',
+      title: option.hint ?? null,
+      onclick: () => { if (option.value !== value) onChange(option.value); },
+    }, option.label)));
+}
+
+// One gate jack, in full: which way it faces, and the gate bus it is on.
+//
+// **A direction is a setting, not a kind of jack.** It used to be neither: the
+// jack had one selector listing every pairing of a direction and a bus ("in →
+// gate bus 3"), two rows per bus, so turning a jack round meant finding the
+// same bus again in the other half of the list - and the two questions, which
+// way and onto what, could not be answered one at a time. They are two
+// controls now, and the bus survives the turn.
+export function jackCard(app, index) {
+  const port = app.patch.gatePorts[index];
+  const caps = app.device?.capabilities;
+  const used = port.direction !== P.GatePortDirection.GATE_PORT_UNUSED;
+
+  // The toggle and the bus selector are one edit: `planJackDirection` says
+  // which bus the jack ends up on, given the one it is being put on, so
+  // "turn it round" and "move it" cannot grow two rules that disagree.
+  const write = (direction, bus) => {
+    const moved = {
+      ...app.patch,
+      gatePorts: app.patch.gatePorts.map((p, i) => (i === index ? { ...p, bus } : p)),
+    };
+    const chosen = planJackDirection(moved, caps, index, direction).bus;
+    app.patch.gatePorts[index] = { direction, bus: chosen };
+    app.edit(() => app.device.setGatePort(index, direction, chosen), 'jack');
+    app.render();
+  };
+
+  // What else is on its bus. `busUsers` names the jacks too, so this one is
+  // taken out of its own answer - the same thing `busNeighbours` does for a
+  // node's port, which cannot be reused here because its idea of "me" is a
+  // node index and a jack's index is a different number entirely.
+  const where = () => {
+    if (!used) return null;
+    const { writers, readers } = busUsers(app, Domain.Gate, port.bus);
+    const me = `jack ${index + 1}`;
+    const parts = [];
+    const from = writers.filter((w) => w !== me);
+    const to = readers.filter((r) => r !== me);
+    if (from.length) parts.push(`from ${from.join(', ')}`);
+    if (to.length) parts.push(`to ${to.join(', ')}`);
+    if (parts.length) return el('span', { class: 'wire' }, parts.join(' · '));
+    return port.direction === P.GatePortDirection.GATE_PORT_IN
+      ? el('span', { class: 'wire' }, 'no reader')
+      : el('span', { class: 'wire empty' }, 'no writer');
+  };
+
+  return el('div', { class: `jack-card ${used ? '' : 'unused'}` },
+    el('div', { class: 'jack-head' },
+      el('h4', {}, `jack ${index + 1}`),
+      el('span', { class: 'hint' },
+        GATE_DIRECTIONS.find((d) => d.value === port.direction)?.hint ?? '')),
+    segmented(GATE_DIRECTIONS, port.direction, (direction) => write(direction, port.bus),
+              { label: `jack ${index + 1} direction` }),
+    used
+      ? el('div', { class: 'port bus-gate' },
+          el('label', { class: 'port-head' },
+            el('span', { class: 'port-name' },
+              port.direction === P.GatePortDirection.GATE_PORT_IN ? 'writes' : 'reads'),
+            busSelect(caps, Domain.Gate, port.bus, null, (bus) => write(port.direction, bus))),
+          where())
+      : null);
 }
 
 // What is modulating this node, and how much of it.

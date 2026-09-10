@@ -192,11 +192,39 @@ export const RELATIVE = {
 export const FOURTEEN_BIT = flag('CC_FOURTEEN_BIT');
 export const PASS_THROUGH = flag('CC_PASS_THROUGH');
 
+// What kind of thing an algorithm is, and the order the picker shelves them
+// in: what a patch is usually built out of first, down to the plumbing. The
+// *values* come from the firmware, which is what stops a category being a
+// guess made from an algorithm's name here - and `labelled` fails the moment
+// the firmware gains or renames one, so a new shelf cannot arrive unnamed.
+//
+// CATEGORY_NONE is "other", and it is not a mistake: it is where an algorithm
+// from firmware newer than this app lands, and where one from firmware older
+// than the category itself lands. Either way the algorithm is still offered.
+export const ALGORITHM_CATEGORIES = labelled(P.AlgorithmCategory, {
+  CATEGORY_SEQUENCER: 'sequencers',
+  CATEGORY_MIDI: 'notes and MIDI',
+  CATEGORY_CLOCK: 'clock',
+  CATEGORY_MODULATOR: 'modulators',
+  CATEGORY_LOGIC: 'logic',
+  CATEGORY_UTILITY: 'utility',
+  CATEGORY_NONE: 'other',
+}, 'AlgorithmCategory');
+
+// Which way a jack faces, as the three states the firmware has. The label is
+// what fits on a toggle; the hint is the sentence that says which way the
+// signal actually runs, which is the part nobody should have to remember.
+const GATE_DIRECTION_HINTS = {
+  GATE_PORT_UNUSED: 'nothing is patched here',
+  GATE_PORT_IN: 'the jack drives a gate bus',
+  GATE_PORT_OUT: 'a gate bus drives the jack',
+};
+
 export const GATE_DIRECTIONS = labelled(P.GatePortDirection, {
   GATE_PORT_UNUSED: 'unused',
-  GATE_PORT_IN: 'in (the jack drives a bus)',
-  GATE_PORT_OUT: 'out (a bus drives the jack)',
-}, 'GatePortDirection');
+  GATE_PORT_IN: 'in',
+  GATE_PORT_OUT: 'out',
+}, 'GatePortDirection').map((d) => ({ ...d, hint: GATE_DIRECTION_HINTS[d.key] }));
 
 // A MIDI channel selector's options, with 0 spelled out rather than left as a
 // number a user has to know means omni.

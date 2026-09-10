@@ -165,6 +165,7 @@ export class Device extends EventTarget {
         inName: [],                            // null where the module did not say
         outName: [],
         summary: null,
+        category: P.AlgorithmCategory.CATEGORY_NONE,
         name: '',
         params: null,                          // filled in lazily by readParams
       };
@@ -189,6 +190,11 @@ export class Device extends EventTarget {
       for (let i = 0; i < descriptor.nIn; i++) descriptor.inName.push(string());
       for (let i = 0; i < descriptor.nOut; i++) descriptor.outName.push(string());
       descriptor.summary = string();
+      // What kind of thing it is, one byte after the summary. A module whose
+      // firmware predates it runs out of record here, and CATEGORY_NONE is
+      // what the picker files under "other" - the algorithm is still
+      // offered, which is the point of appending rather than splicing.
+      if (at < end) descriptor.category = reply[at++];
       this.algorithms[index] = descriptor;
       this.byId.set(descriptor.id, descriptor);
     }

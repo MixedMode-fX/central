@@ -16,7 +16,7 @@ static const char* const GATE_OUT_NAMES[1] = {"out"};
 #define GATE_DESCRIPTOR(Class, Id, Name, NIn, InNames, Summary) \
     const AlgorithmDescriptor Class::descriptor = { \
         Id, Name, NIn, 1, 1, 0, GATE_INLETS, GATE_OUTLET, sizeof(Class), false, construct_node<Class>, \
-        nullptr, 0, InNames, GATE_OUT_NAMES, Summary };
+        nullptr, 0, InNames, GATE_OUT_NAMES, Summary, CATEGORY_LOGIC };
 
 GATE_DESCRIPTOR(LogicNot,  ALGO_LOGIC_NOT,  "NOT",  1, NOT_IN_NAMES,
                 "Inverts a gate: the outlet is high whenever the inlet is low.")

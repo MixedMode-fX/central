@@ -883,8 +883,14 @@ to the firmware appears in an editor with no editor change, and a hardcoded
 list cannot silently drift.
 
 **An algorithm describes itself, not just its shape.** The registry reply
-carries a name for every inlet and every outlet and a one-line summary of the
-algorithm, alongside the domains and counts. A host that has only counts can
+carries a name for every inlet and every outlet, a one-line summary of the
+algorithm and the **category** it belongs to — logic, clock, sequencer, MIDI,
+modulator, utility — alongside the domains and counts. The category is the
+shelf an editor files it on, and it is the firmware's to say for the same
+reason the names are: a host that grouped thirty algorithms by guessing from
+their names would guess wrong the first time the firmware gained one.
+`test_params` fails on an algorithm that ships without a category, as it does
+on one that ships without port names. A host that has only counts can
 say *in 0* and *in 1*; it cannot say which one advances the sequencer and
 which one resets it, so a user has to read the firmware to patch a node.
 Parameters have carried names since the parameter descriptors landed, and this
@@ -1243,6 +1249,32 @@ the app a whole graph ahead of the device and every subsequent incremental edit
 addressing a node that was never taken. The app now tracks that divergence
 explicitly: a patch its own validator refuses is never sent, and the first edit
 that makes it valid sends the whole thing.
+
+**What can be added is a list you can read.** Thirty algorithms in a `<select>`
+is thirty lines of one font, and the only thing the control can say about each
+one is its label — so the label had become the whole description
+(*EuclidianSequencer — 2 in, 1 out*) and still could not say what the algorithm
+*does*, while a phone drew the lot as a full-screen wheel of truncated strings.
+The add list is built instead: **shelved by the category the module reports**,
+one row per algorithm carrying its name, what it costs in connections and the
+firmware's own summary underneath, with a search box that narrows thirty rows
+to the two you meant. It is a listbox rather than a menu of divs — arrows,
+Enter, Escape, `aria-activedescendant` — because a `<select>` gives that away
+for free and a replacement that does not is a downgrade for anyone not using a
+mouse.
+
+**A direction is a setting, not a kind of block.** A jack and a MIDI port were
+each offered twice in that list — *jack in* and *jack out*, *MIDI in* and *MIDI
+out* — so which way a port faced was a decision you made before you had the
+port, and changing your mind meant deleting one and adding its opposite on the
+same bus, found again by hand. A jack is a jack: it is added facing the way
+most patches want it, and **in or out is a toggle in its own config**, beside
+the bus it is on, which the turn carries with it. A gate jack's direction is a
+field the firmware has, so the toggle writes it. A MIDI port's is not — the
+module has four inputs and four outputs and they are different ports — so the
+toggle *moves* the port, taking its cables, its channel and its note bus to the
+first free one on the other side and leaving the one behind unused. Both read
+as the same switch, and the patch says the same thing afterwards either way.
 
 **A modulated parameter is a socket; the rest are not.** A modulation route
 reaches a *parameter*, and a parameter is a different kind of thing from a

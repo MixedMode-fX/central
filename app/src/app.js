@@ -55,6 +55,7 @@ import { toPatchJsonText, fromPatchJson } from './patchjson.js';
 import { libraryTab } from './library.js';
 import { EXAMPLES } from './examples.js';
 import { playTab, metersPanel, refreshLive } from './perform.js';
+import { schemaTab } from './schema.js';
 
 // What the app is *for*, in the order the work happens: build the patch, route
 // the MIDI around it, keep it somewhere.
@@ -72,6 +73,9 @@ const TABS = [
   { key: 'patch', label: 'patch' },
   { key: 'midi', label: 'MIDI' },
   { key: 'library', label: 'library' },
+  // Not a fourth thing to edit either: the schema tab is where the module says
+  // what it can do, in a form something else can read. See schema.js.
+  { key: 'schema', label: 'schema' },
 ];
 
 const AUTOSAVE_MS = 400;
@@ -114,6 +118,10 @@ class App {
     this.diverged = false;
     this.addPick = null;
     this.example = null;
+    // Whether the prompt on the schema tab carries the patch on screen. On,
+    // because "change this" is the usual ask and an empty page is the easy
+    // one to get back to.
+    this.schemaWithPatch = true;
     // How the patch is being looked at. **Blocks and list are one patch seen
     // two ways, not two editors**: the canvas draws the buses as arrows, the
     // list spells them out as selectors, and both write the same patch through
@@ -1020,7 +1028,8 @@ class App {
       this.tab === 'patch' ? this.patchTab() : null,
       this.tab === 'play' ? playTab(this) : null,
       this.tab === 'midi' ? this.midiTab() : null,
-      this.tab === 'library' ? libraryTab(this) : null);
+      this.tab === 'library' ? libraryTab(this) : null,
+      this.tab === 'schema' ? schemaTab(this) : null);
   }
 
   // The patch, drawn or spelled out. Both are the same patch and the same

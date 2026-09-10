@@ -87,10 +87,11 @@ const constants = {
   ...defines(configH, [
     'GPIO_N', 'N_GATE_BUS', 'N_NOTE_BUS', 'N_CV_BUS', 'N_NODE',
     'MAX_IN', 'MAX_OUT', 'N_PARAM', 'N_MIDI_IN_NODES', 'N_MIDI_OUT_NODES',
-    'N_CC_MAP', 'MASTER_PPQN', 'CLOCK_SUBTICK', 'CLOCK_MIN_BPM', 'CLOCK_MAX_BPM',
+    'N_CC_MAP', 'N_MOD_ROUTE', 'MASTER_PPQN', 'CLOCK_SUBTICK', 'CLOCK_MIN_BPM', 'CLOCK_MAX_BPM',
     'CLOCK_DEFAULT_BPM', 'MAX_SEQUENCE_LEN', 'NOTE_SEQ_VOICES', 'DRUM_SEQ_LANES',
   ]),
   ...defines(codecH, ['PATCH_FORMAT_VERSION']),
+  ...defines(read('src/bus/domain.h'), ['CV_BITS', 'CV_FULL']),
   ...defines(storeH, ['EEPROM_BYTES', 'PATCH_SLOTS']),
   ...defines(nrpnH, ['NRPN_CLOCK_BASE', 'NRPN_TRANSPORT_BASE', 'NRPN_RESERVED_BASE']),
 };
@@ -134,6 +135,8 @@ const enums = {
   CcClockTarget: enumeration(read('src/node/patch.h'), 'CcClockTarget'),
   CcTransportTarget: enumeration(read('src/node/patch.h'), 'CcTransportTarget'),
   CcFlags: enumeration(read('src/node/patch.h'), 'CcFlags'),
+  ModMode: enumeration(read('src/node/patch.h'), 'ModMode'),
+  ModFlags: enumeration(read('src/node/patch.h'), 'ModFlags'),
   GatePortDirection: enumeration(read('src/node/patch.h'), 'GatePortDirection'),
   ParamKind: enumeration(read('src/node/param.h'), 'ParamKind'),
   ConfigError: enumeration(read('src/node/registry.h'), 'ConfigError'),

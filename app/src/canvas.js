@@ -26,6 +26,7 @@ import { Domain, domainName, busCount } from './validate.js';
 import { routeCard } from './midi.js';
 import {
   BlockKind, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear, portOf,
+  planModulation, modulationChoices, isModPort,
 } from './graph.js';
 import {
   BLOCK_W, HEAD_H, ROW_H, PAD_Y, blockHeight, socketPoint, layoutOf, worldSize, fitView,
@@ -127,13 +128,18 @@ function arrowMarkers() {
 function socketRow(app, block, port, isOutlet) {
   const domain = domainName(port.domain);
   const connected = port.bus !== P.NO_BUS;
+  const modulated = isModPort(port);
   const where = connected ? `${domain} bus ${port.bus}` : 'not connected';
   const socket = el('button', {
-    class: `socket dom-${domain}${connected ? ' on' : ''}${port.required && !connected ? ' needed' : ''}`,
+    class: `socket dom-${domain}${connected ? ' on' : ''}${modulated ? ' mod' : ''}`
+         + `${port.required && !connected ? ' needed' : ''}`,
     'data-block': block.id, 'data-at': String(port.at), 'data-outlet': isOutlet ? '1' : '',
-    title: `${port.name} — ${where}${connected ? ' (right-click to disconnect)' : ''}`
-         + `\ndrag to ${isOutlet ? 'an inlet' : 'an outlet'} to connect`,
-    'aria-label': `${block.title} ${port.name}, ${where}`,
+    title: modulated
+      ? `${port.name} is modulated from ${where} (right-click to stop)`
+      : `${port.name} — ${where}${connected ? ' (right-click to disconnect)' : ''}`
+        + `\ndrag to ${isOutlet ? 'an inlet' : 'an outlet'} to connect`,
+    'aria-label': `${block.title} ${port.name}, `
+                + `${modulated ? `modulated from ${where}` : where}`,
     oncontextmenu: (e) => {
       e.preventDefault();
       app.applyPlan(planClear(geometry(app).blocks, { blockId: block.id, at: port.at, isOutlet }));
@@ -141,7 +147,7 @@ function socketRow(app, block, port, isOutlet) {
     onpointerdown: (e) => startLink(app, e, { blockId: block.id, at: port.at, isOutlet }),
   }, el('span', { class: 'dot' }));
 
-  return el('div', { class: `blk-port ${isOutlet ? 'out' : 'in'}` },
+  return el('div', { class: `blk-port ${isOutlet ? 'out' : 'in'}${modulated ? ' mod' : ''}` },
     socket,
     el('span', { class: 'blk-port-name' }, port.name,
       port.required && !connected ? el('span', { class: 'required' }, '*') : null),
@@ -249,10 +255,89 @@ function startLink(app, event, ref) {
       viewport?.classList.remove('linking', 'only-gate', 'only-note', 'only-CV');
       if (!moved) { app.select({ kind: 'block', id: ref.blockId }); return; }
       const target = socketUnder(x, y);
-      if (!target) { app.say('dropped on nothing — a connection ends on a socket'); return; }
-      app.applyPlan(planConnection(geometry(app).blocks, app.device.capabilities, ref, target));
+      if (target) {
+        app.applyPlan(planConnection(geometry(app).blocks, app.device.capabilities, ref, target));
+        return;
+      }
+      // A control signal let go over a *block* rather than a socket is the
+      // gesture that makes a modulation route. It cannot be finished here:
+      // the block has parameters, not ports, so the editor has to ask which
+      // one - which is the whole reason a parameter does not get a socket
+      // until something is modulating it (see graph.js).
+      const onBlock = blockUnder(x, y);
+      if (onBlock && ref.isOutlet && found.port.domain === Domain.CV) {
+        askForParameter(app, ref, onBlock, { x, y });
+        return;
+      }
+      app.say(onBlock
+        ? 'dropped on a block — only a control signal can be pointed at a parameter'
+        : 'dropped on nothing — a connection ends on a socket');
     },
   });
+}
+
+function blockUnder(x, y) {
+  return document.elementFromPoint(x, y)?.closest?.('.blk')?.dataset?.block ?? null;
+}
+
+// The dropdown that finishes a modulation drag: every parameter of the block
+// it landed on that is not already modulated, in the order the module
+// describes them. Closes on a choice, on Escape, or on the next click
+// anywhere else - none of which leaves a route behind.
+function askForParameter(app, ref, blockId, at) {
+  const [kind, where] = String(blockId).split(':');
+  if (kind !== BlockKind.Node) {
+    app.say('only a node has parameters to modulate');
+    return;
+  }
+  const index = Number(where);
+  const choices = modulationChoices(app.device, app.patch, index);
+  if (!choices.length) {
+    app.say(app.device?.byId.get(app.patch.nodes[index]?.algorithmId)?.params
+      ? 'every parameter of that block is already modulated'
+      : 'still reading that block’s parameters — try again in a moment');
+    return;
+  }
+
+  closeParamMenu();
+  const menu = el('div', {
+    class: 'param-menu', id: 'param-menu', role: 'listbox',
+    style: `left:${at.x}px; top:${at.y}px`,
+  },
+    el('div', { class: 'param-menu-head' }, 'modulate which parameter?'),
+    el('div', { class: 'param-menu-list' }, choices.map((choice) => el('button', {
+      class: 'param-menu-item', role: 'option',
+      onclick: () => {
+        closeParamMenu();
+        app.applyPlan(planModulation(geometry(app).blocks, app.patch, app.device.capabilities,
+                                     ref, blockId, choice.param, { device: app.device }));
+      },
+    }, el('span', { class: 'param-menu-name' }, choice.label),
+       el('span', { class: 'param-menu-range' }, `${choice.pd.min}–${choice.pd.max}`)))));
+  document.body.append(menu);
+  menu.querySelector('.param-menu-item')?.focus();
+
+  const dismiss = (e) => {
+    if (e.type === 'keydown' && e.key !== 'Escape') return;
+    if (e.type === 'pointerdown' && menu.contains(e.target)) return;
+    closeParamMenu();
+  };
+  menu.dismiss = dismiss;
+  // Deferred, so the pointerup that opened this does not immediately close it.
+  setTimeout(() => {
+    window.addEventListener('pointerdown', dismiss);
+    window.addEventListener('keydown', dismiss);
+  }, 0);
+}
+
+function closeParamMenu() {
+  const menu = document.getElementById('param-menu');
+  if (!menu) return;
+  if (menu.dismiss) {
+    window.removeEventListener('pointerdown', menu.dismiss);
+    window.removeEventListener('keydown', menu.dismiss);
+  }
+  menu.remove();
 }
 
 function socketUnder(x, y) {

@@ -29,7 +29,7 @@
 // Bumped when a message's layout changes in a way an older host would
 // misread. A host that does not know this version is told so and writes
 // nothing, rather than writing garbage into a live patch.
-#define SYSEX_PROTOCOL_VERSION 2
+#define SYSEX_PROTOCOL_VERSION 3
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -75,6 +75,8 @@ enum SysexCommand : uint8_t {
     SYSEX_SET_PATTERN      = 0x1A,   // a run of one node's parameter bytes (#22)
     SYSEX_GET_PATTERN      = 0x1B,
     SYSEX_GET_CONTROL      = 0x1C,   // read any target, by kind and index
+    SYSEX_SET_MOD_ROUTE    = 0x1D,   // one modulation route: a CV bus to a parameter
+    SYSEX_GET_MOD_ROUTE    = 0x1E,
     SYSEX_SLOT_SAVE        = 0x20,
     SYSEX_SLOT_LOAD        = 0x21,
     SYSEX_SLOT_ERASE       = 0x22,
@@ -91,6 +93,7 @@ enum SysexCommand : uint8_t {
     SYSEX_CC_MAP           = 0x52,
     SYSEX_PATTERN          = 0x53,
     SYSEX_CONTROL_VALUE    = 0x54,
+    SYSEX_MOD_ROUTE        = 0x55,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>

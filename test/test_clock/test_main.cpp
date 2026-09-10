@@ -546,23 +546,23 @@ static void test_every_note_value_is_a_whole_number_of_subticks() {
     const uint32_t Q = CLOCK_SUBTICKS_PER_QUARTER;
     struct Case { uint8_t division; uint8_t feel; uint32_t period; };
     static const Case CASES[] = {
-        {Metronome::DIV_8_BARS,  Metronome::FEEL_STRAIGHT, Q * 32},
-        {Metronome::DIV_4_BARS,  Metronome::FEEL_STRAIGHT, Q * 16},
-        {Metronome::DIV_2_BARS,  Metronome::FEEL_STRAIGHT, Q * 8},
-        {Metronome::DIV_BAR,     Metronome::FEEL_STRAIGHT, Q * 4},
-        {Metronome::DIV_HALF,    Metronome::FEEL_STRAIGHT, Q * 2},
-        {Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, Q},
-        {Metronome::DIV_EIGHTH,  Metronome::FEEL_STRAIGHT, Q / 2},
-        {Metronome::DIV_16TH,    Metronome::FEEL_STRAIGHT, Q / 4},
-        {Metronome::DIV_32ND,    Metronome::FEEL_STRAIGHT, Q / 8},
-        {Metronome::DIV_64TH,    Metronome::FEEL_STRAIGHT, Q / 16},
+        {DIV_8_BARS,  FEEL_STRAIGHT, Q * 32},
+        {DIV_4_BARS,  FEEL_STRAIGHT, Q * 16},
+        {DIV_2_BARS,  FEEL_STRAIGHT, Q * 8},
+        {DIV_BAR,     FEEL_STRAIGHT, Q * 4},
+        {DIV_HALF,    FEEL_STRAIGHT, Q * 2},
+        {DIV_QUARTER, FEEL_STRAIGHT, Q},
+        {DIV_EIGHTH,  FEEL_STRAIGHT, Q / 2},
+        {DIV_16TH,    FEEL_STRAIGHT, Q / 4},
+        {DIV_32ND,    FEEL_STRAIGHT, Q / 8},
+        {DIV_64TH,    FEEL_STRAIGHT, Q / 16},
         // A dot is half as long again; a triplet is three in the space of two.
-        {Metronome::DIV_QUARTER, Metronome::FEEL_DOTTED,   Q * 3 / 2},
-        {Metronome::DIV_EIGHTH,  Metronome::FEEL_DOTTED,   Q * 3 / 4},
-        {Metronome::DIV_64TH,    Metronome::FEEL_DOTTED,   Q * 3 / 32},
-        {Metronome::DIV_QUARTER, Metronome::FEEL_TRIPLET,  Q * 2 / 3},
-        {Metronome::DIV_EIGHTH,  Metronome::FEEL_TRIPLET,  Q / 3},
-        {Metronome::DIV_64TH,    Metronome::FEEL_TRIPLET,  Q / 24},
+        {DIV_QUARTER, FEEL_DOTTED,   Q * 3 / 2},
+        {DIV_EIGHTH,  FEEL_DOTTED,   Q * 3 / 4},
+        {DIV_64TH,    FEEL_DOTTED,   Q * 3 / 32},
+        {DIV_QUARTER, FEEL_TRIPLET,  Q * 2 / 3},
+        {DIV_EIGHTH,  FEEL_TRIPLET,  Q / 3},
+        {DIV_64TH,    FEEL_TRIPLET,  Q / 24},
     };
     for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
         NodeConfig c = metro_config(CASES[i].division, CASES[i].feel, 0);
@@ -577,10 +577,10 @@ static void test_every_note_value_is_a_whole_number_of_subticks() {
     // does not spell out: a dot is exactly three halves of its note value and
     // a triplet exactly two thirds, stated as integer equalities so that a
     // period off by one subtick fails rather than passing by a rounding.
-    for (uint8_t d = Metronome::DIV_8_BARS; d <= Metronome::DIVISIONS; d++) {
-        NodeConfig s_config = metro_config(d, Metronome::FEEL_STRAIGHT, 0);
-        NodeConfig d_config = metro_config(d, Metronome::FEEL_DOTTED, 0);
-        NodeConfig t_config = metro_config(d, Metronome::FEEL_TRIPLET, 0);
+    for (uint8_t d = DIV_8_BARS; d <= DIVISIONS; d++) {
+        NodeConfig s_config = metro_config(d, FEEL_STRAIGHT, 0);
+        NodeConfig d_config = metro_config(d, FEEL_DOTTED, 0);
+        NodeConfig t_config = metro_config(d, FEEL_TRIPLET, 0);
         Metronome straight(s_config), dotted(d_config), triplet(t_config);
         char message[48];
         snprintf(message, sizeof message, "division %u", d);
@@ -596,7 +596,7 @@ static void test_every_note_value_is_a_whole_number_of_subticks() {
 // subticks for as long as they run.
 static void test_a_quarter_note_is_a_divider_of_ppqn() {
     BusManager bus;
-    NodeConfig m = metro_config(Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, 0);
+    NodeConfig m = metro_config(DIV_QUARTER, FEEL_STRAIGHT, 0);
     NodeConfig d = div_config(0, MASTER_PPQN, 1);
     Metronome metro(m);
     ClockDiv divider(d);
@@ -628,7 +628,7 @@ static void test_a_quarter_note_is_a_divider_of_ppqn() {
 // rate rounding by one subtick would show up as an uneven gap.
 static void test_triplets_and_dots_land_where_they_are_named() {
     BusManager triplets;
-    NodeConfig t8 = metro_config(Metronome::DIV_EIGHTH, Metronome::FEEL_TRIPLET, 2);
+    NodeConfig t8 = metro_config(DIV_EIGHTH, FEEL_TRIPLET, 2);
     Metronome triplet_node(t8);
     const MetroRun tr = run_metronome(triplet_node, triplets, 2, 8 * CLOCK_SUBTICKS_PER_QUARTER);
     TEST_ASSERT_EQUAL_UINT32(24, tr.pulses);                    // three per beat
@@ -638,7 +638,7 @@ static void test_triplets_and_dots_land_where_they_are_named() {
 
     // A dotted eighth is three sixteenths, so eight of them span three beats.
     BusManager dotted;
-    NodeConfig d8 = metro_config(Metronome::DIV_EIGHTH, Metronome::FEEL_DOTTED, 3);
+    NodeConfig d8 = metro_config(DIV_EIGHTH, FEEL_DOTTED, 3);
     Metronome dotted_node(d8);
     const MetroRun dt = run_metronome(dotted_node, dotted, 3, 8 * CLOCK_SUBTICKS_PER_QUARTER);
     TEST_ASSERT_EQUAL_UINT32(11, dt.pulses);                    // 8 beats / 0.75
@@ -651,7 +651,7 @@ static void test_triplets_and_dots_land_where_they_are_named() {
 // than on the subtick it was constructed on.
 static void test_a_metronome_loaded_late_lands_on_the_beat() {
     BusManager bus;
-    NodeConfig c = metro_config(Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, 4);
+    NodeConfig c = metro_config(DIV_QUARTER, FEEL_STRAIGHT, 4);
     Metronome node(c);
     const uint32_t start = 1000 * CLOCK_SUBTICKS_PER_QUARTER + 7;      // mid-beat
     const MetroRun r = run_metronome(node, bus, 4, 4 * CLOCK_SUBTICKS_PER_QUARTER, start);
@@ -666,23 +666,23 @@ static void test_a_metronome_loaded_late_lands_on_the_beat() {
 // from under a musician counting on it.
 static void test_changing_the_division_keeps_the_rate_exact() {
     BusManager bus;
-    NodeConfig c = metro_config(Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, 5);
+    NodeConfig c = metro_config(DIV_QUARTER, FEEL_STRAIGHT, 5);
     Metronome node(c);
     TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER, node.period());
 
     // Straight to triplet and back, and a division either side of it.
-    TEST_ASSERT_TRUE(node.set_param(1, Metronome::FEEL_TRIPLET));
+    TEST_ASSERT_TRUE(node.set_param(1, FEEL_TRIPLET));
     TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER * 2 / 3, node.period());
-    TEST_ASSERT_TRUE(node.set_param(0, Metronome::DIV_EIGHTH));
+    TEST_ASSERT_TRUE(node.set_param(0, DIV_EIGHTH));
     TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER / 3, node.period());
-    TEST_ASSERT_TRUE(node.set_param(1, Metronome::FEEL_STRAIGHT));
+    TEST_ASSERT_TRUE(node.set_param(1, FEEL_STRAIGHT));
     TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER / 2, node.period());
 
     // A value outside the list is refused, and the node keeps what it had.
-    TEST_ASSERT_FALSE(node.set_param(0, Metronome::DIVISIONS + 1));
-    TEST_ASSERT_FALSE(node.set_param(1, Metronome::FEELS + 1));
-    TEST_ASSERT_EQUAL(Metronome::DIV_EIGHTH, node.division());
-    TEST_ASSERT_EQUAL(Metronome::FEEL_STRAIGHT, node.feel());
+    TEST_ASSERT_FALSE(node.set_param(0, DIVISIONS + 1));
+    TEST_ASSERT_FALSE(node.set_param(1, FEELS + 1));
+    TEST_ASSERT_EQUAL(DIV_EIGHTH, node.division());
+    TEST_ASSERT_EQUAL(FEEL_STRAIGHT, node.feel());
 
     // And it still runs at the rate it now reads back at.
     const MetroRun r = run_metronome(node, bus, 5, 8 * CLOCK_SUBTICKS_PER_QUARTER);
@@ -702,7 +702,7 @@ static void test_reset_re_anchors_the_grid() {
     p.nodes[0] = node_config(ALGO_METRONOME);
     p.nodes[0].in_bus[0] = 0;                              // reset
     p.nodes[0].out_bus[0] = 1;
-    p.nodes[0].params[0] = Metronome::DIV_QUARTER;
+    p.nodes[0].params[0] = DIV_QUARTER;
     p.n_nodes = 1;
     p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 1};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));

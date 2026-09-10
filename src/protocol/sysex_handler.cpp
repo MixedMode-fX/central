@@ -301,6 +301,43 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             return;
         }
 
+        // One modulation route: a CV bus reaching a parameter
+        // (control/mod_matrix.h). Same shape as SYSEX_SET_CC_MAP, and the
+        // same trick for the byte that does not fit seven bits - depth
+        // reaches 255, so its top bit rides in the flags byte's spare bit.
+        case SYSEX_SET_MOD_ROUTE: {
+            if (n < 12){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (args[0] >= N_MOD_ROUTE){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            ModRoute route = unused_route();
+            // A bus index that is not a bus clears the slot. NO_BUS is 0xFF
+            // and does not fit a data byte, so "not a bus" is what says it on
+            // the wire rather than a separate enable flag that could disagree
+            // with the bus field.
+            if (args[1] < N_CV_BUS){
+                route.bus = args[1];
+                route.target_kind = args[2];
+                route.target_index = args[3];
+                route.param = (uint16_t)(args[4] | ((uint16_t)args[5] << 7));
+                route.min = (uint16_t)(args[6] | ((uint16_t)args[7] << 7));
+                route.max = (uint16_t)(args[8] | ((uint16_t)args[9] << 7));
+                route.depth = (uint8_t)(args[10] | ((args[11] & 0x40) ? 0x80u : 0u));
+                route.flags = (uint8_t)(args[11] & 0x3F);
+            }
+            patches.begin_edit();
+            patches.staging().mod_map[args[0]] = route;
+            if (patches.commit_mod_route(args[0], now_us) != APPLY_OK){
+                nak(source, SYSEX_ERR_REJECTED);
+                return;
+            }
+            ack(source);
+            return;
+        }
+
+        case SYSEX_GET_MOD_ROUTE:
+            if (n < 1 || args[0] >= N_MOD_ROUTE){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_mod_route(source, args[0]);
+            return;
+
         case SYSEX_GET_CC_MAP:
             if (n < 1 || args[0] >= N_CC_MAP){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
             reply_cc_map(source, args[0]);
@@ -477,6 +514,12 @@ void SysexHandler::reply_capabilities(uint8_t source){
     put(DRUM_SEQ_LANES);
     put(MASTER_PPQN);
     put(MIDI_CONTROL_PORT);
+    // Appended after the fields a version 2 host knows, for the same reason
+    // the algorithm record's names are appended: an older host stops at the
+    // field it knows and reads the same record it always did.
+    put(N_CC_MAP);
+    put(N_MOD_ROUTE);
+    put_u14(CV_FULL);
     send_reply(source);
 }
 
@@ -683,6 +726,24 @@ void SysexHandler::reply_slots(uint8_t source){
         put(store.occupied(s) ? 1 : 0);
         put_u14(store.used(s));
     }
+    send_reply(source);
+}
+
+void SysexHandler::reply_mod_route(uint8_t source, uint8_t slot){
+    const ModRoute& r = patches.active().mod_map[slot];
+    begin_reply(SYSEX_MOD_ROUTE);
+    put(slot);
+    // An unused slot answers with a bus index that is not a bus, which is
+    // exactly what SYSEX_SET_MOD_ROUTE reads as "clear it": a host can echo a
+    // reply straight back and change nothing.
+    put(r.bus == NO_BUS ? (uint8_t)0x7F : r.bus);
+    put(r.target_kind);
+    put(r.target_index);
+    put_u14(r.param);
+    put_u14(r.min);
+    put_u14(r.max);
+    put((uint8_t)(r.depth & 0x7F));
+    put((uint8_t)((r.flags & 0x3F) | ((r.depth & 0x80) ? 0x40u : 0u)));
     send_reply(source);
 }
 

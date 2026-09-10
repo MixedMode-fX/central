@@ -121,6 +121,18 @@ export class Device extends EventTarget {
       sequenceLength: u8(), voices: u8(), drumLanes: u8(),
       ppqn: u8(), controlPort: u8(),
     };
+    // Appended to the message after the fields a version 2 module sent, so
+    // they are read only if they are there: a module built before modulation
+    // existed stops at controlPort and reports none.
+    if (at + 3 < reply.length) {
+      this.capabilities.ccMappings = u8();
+      this.capabilities.modRoutes = u8();
+      this.capabilities.cvFull = u14();
+    } else {
+      this.capabilities.ccMappings = P.N_CC_MAP;
+      this.capabilities.modRoutes = 0;
+      this.capabilities.cvFull = P.CV_FULL;
+    }
     return this.capabilities;
   }
 
@@ -360,6 +372,42 @@ export class Device extends EventTarget {
       ...codec.u14(m.max),
     ]);
   }
+  // One modulation route (src/control/mod_matrix.h). A bus index that is not
+  // a bus clears the slot, which is what the firmware reads too: NO_BUS is
+  // 0xFF and does not fit a data byte, so "not a bus" says it rather than a
+  // separate enable flag that could disagree with the bus field.
+  async setModRoute(slot, route) {
+    const r = route ?? { bus: P.NO_BUS };
+    if (r.bus === P.NO_BUS || r.bus === null || r.bus === undefined) {
+      return this.command(P.SysexCommand.SYSEX_SET_MOD_ROUTE,
+        [slot, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+    return this.command(P.SysexCommand.SYSEX_SET_MOD_ROUTE, [
+      slot, r.bus, r.targetKind, r.targetIndex,
+      ...codec.u14(r.param), ...codec.u14(r.min), ...codec.u14(r.max),
+      r.depth & 0x7f, (r.flags & 0x3f) | ((r.depth & 0x80) ? 0x40 : 0),
+    ]);
+  }
+  async getModRoute(slot) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_MOD_ROUTE, [slot]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_MOD_ROUTE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    this.throwOnNak(reply, 'no such modulation route');
+    const bus = reply[6];
+    if (bus >= 0x7f) return null;
+    const flags = reply[16];
+    return {
+      bus,
+      targetKind: reply[7],
+      targetIndex: reply[8],
+      param: codec.readU14(reply, 9),
+      min: codec.readU14(reply, 11),
+      max: codec.readU14(reply, 13),
+      depth: (reply[15] & 0x7f) | ((flags & 0x40) ? 0x80 : 0),
+      flags: flags & 0x3f,
+    };
+  }
+
   async learnCc(slot, targetKind, targetIndex, param) {
     return this.command(P.SysexCommand.SYSEX_CC_LEARN,
       [1, slot, targetKind, targetIndex, ...codec.u14(param)]);

@@ -95,8 +95,14 @@ class CcMapper {
         // parameter writes, not a second semantics, so it ends here - at the
         // same applier a mapped CC uses, which ends at
         // PatchManager::set_param.
+        // `transient` marks a write that will be made again next pass - the
+        // modulation matrix's. Such a write reaches the node and nothing
+        // else: it is not mirrored into the patch image and does not mark the
+        // store dirty, because a modulator running for an hour must not be an
+        // hour of EEPROM writes or a preset that saves whatever phase its LFO
+        // was at (PatchManager::modulate_param says this at length).
         bool write_control(uint8_t kind, uint8_t index, uint16_t param,
-                           uint16_t value, uint32_t now_us);
+                           uint16_t value, uint32_t now_us, bool transient = false);
         // What a target currently holds, for a host that wants to read one
         // without a full dump.
         bool read_control(uint8_t kind, uint8_t index, uint16_t param, uint16_t& value_out) const;

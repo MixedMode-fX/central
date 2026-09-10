@@ -140,10 +140,28 @@ ApplyError PatchManager::commit_cc_map(uint8_t slot, uint32_t now_us){
     return error = APPLY_OK;
 }
 
-void PatchManager::set_globals(const GlobalSettings& g, uint32_t now_us){
+// One modulation route. The staged route is checked against the *live*
+// patch's other slots, because route_valid's "no other route on this target"
+// rule is a question about the whole table and not about one entry: that is
+// what makes moving a route from one target to another legal while adding a
+// second route to an occupied one is not.
+ApplyError PatchManager::commit_mod_route(uint8_t slot, uint32_t now_us){
+    if (slot >= N_MOD_ROUTE) return error = APPLY_INVALID;
+    const ModRoute route = stage.mod_map[slot];
+    // An empty slot is always legal: clearing a route must never fail.
+    if (route.bus != NO_BUS && !MixedModeMaster::route_valid(live, slot, route)){
+        leds.error(now_us);
+        return error = APPLY_INVALID;
+    }
+    live.mod_map[slot] = route;
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
+void PatchManager::set_globals(const GlobalSettings& g, uint32_t now_us, bool persist){
     live_globals = g;
     push_globals();
-    store.mark_dirty(now_us);
+    if (persist) store.mark_dirty(now_us);
 }
 
 ParamError PatchManager::set_param(uint8_t node_index, uint16_t param_index,
@@ -160,6 +178,14 @@ ParamError PatchManager::set_param(uint8_t node_index, uint16_t param_index,
     if (node_index < N_NODE && param_index < N_PARAM) live.nodes[node_index].params[param_index] = running;
     store.mark_dirty(now_us);
     return PARAM_SET_OK;
+}
+
+ParamError PatchManager::modulate_param(uint8_t node_index, uint16_t param_index, uint8_t value){
+    // Deliberately not mirrored and deliberately not marked dirty; the header
+    // says why. Nor does it light the red LED: a route whose target moved out
+    // from under it is reported by ModMatrix::refused(), and a modulator that
+    // flashed the error LED every pass would drown out everything else.
+    return mm.set_node_param(node_index, param_index, value);
 }
 
 void PatchManager::service(uint32_t now_us){

@@ -26,7 +26,7 @@ Patch default_patch(){
     // this is - the divisor was only ever how it had to be spelled.
     p.nodes[1] = node_config(ALGO_METRONOME);
     p.nodes[1].out_bus[0] = 1;                                // gate bus 1
-    p.nodes[1].params[0] = Metronome::DIV_QUARTER;            // one trigger per beat
+    p.nodes[1].params[0] = DIV_QUARTER;            // one trigger per beat
     p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 1};       // gate bus 1 -> jack 1
 
     p.n_nodes = 2;

@@ -320,15 +320,19 @@ void CcMapper::write_target(const CcMapping& m, uint16_t value, uint32_t now_us)
 // The one applier. A mapped CC and an NRPN both end here, so they produce
 // identical results and are rejected identically when out of range.
 bool CcMapper::write_control(uint8_t kind, uint8_t index, uint16_t param,
-                             uint16_t value, uint32_t now_us){
+                             uint16_t value, uint32_t now_us, bool transient){
     switch (kind){
-        case CC_TARGET_NODE:
-            if (patches.set_param(index, param, (uint8_t)value, now_us) == PARAM_SET_OK){
+        case CC_TARGET_NODE: {
+            const ParamError e = transient
+                ? patches.modulate_param(index, param, (uint8_t)value)
+                : patches.set_param(index, param, (uint8_t)value, now_us);
+            if (e == PARAM_SET_OK){
                 write_count++;
                 return true;
             }
             refuse_count++;
             return false;
+        }
 
         case CC_TARGET_CLOCK: {
             GlobalSettings g = patches.globals();
@@ -338,7 +342,7 @@ bool CcMapper::write_control(uint8_t kind, uint8_t index, uint16_t param,
                 case CC_CLOCK_PPQN:   g.cv_ppqn = (uint8_t)value; break;
                 default: refuse_count++; return false;
             }
-            patches.set_globals(g, now_us);
+            patches.set_globals(g, now_us, !transient);
             write_count++;
             return true;
         }

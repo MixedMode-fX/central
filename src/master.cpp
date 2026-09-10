@@ -5,7 +5,8 @@ MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
     gpio(gpio_if), midi(midi_if), clk(), bus(), pool(),
     gate_in(), gate_out(), midi_in(), midi_out(),
     tick_pending(false), tick_count(0),
-    error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0)
+    error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0),
+    route_error_index(0)
 {}
 
 LoadError MixedModeMaster::validate(const Patch& patch){
@@ -40,7 +41,52 @@ LoadError MixedModeMaster::validate(const Patch& patch){
             return LOAD_CC_MAPPING_INVALID;
         }
     }
+    for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
+        if (patch.mod_map[i].bus == NO_BUS) continue;
+        if (!route_valid(patch, i, patch.mod_map[i])){
+            route_error_index = i;
+            return LOAD_MOD_ROUTE_INVALID;
+        }
+    }
     return LOAD_OK;
+}
+
+// Whether a target exists in this patch, shared by a controller binding and a
+// modulation route: they reach the same target space, so "no such parameter"
+// has to mean the same thing to both.
+static bool target_exists(const Patch& patch, uint8_t kind, uint8_t index, uint16_t param){
+    switch (kind){
+        case CC_TARGET_NODE: {
+            if (index >= patch.n_nodes) return false;
+            const AlgorithmDescriptor* d = registry::find(patch.nodes[index].algorithm_id);
+            if (d == nullptr) return false;
+            return registry::param(*d, param) != nullptr;
+        }
+        case CC_TARGET_CLOCK:     return param < CC_CLOCK_TARGETS;
+        case CC_TARGET_TRANSPORT: return param < CC_TRANSPORT_TARGETS;
+        default:                  return false;         // CC_TARGET_PORT is reserved
+    }
+}
+
+bool MixedModeMaster::route_valid(const Patch& patch, uint8_t slot, const ModRoute& r){
+    if (slot >= N_MOD_ROUTE) return false;
+    if (r.bus == NO_BUS) return true;                   // an unused slot is fine
+    if (r.bus >= N_CV_BUS) return false;
+    if (r.min > r.max) return false;
+    // A transport target is momentary - it fires, it does not hold a value -
+    // so there is nothing for a continuous signal to set. A modulator that
+    // pressed "start" once a cycle is not a thing to build by accident.
+    if (r.target_kind == CC_TARGET_TRANSPORT) return false;
+    if (!target_exists(patch, r.target_kind, r.target_index, r.param)) return false;
+    for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
+        if (i == slot) continue;
+        const ModRoute& other = patch.mod_map[i];
+        if (other.bus == NO_BUS) continue;
+        if (other.target_kind == r.target_kind
+         && other.target_index == r.target_index
+         && other.param == r.param) return false;       // two writers, one value
+    }
+    return true;
 }
 
 bool MixedModeMaster::mapping_valid(const Patch& patch, const CcMapping& m){
@@ -50,17 +96,7 @@ bool MixedModeMaster::mapping_valid(const Patch& patch, const CcMapping& m){
     // A mapping cannot target the control cable: the protocol's own port is
     // not something a patch gets to reach (#11, #21).
     if (m.source_mask & MIDI_CONTROL_PORT) return false;
-    switch (m.target_kind){
-        case CC_TARGET_NODE: {
-            if (m.target_index >= patch.n_nodes) return false;
-            const AlgorithmDescriptor* d = registry::find(patch.nodes[m.target_index].algorithm_id);
-            if (d == nullptr) return false;
-            return registry::param(*d, m.param) != nullptr;
-        }
-        case CC_TARGET_CLOCK:     return m.param < CC_CLOCK_TARGETS;
-        case CC_TARGET_TRANSPORT: return m.param < CC_TRANSPORT_TARGETS;
-        default:                  return false;         // CC_TARGET_PORT is reserved
-    }
+    return target_exists(patch, m.target_kind, m.target_index, m.param);
 }
 
 LoadError MixedModeMaster::load(const Patch& patch){

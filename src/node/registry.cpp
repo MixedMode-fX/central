@@ -14,6 +14,10 @@
 #include "algorithm/sequencer/sequencers.h"
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/drum_sequencer.h"
+#include "algorithm/util/gate_hold.h"
+#include "algorithm/modulator/lfo.h"
+#include "algorithm/modulator/sample_hold.h"
+#include "algorithm/modulator/slew.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -43,6 +47,10 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &PolySequencer::descriptor,
     &DrumSeqGate::descriptor,
     &DrumSeqMidi::descriptor,
+    &GateHold::descriptor,
+    &Lfo::descriptor,
+    &SampleHold::descriptor,
+    &Slew::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

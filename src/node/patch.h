@@ -113,12 +113,76 @@ inline CcMapping unused_mapping(){
     return m;
 }
 
+// What a modulation route does with the signal it reads.
+//
+//   absolute  the signal *is* the value, swept across the route's range. The
+//             modulator behaves exactly like a controller knob somebody else
+//             is turning, which is what "connect it as if it were a CC" asks
+//             for and what a slow ramp or a sample and hold usually wants.
+//   offset    the signal is *added* to whatever the parameter is already set
+//             to. The set point stays a set point - a knob, an editor field
+//             or a CC binding still moves it - and the modulation swings
+//             around it. This is what a modulator means on a synthesiser,
+//             and it is the mode that lets a CC and an LFO share a target
+//             without fighting: the CC moves the centre, the LFO moves
+//             around the centre.
+enum ModMode : uint8_t {
+    MOD_ABSOLUTE = 0,
+    MOD_OFFSET   = 1,
+};
+
+// Route flags, packed into one byte.
+enum ModFlags : uint8_t {
+    MOD_MODE_MASK = 0x01,   // ModMode
+    // How the signal on the bus is read. Unipolar takes 0 .. CV_MAX, so an
+    // offset route only ever pushes the parameter up; bipolar takes
+    // -CV_HALF .. CV_HALF-1 centred on zero, so it pushes both ways. It is a
+    // property of the *route* and not of the bus, because the same signal can
+    // legitimately be read either way by two different routes.
+    MOD_BIPOLAR   = 0x02,
+    // Turn the signal upside down. One flag rather than a negative depth,
+    // because depth is also what a host draws as a percentage.
+    MOD_INVERT    = 0x04,
+};
+
+// One modulation route: a CV bus reaching a parameter.
+//
+// **It is not a node**, for exactly the reasons control/cc_mapper.h gives for
+// a controller binding: a parameter has no domain, no fan-in rule and no
+// per-pass value, so writing one is a control-plane operation and not a bus
+// connection. Making it a node would need a pool slot per route and would
+// leave the modulation unreachable the moment a swap removed that node.
+//
+// It reaches the same target space a CcMapping does - node parameter, clock,
+// transport - through the same applier, so a modulator and a knob are refused
+// identically when they ask for something out of range.
+struct ModRoute {
+    uint8_t  bus;           // CV bus index; NO_BUS = unused slot
+    uint8_t  target_kind;   // CcTargetKind
+    uint8_t  target_index;  // node index, or unused
+    uint16_t param;         // parameter index, or a clock / transport target
+    // The sub-range of the target the modulation covers, in the target's own
+    // units, exactly as CcMapping::min / max. min == max == 0 means the
+    // target's full range.
+    uint16_t min;
+    uint16_t max;
+    uint8_t  depth;         // 0..255 as a fraction of that range; 0 is silent
+    uint8_t  flags;         // ModFlags
+};
+
+inline ModRoute unused_route(){
+    ModRoute r = {};
+    r.bus = NO_BUS;
+    return r;
+}
+
 struct Patch {
     GatePortConfig gate_ports[GPIO_N];
     MidiInConfig   midi_in[N_MIDI_IN_NODES];
     MidiOutConfig  midi_out[N_MIDI_OUT_NODES];
     NodeConfig     nodes[N_NODE];
     CcMapping      cc_map[N_CC_MAP];
+    ModRoute       mod_map[N_MOD_ROUTE];
     uint8_t        n_nodes;
 };
 
@@ -138,6 +202,7 @@ inline Patch empty_patch(){
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) p.midi_in[i] = MidiInConfig{0, 0, NO_BUS};
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) p.midi_out[i] = MidiOutConfig{0, 0, NO_BUS};
     for (uint8_t i = 0; i < N_CC_MAP; i++) p.cc_map[i] = unused_mapping();
+    for (uint8_t i = 0; i < N_MOD_ROUTE; i++) p.mod_map[i] = unused_route();
     p.n_nodes = 0;
     return p;
 }

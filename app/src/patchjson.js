@@ -25,6 +25,7 @@ import * as P from './protocol.js';
 import * as codec from './codec.js';
 import { MIDI_PORTS, portNames, scaleMaskOf, scaleIdOf, scaleName, STEP_DIRECTIONS,
          METRONOME_DIVISIONS, METRONOME_FEELS } from './names.js';
+import { modParamName } from './graph.js';
 
 const DIRECTIONS = { [P.GatePortDirection.GATE_PORT_UNUSED]: 'unused',
                      [P.GatePortDirection.GATE_PORT_IN]: 'in',
@@ -240,6 +241,19 @@ export function toPatchJson(patch, globals, device) {
     bindings.push({ slot, ...m, sources: portNames(m.sourceMask) });
   });
   if (bindings.length) json.cc_map = bindings;
+
+  // Modulation routes, by the name of the parameter they reach rather than
+  // only its index: "cutoff" survives a parameter being inserted above it in
+  // a later firmware, and is what makes a route in a file readable at all.
+  const routes = [];
+  (patch.modMap ?? []).forEach((r, slot) => {
+    if (!r || r.bus === P.NO_BUS) return;
+    const entry = { slot, ...r };
+    const named = modParamName(device, patch, r);
+    if (named) entry.target = named;
+    routes.push(entry);
+  });
+  if (routes.length) json.mod_map = routes;
   return json;
 }
 
@@ -310,6 +324,23 @@ export function fromPatchJson(json, device) {
       min: m.min ?? 0,
       max: m.max ?? 0,
       flags: m.flags ?? 0,
+    };
+  }
+  for (const r of json.mod_map ?? []) {
+    const slot = Number(r.slot ?? 0);
+    if (!(slot >= 0 && slot < patch.modMap.length)) continue;
+    // `target` is a name for a reader; `param` is what the module is told.
+    // The name is not resolved back - a file whose parameter index and name
+    // disagree is a file to fix, not one to guess about.
+    patch.modMap[slot] = {
+      bus: r.bus ?? P.NO_BUS,
+      targetKind: r.targetKind ?? P.CcTargetKind.CC_TARGET_NODE,
+      targetIndex: r.targetIndex ?? 0,
+      param: r.param ?? 0,
+      min: r.min ?? 0,
+      max: r.max ?? 0,
+      depth: r.depth ?? 255,
+      flags: r.flags ?? 0,
     };
   }
   return { patch, globals };

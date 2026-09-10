@@ -17,6 +17,7 @@
 #include "console/console.h"
 #include "protocol/sysex_handler.h"
 #include "control/cc_mapper.h"
+#include "control/mod_matrix.h"
 #include "control/nrpn.h"
 #include "control/midi_dispatch.h"
 #include "hal/midi_types.h"
@@ -42,6 +43,12 @@ static PatchManager patches(master, store, leds);
 // mapping applies at the MIDI input layer and writes through the same
 // validated entry point the protocol and the console use.
 static CcMapper cc_map(patches, master);
+
+// Modulation (control/mod_matrix.h). Also not a node, and for the same
+// reasons: it reads the CV buses the modulators wrote last pass and turns
+// them into parameter writes through the very same applier a mapped CC uses.
+static ModMatrix mod_matrix(patches, cc_map);
+
 static NrpnDecoder nrpn(patches, cc_map);
 static Console console(console_io, patches, master, store, leds, cc_map);
 
@@ -103,7 +110,16 @@ void loop(){
     // 3. apply whatever the controllers moved, then one evaluation pass.
     //    Parameter writes happen here, before process(), and never in an
     //    interrupt: the transport enqueues, the pass applies.
+    //
+    //    The controllers first, then the modulation, because an offset route
+    //    takes the parameter's set point as its centre and the knob is what
+    //    moves the set point: applying them the other way round would make
+    //    every knob move look like a modulation the matrix had not made and
+    //    cost a re-anchor every pass. The matrix reads the CV buses' front
+    //    buffer - what the modulators published on the previous pass - which
+    //    is the same one-pass delay every reader in the module sees.
     cc_map.apply(now);
+    mod_matrix.apply(master.buses(), now);
     master.pass(now);
 
     // 4. reprogram the subtick timer if the tempo or the external period moved.

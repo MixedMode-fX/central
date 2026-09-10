@@ -165,6 +165,83 @@ want different things:
   after a fixed number of milliseconds from the ledger; a lane retriggered
   before then releases first, and a patch swap releases everything.
 
+## Utility Algorithms
+
+### GateHold
+
+Every clock source in this module makes a **trigger** — `TRIGGER_WIDTH_US`, 5 ms
+(`src/config.h`) — because a trigger whose width followed the tempo would stop
+being a trigger. That is right for clocking things and useless for the other
+half of what a gate is for: opening an envelope, latching a mute, holding a
+note down. `GateHold` is the piece between the two.
+
+| Mode | What it does |
+|---|---|
+| `latch` | a rising edge on `set` raises the output and it stays up; a rising edge on `reset` drops it. An SR latch — the mode that answers "hold a gate high until I say otherwise" |
+| `toggle` | each rising edge on `set` flips the output; `reset` still drops it. One button, two states |
+| `extend` | a minimum length: the output follows `set` but stays up for at least `hold`, retriggering cleanly. This is what turns a 5 ms trigger into a gate |
+| `limit` | a maximum length: the output drops after `hold` even if the input is still up, and does not rise again until the input has gone low and come back |
+
+`reset` is optional — a latch with nothing patched to it holds until the patch
+changes, which is a legitimate thing to ask for. **Reset wins**: an edge on
+`reset` in the same pass as one on `set` leaves the output low, in every mode.
+Changing the mode does not clear the output: a mode change is not a reset, and
+silently dropping a gate somebody is holding is worse than either reading.
+
+## Modulators
+
+Modulators write a **CV bus** — the internal control bus described under
+[Signal bus model](#signal-bus-model) — and the
+[modulation matrix](#modulation-a-control-signal-reaching-a-parameter) turns
+that signal into parameter writes. Nothing about a modulator knows what it is
+modulating: it produces a signal, the matrix decides what the signal reaches,
+and one LFO can drive four parameters at four depths without four LFOs.
+
+### LFO
+
+Seven shapes — sine, triangle, ramp up, ramp down, square, random step, random
+glide — with depth, offset, start phase and a bipolar/unipolar choice.
+
+**Two rates, and only one of them is a guess.** Synced to the master clock the
+cycle is a note value from the same list `Metronome` offers, counted in
+subticks, so an LFO set to `1/4` and a Metronome set to `1/4` are locked
+together for ever and neither drifts. Free-running the cycle is wall-clock
+time in tenths of a hertz, 0.1 Hz to 25.5 Hz — which is what a modulator that
+should *not* line up with the music needs, and a synced one cannot express.
+
+A synced LFO's cycle is anchored on **subtick zero**, not on whichever subtick
+the node was constructed on, so an LFO added to a patch that has been running
+for an hour is in phase with the Metronome beside it. The optional `reset`
+inlet is the one thing that moves the anchor. Changing the rate or the
+division re-derives the period **without moving the phase**: a rate swept
+under a running modulation sweeps continuously instead of jumping back to the
+top of its cycle, the same rule `ClockDiv` follows for a pulse it has already
+scheduled.
+
+### SampleHold
+
+One reading of a control signal, held until the next trigger. With nothing
+patched to `signal` it samples its own noise, which is the classic patch — a
+random level per step, held steady between steps — and with something patched
+it holds a reading of that, which is how a slow LFO becomes a stepped sequence
+locked to the clock. `sample` reads on the rising edge; `track` follows the
+input for as long as the trigger is up and freezes on the fall. `steps`
+quantises what is held onto that many evenly spaced levels; at 0 or 1 the full
+twelve bits are held.
+
+### Slew
+
+What a value is allowed to change by, per unit of time — the node that turns a
+step into a glide. Rise and fall are separate (a fast attack and a slow decay
+out of a sample and hold is an envelope; one rate for both is not) and `link`
+ties them for the case where they are not. Times are **per full scale**, in
+tens of milliseconds, so two different step sizes glide at the same speed
+rather than taking the same time.
+
+Smoothing is a signal operation, so it belongs in the signal path where it can
+be shared, metered and patched around — which is why the modulation matrix has
+no smoothing control of its own.
+
 ## Logic Algorithms
 
 Configurable logic gates (all gates can also be inverted) & latches:
@@ -301,7 +378,28 @@ and the hardware ports are nodes too. An internal bus is a virtual patch cable.
 |---|---|---|---|
 | Gate | a level (`bool`) | 16 | OR of all writers (a passive mult) |
 | Note | MIDI events (notes, CC, bend, ...) | 8 | arrival order; overflow is counted, never silent |
-| CV | `int16_t` | 8 | sum with saturation (reserved for #8) |
+| CV | `int16_t`, 12-bit full scale | 8 | sum with saturation |
+
+**The CV domain is the internal control bus.** A modulator writes it, the
+modulation matrix reads it and turns it into parameter writes, and #8's jacks
+will read and write it as voltage. It is deliberately not the note bus: a note
+bus carries MIDI events, whose data bytes are seven bits, so a modulator sent
+that way would arrive at 128 steps and would have to invent a controller
+number to be recognised by. A control signal is a *value*, not an event — it
+has a level every pass whether or not anything changed, which is what a bus of
+`int16_t` already is.
+
+Full scale is **twelve bits**: `CV_FULL = 4096`, unipolar `0 .. 4095`, bipolar
+`-2048 .. 2047` (`src/bus/domain.h`). Seven bits is 128 steps across a
+parameter's whole range, which is audible as stepping on anything worth
+modulating — a filter sweep, a detune, a slow glide — and twelve is finer than
+any parameter the module has (a parameter byte is eight bits) and matches the
+12-bit DAC a jack would use, so the matrix rounds *down* into the target's
+range rather than interpolating up from something coarser. It is not fourteen
+because fan-in is a sum and the bus is an `int16_t`: at twelve bits, all eight
+buses' worth of writers at full positive scale come to 32768, one LSB past
+`INT16_MAX`, so eight modulators summed on one bus clip by a single step at
+the very top and nowhere else. At fourteen bits, two writers would clip.
 
 Buses are **double-buffered**: readers see the previous pass, writers write
 the next, and `BusManager::swap()` publishes. Evaluation is therefore
@@ -367,6 +465,8 @@ Algorithms available today:
 | Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator` |
 | Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off) |
+| Utility | `GateHold` (latch, toggle, extend or limit a gate) |
+| Modulators | `LFO`, `SampleHold`, `Slew` (all write a CV bus) |
 
 # Master clock
 
@@ -718,6 +818,10 @@ configuration path until the SysEx protocol is finished.
 | `slots` | What each preset slot holds |
 | `save` / `load` / `erase <slot>` | Preset management |
 | `defaults` | Back to the built-in patch |
+| `maps` / `map` / `unmap` / `learn` | Controller bindings |
+| `mods` | The modulation routes, and the live level on every CV bus |
+| `mod <slot> <cv bus> <node> <param> [depth] [flags]` | Point a control signal at a parameter |
+| `unmod <slot>` | Forget a route |
 
 ## The patch protocol (SysEx)
 
@@ -739,7 +843,9 @@ byte on the wire is `<= 0x7F`.
 (`F0 7E <dev> 06 01 F7`) and blinks both LEDs, so an editor finds it among the
 host's ports and a user with two modules can see which one answered. It then
 reports its capabilities (`N_NODE`, bus counts per domain, `MAX_IN`/`MAX_OUT`,
-`N_PARAM`, slot count and size) and enumerates every algorithm and every
+`N_PARAM`, slot count and size, how many controller bindings and modulation
+routes it holds, and what full scale on a control bus is) and enumerates every
+algorithm and every
 parameter descriptor straight off the compiled table — so an algorithm added
 to the firmware appears in an editor with no editor change, and a hardcoded
 list cannot silently drift.
@@ -753,7 +859,8 @@ Parameters have carried names since the parameter descriptors landed, and this
 is the same argument at port scope — `test_params` fails if an algorithm in
 the table ships without them. The strings are appended after the algorithm's
 name rather than spliced into the record, so a host that only knows the older
-layout stops where it always did and needs no version bump.
+layout stops where it always did and needs no version bump. The capabilities
+reply grew the same way, for the same reason.
 
 **A parameter value is eight bits and a SysEx data byte is seven.** Several
 ranges reach 255, and the high byte of a step pattern *is* step 8 — so
@@ -866,6 +973,61 @@ discipline the master clock already uses.
 
 Console: `maps`, `map <slot> <cc> <node> <param> [min] [max]`,
 `learn <slot> <node> <param>`, `unmap <slot>`.
+
+## Modulation: a control signal reaching a parameter
+
+A modulator produces a value every pass on a CV bus. A parameter is a byte on
+a node. The **modulation matrix** (`src/control/mod_matrix.h`) is the piece
+between them, and it is built the same way `CcMapper` is, because it is
+answering the same question with a different source:
+
+- **The table is part of the `Patch`, not the graph.** Everything the CC
+  section says about a parameter not being a bus signal applies here word for
+  word. A route is not a node: it would need a pool slot each, and the
+  modulation would stop existing the moment a swap removed that node.
+- **It writes through the same applier** a mapped CC does, which ends at
+  `PatchManager::set_param`. One validator, one set of tests. A modulator
+  cannot reach anything a knob could not, and is refused identically when it
+  asks for something out of range.
+- **One write per route per pass**, whatever the signal did in between — the
+  same rate-limiting discipline, for the same reason.
+
+`N_MOD_ROUTE` = 16 routes, two per CV bus, which is the shape that actually
+occurs: one modulator reaching several parameters. Unused entries cost nothing
+stored or on the wire.
+
+**Where it runs.** Between passes, from the main loop, after `CcMapper::apply`
+and before `MixedModeMaster::pass`. The buses' front buffer holds what the
+modulators wrote during the *previous* pass, so a route reads a value that is
+finished and published — the same one-pass delay every reader in the module
+sees, and the reason evaluation order does not matter here either.
+
+**Absolute and offset.** Absolute is the modulator behaving as a knob: the
+signal *is* the value, swept across the route's range, which is what "connect
+it as if it were a MIDI CC" asks for. Offset keeps the parameter's own setting
+as a centre and swings around it — what a modulator means on a synthesiser,
+and the mode that lets a CC and an LFO share one target and *cooperate*: the
+knob moves the centre, the LFO moves around the centre. That only works if the
+matrix can tell "the user moved the set point" from "this is what I wrote last
+pass", so every offset lane remembers what it wrote; a target that is not
+where the matrix left it has been moved by somebody else and the centre is
+re-taken from it. That is the same anchor discipline scale takeover uses.
+
+Each route also carries a **depth** (a fraction of the swept range), a
+sub-range in the target's own units, and two flags: **bipolar**, which says to
+read the signal as centred on zero rather than as a level from zero, and
+**invert**. Polarity is a property of the *route* and not of the bus, because
+the same signal can legitimately be read either way by two different routes.
+
+**Two routes may not share a target.** The validator refuses it: two writers
+racing over one value has no defined result — and the module already has a
+place to mix two modulators, which is the CV bus itself, where fan-in is a
+sum. A modulator also cannot reach a `transport` target: those fire, they do
+not hold a value, and there is nothing for a continuous signal to set.
+
+Routes travel in the patch image (format version 3; a version 2 image is still
+read and simply has none), over SysEx as `SET_MOD_ROUTE` / `GET_MOD_ROUTE`,
+and through the console as `mods`, `mod` and `unmod`.
 
 ## What CC cannot reach: NRPN and pattern data
 
@@ -1034,6 +1196,23 @@ addressing a node that was never taken. The app now tracks that divergence
 explicitly: a patch its own validator refuses is never sent, and the first edit
 that makes it valid sends the whole thing.
 
+**A modulated parameter is a socket; the rest are not.** A modulation route
+reaches a *parameter*, and a parameter is a different kind of thing from a
+port — it has no domain and no bus, and a node has anywhere from two of them
+to three hundred and thirty-six. Drawing every one on the block would bury the
+signal path under a wall of sockets and say nothing, because a patch is not
+about the parameters nobody has touched. So a parameter that something is
+modulating gets an inlet on the block, drawn with a square dot, and an
+unmodulated one stays in the panel below where it has always been. Dragging a
+control signal onto a block is what turns one into the other: the drag cannot
+finish on a socket that does not exist yet, so it opens a dropdown of that
+block's parameters — every one the module describes, minus any a route already
+owns, since the firmware refuses two routes on one target. *How* it modulates
+— depth, offset or absolute, bipolar, inverted — is edited beside the
+parameter it moves, in the block's own panel, because "what is happening to
+this control" is the question somebody is asking when they look at it. A route
+to the clock has no block to land on and lives in the panel only.
+
 **Patches live in the browser.** A module holds four preset slots in EEPROM and
 the module in the page holds its own in RAM, which a reload empties; neither is
 somewhere to keep work. So the app keeps a library in `localStorage`, and what
@@ -1041,7 +1220,7 @@ it stores is the patch **image** — the same bytes a `.syx` file carries and a
 slot holds, not an object of the app's own shape that would be a third format
 to keep in step with the firmware. Whatever is being edited is written back on
 every change, so a reload picks up where you left off; anything unsaved is put
-in the library before something replaces it. Eighteen example patches, each
+in the library before something replaces it. Twenty-two example patches, each
 exercising one part of the machine, are there to start from — and CI loads
 every one of them into the real firmware, so an example cannot rot.
 
@@ -1090,6 +1269,15 @@ boot and reset lines on pins 30 and 31 is declared in `hardware.h` and nothing
 in this repository says what it connects to. If it is an input device it is
 the module's only candidate for panel control, and that changes the whole
 picture above. Still unanswered.
+
+**Control voltage at the jacks.** The CV domain is now a real bus with real
+writers, and nothing reaches a pin: `GateInPort` and `GateOutPort` are still
+the only hardware port nodes. A `CvOutPort` writing a DAC and a `CvInPort`
+reading the ADC would make every modulator in this document an output and
+every external voltage a modulation source, with no change to the matrix, the
+patch format or the editor — the scale is already twelve bits precisely so
+that a 12-bit DAC is a lossless rendering of what the bus carries. Calibration
+has a home reserved in `GlobalSettings`. Not built.
 
 **Launchpad DAW mode over the USB host port** needs no new pins, so it is
 within the hardware surface, and it remains the module's only realistic

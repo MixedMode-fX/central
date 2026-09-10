@@ -120,6 +120,112 @@ export const BlockKind = Object.freeze({
   Node: 'node', Jack: 'jack', MidiIn: 'midiIn', MidiOut: 'midiOut',
 });
 
+// --- modulation -------------------------------------------------------------
+//
+// A modulation route is a CV bus reaching a *parameter*
+// (src/control/mod_matrix.h), and that is a different kind of thing from
+// everything above: a parameter is not a port, it has no domain and no bus,
+// and a node has anywhere from two of them to three hundred and thirty-six.
+//
+// **So a modulated parameter is drawn as an inlet, and an unmodulated one is
+// not drawn at all.** Putting every parameter on the block would bury the
+// signal path under a wall of sockets - a PolySequencer alone would be 336
+// rows - and would say nothing, because a patch is not about the parameters
+// nobody has touched. A parameter that something is modulating *is* part of
+// the shape of the patch, so it gets a socket; the rest stay in the panel
+// below, where they have always been. Dragging a control signal onto a block
+// is what turns one of them into the other, and the dropdown that asks which
+// one is the editor's way of saying "a parameter is not a port, so you have
+// to name it".
+//
+// A route to the clock has no block to land on - the master clock is not in
+// the patch's node list - so it lives in the modulation panel and not on the
+// canvas. It is still a route, still validated the same way, and still shown;
+// it simply has nowhere to be drawn.
+// True for a port synthesised from a modulation route rather than read from a
+// descriptor. `at` still numbers the row it is drawn on - `layout.js` places a
+// socket from it, so it cannot be an arbitrary handle - but it is *not* an
+// index into inBus, and `modSlot` is what says which route the port is.
+export const isModPort = (port) => port?.modSlot !== undefined && port?.modSlot !== null;
+
+// Every route that reaches node `index`, as inlet-shaped ports, numbered from
+// `firstRow` - they are appended after the algorithm's own inlets, so they
+// carry on where those stopped. Ordered by slot, so a block does not
+// reshuffle its own sockets when an unrelated route is added.
+function modInlets(device, patch, index, firstRow) {
+  const ports = [];
+  (patch.modMap ?? []).forEach((route, slot) => {
+    if (!route || route.bus === P.NO_BUS) return;
+    if (route.targetKind !== P.CcTargetKind.CC_TARGET_NODE || route.targetIndex !== index) return;
+    ports.push({
+      at: firstRow + ports.length, modSlot: slot,
+      name: modParamName(device, patch, route),
+      domain: Domain.CV, bus: route.bus, required: false,
+    });
+  });
+  return ports;
+}
+
+// What a route's target parameter is called, from the device's descriptors -
+// the same names the parameter panel draws, so the socket and the control
+// below it say the same word.
+export function modParamName(device, patch, route) {
+  if (route.targetKind === P.CcTargetKind.CC_TARGET_CLOCK) {
+    return ['tempo', 'clock source', 'sync ppqn'][route.param] ?? `clock ${route.param}`;
+  }
+  const node = patch.nodes[route.targetIndex];
+  const pd = node ? paramDescriptorOf(device, node.algorithmId, route.param) : null;
+  return pd?.name ?? `param ${route.param}`;
+}
+
+// One parameter's descriptor. `Device.describeParam` is the lookup - the same
+// rule param_lookup() follows in the firmware - and this only tolerates a
+// missing device, which the layout tests have.
+export const paramDescriptorOf = (device, algorithmId, param) =>
+  device?.describeParam?.(algorithmId, param) ?? null;
+
+// The parameters of node `index` a control signal could be pointed at: every
+// one the module describes, minus the reserved ones and minus any a route
+// already owns - two routes on one parameter is refused by the firmware
+// (MixedModeMaster::route_valid), so it is never offered.
+export function modulationChoices(device, patch, index) {
+  const node = patch.nodes[index];
+  const groups = device?.byId.get(node?.algorithmId)?.params;
+  if (!node || !groups) return [];
+  const taken = new Set((patch.modMap ?? [])
+    .filter((r) => r && r.bus !== P.NO_BUS
+                && r.targetKind === P.CcTargetKind.CC_TARGET_NODE && r.targetIndex === index)
+    .map((r) => r.param));
+
+  const choices = [];
+  for (const group of groups) {
+    if (!group) continue;
+    for (let r = 0; r < group.repeat; r++) {
+      for (let f = 0; f < group.nFields; f++) {
+        const pd = group.fields[f];
+        const param = group.first + r * group.nFields + f;
+        if (!pd || (pd.min === 0 && pd.max === 0)) continue;    // reserved
+        if (taken.has(param)) continue;
+        choices.push({
+          param, pd,
+          // A table's fields repeat, so "velocity" alone would appear
+          // thirty-two times with nothing to tell them apart.
+          label: group.repeat > 1 ? `${pd.name} ${r + 1}` : pd.name,
+        });
+      }
+    }
+  }
+  return choices;
+}
+
+// The first modulation slot nothing is using.
+export function freeModSlot(patch, limit) {
+  const map = patch.modMap ?? [];
+  const n = Math.min(limit ?? map.length, map.length);
+  for (let i = 0; i < n; i++) if (!map[i] || map[i].bus === P.NO_BUS) return i;
+  return null;
+}
+
 // What a port is called, from the device, falling back to the index for a
 // module whose firmware predates port names.
 export const inletName = (d, i) => d.inName?.[i] || `in ${i}`;
@@ -173,6 +279,10 @@ export function patchBlocks(device, patch) {
       inlets.push({ at: k, name: inletName(d, k), domain: d.inDomain[k],
                     bus: node.inBus[k], required: k < d.minIn });
     }
+    // Parameters something is modulating, as inlets. See the note above
+    // BlockKind: only the ones in use are drawn, which is what keeps a block
+    // a block rather than a list of every parameter the algorithm has.
+    for (const port of modInlets(device, patch, i, inlets.length)) inlets.push(port);
     const outlets = [];
     for (let k = 0; k < d.nOut && k < P.MAX_OUT; k++) {
       outlets.push({ at: k, name: outletName(d, k), domain: d.outDomain[k], bus: node.outBus[k] });
@@ -333,6 +443,9 @@ export function planConnection(blocks, caps, a, b) {
   const domain = source.port.domain;
   const writes = [];
   let bus = source.port.bus;
+  if (isModPort(source.port)) {
+    return { ok: false, why: 'a modulated parameter is a destination, not a source' };
+  }
   if (bus === P.NO_BUS) {
     bus = target.port.bus !== P.NO_BUS ? target.port.bus : freeBus(blocks, caps, domain);
     if (bus === null) {
@@ -342,7 +455,8 @@ export function planConnection(blocks, caps, a, b) {
   }
   const was = target.port.bus;
   if (was !== bus) {
-    writes.push({ blockId: target.block.id, at: target.port.at, isOutlet: false, bus });
+    writes.push({ blockId: target.block.id, at: target.port.at, isOutlet: false, bus,
+                  modSlot: target.port.modSlot });
   }
   if (!writes.length) return { ok: false, why: 'those two are already connected' };
 
@@ -360,9 +474,18 @@ export function planConnection(blocks, caps, a, b) {
 // which byte moves is a patch-shape question, and it is here so that the tests
 // can apply a plan to a patch without a browser and get exactly what the app
 // would have got.
-export function applyWrite(patch, { blockId, at, isOutlet, bus }) {
+export function applyWrite(patch, { blockId, at, isOutlet, bus, modSlot }) {
   const [kind, where] = blockId.split(':');
   const index = Number(where);
+  // A modulated parameter has no inBus byte behind it: what moves is the
+  // route's own bus, and the message that carries it is a different one.
+  if (modSlot !== undefined && modSlot !== null) {
+    const route = patch.modMap?.[modSlot];
+    if (!route) return null;
+    if (bus === P.NO_BUS) patch.modMap[modSlot] = null;
+    else route.bus = bus;
+    return { kind: 'mod', index: modSlot, port: patch.modMap[modSlot] };
+  }
   if (kind === BlockKind.Node) {
     const node = patch.nodes[index];
     if (!node) return null;
@@ -405,8 +528,11 @@ export function planDisconnect(blocks, arrow) {
     : '';
   return {
     ok: true, domain: arrow.domain, bus: arrow.bus,
-    writes: [{ blockId: target.block.id, at: target.port.at, isOutlet: false, bus: P.NO_BUS }],
-    said: `${target.block.title} ${target.port.name} is not connected${also}`,
+    writes: [{ blockId: target.block.id, at: target.port.at, isOutlet: false, bus: P.NO_BUS,
+               modSlot: target.port.modSlot }],
+    said: isModPort(target.port)
+      ? `${target.block.title} ${target.port.name} is not modulated any more`
+      : `${target.block.title} ${target.port.name} is not connected${also}`,
   };
 }
 
@@ -420,7 +546,71 @@ export function planClear(blocks, ref) {
   if (refused) return refused;
   return {
     ok: true, domain: found.port.domain, bus: found.port.bus,
-    writes: [{ blockId: found.block.id, at: found.port.at, isOutlet: Boolean(ref.isOutlet), bus: P.NO_BUS }],
-    said: `${found.block.title} ${found.port.name} is not connected`,
+    writes: [{ blockId: found.block.id, at: found.port.at, isOutlet: Boolean(ref.isOutlet),
+               bus: P.NO_BUS, modSlot: found.port.modSlot }],
+    said: isModPort(found.port)
+      ? `${found.block.title} ${found.port.name} is not modulated any more`
+      : `${found.block.title} ${found.port.name} is not connected`,
+  };
+}
+
+
+// A control signal dropped on a block, once the user has said which parameter
+// they meant. The signal's bus is the route's bus - dragging *from* something
+// already on a bus adds a listener to it, exactly as `planConnection` does -
+// and a source not on a bus yet claims a free one on the way.
+//
+// Nothing is applied here: `App.applyPlan` writes the patch and sends the
+// messages, so the rule and the effect are not the same code.
+export function planModulation(blocks, patch, caps, sourceRef, targetBlockId, param, options = {}) {
+  const source = portOf(blocks, sourceRef);
+  if (!source || !sourceRef.isOutlet) {
+    return { ok: false, why: 'a modulation route starts at an outlet' };
+  }
+  if (source.port.domain !== Domain.CV) {
+    return { ok: false, why: `${domainName(source.port.domain)} is not a control signal — `
+                           + 'modulation comes from a CV outlet' };
+  }
+  const [kind, where] = String(targetBlockId).split(':');
+  if (kind !== BlockKind.Node) {
+    return { ok: false, why: 'only a node has parameters to modulate' };
+  }
+  const index = Number(where);
+  if (!caps?.modRoutes) {
+    return { ok: false, why: 'this module’s firmware predates modulation — '
+                           + 'it has no routes to point a control signal at a parameter' };
+  }
+  const slot = freeModSlot(patch, caps.modRoutes);
+  if (slot === null) {
+    return { ok: false, why: `every one of the module's ${caps.modRoutes} `
+                           + 'modulation routes is in use' };
+  }
+
+  const writes = [];
+  let bus = source.port.bus;
+  if (bus === P.NO_BUS) {
+    bus = freeBus(blocks, caps, Domain.CV);
+    if (bus === null) return { ok: false, why: 'every CV bus is already written by something' };
+    writes.push({ blockId: source.block.id, at: source.port.at, isOutlet: true, bus });
+  }
+
+  const route = {
+    bus,
+    targetKind: P.CcTargetKind.CC_TARGET_NODE,
+    targetIndex: index,
+    param,
+    // The target's full range, and the whole of the signal. A route that
+    // arrived at some fraction of either would be a route a user has to go
+    // and find before it does anything.
+    min: 0, max: 0,
+    depth: options.depth ?? 255,
+    flags: options.flags ?? P.ModFlags.MOD_BIPOLAR | P.ModMode.MOD_OFFSET,
+  };
+  const target = patch.nodes[index];
+  const pd = target ? paramDescriptorOf(options.device, target.algorithmId, param) : null;
+  return {
+    ok: true, domain: Domain.CV, bus, writes, routes: [{ slot, route }],
+    said: `${source.block.title} ${source.port.name} → ${pd?.name ?? `param ${param}`}`
+        + ` on CV bus ${bus}`,
   };
 }

@@ -29,6 +29,7 @@ enum LoadError : uint8_t {
     LOAD_MIDI_PORT_BUS_OUT_OF_RANGE,
     LOAD_NODE_INVALID,         // see last_node_error() / last_node_index()
     LOAD_CC_MAPPING_INVALID,   // see last_mapping_index() (#21)
+    LOAD_MOD_ROUTE_INVALID,    // see last_route_index()
 };
 
 // Owns the master clock, the buses, the reserved hardware port nodes and the
@@ -129,11 +130,25 @@ class MixedModeMaster {
         ConfigError last_node_error() const { return node_error; }
         uint8_t last_node_index() const { return node_error_index; }
         uint8_t last_mapping_index() const { return mapping_error_index; }
+        uint8_t last_route_index() const { return route_error_index; }
         // Range-checks one controller binding against the patch it belongs
         // to: unknown target, a node index beyond n_nodes, a parameter index
         // beyond the descriptor, min > max. A patch with a bad mapping is
         // rejected whole (#11's rule), never partially applied.
         static bool mapping_valid(const Patch& patch, const CcMapping& mapping);
+        // Range-checks one modulation route against the patch it belongs to:
+        // a CV bus that exists, a target that exists, min <= max, and **no
+        // other route already on that target**. Two routes writing one
+        // parameter would be two writers racing over one value with no
+        // defined result; two modulators reaching one parameter is two
+        // writers on one CV bus, which the bus already sums (bus/domain.h).
+        // The rule is enforced here so a patch that would have been
+        // unpredictable is refused instead of running.
+        // `candidate` is the route being proposed for `slot`; every other
+        // slot is read from `patch`. Taking the route separately is what lets
+        // an incremental edit be checked against the running patch **without
+        // copying it** - a Patch is 12 KB and has no business on the stack.
+        static bool route_valid(const Patch& patch, uint8_t slot, const ModRoute& candidate);
         uint8_t node_count() const { return pool.count(); }
         Node* node(uint8_t index) const { return pool.node(index); }
         const AlgorithmDescriptor* node_descriptor(uint8_t index) const { return pool.descriptor(index); }
@@ -157,6 +172,7 @@ class MixedModeMaster {
         ConfigError node_error;
         uint8_t node_error_index;
         uint8_t mapping_error_index;
+        uint8_t route_error_index;
 };
 
 #endif

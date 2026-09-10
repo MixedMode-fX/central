@@ -72,6 +72,9 @@ class Console {
         void cmd_maps();
         void cmd_map(uint8_t argc, uint32_t now_us);
         void cmd_unmap(uint8_t argc, uint32_t now_us);
+        void cmd_mods();
+        void cmd_mod(uint8_t argc, uint32_t now_us);
+        void cmd_unmod(uint8_t argc, uint32_t now_us);
         void cmd_learn(uint8_t argc, uint32_t now_us);
 
         void put(const char* text){ io.write(text); }

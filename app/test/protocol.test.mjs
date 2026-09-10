@@ -25,8 +25,10 @@ import * as P from '../src/protocol.js';
 import * as codec from '../src/codec.js';
 import { Device } from '../src/device.js';
 import { validate } from '../src/validate.js';
-import { connectNewNode } from '../src/graph.js';
+import { connectNewNode, patchBlocks, connectionsOf, isModPort,
+         modulationChoices, planModulation } from '../src/graph.js';
 import { toPatchJson, toPatchJsonText, fromPatchJson } from '../src/patchjson.js';
+import { layoutOf, socketPoint, blockHeight } from '../src/layout.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const wasmPath = process.argv[2] || join(here, '..', '..', 'emulator', 'dist', 'mmmc.wasm');
@@ -530,6 +532,213 @@ await test('controller bindings can be written and read back', async () => {
   assert.equal(m.min, 60);
   assert.equal(m.max, 180);
   assert.equal(m.flags, P.CcFlags.CC_FOURTEEN_BIT);
+});
+
+// --- Modulation -----------------------------------------------------------
+
+// A patch with a modulator and something to modulate: an LFO on CV bus 0 and
+// a divider whose amount it drives.
+function modulationPatch() {
+  const patch = codec.emptyPatch();
+  const lfo = device.algorithms.find((a) => a.name === 'LFO');
+  const divider = device.algorithms.find((a) => a.name === 'ClockDiv');
+
+  const a = codec.emptyNode(lfo.id);
+  a.outBus[0] = 0;                       // a CV bus
+  a.params[0] = 3;                       // ramp up
+  a.params[1] = 1;                       // free-running
+  a.params[2] = 10;                      // 1 Hz
+
+  const b = codec.emptyNode(divider.id);
+  b.outBus[0] = 0;                       // a gate bus
+  b.params[1] = 4;
+  patch.nodes = [a, b];
+  return patch;
+}
+
+await test('the module reports how much modulation it holds', () => {
+  const caps = device.capabilities;
+  assert.equal(caps.modRoutes, P.N_MOD_ROUTE,
+               'the editor cannot offer a route the module has no slot for');
+  assert.equal(caps.cvFull, P.CV_FULL,
+               'full scale on a control bus is what a depth is a fraction of');
+  assert.ok(caps.cvFull > 128,
+            'a modulator resolved to seven bits would step audibly on a fine control');
+});
+
+await test('a modulation route can be written and read back', async () => {
+  await device.sendPatch(modulationPatch(), codec.emptyGlobals());
+  const route = {
+    bus: 0,
+    targetKind: P.CcTargetKind.CC_TARGET_NODE,
+    targetIndex: 1,
+    param: 1,
+    min: 2, max: 200,
+    depth: 200,                          // past seven bits, so the wire is tested
+    flags: P.ModFlags.MOD_BIPOLAR | P.ModFlags.MOD_INVERT | P.ModMode.MOD_OFFSET,
+  };
+  await device.setModRoute(4, route);
+  assert.deepEqual(await device.getModRoute(4), route);
+
+  const dumped = await device.dump();
+  assert.deepEqual(dumped.patch.modMap[4], route,
+                   'a route is part of the patch, so it is in the dump');
+  assert.equal(dumped.patch.modMap[0], null);
+});
+
+await test('a route can be cleared, and the module says so', async () => {
+  await device.sendPatch(modulationPatch(), codec.emptyGlobals());
+  await device.setModRoute(2, {
+    bus: 1, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    param: 1, min: 0, max: 0, depth: 255, flags: 0,
+  });
+  assert.ok(await device.getModRoute(2));
+  await device.setModRoute(2, null);
+  assert.equal(await device.getModRoute(2), null);
+});
+
+await test('the module refuses two routes on one parameter', async () => {
+  await device.sendPatch(modulationPatch(), codec.emptyGlobals());
+  const route = (bus) => ({
+    bus, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    param: 1, min: 0, max: 0, depth: 255, flags: 0,
+  });
+  await device.setModRoute(0, route(0));
+  // Two writers racing over one value has no defined result. Two modulators
+  // on one parameter is two writers on one CV bus, which the bus sums.
+  await assert.rejects(() => device.setModRoute(1, route(1)), /REJECTED/);
+});
+
+await test('the editor refuses a route the firmware would refuse', async () => {
+  const patch = modulationPatch();
+  await device.readParams(patch.nodes[1].algorithmId);
+  const bad = (route) => {
+    patch.modMap[0] = route;
+    return validate(device, patch);
+  };
+  assert.ok(bad({ bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 9,
+                  param: 1, min: 0, max: 0, depth: 255, flags: 0 }).length,
+            'a route to a node that is not there');
+  assert.ok(bad({ bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+                  param: 900, min: 0, max: 0, depth: 255, flags: 0 }).length,
+            'a route to a parameter that is not there');
+  assert.ok(bad({ bus: 0, targetKind: P.CcTargetKind.CC_TARGET_TRANSPORT, targetIndex: 0,
+                  param: 0, min: 0, max: 0, depth: 255, flags: 0 }).length,
+            'a modulator cannot press the transport');
+  assert.ok(bad({ bus: 99, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+                  param: 1, min: 0, max: 0, depth: 255, flags: 0 }).length,
+            'a CV bus that does not exist');
+
+  // And each of them really is refused by the module, which is the point of
+  // checking it here rather than trusting the two rule sets to agree.
+  for (const route of [
+    { bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 9, param: 1,
+      min: 0, max: 0, depth: 255, flags: 0 },
+    { bus: 0, targetKind: P.CcTargetKind.CC_TARGET_TRANSPORT, targetIndex: 0, param: 0,
+      min: 0, max: 0, depth: 255, flags: 0 },
+  ]) {
+    await device.sendPatch(modulationPatch(), codec.emptyGlobals());
+    await assert.rejects(() => device.setModRoute(0, route), /REJECTED/);
+  }
+});
+
+await test('a modulated parameter is a socket, and the rest are not', async () => {
+  const patch = modulationPatch();
+  patch.modMap[0] = {
+    bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    param: 1, min: 0, max: 0, depth: 255, flags: P.ModFlags.MOD_BIPOLAR,
+  };
+  await device.readParams(patch.nodes[1].algorithmId);
+  const blocks = patchBlocks(device, patch);
+  const divider = blocks.find((b) => b.id === 'node:1');
+
+  const mod = divider.inlets.filter(isModPort);
+  assert.equal(mod.length, 1, 'one route, one socket');
+  assert.equal(mod[0].name, 'amount', 'the socket is named after the parameter');
+  assert.equal(mod[0].bus, 0);
+  // ClockDiv has five parameters and one real inlet. Only the modulated one
+  // is drawn - the block would otherwise be a list of every parameter.
+  assert.equal(divider.inlets.length - mod.length, 1);
+
+  // And the arrow: the LFO's outlet to that socket, because they share a bus.
+  const arrows = connectionsOf(blocks);
+  const arrow = arrows.find((a) => a.from.blockId === 'node:0' && a.to.blockId === 'node:1'
+                                && a.to.at === mod[0].at);
+  assert.ok(arrow, 'a route the module is running is an arrow on the canvas');
+
+  // ...drawn where the block is. `at` numbers a socket *row*, so a handle
+  // that was not one would put the arrow thousands of pixels off the canvas -
+  // an arrow that is computed but never seen.
+  const positions = layoutOf(blocks, arrows, null);
+  const at = positions.get('node:1');
+  const point = socketPoint(at, arrow.to.at, false);
+  assert.ok(point.y >= at.y && point.y <= at.y + blockHeight(divider),
+            `the modulation socket is drawn at y=${point.y}, outside its block`);
+});
+
+await test('dragging a control signal onto a block plans a route', async () => {
+  const patch = modulationPatch();
+  await device.readParams(patch.nodes[1].algorithmId);
+  const blocks = patchBlocks(device, patch);
+
+  const choices = modulationChoices(device, patch, 1);
+  assert.ok(choices.some((c) => c.label === 'amount'));
+  const amount = choices.find((c) => c.label === 'amount');
+
+  const plan = planModulation(blocks, patch, device.capabilities,
+                              { blockId: 'node:0', at: 0, isOutlet: true },
+                              'node:1', amount.param, { device });
+  assert.ok(plan.ok, plan.why);
+  assert.equal(plan.routes.length, 1);
+  assert.equal(plan.routes[0].route.bus, 0, 'the signal is already on a bus, so that is the bus');
+  assert.equal(plan.routes[0].route.targetIndex, 1);
+  assert.equal(plan.routes[0].route.param, amount.param);
+
+  // Applied, the module takes it - which is the check that matters: a drag
+  // that produces a patch the firmware refuses is the bug this file exists
+  // to catch.
+  patch.modMap[plan.routes[0].slot] = plan.routes[0].route;
+  await device.sendPatch(patch, codec.emptyGlobals());
+  const dumped = await device.dump();
+  assert.deepEqual(dumped.patch.modMap[plan.routes[0].slot], plan.routes[0].route);
+
+  // And the parameter it now owns is not offered a second time.
+  assert.ok(!modulationChoices(device, patch, 1).some((c) => c.param === amount.param));
+});
+
+await test('a note bus cannot be pointed at a parameter', async () => {
+  const patch = modulationPatch();
+  const arp = device.algorithms.find((a) => a.name === 'Arpeggiator');
+  const node = codec.emptyNode(arp.id);
+  node.inBus[0] = 0;
+  node.inBus[1] = 0;
+  node.outBus[0] = 1;
+  patch.nodes.push(node);
+  await device.readParams(patch.nodes[1].algorithmId);
+  const blocks = patchBlocks(device, patch);
+
+  const plan = planModulation(blocks, patch, device.capabilities,
+                              { blockId: 'node:2', at: 0, isOutlet: true },
+                              'node:1', 1, { device });
+  assert.ok(!plan.ok);
+  assert.match(plan.why, /not a control signal/);
+});
+
+await test('modulation survives the JSON dialect', async () => {
+  const patch = modulationPatch();
+  patch.modMap[1] = {
+    bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    param: 1, min: 0, max: 0, depth: 128,
+    flags: P.ModFlags.MOD_BIPOLAR | P.ModMode.MOD_OFFSET,
+  };
+  await device.readParams(patch.nodes[1].algorithmId);
+  const json = toPatchJson(patch, codec.emptyGlobals(), device);
+  assert.equal(json.mod_map.length, 1);
+  assert.equal(json.mod_map[0].target, 'amount',
+               'a route in a file names the parameter it reaches, not only its index');
+
+  const back = fromPatchJson(JSON.parse(JSON.stringify(json)), device);
+  assert.deepEqual(back.patch.modMap[1], patch.modMap[1]);
 });
 
 // --- The offline path -----------------------------------------------------

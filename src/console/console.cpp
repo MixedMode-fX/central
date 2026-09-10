@@ -134,6 +134,9 @@ void Console::dispatch(uint32_t now_us){
     if (str_eq(cmd, "maps"))       { cmd_maps(); return; }
     if (str_eq(cmd, "map"))        { cmd_map(argc, now_us); return; }
     if (str_eq(cmd, "unmap"))      { cmd_unmap(argc, now_us); return; }
+    if (str_eq(cmd, "mods"))       { cmd_mods(); return; }
+    if (str_eq(cmd, "mod"))        { cmd_mod(argc, now_us); return; }
+    if (str_eq(cmd, "unmod"))      { cmd_unmod(argc, now_us); return; }
     if (str_eq(cmd, "learn"))      { cmd_learn(argc, now_us); return; }
 
     put("unknown command: ");
@@ -161,6 +164,9 @@ void Console::cmd_help(){
     put_line("map <slot> <cc> <node> <param>   bind a CC to a parameter");
     put_line("learn <slot> <node> <param>      bind the next CC seen");
     put_line("unmap <slot>            forget a binding");
+    put_line("mods                    the modulation routes");
+    put_line("mod <slot> <cv bus> <node> <param> [depth] [flags]   modulate a parameter");
+    put_line("unmod <slot>            forget a route");
 }
 
 void Console::cmd_info(){
@@ -506,6 +512,74 @@ void Console::cmd_maps(){
     if (cc.learning()) put_line("a learn is armed");
     put_kv("writes  ", cc.writes());
     put_kv("refused ", cc.refused());
+}
+
+void Console::cmd_mods(){
+    const Patch& p = patches.active();
+    bool any = false;
+    for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
+        const ModRoute& r = p.mod_map[i];
+        if (r.bus == NO_BUS) continue;
+        any = true;
+        put_uint(i); put(": cv bus "); put_uint(r.bus);
+        put(" -> "); put(r.target_kind < CC_TARGET_KINDS ? CC_TARGET_NAMES[r.target_kind] : "?");
+        put(" "); put_uint(r.target_index);
+        put(" param "); put_uint(r.param);
+        put(" ["); put_uint(r.min); put(".."); put_uint(r.max); put("]");
+        put(" depth "); put_uint(r.depth);
+        put((r.flags & MOD_MODE_MASK) == MOD_OFFSET ? " offset" : " absolute");
+        if (r.flags & MOD_BIPOLAR) put(" bipolar");
+        if (r.flags & MOD_INVERT) put(" inverted");
+        put_line("");
+    }
+    if (!any) put_line("no modulation");
+    put("cv    ");
+    for (uint8_t i = 0; i < N_CV_BUS; i++){ put_int(mm.buses().cv_read(i)); put(" "); }
+    put_line("");
+}
+
+// `mod 0 1 3 2` reads "route 0: CV bus 1 modulates node 3's parameter 2".
+// Depth defaults to full and the flags to a bipolar offset, which is what a
+// modulator means unless it is told otherwise (node/patch.h).
+void Console::cmd_mod(uint8_t n, uint32_t now_us){
+    if (n < 5){ put_line("mod <slot> <cv bus> <node> <param> [depth] [flags]"); return; }
+    bool ok[6] = {false, false, false, false, false, false};
+    const uint32_t slot  = arg_uint(1, ok[0]);
+    const uint32_t bus   = arg_uint(2, ok[1]);
+    const uint32_t node  = arg_uint(3, ok[2]);
+    const uint32_t param = arg_uint(4, ok[3]);
+    const uint32_t depth = n > 5 ? arg_uint(5, ok[4]) : 255u;
+    const uint32_t flags = n > 6 ? arg_uint(6, ok[5]) : (uint32_t)(MOD_OFFSET | MOD_BIPOLAR);
+    if (!ok[0] || !ok[1] || !ok[2] || !ok[3]
+     || (n > 5 && !ok[4]) || (n > 6 && !ok[5])){ put_line("mod: not a number"); return; }
+    if (slot >= N_MOD_ROUTE){ put_line("mod: no such slot"); return; }
+    if (bus >= N_CV_BUS){ put_line("mod: no such cv bus"); return; }
+
+    ModRoute route = unused_route();
+    route.bus = (uint8_t)bus;
+    route.target_kind = CC_TARGET_NODE;
+    route.target_index = (uint8_t)node;
+    route.param = (uint16_t)param;
+    route.depth = (uint8_t)(depth > 255 ? 255 : depth);
+    route.flags = (uint8_t)flags;
+    patches.begin_edit();
+    patches.staging().mod_map[slot] = route;
+    if (patches.commit_mod_route((uint8_t)slot, now_us) != APPLY_OK){
+        put_line("mod: refused");
+        return;
+    }
+    put_line("routed");
+}
+
+void Console::cmd_unmod(uint8_t n, uint32_t now_us){
+    if (n < 2){ put_line("unmod <slot>"); return; }
+    bool ok = false;
+    const uint32_t slot = arg_uint(1, ok);
+    if (!ok || slot >= N_MOD_ROUTE){ put_line("unmod: no such slot"); return; }
+    patches.begin_edit();
+    patches.staging().mod_map[slot] = unused_route();
+    patches.commit_mod_route((uint8_t)slot, now_us);
+    put_line("forgotten");
 }
 
 void Console::cmd_map(uint8_t n, uint32_t now_us){

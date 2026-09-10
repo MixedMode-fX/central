@@ -3,6 +3,7 @@
 
 #include "node/node.h"
 #include "clock/trigger_pulse.h"
+#include "clock/musical_division.h"
 
 // The master clock in note values (#4).
 //
@@ -46,32 +47,11 @@ class Metronome : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
 
-        // Note values, slowest first, indexed from 1 so that a stored 0 can
-        // still mean the descriptor's default (param.h). A "bar" is four
-        // quarter notes: the module has no time signature, and 4/4 is the
-        // only reading of "bar" that needs no other information.
-        enum Division : uint8_t {
-            DIV_8_BARS = 1,
-            DIV_4_BARS = 2,
-            DIV_2_BARS = 3,
-            DIV_BAR    = 4,
-            DIV_HALF   = 5,
-            DIV_QUARTER = 6,
-            DIV_EIGHTH = 7,
-            DIV_16TH   = 8,
-            DIV_32ND   = 9,
-            DIV_64TH   = 10,
-            DIVISIONS  = 10,
-        };
-
-        // What the note value is worth. Straight is the value itself, dotted
-        // is half as long again, a triplet is three in the space of two.
-        enum Feel : uint8_t {
-            FEEL_STRAIGHT = 1,
-            FEEL_DOTTED   = 2,
-            FEEL_TRIPLET  = 3,
-            FEELS         = 3,
-        };
+        // The note values and the feels are MusicalDivision / MusicalFeel
+        // (clock/musical_division.h). They were declared here until the LFO
+        // needed the same list: two algorithms offering "1/16 triplet" must
+        // mean the same number of subticks by it, so the vocabulary is shared
+        // rather than copied.
 
         explicit Metronome(const NodeConfig& config);
 
@@ -102,8 +82,8 @@ class Metronome : public Node{
 
         uint8_t reset_in;
         uint8_t out;
-        uint8_t div;             // Division
-        uint8_t how;             // Feel
+        uint8_t div;             // MusicalDivision
+        uint8_t how;             // MusicalFeel
         uint8_t width_param;     // as stored, for get_param
         uint32_t div_period;     // subticks between two pulses
         uint32_t next_fire;

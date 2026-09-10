@@ -343,6 +343,8 @@ export function describeMapping(app, m) {
   return { from, to: describeTarget(app, m), range: describeRange(app, m) };
 }
 
+// Shared by a controller binding and a modulation route: they reach the same
+// target space, so "what does this move" has to read the same for both.
 export function describeTarget(app, m) {
   switch (m.targetKind) {
     case P.CcTargetKind.CC_TARGET_NODE: {
@@ -415,6 +417,52 @@ export function mappingPanel(app) {
       return all;
     })(),
     caps ? null : el('p', { class: 'hint' }, 'Connect a module to edit bindings.'));
+}
+
+// --- modulation routes ------------------------------------------------------
+//
+// Routes are made on the canvas and their depth and mode are edited beside the
+// parameter they move, which is where somebody asking "what is happening to
+// this control" is looking. This is the other half: every route in one table,
+// including the ones that have nowhere to be drawn - a route to the clock's
+// tempo reaches something that is not a node, so no block carries it, and
+// without this it would be in the patch and invisible.
+export function modulationPanel(app) {
+  const slots = app.patch.modMap ?? [];
+  const limit = app.device?.capabilities?.modRoutes;
+  const used = slots.map((r, slot) => ({ r, slot })).filter(({ r }) => r && r.bus !== P.NO_BUS);
+  if (!used.length && !limit) return null;
+
+  const summary = used.length
+    ? el('div', { class: 'table-scroll' }, el('table', { class: 'bindings' },
+        el('thead', {}, el('tr', {},
+          el('th', {}, 'slot'), el('th', {}, 'signal'), el('th', {}, 'moves'),
+          el('th', {}, 'how'), el('th', {}, ''))),
+        el('tbody', {}, used.map(({ r, slot }) => el('tr', {},
+          el('td', {}, String(slot)),
+          el('td', {}, `CV bus ${r.bus}`),
+          el('td', {}, describeTarget(app, r)),
+          el('td', {}, [
+            (r.flags & P.ModFlags.MOD_MODE_MASK) === P.ModMode.MOD_OFFSET ? 'offset' : 'absolute',
+            `${Math.round((r.depth ?? 255) * 100 / 255)} %`,
+            r.flags & P.ModFlags.MOD_BIPOLAR ? 'bipolar' : 'unipolar',
+            r.flags & P.ModFlags.MOD_INVERT ? 'inverted' : null,
+            r.min === 0 && r.max === 0 ? 'full range' : `${r.min}–${r.max}`,
+          ].filter(Boolean).join(' · ')),
+          el('td', {}, el('button', {
+            class: 'ghost danger', onclick: () => app.clearModRoute(slot),
+          }, 'clear')))))))
+    : el('p', { class: 'hint' },
+        'Nothing is modulated. Add an LFO or a sample and hold on the canvas and drag its '
+        + 'control outlet onto a block.');
+
+  return el('section', { class: 'panel' },
+    el('h2', {}, 'modulation'),
+    el('p', { class: 'hint' },
+      `${used.length} of ${limit ?? slots.length} routes in use. A route points a control `
+      + 'signal at a parameter, the way a controller binding points a knob at one — and it '
+      + 'is part of the patch in exactly the same way.'),
+    summary);
 }
 
 function mappingEditor(app, slot, existing) {

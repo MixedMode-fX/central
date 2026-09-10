@@ -58,7 +58,22 @@ function usedBuses(buses, count) {
 // drum_sequencer.h, and the flag bits are NoteStep's.
 const SEQ_HEADER = 16, SEQ_LANE_STRIDE = 8;
 const NOTE_FLAG = { rest: 0x20, tie: 0x40, accent: 0x80 };
-const GATE_SEQUENCERS = ['StepSequencer', 'EuclidianSequencer', 'RandomSequencer'];
+// Which algorithms take a `seq` block, and which of the four layouts each
+// one's block is packed into. `packSeq` below dispatches on this table and
+// `schema.js` describes the same table, so the sugar cannot be documented for
+// an algorithm that does not take it - and an algorithm renamed in the
+// firmware fails the check in `app/test/app.test.mjs` rather than quietly
+// losing its patterns.
+export const SEQ_FAMILY = Object.freeze({
+  NoteSequencer: 'note',
+  PolySequencer: 'note',
+  DrumSeqGate: 'drum',
+  DrumSeqMidi: 'drum',
+  Metronome: 'metronome',
+  StepSequencer: 'gate',
+  EuclidianSequencer: 'gate',
+  RandomSequencer: 'gate',
+});
 
 // A sequencer's scale, as the 12-bit mask the firmware stores. Omitted - or
 // named "global" - is an empty mask, and an empty mask is the firmware's
@@ -120,7 +135,10 @@ export function packSeq(name, seq, params) {
     u8(1, directionOf(seq.direction));
   };
 
-  if (name === 'NoteSequencer' || name === 'PolySequencer') {
+  const family = SEQ_FAMILY[name];
+  if (!family) throw new Error(`${name} takes no "seq" block; use "params"`);
+
+  if (family === 'note') {
     const voices = name === 'PolySequencer' ? P.NOTE_SEQ_VOICES : 1;
     const stride = voices * 2 + 2;
     header();
@@ -150,7 +168,7 @@ export function packSeq(name, seq, params) {
     return;
   }
 
-  if (name === 'DrumSeqGate' || name === 'DrumSeqMidi') {
+  if (family === 'drum') {
     header();
     u8(2, seq.gate ?? 0);
     const lanes = seq.lanes ?? [];
@@ -173,7 +191,7 @@ export function packSeq(name, seq, params) {
     return;
   }
 
-  if (name === 'Metronome') {
+  if (family === 'metronome') {
     // Not a sequencer at all any more - a clock node - but this is where a
     // patch file says what a node's controls mean in words, and "1/8" and
     // "triplet" are exactly that.
@@ -183,7 +201,7 @@ export function packSeq(name, seq, params) {
     return;
   }
 
-  if (GATE_SEQUENCERS.includes(name)) {
+  if (family === 'gate') {
     header();
     u8(2, seq.width ?? 0);
     if (name === 'StepSequencer' && seq.hits !== undefined) {
@@ -194,10 +212,7 @@ export function packSeq(name, seq, params) {
     if (name === 'EuclidianSequencer') { u8(3, seq.pulses ?? 0); u8(4, seq.rotation ?? 0); }
     if (name === 'RandomSequencer') { u8(3, seq.density ?? 0); u8(4, seq.seed ?? 0); }
     (seq.prob ?? []).forEach((p, i) => u8(8 + i, p));
-    return;
   }
-
-  throw new Error(`${name} takes no "seq" block; use "params"`);
 }
 
 export function toPatchJson(patch, globals, device) {

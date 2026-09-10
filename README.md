@@ -1526,8 +1526,9 @@ Three things keep it honest, and all three are checked in CI:
   firmware's validator" is a check, not a hope. The patch library, the runtime
   seam and every example patch are checked the same way.
 
-**Three tabs, and a place to go and listen.** *patch*, *MIDI* and *library* are
-the three things there are to edit; **play** is the module *running*, and it
+**Four tabs, and a place to go and listen.** *patch*, *MIDI* and *library* are
+the three things there are to edit and *schema* is what the module can tell
+something else about itself; **play** is the module *running*, and it
 sits at the top of the page next to *connect a module* because those two
 buttons answer the same question — which module am I listening to, the one in
 this page or the one on the cable. Play is the emulator's surface: the LEDs and
@@ -1669,6 +1670,24 @@ had a control.
 the JSON is the same patch in words — named algorithms, jacks numbered from 1,
 sequencers as patterns rather than bytes — and it imports back, so it is a door
 in both directions rather than a one-way export.
+
+**And the format describes itself, so something else can write one.** The
+editor can build any patch this module runs because it asked the module what it
+has; anything else — a language model, a script — gets the JSON above and not
+one of the rules it obeys, and answers with an algorithm this firmware has not
+got or a bus that does not exist. The *schema* tab turns what the device
+reported into a **JSON Schema** of that same JSON: every algorithm by name,
+each with its connections in the firmware's own order, each parameter with its
+range, its enum options and its default, the sequencer sugar, and the module's
+real jack, bus and node counts. Nothing about any algorithm is written in the
+app, so the schema describes the module in front of you — including one running
+firmware the app has never heard of. The page hands it over inside a prompt,
+with a worked example and optionally the patch on screen, and takes the answer
+back in a box that loads it into the editor: an answer that validates is one
+`fromPatchJson` builds and the firmware's own validator then judges, which is
+what makes "it validates" mean anything. CI checks the schema against the real
+firmware both ways round — every example patch passes it, and a patch the
+firmware refuses fails it.
 
 **The layout is built for a phone first.** With the module in the page there is
 no cable to plug in, so a phone is a fully working app and the only one an

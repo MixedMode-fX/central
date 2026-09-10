@@ -48,10 +48,10 @@ jobs:
 Nothing had to be added to the firmware for this: `emulator/README.md` has the
 seam it hangs on.
 
-## Three tabs, and a place to go and listen
+## Four tabs, and a place to go and listen
 
-The app is three tabs — **patch**, **MIDI**, **library** — and one button at
-the top of the page beside *connect a module*: **play**.
+The app is four tabs — **patch**, **MIDI**, **library**, **schema** — and one
+button at the top of the page beside *connect a module*: **play**.
 
 That is the shape because *play* is not a fourth thing to edit. It is the
 module *running*, and the question it answers is the same one *connect a
@@ -181,6 +181,10 @@ clock and Program Change recall.
 **library** — where a patch lives: this browser, a file, or the module's own
 preset slots.
 
+**schema** — what the module can do, in a form something that is not this
+editor can read: a JSON Schema of the patch format, generated from the attached
+module, inside a prompt to copy. See below.
+
 ## Two ways of reading one patch
 
 The list of cards says what a patch *contains*. It cannot say what a patch
@@ -278,6 +282,41 @@ nothing plugged in, export it, and send it with any standard SysEx librarian.
 named MIDI ports, bus indices per domain. It is readable, diffable and
 pasteable, it carries the globals and the controller bindings too, and it
 imports back, so it is a door in both directions rather than a one-way export.
+
+## A schema, so something else can write the patch
+
+The editor can build any patch this module runs, because everything it knows
+about the machine it read *from* the machine: the algorithms, their inlets and
+outlets and domains, every parameter's range and meaning, the bus counts. Ask
+anything else for a patch — a language model, a script, a person with a text
+editor — and none of that is available to it. The `.json` above shows the
+*shape* of a patch and not one of the rules it has to obey, so what comes back
+names an algorithm this firmware has not got, or writes a bus that does not
+exist, or a parameter twice its range.
+
+The **schema** tab is the answer, and it is the same answer the rest of the app
+gives: ask the module. `schema.js` turns what the device reported into a **JSON
+Schema** of the JSON dialect above — every algorithm by name, each with its
+connections in the firmware's own order and each parameter with its range, its
+enum options and what its default is; the sequencer sugar; the module's real
+jack, bus, node and slot counts. Nothing about any algorithm is written there,
+so the schema describes *the module in front of you*, including one running
+firmware this app has never heard of.
+
+The page hands it over inside a prompt — the rules that are about the machine
+rather than about JSON, a worked example patch, optionally the patch on screen
+as the thing to change — with the answer coming back to a box on the same page
+that loads it into the editor. Which is the point of describing the format the
+library tab already reads rather than inventing one for the occasion: an answer
+that validates is an answer the editor can load, and loading it puts it through
+`fromPatchJson` and then the firmware's own validator, which is what decides
+whether a patch is real.
+
+`app/test/app.test.mjs` checks the schema against the module both ways round:
+every example patch has to pass it, and a patch the firmware refuses — an
+algorithm it has not got, a bus past the last one, a parameter above its range,
+more nodes than fit — has to fail it. A schema that is wrong about the firmware
+is a bug nothing on the page would show.
 
 ## An external controller
 
@@ -455,6 +494,8 @@ app/
     perform.js        the play surface, and everything that updates live
     scope.js          the two time views: the scope and the piano roll
     library.js        the library tab
+    schema.js         the patch format as a JSON Schema, read from the module,
+                      and the page that hands it over in a prompt
     storage.js        localStorage: the library, the working patch, the monitor
     examples.js       the example patches, in that JSON
     controller.js     a MIDI controller plugged into this computer

@@ -56,7 +56,7 @@ export const EXAMPLES = {
   'Channel split and merge': {
     about: 'Two input ports read the same DIN with different channel filters; a third merges the USB host into the first bus. Change the channel under play and watch which port the MIDI log says received it.',
     patch: {
-      midi_in: [{ sources: ['DIN 1'], channel: 1, bus: 0 }, { sources: ['DIN 1'], channel: 2, bus: 1 }, { sources: ['USB Host'], channel: 0, bus: 0 }],
+      midi_in: [{ sources: ['DIN 1'], channel: 1, bus: 0 }, { sources: ['DIN 1'], channel: 2, bus: 1 }, { sources: ['USB host'], channel: 0, bus: 0 }],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }, { targets: ['USB 2'], channel: 0, bus: 1 }],
     },
   },

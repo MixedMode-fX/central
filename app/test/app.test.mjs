@@ -24,10 +24,11 @@ import assert from 'node:assert/strict';
 import * as P from '../src/protocol.js';
 import * as codec from '../src/codec.js';
 import { Library, toBase64, fromBase64, ago } from '../src/storage.js';
-import { fromPatchJson, toPatchJson } from '../src/patchjson.js';
+import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/patchjson.js';
 import { validate } from '../src/validate.js';
 import { SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS } from '../src/names.js';
 import { EXAMPLES } from '../src/examples.js';
+import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/schema.js';
 import { EmbeddedModule } from '../src/module.js';
 import { slider } from '../src/views.js';
 import { Listener, gateHits } from '../src/audio.js';
@@ -477,6 +478,227 @@ await test('a route with no block to land on is still listed', async () => {
             'a clock route has nowhere to be drawn, so the table is where it lives');
 });
 
+// --- the patch format, as a schema -------------------------------------------
+//
+// `schema.js` turns what the device reported into a JSON Schema, so that
+// something which is not this editor - a language model, a script - can write
+// a patch this editor will load. Two things could go wrong with that and only
+// one of them is visible: the schema could be *wrong about the firmware*, and
+// nothing on the page would show it. So it is checked here against the real
+// module, both ways round - every example patch has to pass it, and a patch
+// the firmware would refuse has to fail it.
+//
+// The checker below is deliberately small: it understands exactly the keywords
+// `schema.js` emits and throws on a `$ref` that does not resolve, rather than
+// pulling in a validator this app does not otherwise need. A keyword added to
+// the generator and not to this list would quietly stop being checked, which
+// is why the generator's own vocabulary is written out here.
+const KEYWORDS = new Set([
+  '$schema', '$id', '$ref', '$defs', 'title', 'description', 'type', 'enum', 'const',
+  'minimum', 'maximum', 'minItems', 'maxItems', 'maxLength', 'prefixItems', 'items',
+  'properties', 'required', 'additionalProperties', 'allOf', 'anyOf', 'oneOf', 'if', 'then',
+]);
+
+const isType = (type, value) => ({
+  object: value !== null && typeof value === 'object' && !Array.isArray(value),
+  array: Array.isArray(value),
+  string: typeof value === 'string',
+  boolean: typeof value === 'boolean',
+  integer: Number.isInteger(value),
+  number: typeof value === 'number',
+  null: value === null,
+}[type] ?? false);
+
+function schemaProblems(schema, value, root = schema, at = 'the patch') {
+  if (schema === true || schema === undefined) return [];
+  if (schema === false) return [`${at}: is not allowed here`];
+  for (const key of Object.keys(schema)) {
+    if (!KEYWORDS.has(key)) throw new Error(`${at}: the checker does not know the keyword "${key}"`);
+  }
+  const found = [];
+  const bad = (why) => found.push(`${at}: ${why}`);
+
+  if (schema.$ref) {
+    const target = schema.$ref.replace(/^#\//, '').split('/').reduce((o, key) => o?.[key], root);
+    if (!target) throw new Error(`${at}: ${schema.$ref} is not in the schema`);
+    found.push(...schemaProblems(target, value, root, at));
+  }
+  const types = schema.type === undefined ? null : [schema.type].flat();
+  if (types && !types.some((type) => isType(type, value))) bad(`should be ${types.join(' or ')}`);
+  if ('const' in schema && value !== schema.const) bad(`should be ${JSON.stringify(schema.const)}`);
+  if (schema.enum && !schema.enum.includes(value)) bad(`is not one of ${schema.enum.join(', ')}`);
+  if (typeof value === 'number') {
+    if (schema.minimum !== undefined && value < schema.minimum) bad(`${value} is below ${schema.minimum}`);
+    if (schema.maximum !== undefined && value > schema.maximum) bad(`${value} is above ${schema.maximum}`);
+  }
+  if (typeof value === 'string' && schema.maxLength !== undefined && value.length > schema.maxLength) {
+    bad(`is longer than ${schema.maxLength}`);
+  }
+  if (Array.isArray(value)) {
+    if (schema.minItems !== undefined && value.length < schema.minItems) bad(`needs ${schema.minItems} entries`);
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) bad(`holds at most ${schema.maxItems}`);
+    value.forEach((item, i) => {
+      const sub = schema.prefixItems?.[i] ?? schema.items;
+      if (sub !== undefined) found.push(...schemaProblems(sub, item, root, `${at}[${i}]`));
+    });
+  }
+  if (isType('object', value)) {
+    for (const key of schema.required ?? []) if (!(key in value)) bad(`has no "${key}"`);
+    for (const [key, item] of Object.entries(value)) {
+      const sub = schema.properties?.[key];
+      if (sub === undefined) {
+        if (schema.properties && schema.additionalProperties === false) bad(`has no property "${key}"`);
+        continue;
+      }
+      found.push(...schemaProblems(sub, item, root, `${at}.${key}`));
+    }
+  }
+  for (const sub of schema.allOf ?? []) found.push(...schemaProblems(sub, value, root, at));
+  if (schema.anyOf && !schema.anyOf.some((sub) => !schemaProblems(sub, value, root, at).length)) {
+    bad('matches none of the alternatives');
+  }
+  if (schema.oneOf) {
+    const matched = schema.oneOf.filter((sub) => !schemaProblems(sub, value, root, at).length).length;
+    if (matched !== 1) bad(`matches ${matched} of the alternatives, not one`);
+  }
+  if (schema.if && !schemaProblems(schema.if, value, root, at).length) {
+    found.push(...schemaProblems(schema.then, value, root, at));
+  }
+  return found;
+}
+
+// The schema is only worth anything if a patch that passes it is a patch that
+// runs, and the examples are the patches this repository already asserts the
+// firmware accepts. So they are the fixture: anything the schema refuses here
+// is the schema being wrong about the module, not the patch being wrong.
+await test('every example patch passes the schema read from the module', async () => {
+  const { module } = await instantiate();
+  const schema = patchSchema(await connected(module));
+  for (const [name, example] of Object.entries(EXAMPLES)) {
+    const problems = schemaProblems(schema, example.patch);
+    assert.deepEqual(problems, [], `${name}: ${problems.join('; ')}`);
+  }
+});
+
+// And the other direction, which is the half that matters for a patch written
+// by something that has only read the schema: each of these is refused by the
+// firmware, so each has to be refused here.
+await test('the schema refuses what the firmware refuses', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const schema = patchSchema(device);
+  const caps = device.capabilities;
+  const refuses = (why, patch) => {
+    const problems = schemaProblems(schema, patch);
+    assert.ok(problems.length, `${why} passed the schema`);
+    // The same patch, at the firmware: the schema must not be refusing
+    // something the module would have taken.
+    let refused = false;
+    try {
+      const built = fromPatchJson(patch, device);
+      refused = validate(device, built.patch).length > 0;
+    } catch { refused = true; }
+    assert.ok(refused, `${why} is refused by the schema but accepted by the firmware`);
+  };
+
+  refuses('an algorithm this firmware does not have',
+          { nodes: [{ algo: 'Reverb' }] });
+  refuses('a gate bus past the last one',
+          { nodes: [{ algo: 'Metronome', out: [caps.gateBuses] }] });
+  refuses('a parameter above its range',
+          { nodes: [{ algo: 'Metronome', params: [200] }] });
+  refuses('a jack the panel does not have',
+          { gate_ports: [{ port: caps.jacks + 1, dir: 'out', bus: 0 }] });
+  refuses('more nodes than the module holds',
+          { nodes: Array.from({ length: caps.nodes + 1 }, () => ({ algo: 'NOT', in: [0], out: [0] })) });
+  refuses('a MIDI port that is not on this module',
+          { midi_in: [{ sources: ['DIN 9'], channel: 0, bus: 0 }] });
+
+  // A `seq` block is sugar for one algorithm's parameter layout, so offering
+  // it to an algorithm that has none is a patch nobody can pack.
+  const problems = schemaProblems(schema, { nodes: [{ algo: 'NOT', seq: { length: 4 } }] });
+  assert.ok(problems.length, 'a seq block on a logic gate passed the schema');
+});
+
+// The names in the schema are the ones on the panel, because a file written
+// against it should read like the module - but the loader has always been
+// forgiving about case and spacing, and about the firmware's own enum names.
+// The examples are written in the canonical spelling now that a schema says
+// what canonical is, so this is what keeps the forgiving path covered.
+await test('a MIDI port is read however it is spelled', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const mask = (name) => fromPatchJson(
+    { midi_in: [{ sources: [name], channel: 0, bus: 0 }] }, device).patch.midiIn[0].sourceMask;
+  const canonical = mask('USB host');
+  assert.equal(mask('USB Host'), canonical, 'case matters, and it should not');
+  assert.equal(mask('usb_host'), canonical, 'spacing matters, and it should not');
+  assert.equal(mask('HOST_1'), canonical, 'the firmware\'s own name for the port is not accepted');
+  assert.throws(() => mask('DIN 9'), /no MIDI port/, 'a port that does not exist was accepted');
+});
+
+// The sugar is a table in `patchjson.js` and a set of branches here, and both
+// name algorithms as strings. A rename in the firmware would leave a patch
+// file quietly losing its pattern, so the names are checked against the
+// registry rather than against each other.
+await test('every algorithm the sequencer sugar names is one the module has', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const known = device.algorithms.filter(Boolean).map((d) => d.name);
+  for (const name of Object.keys(SEQ_FAMILY)) {
+    assert.ok(known.includes(name), `patchjson.js packs a "seq" block for ${name}, which this firmware has not`);
+  }
+  const schema = patchSchema(device);
+  const branches = schema.properties.nodes.items.allOf;
+  assert.equal(branches.length, known.length, 'an algorithm is missing its branch in the schema');
+  for (const d of device.algorithms.filter(Boolean)) {
+    const branch = branches.find((b) => b.if.properties.algo.const === d.name);
+    assert.ok(branch, `${d.name} is not in the schema`);
+    const takesSeq = branch.then.properties.seq !== false;
+    assert.equal(takesSeq, Boolean(SEQ_FAMILY[d.name]),
+                 `${d.name}: the schema and patchjson.js disagree about the "seq" block`);
+  }
+});
+
+// What the page actually hands over is the prompt, not the schema: a schema
+// with no worked example and no statement of what the buses are is a wall.
+await test('the prompt carries the schema, the example and this module\'s shape', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  assert.ok(EXAMPLES[WORKED_EXAMPLE], `the prompt's worked example "${WORKED_EXAMPLE}" is not in examples.js`);
+  const prompt = promptText(device, { patch: null });
+  assert.ok(prompt.includes(schemaText(device).trim()), 'the prompt does not carry the schema');
+  assert.ok(prompt.includes(EXAMPLES[WORKED_EXAMPLE].about), 'the prompt does not carry the worked example');
+  assert.ok(prompt.includes(`${device.capabilities.jacks} jacks`), 'the prompt does not say what this module is');
+  // And the patch on screen, when the page is asked for it.
+  const mine = JSON.stringify({ nodes: [{ algo: 'NOT', in: [0], out: [1] }] }, null, 2);
+  assert.ok(promptText(device, { patch: mine }).includes(mine), 'the prompt drops the patch it was given');
+});
+
+// The page itself. There is no browser here, so what is checked is that it
+// builds from a device and says the two things a first visit needs: that this
+// is where the prompt is, and - with no module - why there is nothing to copy.
+await test('the schema tab builds, and says so when there is no module', async () => {
+  const { schemaTab } = await import('../src/schema.js');
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const words = (node) => [node?.text ?? '', ...(node?.children ?? []).map(words)].flat().join(' ');
+
+  const empty = withDom(() => schemaTab({ device: null }));
+  assert.match(words(empty), /none is attached/, 'a page with no module has to say why it is empty');
+
+  const app = {
+    device, schemaWithPatch: true,
+    patchJson: () => JSON.stringify({ nodes: [{ algo: 'NOT', in: [0], out: [1] }] }, null, 2),
+    isOpen: () => false, setOpen: () => {}, render: () => {},
+  };
+  const page = withDom(() => schemaTab(app));
+  const text = words(page);
+  assert.match(text, /copy the prompt/, 'the prompt cannot be copied from this page');
+  assert.match(text, new RegExp(`${device.algorithms.filter(Boolean).length} algorithms`),
+               'the page does not say how much of the module the schema covers');
+});
+
 // --- the slider guard -------------------------------------------------------
 
 // The event sequences below are the ones a phone actually produces - they were
@@ -555,7 +777,7 @@ await test('the built page contains every module, with nothing left to import', 
   const code = bundle('app.js');
   for (const name of ['app.js', 'module.js', 'storage.js', 'perform.js', 'controller.js',
                       'audio.js', 'drums.js', 'library.js', 'scope.js', 'views.js', 'midi.js',
-                      'protocol.js']) {
+                      'schema.js', 'protocol.js']) {
     assert.ok(code.includes(`__define('${name}'`), `${name} is not in the build`);
   }
   // Nothing may be left that a browser would try to fetch: the built page is
@@ -1291,13 +1513,15 @@ function fakeDocument() {
     createElement(tag) {
       const listeners = new Map();
       return {
-        tag, nodeType: 1, className: '', attrs: {}, value: '',
+        // Children are kept rather than dropped, so a test can read the words
+        // a panel put on the page. Nothing here lays anything out.
+        tag, nodeType: 1, className: '', attrs: {}, value: '', children: [],
         setAttribute(key, value) { this.attrs[key] = String(value); if (key === 'value') this.value = String(value); },
         addEventListener(type, fn) {
           if (!listeners.has(type)) listeners.set(type, []);
           listeners.get(type).push(fn);
         },
-        append() {},
+        append(...kids) { this.children.push(...kids); },
         fire(type, event = {}) { for (const fn of listeners.get(type) ?? []) fn({ type, ...event }); },
       };
     },

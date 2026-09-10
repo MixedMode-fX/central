@@ -40,6 +40,7 @@ enum AlgorithmId : uint8_t {
     ALGO_MIDI_TO_CV   = 30,
     ALGO_CV_TO_NOTE   = 31,
     ALGO_CV_TO_GATE   = 32,
+    ALGO_TURING       = 33,
 };
 
 enum ConfigError : uint8_t {

@@ -129,7 +129,7 @@ await test('a full quota is reported, not swallowed', async () => {
   assert.ok(library.available, 'the probe write fits');
   const bytes = codec.encodePatch(codec.emptyPatch(), codec.emptyGlobals());
   assert.throws(() => library.save({ name: 'too big', bytes, nodes: 0 }),
-                /Delete one, or export it to a file/);
+                /delete a patch, or export it to a file/);
   // The working patch is autosaved on every edit, so it must never throw: a
   // full quota may not be allowed to break editing.
   library.saveWorking({ id: null, name: 'working', bytes });

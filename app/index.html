@@ -168,7 +168,6 @@
   /* --- boxes --- */
   .caps { color: var(--dim); font-size: .85rem; margin-bottom: 1rem; }
   .hint { color: var(--dim); font-size: .85rem; }
-  .summary { color: var(--dim); font-size: .9rem; margin: 0 0 .8rem; }
   .error, .problems, .notes {
     border-radius: var(--radius); padding: .7rem .8rem; margin-bottom: 1rem; border: 1px solid;
   }
@@ -602,12 +601,7 @@
 
 <div id="app"></div>
 
-<noscript>
-  This app is a JavaScript application: it runs the module's own firmware, compiled to
-  WebAssembly, in this page. With scripting off you can still configure a module through
-  its serial console, or send it a <code>.syx</code> patch file with any standard SysEx
-  librarian.
-</noscript>
+<noscript>This app needs JavaScript.</noscript>
 
 <!-- Where the build puts the module, base64, so the built page opens from a
      file:// URL with nothing serving it. A page served next to mmmc.wasm

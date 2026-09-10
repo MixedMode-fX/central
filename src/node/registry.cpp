@@ -23,6 +23,7 @@
 #include "algorithm/util/cv_to_gate.h"
 #include "algorithm/modulator/turing.h"
 #include "algorithm/midi/harmony.h"
+#include "algorithm/sequencer/automaton.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -61,6 +62,7 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &CvToGate::descriptor,
     &Turing::descriptor,
     &Harmony::descriptor,
+    &Automaton::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

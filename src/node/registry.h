@@ -42,6 +42,7 @@ enum AlgorithmId : uint8_t {
     ALGO_CV_TO_GATE   = 32,
     ALGO_TURING       = 33,
     ALGO_HARMONY      = 34,
+    ALGO_AUTOMATON    = 35,
 };
 
 enum ConfigError : uint8_t {

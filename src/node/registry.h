@@ -37,6 +37,7 @@ enum AlgorithmId : uint8_t {
     ALGO_LFO          = 27,
     ALGO_SAMPLE_HOLD  = 28,
     ALGO_SLEW         = 29,
+    ALGO_MIDI_TO_CV   = 30,
 };
 
 enum ConfigError : uint8_t {

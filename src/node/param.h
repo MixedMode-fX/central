@@ -90,5 +90,9 @@ inline uint8_t param_effective(const ParamDescriptor& d, uint8_t stored){
 // Shared option-name tables, so two algorithms naming the same enum agree.
 extern const char* const PARAM_DIRECTION_NAMES[5];   // StepEngine::Direction
 extern const char* const PARAM_SCALE_NAMES[15];      // ScaleId
+// NotePriorityRule (midi/held_notes.h). Options are indexed from the
+// parameter's own minimum, so the one table serves a parameter numbered from
+// zero and one numbered from one.
+extern const char* const PARAM_PRIORITY_NAMES[3];
 
 #endif

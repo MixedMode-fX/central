@@ -5,9 +5,9 @@
 static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
-static const char* const MODE_NAMES[3] = {"lowest", "highest", "latest"};
 static const ParamDescriptor PARAMS[1] = {
-    {"mode", 0, 2, 0, PARAM_ENUM, MODE_NAMES},
+    {"mode", NOTE_PRIORITY_LOWEST, NOTE_PRIORITY_LATEST, NOTE_PRIORITY_LOWEST,
+     PARAM_ENUM, PARAM_PRIORITY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 1, PARAMS}};
 
@@ -40,28 +40,17 @@ NotePriority::NotePriority(const NodeConfig& config) :
     held(), sounding()
 {}
 
-uint8_t NotePriority::winner() const {
-    switch (mode){
-        case PRIORITY_HIGH:   return held.highest();
-        case PRIORITY_LATEST: return held.latest();
-        default:              return held.lowest();
-    }
-}
-
 void NotePriority::follow(BusManager& bus){
-    const uint8_t want = winner();
+    const uint8_t want = held.winner((NotePriorityRule)mode);
     if (want == playing) return;
     if (playing != HeldNotes::NONE){
         sounding.release(bus, out, playing);
         playing = HeldNotes::NONE;
     }
     if (want == HeldNotes::NONE) return;
-    for (uint8_t i = 0; i < held.count(); i++){
-        const HeldNote& h = held.at(i);
-        if (h.note != want) continue;
-        if (sounding.emit(bus, out, want, want, h.velocity, h.channel)) playing = want;
-        return;
-    }
+    const HeldNote* h = held.find(want);
+    if (h == nullptr) return;
+    if (sounding.emit(bus, out, want, want, h->velocity, h->channel)) playing = want;
 }
 
 void NotePriority::process(BusManager& bus, uint32_t){

@@ -17,6 +17,7 @@
 #include "algorithm/midi/note_quantise.h"
 #include "algorithm/midi/probability.h"
 #include "algorithm/midi/arpeggiator.h"
+#include "algorithm/midi/midi_to_cv.h"
 
 void setUp() {}
 // The module's key is process-wide state (midi/global_scale.h), so every test
@@ -152,6 +153,42 @@ static void test_held_notes_repeat_updates_in_place() {
 // The panic path emits note-offs and nothing else. The original called the
 // note-off *path*, which re-triggered the next priority note - so the panic
 // routine sent note-ons.
+// The one place that answers "which held note wins", and the one lookup that
+// finds a note once it has been chosen. Two algorithms lean on these, so they
+// are tested here rather than only through whichever of them happens to run.
+static void test_held_notes_answers_the_priority_rules_and_finds_a_note() {
+    HeldNotes held;
+    HeldNote evicted = {0, 0, 0};
+    bool did = false;
+
+    // Nothing held has one answer, whatever the rule.
+    for (uint8_t rule = 0; rule < NOTE_PRIORITY_RULES; rule++) {
+        TEST_ASSERT_EQUAL(HeldNotes::NONE, held.winner((NotePriorityRule)rule));
+    }
+
+    held.add(60, 100, 1, evicted, did);
+    held.add(67, 90, 2, evicted, did);
+    held.add(64, 80, 3, evicted, did);
+    TEST_ASSERT_EQUAL(60, held.winner(NOTE_PRIORITY_LOWEST));
+    TEST_ASSERT_EQUAL(67, held.winner(NOTE_PRIORITY_HIGHEST));
+    TEST_ASSERT_EQUAL(64, held.winner(NOTE_PRIORITY_LATEST));
+
+    // A chosen note comes back with everything it arrived with.
+    const HeldNote* found = held.find(67);
+    TEST_ASSERT_NOT_NULL(found);
+    TEST_ASSERT_EQUAL(90, found->velocity);
+    TEST_ASSERT_EQUAL(2, found->channel);
+    TEST_ASSERT_NULL(held.find(72));
+    TEST_ASSERT_TRUE(held.contains(64));
+    TEST_ASSERT_FALSE(held.contains(72));
+
+    // And both parameter numberings land on the rule they name.
+    TEST_ASSERT_EQUAL(held.winner(NOTE_PRIORITY_HIGHEST),
+                      held.winner((NotePriorityRule)NotePriority::PRIORITY_HIGH));
+    TEST_ASSERT_EQUAL(held.winner(NOTE_PRIORITY_HIGHEST),
+                      held.winner((NotePriorityRule)(MidiToCv::PRIORITY_HIGHEST - 1)));
+}
+
 static void test_release_all_emits_only_note_offs() {
     BusManager bus;
     SoundingNotes sounding;
@@ -1003,6 +1040,342 @@ static void test_arpeggiator_gate_length_releases_early() {
 }
 
 // ---------------------------------------------------------------------------
+// MidiToCV: a note stream leaving as pitch, gate, velocity, mod and a trigger
+// ---------------------------------------------------------------------------
+
+// The buses the rig patches, one per outlet. Pitch and gate share index 0 in
+// their own domains, which is legal and is what a real patch looks like.
+static const uint8_t CV_PITCH_BUS = 0;
+static const uint8_t CV_GATE_BUS = 0;
+static const uint8_t CV_VELOCITY_BUS = 1;
+static const uint8_t CV_MOD_BUS = 2;
+static const uint8_t CV_TRIGGER_BUS = 1;
+
+struct CvVoice {
+    int16_t pitch;
+    bool gate;
+    int16_t velocity;
+    int16_t mod;
+    bool trigger;
+};
+
+static NodeConfig cv_config() {
+    NodeConfig c = node_config(ALGO_MIDI_TO_CV);
+    c.in_bus[0] = 0;
+    c.out_bus[0] = CV_PITCH_BUS;
+    c.out_bus[1] = CV_GATE_BUS;
+    c.out_bus[2] = CV_VELOCITY_BUS;
+    c.out_bus[3] = CV_MOD_BUS;
+    c.out_bus[4] = CV_TRIGGER_BUS;
+    return c;
+}
+
+// One pass, and what the five outlets carried when it was over.
+static CvVoice run_cv_pass(BusManager& bus, MidiToCv& node, uint32_t now_us = 0) {
+    bus.swap();
+    node.process(bus, now_us);
+    bus.swap();
+    return CvVoice{bus.cv_read(CV_PITCH_BUS), bus.gate_read(CV_GATE_BUS),
+                   bus.cv_read(CV_VELOCITY_BUS), bus.cv_read(CV_MOD_BUS),
+                   bus.gate_read(CV_TRIGGER_BUS)};
+}
+
+// What the node should put on the pitch bus for a note, at the default range
+// of ten octaves from C2: full scale over 120 semitones, so a semitone is
+// 4096/120 and the assertions below are written in semitones rather than in
+// bus units nobody would recognise.
+static int16_t semitones_above_base(int32_t semitones, uint8_t range = MidiToCv::DEFAULT_RANGE) {
+    const int32_t per_semitone = ((int32_t)CV_FULL << 8) / (12 * (int32_t)range);
+    return (int16_t)cv_clamp_unipolar((semitones * per_semitone) >> 8);
+}
+
+static MidiEvent bend_to(uint16_t value, uint8_t channel = 1) {
+    return MidiEvent{MIDI_PITCH_BEND, channel, (uint8_t)(value & 0x7F), (uint8_t)((value >> 7) & 0x7F)};
+}
+static MidiEvent cc(uint8_t controller, uint8_t value, uint8_t channel = 1) {
+    return MidiEvent{MIDI_CONTROL_CHANGE, channel, controller, value};
+}
+
+static void test_midi_to_cv_pitch_is_an_octave_per_range_step() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    MidiToCv node(c);
+
+    // The base note sits at the bottom of the range.
+    bus.note_write(0, on(MidiToCv::DEFAULT_BASE));
+    TEST_ASSERT_EQUAL_INT16(0, run_cv_pass(bus, node).pitch);
+
+    // An octave up is a tenth of full scale, at ten octaves of range.
+    bus.note_write(0, off(MidiToCv::DEFAULT_BASE));
+    bus.note_write(0, on(MidiToCv::DEFAULT_BASE + 12));
+    TEST_ASSERT_EQUAL_INT16(semitones_above_base(12), run_cv_pass(bus, node).pitch);
+    TEST_ASSERT_INT16_WITHIN(1, CV_FULL / 10, run_cv_pass(bus, node).pitch);
+
+    // Five octaves up is half of it.
+    bus.note_write(0, off(MidiToCv::DEFAULT_BASE + 12));
+    bus.note_write(0, on(MidiToCv::DEFAULT_BASE + 60));
+    TEST_ASSERT_INT16_WITHIN(1, CV_HALF, run_cv_pass(bus, node).pitch);
+
+    // Halving the range doubles the interval: the same note, twice as high on
+    // the bus, and it moves under the held note rather than at the next one.
+    TEST_ASSERT_TRUE(node.set_param(1, 5));
+    TEST_ASSERT_EQUAL_INT16(semitones_above_base(60, 5), run_cv_pass(bus, node).pitch);
+}
+
+static void test_a_note_below_the_base_clamps_at_the_bottom() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    MidiToCv node(c);
+
+    bus.note_write(0, on(MidiToCv::DEFAULT_BASE - 12));
+    const CvVoice under = run_cv_pass(bus, node);
+    TEST_ASSERT_EQUAL_INT16(0, under.pitch);      // flat, never wrapped to the top
+    TEST_ASSERT_TRUE(under.gate);                 // and still a note
+
+    // Moving the base down puts it back in the range.
+    TEST_ASSERT_TRUE(node.set_param(2, MidiToCv::DEFAULT_BASE - 24));
+    TEST_ASSERT_EQUAL_INT16(semitones_above_base(12), run_cv_pass(bus, node).pitch);
+}
+
+static void test_the_gate_is_up_for_as_long_as_a_key_is_held() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    MidiToCv node(c);
+
+    TEST_ASSERT_FALSE(run_cv_pass(bus, node).gate);
+    bus.note_write(0, on(60));
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 1000).gate);
+    for (uint32_t t = 2000; t < 100000; t += 1000) {
+        TEST_ASSERT_TRUE(run_cv_pass(bus, node, t).gate);
+    }
+    bus.note_write(0, off(60));
+    TEST_ASSERT_FALSE(run_cv_pass(bus, node, 101000).gate);
+
+    // The pitch outlives the gate: an envelope in its release must not be
+    // dragged to another note by the key coming up.
+    TEST_ASSERT_EQUAL_INT16(semitones_above_base(60 - MidiToCv::DEFAULT_BASE),
+                            run_cv_pass(bus, node, 102000).pitch);
+}
+
+static void test_the_priority_decides_which_held_note_the_voice_takes() {
+    const uint8_t modes[3] = {MidiToCv::PRIORITY_LOWEST, MidiToCv::PRIORITY_HIGHEST,
+                              MidiToCv::PRIORITY_LATEST};
+    const uint8_t expected[3] = {60, 67, 64};        // played 60, then 67 and 64
+    for (uint8_t m = 0; m < 3; m++) {
+        BusManager bus;
+        NodeConfig c = cv_config();
+        c.params[0] = modes[m];
+        MidiToCv node(c);
+
+        bus.note_write(0, on(60));
+        run_cv_pass(bus, node);
+        TEST_ASSERT_EQUAL(60, node.voice());
+
+        bus.note_write(0, on(67));
+        bus.note_write(0, on(64));
+        const CvVoice v = run_cv_pass(bus, node, 1000);
+        TEST_ASSERT_EQUAL(expected[m], node.voice());
+        TEST_ASSERT_EQUAL_INT16(semitones_above_base((int32_t)expected[m] - MidiToCv::DEFAULT_BASE),
+                                v.pitch);
+        TEST_ASSERT_TRUE(v.gate);
+    }
+}
+
+static void test_releasing_a_key_hands_the_voice_back_without_a_new_attack() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    c.params[0] = MidiToCv::PRIORITY_LATEST;
+    MidiToCv node(c);
+
+    bus.note_write(0, on(60));
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 1000).trigger);          // the attack
+    bus.note_write(0, on(64));
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 20000).trigger);         // the second attack
+
+    // The upper key comes up. The voice goes back to the note still held -
+    // and that is a legato move, not a strike, so nothing retriggers.
+    bus.note_write(0, off(64));
+    const CvVoice back = run_cv_pass(bus, node, 40000);
+    TEST_ASSERT_EQUAL(60, node.voice());
+    TEST_ASSERT_EQUAL_INT16(semitones_above_base(60 - MidiToCv::DEFAULT_BASE), back.pitch);
+    TEST_ASSERT_TRUE(back.gate);
+    TEST_ASSERT_FALSE(back.trigger);
+}
+
+static void test_the_trigger_is_a_fixed_width_pulse_on_every_attack() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    c.params[5] = 10;                                  // 10 ms
+    MidiToCv node(c);
+
+    TEST_ASSERT_FALSE(run_cv_pass(bus, node, 0).trigger);
+    bus.note_write(0, on(60));
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 1000).trigger);
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 9000).trigger);
+    TEST_ASSERT_FALSE(run_cv_pass(bus, node, 12000).trigger);
+    // ... while the gate is still up: the two outlets answer different
+    // questions and only one of them has ended.
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 13000).gate);
+
+    // A key struck under the one already down fires it again.
+    bus.note_write(0, on(72));
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 14000).trigger);
+}
+
+static void test_retrigger_mode_drops_the_gate_for_one_pass() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    c.params[0] = MidiToCv::PRIORITY_LATEST;
+    c.params[4] = MidiToCv::GATE_RETRIGGER;
+    MidiToCv node(c);
+
+    bus.note_write(0, on(60));
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 1000).gate);       // nothing to re-gate yet
+    bus.note_write(0, on(64));
+    TEST_ASSERT_FALSE(run_cv_pass(bus, node, 2000).gate);      // the re-gate
+    TEST_ASSERT_TRUE(run_cv_pass(bus, node, 3000).gate);       // and back up, one pass later
+    TEST_ASSERT_EQUAL(64, node.voice());
+
+    // In legato - the default - the same two keys never drop it.
+    BusManager legato_bus;
+    NodeConfig legato_config = cv_config();
+    legato_config.params[0] = MidiToCv::PRIORITY_LATEST;
+    MidiToCv legato(legato_config);
+    legato_bus.note_write(0, on(60));
+    TEST_ASSERT_TRUE(run_cv_pass(legato_bus, legato, 1000).gate);
+    legato_bus.note_write(0, on(64));
+    TEST_ASSERT_TRUE(run_cv_pass(legato_bus, legato, 2000).gate);
+}
+
+static void test_pitch_bend_moves_a_held_note_by_the_range_set() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    MidiToCv node(c);
+
+    bus.note_write(0, on(60));
+    const int16_t centre = run_cv_pass(bus, node).pitch;
+    TEST_ASSERT_EQUAL_INT16(semitones_above_base(60 - MidiToCv::DEFAULT_BASE), centre);
+
+    // Two semitones up at full travel, by default.
+    bus.note_write(0, bend_to(16383));
+    TEST_ASSERT_INT16_WITHIN(1, semitones_above_base(60 - MidiToCv::DEFAULT_BASE + 2),
+                             run_cv_pass(bus, node).pitch);
+    // ... and two down at the bottom.
+    bus.note_write(0, bend_to(0));
+    TEST_ASSERT_INT16_WITHIN(1, semitones_above_base(60 - MidiToCv::DEFAULT_BASE - 2),
+                             run_cv_pass(bus, node).pitch);
+    // Back to the centre, exactly: a wheel at rest is not a detune.
+    bus.note_write(0, bend_to(MidiToCv::BEND_CENTRE));
+    TEST_ASSERT_EQUAL_INT16(centre, run_cv_pass(bus, node).pitch);
+
+    // A wider range is the same deflection, further.
+    bus.note_write(0, bend_to(16383));
+    TEST_ASSERT_TRUE(node.set_param(3, 12));
+    TEST_ASSERT_INT16_WITHIN(1, semitones_above_base(60 - MidiToCv::DEFAULT_BASE + 12),
+                             run_cv_pass(bus, node).pitch);
+
+    // And zero is a converter that ignores the wheel altogether.
+    TEST_ASSERT_TRUE(node.set_param(3, 0));
+    TEST_ASSERT_EQUAL_INT16(centre, run_cv_pass(bus, node).pitch);
+}
+
+static void test_velocity_is_taken_at_the_attack_and_held_after_it() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    MidiToCv node(c);
+
+    bus.note_write(0, on(60, 127));
+    TEST_ASSERT_EQUAL_INT16(CV_MAX, run_cv_pass(bus, node).velocity);
+
+    bus.note_write(0, on(64, 64));
+    TEST_ASSERT_EQUAL_INT16((int32_t)64 * CV_MAX / 127, run_cv_pass(bus, node, 1000).velocity);
+
+    // Released, and the level stays where it was: an envelope in its release
+    // is still reading this.
+    bus.note_write(0, off(64));
+    bus.note_write(0, off(60));
+    const CvVoice after = run_cv_pass(bus, node, 2000);
+    TEST_ASSERT_FALSE(after.gate);
+    TEST_ASSERT_EQUAL_INT16((int32_t)64 * CV_MAX / 127, after.velocity);
+}
+
+static void test_the_mod_outlet_follows_the_controller_it_is_pointed_at() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    MidiToCv node(c);
+
+    // The mod wheel, by default.
+    bus.note_write(0, cc(1, 127));
+    TEST_ASSERT_EQUAL_INT16(CV_MAX, run_cv_pass(bus, node).mod);
+    bus.note_write(0, cc(1, 0));
+    TEST_ASSERT_EQUAL_INT16(0, run_cv_pass(bus, node).mod);
+    bus.note_write(0, cc(1, 64));
+    TEST_ASSERT_EQUAL_INT16((int32_t)64 * CV_MAX / 127, run_cv_pass(bus, node).mod);
+
+    // Another controller is ignored until it is the one asked for, and the
+    // level the wheel left is kept when it changes.
+    bus.note_write(0, cc(74, 127));
+    TEST_ASSERT_EQUAL_INT16((int32_t)64 * CV_MAX / 127, run_cv_pass(bus, node).mod);
+    TEST_ASSERT_TRUE(node.set_param(7, 74));
+    TEST_ASSERT_EQUAL_INT16((int32_t)64 * CV_MAX / 127, run_cv_pass(bus, node).mod);
+    bus.note_write(0, cc(74, 127));
+    TEST_ASSERT_EQUAL_INT16(CV_MAX, run_cv_pass(bus, node).mod);
+}
+
+static void test_channel_pressure_can_drive_the_mod_outlet_instead() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    c.params[6] = MidiToCv::MOD_PRESSURE;
+    MidiToCv node(c);
+
+    bus.note_write(0, cc(1, 127));                       // the wheel is not the source now
+    TEST_ASSERT_EQUAL_INT16(0, run_cv_pass(bus, node).mod);
+
+    bus.note_write(0, MidiEvent{MIDI_AFTERTOUCH_CHANNEL, 1, 100, 0});
+    TEST_ASSERT_EQUAL_INT16((int32_t)100 * CV_MAX / 127, run_cv_pass(bus, node).mod);
+}
+
+static void test_an_outlet_with_nothing_patched_to_it_is_not_an_error() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    c.out_bus[0] = NO_BUS;                               // no pitch
+    c.out_bus[2] = NO_BUS;                               // no velocity
+    c.out_bus[3] = NO_BUS;                               // no mod
+    c.out_bus[4] = NO_BUS;                               // no trigger
+    TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
+
+    MidiToCv node(c);
+    bus.note_write(0, on(60));
+    const CvVoice v = run_cv_pass(bus, node, 1000);
+    TEST_ASSERT_TRUE(v.gate);                            // the one jack that is patched
+    TEST_ASSERT_EQUAL_INT16(0, v.pitch);                 // and nothing written anywhere else
+    TEST_ASSERT_EQUAL_INT16(0, v.velocity);
+    TEST_ASSERT_FALSE(v.trigger);
+    TEST_ASSERT_EQUAL_INT16(semitones_above_base(60 - MidiToCv::DEFAULT_BASE), node.pitch());
+}
+
+static void test_the_voice_survives_more_keys_than_the_node_can_hold() {
+    BusManager bus;
+    NodeConfig c = cv_config();
+    c.params[0] = MidiToCv::PRIORITY_LOWEST;
+    MidiToCv node(c);
+
+    // Past MAX_HELD_NOTES the oldest key is evicted. The voice is re-derived
+    // from what is held, so the eviction can move it but can never strand it.
+    for (uint8_t i = 0; i < MAX_HELD_NOTES + 4; i++) bus.note_write(0, on((uint8_t)(40 + i)));
+    const CvVoice full = run_cv_pass(bus, node, 1000);
+    TEST_ASSERT_TRUE(full.gate);
+    TEST_ASSERT_EQUAL(MAX_HELD_NOTES, node.held_count());
+    TEST_ASSERT_EQUAL(44, node.voice());                 // the four oldest were evicted
+
+    for (uint8_t i = 0; i < MAX_HELD_NOTES + 4; i++) bus.note_write(0, off((uint8_t)(40 + i)));
+    const CvVoice empty = run_cv_pass(bus, node, 2000);
+    TEST_ASSERT_FALSE(empty.gate);
+    TEST_ASSERT_EQUAL(0, node.held_count());
+    TEST_ASSERT_EQUAL(HeldNotes::NONE, node.voice());
+}
+
+// ---------------------------------------------------------------------------
 // The rule that governs every modifier: no hanging notes, ever
 // ---------------------------------------------------------------------------
 
@@ -1138,6 +1511,7 @@ int main() {
     RUN_TEST(test_held_notes_empty_has_one_representation);
     RUN_TEST(test_held_notes_overflow_reports_the_evicted_note);
     RUN_TEST(test_held_notes_repeat_updates_in_place);
+    RUN_TEST(test_held_notes_answers_the_priority_rules_and_finds_a_note);
     RUN_TEST(test_release_all_emits_only_note_offs);
     RUN_TEST(test_sounding_notes_refuses_what_it_cannot_release);
     RUN_TEST(test_scale_masks_and_quantisation);
@@ -1170,6 +1544,20 @@ int main() {
     RUN_TEST(test_arpeggiator_hold_replaces_the_chord_rather_than_adding_to_it);
     RUN_TEST(test_arpeggiator_hold_off_drops_only_what_no_key_holds);
     RUN_TEST(test_arpeggiator_hold_inlet_latches_like_the_parameter);
+
+    RUN_TEST(test_midi_to_cv_pitch_is_an_octave_per_range_step);
+    RUN_TEST(test_a_note_below_the_base_clamps_at_the_bottom);
+    RUN_TEST(test_the_gate_is_up_for_as_long_as_a_key_is_held);
+    RUN_TEST(test_the_priority_decides_which_held_note_the_voice_takes);
+    RUN_TEST(test_releasing_a_key_hands_the_voice_back_without_a_new_attack);
+    RUN_TEST(test_the_trigger_is_a_fixed_width_pulse_on_every_attack);
+    RUN_TEST(test_retrigger_mode_drops_the_gate_for_one_pass);
+    RUN_TEST(test_pitch_bend_moves_a_held_note_by_the_range_set);
+    RUN_TEST(test_velocity_is_taken_at_the_attack_and_held_after_it);
+    RUN_TEST(test_the_mod_outlet_follows_the_controller_it_is_pointed_at);
+    RUN_TEST(test_channel_pressure_can_drive_the_mod_outlet_instead);
+    RUN_TEST(test_an_outlet_with_nothing_patched_to_it_is_not_an_error);
+    RUN_TEST(test_the_voice_survives_more_keys_than_the_node_can_hold);
     RUN_TEST(test_transpose_hangs_nothing);
     RUN_TEST(test_note_priority_hangs_nothing);
     RUN_TEST(test_velocity_curve_hangs_nothing);

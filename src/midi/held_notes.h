@@ -29,6 +29,24 @@ struct HeldNote {
     uint8_t channel;
 };
 
+// Which held note a monophonic voice takes. Two algorithms ask this - the
+// `NotePriority` modifier and the `MidiToCV` converter - and a third would be
+// wrong to answer it a fourth way, so the question lives with the store that
+// can answer it rather than in a switch in each of them. Every one of the
+// three answers is wanted by somebody: `lowest` is a bass line, `highest` is a
+// lead, `latest` is what a keyboard player expects.
+//
+// An algorithm's *parameter* is not this enum - the two that have one number
+// their options differently, because a stored zero means the descriptor's
+// default and their defaults differ - but both are defined in terms of these
+// values so the mapping is a compile-time fact rather than a coincidence.
+enum NotePriorityRule : uint8_t {
+    NOTE_PRIORITY_LOWEST  = 0,
+    NOTE_PRIORITY_HIGHEST = 1,
+    NOTE_PRIORITY_LATEST  = 2,
+    NOTE_PRIORITY_RULES   = 3,
+};
+
 class HeldNotes {
     public:
         static constexpr uint8_t NONE = 0xFF;
@@ -50,7 +68,11 @@ class HeldNotes {
 
         uint8_t count() const { return n; }
         bool empty() const { return n == 0; }
-        bool contains(uint8_t note) const;
+        bool contains(uint8_t note) const { return find(note) != nullptr; }
+        // The note as it is held - velocity and channel included - or nullptr
+        // if it is not. What a caller that has chosen a note needs next, and
+        // the reason no algorithm scans `at()` by hand to find one.
+        const HeldNote* find(uint8_t note) const;
 
         // Arrival order: 0 is the oldest note still held.
         const HeldNote& at(uint8_t index) const;
@@ -61,6 +83,8 @@ class HeldNotes {
         uint8_t lowest() const;
         uint8_t highest() const;
         uint8_t latest() const;
+        // Whichever of the three the rule asks for; NONE when nothing is held.
+        uint8_t winner(NotePriorityRule rule) const;
 
     private:
         HeldNote notes[CAPACITY];

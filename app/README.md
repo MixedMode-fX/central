@@ -216,7 +216,7 @@ one is put in the library first rather than dropped.
 The library is this browser, on this device, and nothing leaves it. `.syx` and
 `.json` export are how a patch travels.
 
-It also starts with somewhere to start: eighteen **example patches**, the ones
+It also starts with somewhere to start: twenty-three **example patches**, the ones
 the emulator page used to open with, each exercising one part of the machine
 and saying what to do and what to expect. Loading one is loading a file — it
 arrives unsaved, so nothing you have kept is touched. `test/app.test.mjs` loads

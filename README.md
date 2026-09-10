@@ -188,6 +188,19 @@ changes, which is a legitimate thing to ask for. **Reset wins**: an edge on
 Changing the mode does not clear the output: a mode change is not a reset, and
 silently dropping a gate somebody is holding is worse than either reading.
 
+**`set` is optional too, which makes the node a switch.** The `gate` parameter
+*is* the output level, so with nothing patched into either inlet a latch set
+high sends a high gate and keeps it there — which is the other thing a patch
+wants from a gate and had no way to ask for. Something has to be held open,
+a logic input tied high, a run switch put where a hand can reach it, and none
+of those is a trigger that somebody has to remember to fire. It is one control
+from either end: the parameter moves from the editor, a CC or a modulation
+route, an edge on `set` or `reset` moves the same level, and reading the
+parameter back says what the node is actually doing — so a patch saved with
+the gate up loads with it up. In the timed modes the level is recomputed from
+`set` every pass, so the switch there is a starting value rather than a hold;
+holding one up with nothing patched in is what `latch` is for.
+
 ## Modulators
 
 Modulators write a **CV bus** — the internal control bus described under
@@ -465,7 +478,7 @@ Algorithms available today:
 | Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator` |
 | Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off) |
-| Utility | `GateHold` (latch, toggle, extend or limit a gate) |
+| Utility | `GateHold` (a switch, a latch, a toggle, or a gate of a set length) |
 | Modulators | `LFO`, `SampleHold`, `Slew` (all write a CV bus) |
 
 # Master clock
@@ -580,6 +593,25 @@ either way it is saved with the patch and pushed to the graph by
 `Chord`'s intervals are **steps of that scale**, which is the same thing as
 semitones when the scale is chromatic — so 0 2 4 is a diatonic triad on every
 degree, and the fixed semitone stack it always was when nothing names a key.
+
+**And with nothing patched to its note inlet, `Chord` plays itself.** A voicer
+that needs a keyboard is a voicer that cannot start a patch, and "set the notes
+and let it run" is what a module with no keys attached is for: unpatched, the
+node sounds the tonic triad of the key it is in, at the octave it is given, and
+holds it — no clock, no player, nothing to remember to press. That is exactly
+the shape an `Arpeggiator` downstream wants, because an arpeggiator arpeggiates
+held notes and does not care whose fingers are holding them, so a chord, a
+metronome and an arpeggiator are a complete patch with no input at all.
+
+A held chord is not a frozen one. It is **re-voiced** whenever what it should
+be playing changes — a note-on on the root inlet, the module's key moving under
+it, or any parameter of the voicing being edited — and re-voicing releases every
+note it had sounding from the ledger before sounding the new chord, so editing
+one while it drones cannot strand a note. On a self-playing node the root inlet
+means what `note in` means everywhere else: the whole note rather than only its
+pitch class, and it does not touch the key. That is the difference between a
+sequenced root walking through the chords of one key and one dragging the key
+along behind it, and only the first is a chord progression.
 
 # Code structure
 
@@ -1220,7 +1252,7 @@ it stores is the patch **image** — the same bytes a `.syx` file carries and a
 slot holds, not an object of the app's own shape that would be a third format
 to keep in step with the firmware. Whatever is being edited is written back on
 every change, so a reload picks up where you left off; anything unsaved is put
-in the library before something replaces it. Twenty-two example patches, each
+in the library before something replaces it. Twenty-three example patches, each
 exercising one part of the machine, are there to start from — and CI loads
 every one of them into the real firmware, so an example cannot rot.
 

@@ -101,6 +101,23 @@ export const EXAMPLES = {
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
+  'No input at all: a self-playing chord, arpeggiated, its root moved every bar': {
+    about: 'Nothing is plugged in \u2014 no keyboard, no gate, no MIDI. The chord voicer has nothing patched to its note inlet, so it plays itself: the triad of the key, held indefinitely. A sixteenth-note metronome arpeggiates it up over two octaves, and a four-step note sequencer clocked at one bar walks the root through C minor (i \u2013 VI \u2013 iv \u2013 v), re-voicing the chord each time. The GateHold on jack 2 is the run switch: with nothing patched into it either, its "gate" parameter is the level it sends, and the AND lets the sixteenths through only while it is up. Enable audio under play, then turn that one parameter off and on.',
+    patch: {
+      globals: { scale: 'minor', root: 0 },
+      gate_ports: [{ port: 1, dir: 'out', bus: 2 }, { port: 2, dir: 'out', bus: 1 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
+        { algo: 'Metronome', out: [3], seq: { division: '1 bar' } },
+        { algo: 'GateHold', out: [1], params: [1, 0, 1] },
+        { algo: 'AND', in: [0, 1], out: [2] },
+        { algo: 'NoteSequencer', in: [3], out: [0], seq: { length: 4, root: 48, steps: [0, 5, 3, 4] } },
+        { algo: 'Chord', in: [null, 0], out: [1], params: [2, 2, 4, 0, 0, 0, 0, 0, 0, 4] },
+        { algo: 'Arpeggiator', in: [1, 2], out: [2], params: [0, 2, 60, 0] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
+    },
+  },
   'Euclidean drums: E(3,8), E(5,8), E(2,8) on jacks 1-3 and as notes': {
     about: 'One sixteenth-note metronome advances three Euclidean sequencers in lock-step. Each fires a jack and a note (36, 42, 38). Enable audio under play; jacks 1 to 3 light in turn, and the three lanes are audible as a kit.',
     patch: {

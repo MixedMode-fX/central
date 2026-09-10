@@ -38,7 +38,23 @@
 // output low, in every mode. One rule, stated once, rather than four
 // orderings a user has to discover.
 //
-// Inlet 0 (gate, required): set.
+// **Nothing has to be patched into it.** `set` is optional too, so the node
+// is also a switch: the `gate` parameter *is* the output level, and with no
+// cable on either inlet a latch set high sends a high gate and keeps it
+// there until somebody says otherwise - which is the other thing a patch
+// wants from a gate and had no way to ask for. A patch that needs a jack
+// held open, an envelope kept up or a logic input tied high has one node
+// that does it, rather than a sequencer whose only job is to fire once.
+// It is one control from either end: the parameter moves from the editor, a
+// CC or a modulation route, and an edge on `set` or `reset` moves the same
+// level, so a switch and a cable never disagree about who owns the output.
+//
+// In the timed modes the level is recomputed from `set` every pass, so the
+// switch there is a starting value rather than a hold: `extend` and `limit`
+// are what the input does to a gate, and holding one up with no input is
+// what `latch` is for.
+//
+// Inlet 0 (gate, optional): set.
 // Inlet 1 (gate, optional): reset.
 // Outlet 0 (gate): the held level. Written every pass it is up, because a
 //         gate bus is cleared by the swap - the level is the node's state,
@@ -46,11 +62,14 @@
 //
 // params[0] mode  latch / toggle / extend / limit
 // params[1] hold  milliseconds, for extend and limit (0 -> DEFAULT_HOLD_MS)
+// params[2] gate  the output level itself: 1 raises it, 0 drops it. Read
+//                 back as what the node is *running*, so a patch saved with
+//                 the gate up loads with it up.
 //
-// Live edits (#20): both move at runtime. Changing the mode does not clear
-// the output - a latch turned into a toggle is still up, and the next edge
-// flips it - because a mode change is not a reset and silently dropping a
-// gate somebody is holding is worse than either reading.
+// Live edits (#20): all three move at runtime. Changing the mode does not
+// clear the output - a latch turned into a toggle is still up, and the next
+// edge flips it - because a mode change is not a reset and silently dropping
+// a gate somebody is holding is worse than either reading.
 class GateHold : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -68,6 +87,10 @@ class GateHold : public Node{
         // Long enough to be unmistakably a gate rather than a trigger, and
         // short enough that a user who has not set it yet hears the note stop.
         static constexpr uint8_t DEFAULT_HOLD_MS = 100;
+
+        // params[2]. Indexed like every other parameter; named here because
+        // it is the one a switch writes.
+        static constexpr uint16_t P_GATE = 2;
 
         explicit GateHold(const NodeConfig& config);
 

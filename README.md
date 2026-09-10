@@ -942,6 +942,12 @@ pitch class, and it does not touch the key. That is the difference between a
 sequenced root walking through the chords of one key and one dragging the key
 along behind it, and only the first is a chord progression.
 
+What the module cannot do yet is *choose* that root. Root motion and voicing
+are the two layers of the harmonic stack nothing here owns — see
+[docs/harmony.md](docs/harmony.md) for the design of a harmony family built on
+scale-degree arithmetic, where the circle of fifths is one modulo add and
+modal brightness is the same circle read the other way.
+
 # Code structure
 
 Everything is a `Node`. A node reads and writes bus indices and never names a

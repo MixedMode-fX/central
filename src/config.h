@@ -120,6 +120,16 @@
 // wire or in EEPROM.
 #define N_CC_MAP 32
 
+// Modulation routes a patch can carry.
+//
+// A route binds one CV bus to one parameter (node/patch.h, control/mod_matrix.h).
+// Sixteen is two per CV bus, which is the shape that actually occurs - one
+// modulator reaching several parameters - and costs 16 x sizeof(ModRoute) =
+// 160 bytes of RAM inside Patch. Unused entries are not stored or transmitted
+// at all (patch_codec trims them), so a patch with no modulation pays nothing
+// on the wire or in EEPROM.
+#define N_MOD_ROUTE 16
+
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per
 // second, so ~350 messages/s; five transports at once and a 1 kHz pass rate

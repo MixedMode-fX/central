@@ -9,7 +9,7 @@ import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
 // The port names live with the patch-shape code, because the canvas needs them
 // too and it must not have to reach through the views to get them.
-import { inletName, outletName } from './graph.js';
+import { inletName, outletName, modParamName } from './graph.js';
 export { inletName, outletName };
 
 const el = (tag, attrs = {}, ...children) => {
@@ -223,7 +223,95 @@ export function nodeCard(app, index) {
       el('div', { class: 'port-group' },
         el('h4', {}, outlets.length ? 'writes' : 'writes nothing'), outlets)),
     paramPanel(app, index),
+    modPanel(app, index),
     gridPanel(app, index));
+}
+
+// What is modulating this node, and how much of it.
+//
+// A route is made on the canvas - drag a control signal onto a block and pick
+// a parameter - but *how* it modulates is not something a drag can say, and
+// three of its four fields decide whether the result is a modulation or a
+// mess: how deep, around the set point or instead of it, and which way up.
+// They live here, beside the parameter they move, rather than in a table of
+// routes somewhere else, because "what is happening to this control" is the
+// question somebody is asking when they look at it.
+//
+// Nothing is drawn when nothing is modulating the node: an empty panel on
+// every block would be a section heading repeated thirty-two times. A route to
+// the clock reaches something that is not a node and so has no block to be
+// beside; those live in the modulation table under MIDI control, which lists
+// every route whatever it reaches.
+function modPanel(app, index) {
+  const routes = [];
+  (app.patch.modMap ?? []).forEach((route, slot) => {
+    if (!route || route.bus === P.NO_BUS) return;
+    if (route.targetKind !== P.CcTargetKind.CC_TARGET_NODE || route.targetIndex !== index) return;
+    routes.push({ slot, route });
+  });
+  if (!routes.length) return null;
+
+  return el('div', { class: 'params mod-routes' },
+    el('h4', {}, 'modulation'),
+    routes.map(({ slot, route }) => modRow(app, slot, route)));
+}
+
+function modRow(app, slot, route) {
+  const write = (changed) => {
+    const next = { ...route, ...changed };
+    app.patch.modMap[slot] = next;
+    app.edit(() => app.device.setModRoute(slot, next), 'modulation route');
+    app.render();
+  };
+  const mode = route.flags & P.ModFlags.MOD_MODE_MASK;
+  const name = modParamName(app.device, app.patch, route);
+
+  const modeSelect = el('select', {
+    title: 'offset swings around the value the parameter is set to; '
+         + 'absolute replaces it',
+    onchange: (e) => write({
+      flags: (route.flags & ~P.ModFlags.MOD_MODE_MASK) | Number(e.target.value),
+    }),
+  },
+    el('option', { value: String(P.ModMode.MOD_OFFSET) }, 'offset'),
+    el('option', { value: String(P.ModMode.MOD_ABSOLUTE) }, 'absolute'));
+  modeSelect.value = String(mode);
+
+  // Through `slider`, and on commit rather than on input: `write` re-renders,
+  // which replaces this element - so writing on every input event would pull
+  // the control out from under the finger dragging it. Every other numeric
+  // control in this file is built the same way, for the same reason.
+  const percent = el('span', { class: 'param-value' },
+                     `${Math.round((route.depth ?? 255) * 100 / 255)} %`);
+  const depth = slider({
+    class: 'slider', min: '0', max: '255', step: '1',
+    value: String(route.depth ?? 255),
+    'aria-label': `${name} modulation depth`,
+    title: 'how much of the parameter’s range the signal covers',
+  }, {
+    onInput: (v) => { percent.textContent = `${Math.round(Number(v) * 100 / 255)} %`; },
+    onCommit: (v) => write({ depth: Number(v) }),
+  });
+
+  const flag = (bit, label, why) => {
+    const box = el('input', {
+      type: 'checkbox', class: 'switch',
+      onchange: (e) => write({ flags: e.target.checked ? (route.flags | bit) : (route.flags & ~bit) }),
+    });
+    box.checked = (route.flags & bit) !== 0;
+    return el('label', { class: 'bool', title: why }, box, el('span', {}, label));
+  };
+
+  return el('div', { class: 'param mod-route' },
+    el('span', { class: 'param-name' }, name),
+    el('span', { class: 'param-value dom-CV' }, `CV bus ${route.bus}`),
+    el('div', { class: 'param-controls' }, modeSelect, depth, percent),
+    el('div', { class: 'param-controls' },
+      flag(P.ModFlags.MOD_BIPOLAR, 'bipolar',
+           'read the signal as centred on zero, so it pushes both ways'),
+      flag(P.ModFlags.MOD_INVERT, 'invert', 'turn the signal upside down'),
+      el('button', { class: 'ghost danger', onclick: () => app.clearModRoute(slot) },
+         'unroute')));
 }
 
 // A control per parameter, drawn from the descriptor: a range for a number, a

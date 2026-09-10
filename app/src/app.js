@@ -42,12 +42,14 @@ import { Library, toBase64 } from './storage.js';
 import { el, nodeCard, busUsers } from './views.js';
 import {
   connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
+  modParamName,
 } from './graph.js';
 import { forgetNode } from './layout.js';
 import {
   canvasPanel, canvasInspector, geometry, addBar, busCapacity, ENDPOINTS,
 } from './canvas.js';
-import { routingPanel, globalsPanel, mappingPanel, controllerPanel } from './midi.js';
+import { routingPanel, globalsPanel, mappingPanel, modulationPanel,
+         controllerPanel } from './midi.js';
 import { toPatchJsonText, fromPatchJson } from './patchjson.js';
 import { libraryTab } from './library.js';
 import { EXAMPLES } from './examples.js';
@@ -383,6 +385,13 @@ class App {
       if (m.targetIndex > index) return { ...m, targetIndex: m.targetIndex - 1 };
       return m;
     });
+    // Modulation routes name a node the same way, so they move the same way.
+    this.patch.modMap = (this.patch.modMap ?? []).map((r) => {
+      if (!r || r.targetKind !== P.CcTargetKind.CC_TARGET_NODE) return r;
+      if (r.targetIndex === index) return null;
+      if (r.targetIndex > index) return { ...r, targetIndex: r.targetIndex - 1 };
+      return r;
+    });
     this.sendWhole();
   }
 
@@ -472,6 +481,10 @@ class App {
     const target = applyWrite(this.patch, write);
     if (!target) return;
     const { kind, index, port } = target;
+    if (kind === 'mod') {
+      this.edit(() => this.device.setModRoute(index, port), 'modulation route');
+      return;
+    }
     if (kind === BlockKind.Node) {
       this.edit(() => this.device.setConnection(index, Boolean(write.isOutlet), write.at, write.bus),
                 'connection');
@@ -492,9 +505,24 @@ class App {
   applyPlan(plan) {
     if (!plan) return;
     if (!plan.ok) { this.status = plan.why; this.render(); return; }
+    // Routes before ports, so a source claiming a bus on the way has the
+    // route already pointed at the bus it is about to be put on: the module
+    // validates a route against the *running* patch, and one naming a bus its
+    // source has not reached yet is a route that does nothing until the next
+    // edit.
+    for (const { slot, route } of plan.routes ?? []) this.writeModRoute(slot, route);
     for (const write of plan.writes) this.writePort(write);
     this.status = plan.said;
     this.render();
+  }
+
+  // One modulation route, written to the patch and sent as the one message
+  // that carries it. `null` clears the slot, which is how a route is removed:
+  // a route with no bus is not a route (src/control/mod_matrix.h).
+  writeModRoute(slot, route) {
+    this.patch.modMap ??= Array.from({ length: P.N_MOD_ROUTE }, () => null);
+    this.patch.modMap[slot] = route;
+    this.edit(() => this.device.setModRoute(slot, route), 'modulation route');
   }
 
   // "add", for anything that can be on the canvas: an algorithm by its id, or
@@ -612,6 +640,14 @@ class App {
     this.learnTarget = null;
     this.status = 'learn cancelled';
     this.edit(() => this.device.cancelLearn(), 'learn');
+    this.render();
+  }
+
+  clearModRoute(slot) {
+    const name = this.patch.modMap?.[slot]
+      ? modParamName(this.device, this.patch, this.patch.modMap[slot]) : null;
+    this.writeModRoute(slot, null);
+    this.status = name ? `${name} is not modulated any more` : `modulation ${slot} is clear`;
     this.render();
   }
 
@@ -981,7 +1017,8 @@ class App {
       return el('p', { class: 'hint' },
         'The module is not answering yet, so there is nothing to route MIDI to.');
     }
-    return el('div', {}, controllerPanel(this), mappingPanel(this), routingPanel(this), globalsPanel(this));
+    return el('div', {}, controllerPanel(this), mappingPanel(this), modulationPanel(this),
+                         routingPanel(this), globalsPanel(this));
   }
 
   header() {

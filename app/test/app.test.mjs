@@ -455,6 +455,24 @@ await test('the note values and directions name the firmware\'s own options', as
                    'StepEngine::Direction moved under names.js');
 });
 
+// A route to the clock reaches something that is not a node, so no block on
+// the canvas carries it. It is still in the patch, and a route in the patch
+// that appears nowhere is a route nobody can find or remove.
+await test('a route with no block to land on is still listed', async () => {
+  const { modulationPanel, describeTarget } = await import('../src/midi.js');
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.modMap[0] = {
+    bus: 0, targetKind: P.CcTargetKind.CC_TARGET_CLOCK, targetIndex: 0,
+    param: P.CcClockTarget.CC_CLOCK_TEMPO, min: 0, max: 0, depth: 255, flags: 0,
+  };
+  const app = { patch, device };
+  assert.match(describeTarget(app, patch.modMap[0]), /clock/);
+  assert.ok(withDom(() => modulationPanel(app)),
+            'a clock route has nowhere to be drawn, so the table is where it lives');
+});
+
 // --- the slider guard -------------------------------------------------------
 
 // The event sequences below are the ones a phone actually produces - they were
@@ -900,6 +918,8 @@ await test('a hand-placed block stays where it was put', async () => {
 // honest: the sequences fired at it come from a real browser.
 function fakeDocument() {
   return {
+    // `el()` wraps a bare string child in a text node.
+    createTextNode(text) { return { nodeType: 3, text: String(text) }; },
     createElement(tag) {
       const listeners = new Map();
       return {

@@ -35,6 +35,19 @@
 //                          max               2
 //                          flags             1
 //                      }
+//   n_routes           1   (modulation; unused slots are not stored. Absent
+//                          from a version 2 image, which simply has none)
+//   routes             n_routes x {
+//                          slot              1   which mod_map entry it is
+//                          bus               1
+//                          target_kind       1
+//                          target_index      1
+//                          param             2
+//                          min               2
+//                          max               2
+//                          depth             1
+//                          flags             1
+//                      }
 
 static constexpr size_t HEADER_BYTES = 8;
 static constexpr size_t CRC_BYTES = 2;
@@ -42,6 +55,7 @@ static constexpr size_t PORT_BYTES =
     (size_t)GPIO_N * 2u + (size_t)N_MIDI_IN_NODES * 3u + (size_t)N_MIDI_OUT_NODES * 3u + 1u;
 static constexpr size_t NODE_FIXED_BYTES = 1u + MAX_IN + MAX_OUT + 2u;
 static constexpr size_t MAPPING_BYTES = 13u;
+static constexpr size_t ROUTE_BYTES = 12u;
 
 uint16_t patch_codec::crc16(const uint8_t* data, size_t length){
     uint16_t crc = 0xFFFF;
@@ -57,7 +71,8 @@ uint16_t patch_codec::crc16(const uint8_t* data, size_t length){
 size_t patch_codec::max_encoded_size(){
     return HEADER_BYTES + sizeof(GlobalSettings) + PORT_BYTES
          + (size_t)N_NODE * (NODE_FIXED_BYTES + N_PARAM)
-         + 1u + (size_t)N_CC_MAP * MAPPING_BYTES + CRC_BYTES;
+         + 1u + (size_t)N_CC_MAP * MAPPING_BYTES
+         + 1u + (size_t)N_MOD_ROUTE * ROUTE_BYTES + CRC_BYTES;
 }
 
 // A small append-only writer, so every put is bounds-checked in one place.
@@ -161,6 +176,26 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
         w.u8(m.flags);
     }
 
+    // Modulation routes. Same shape as the bindings above and for the same
+    // reason: only the slots in use are stored, so a patch with no modulation
+    // costs one byte.
+    uint8_t n_routes = 0;
+    for (uint8_t i = 0; i < N_MOD_ROUTE; i++) if (patch.mod_map[i].bus != NO_BUS) n_routes++;
+    w.u8(n_routes);
+    for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
+        const ModRoute& r = patch.mod_map[i];
+        if (r.bus == NO_BUS) continue;
+        w.u8(i);
+        w.u8(r.bus);
+        w.u8(r.target_kind);
+        w.u8(r.target_index);
+        w.u16(r.param);
+        w.u16(r.min);
+        w.u16(r.max);
+        w.u8(r.depth);
+        w.u8(r.flags);
+    }
+
     if (w.overflowed) return CODEC_NO_ROOM;
 
     const size_t payload = w.at - payload_start;
@@ -181,7 +216,8 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
 
     Reader r{in, length, 0, false};
     if (r.u32() != PATCH_MAGIC) return CODEC_BAD_MAGIC;
-    if (r.u8() != PATCH_FORMAT_VERSION) return CODEC_BAD_VERSION;
+    const uint8_t version = r.u8();
+    if (version < PATCH_FORMAT_MIN_VERSION || version > PATCH_FORMAT_VERSION) return CODEC_BAD_VERSION;
     r.u8();                                     // flags
     const uint16_t payload = r.u16();
     if (HEADER_BYTES + (size_t)payload + CRC_BYTES > length) return CODEC_TRUNCATED;
@@ -248,6 +284,30 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
         if (r.underflowed) return CODEC_TRUNCATED;
         if (slot >= N_CC_MAP) return CODEC_TOO_MANY_MAPPINGS;
         patch.cc_map[slot] = m;
+    }
+    if (r.underflowed) return CODEC_TRUNCATED;
+
+    // Version 2 stopped here. `patch` came from empty_patch(), so its routes
+    // are already the unused ones a version 2 image means.
+    if (version < 3 || r.at >= r.length) return CODEC_OK;
+
+    const uint8_t n_routes = r.u8();
+    if (r.underflowed) return CODEC_TRUNCATED;
+    if (n_routes > N_MOD_ROUTE) return CODEC_TOO_MANY_ROUTES;
+    for (uint8_t i = 0; i < n_routes; i++){
+        const uint8_t slot = r.u8();
+        ModRoute route = unused_route();
+        route.bus = r.u8();
+        route.target_kind = r.u8();
+        route.target_index = r.u8();
+        route.param = r.u16();
+        route.min = r.u16();
+        route.max = r.u16();
+        route.depth = r.u8();
+        route.flags = r.u8();
+        if (r.underflowed) return CODEC_TRUNCATED;
+        if (slot >= N_MOD_ROUTE) return CODEC_TOO_MANY_ROUTES;
+        patch.mod_map[slot] = route;
     }
     return r.underflowed ? CODEC_TRUNCATED : CODEC_OK;
 }

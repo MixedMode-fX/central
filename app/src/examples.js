@@ -208,6 +208,49 @@ export const EXAMPLES = {
       nodes: [{ algo: 'AND', in: [0, 1], out: [2] }, { algo: 'OR', in: [0, 1], out: [3] }, { algo: 'XOR', in: [0, 1], out: [4] }, { algo: 'NOT', in: [0], out: [5] }],
     },
   },
+  'Hold a gate up: a trigger latched on jack 1, and stretched on jack 2': {
+    about: 'Every clock source in this module makes a 5 ms trigger, which is right for clocking and useless for holding anything open. GateHold is the missing piece. Jack 1 latches high on the first beat and stays there until you tap jack 8 to reset it; jack 2 gets the same trigger stretched into a 200 ms gate.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 2 }, { port: 8, dir: 'in', bus: 3 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1 bar' } },
+        { algo: 'GateHold', in: [0, 3], out: [1], params: [1, 0] },
+        { algo: 'GateHold', in: [0], out: [2], params: [3, 200] },
+      ],
+    },
+  },
+  'Modulation: an LFO on a control bus opens and closes a sequence': {
+    about: 'The LFO writes a control bus rather than a note bus, and a modulation route points that signal at the sequencer\u2019s probability \u2014 as if a knob somewhere were being turned for you, but at twelve bits rather than a CC\u2019s seven. Enable audio under play and listen to the pattern thin out and fill in over eight bars. On the canvas the modulated parameter is the extra socket on the sequencer; drag the LFO\u2019s outlet onto any block to point it somewhere else.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
+        { algo: 'RandomSequencer', in: [0], out: [1], params: [16, 0, 0, 50, 0] },
+        { algo: 'LFO', out: [0], params: [2, 2, 0, 1, 1, 255, 0, 0, 2] },
+        { algo: 'GateToNote', in: [1], out: [0], params: [48, 100, 1] },
+      ],
+      mod_map: [{ slot: 0, bus: 0, targetKind: 0, targetIndex: 1, param: 3,
+                  min: 0, max: 0, depth: 255, flags: 0 }],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+    },
+  },
+  'Sample and hold: noise clocked into a transposition': {
+    about: 'The oldest modular utility there is. SampleHold takes one reading of its own noise on every trigger and holds it steady between triggers; a modulation route turns that held level into the transposition a sequence is played at, so the melody moves in whole steps rather than sliding. Slew is patched between them \u2014 set its rise and fall above zero under play to hear the steps become glides.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/4' } },
+        { algo: 'Metronome', out: [1], seq: { division: '1/16' } },
+        { algo: 'SampleHold', in: [0], out: [0], params: [3, 1, 5] },
+        { algo: 'Slew', in: [0], out: [1] },
+        { algo: 'NoteSequencer', in: [1], out: [0], seq: { length: 8, root: 60, scale: 'minor', steps: [0, 2, 4, 2, 5, 4, 2, 0] } },
+        { algo: 'Transpose', in: [0], out: [1] },
+      ],
+      mod_map: [{ slot: 0, bus: 1, targetKind: 0, targetIndex: 5, param: 0,
+                  min: 0, max: 12, depth: 255, flags: 0 }],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
   'Feedback: a NOT on its own bus oscillates at half the pass rate': {
     about: 'Buses are double-buffered, so feedback is a one-pass delay rather than a hang. Jack 1 flickers rather than the patch hanging.',
     patch: { gate_ports: [{ port: 1, dir: 'out', bus: 0 }], nodes: [{ algo: 'NOT', in: [0], out: [0] }] },

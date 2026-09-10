@@ -112,6 +112,44 @@ export function validateMapping(device, patch, slot) {
   return found;
 }
 
+// One modulation route, against the same rules MixedModeMaster::route_valid
+// enforces - so a route the editor accepts is never one the module refuses.
+export function validateRoute(device, patch, slot) {
+  const r = patch.modMap?.[slot];
+  if (!r || r.bus === P.NO_BUS) return [];
+  const where = `modulation ${slot}`;
+  const found = [];
+  if (r.bus >= (device.capabilities?.cvBuses ?? P.N_CV_BUS)) {
+    found.push(problem(where, `CV bus ${r.bus} does not exist`));
+  }
+  if (r.min > r.max) found.push(problem(where, 'the low end of the range is above the high end'));
+  // A transport target fires; it does not hold a value, so there is nothing
+  // for a continuous signal to set.
+  if (r.targetKind === P.CcTargetKind.CC_TARGET_TRANSPORT) {
+    found.push(problem(where, 'a modulator cannot press the transport — it is a value, not a button'));
+  } else if (r.targetKind === P.CcTargetKind.CC_TARGET_NODE) {
+    if (r.targetIndex >= patch.nodes.length) {
+      found.push(problem(where, `node ${r.targetIndex} is not in this patch`));
+    } else if (!device.describeParam(patch.nodes[r.targetIndex].algorithmId, r.param)) {
+      found.push(problem(where, `that node has no parameter ${r.param}`));
+    }
+  } else if (r.targetKind === P.CcTargetKind.CC_TARGET_CLOCK) {
+    if (r.param >= 3) found.push(problem(where, 'no such clock target'));
+  } else {
+    found.push(problem(where, 'that target kind is reserved and not built yet'));
+  }
+  // Two writers racing over one value has no defined result. Two modulators
+  // reaching one parameter is two writers on one CV bus, which the bus sums.
+  const clash = (patch.modMap ?? []).findIndex((other, i) => i !== slot && other
+    && other.bus !== P.NO_BUS && other.targetKind === r.targetKind
+    && other.targetIndex === r.targetIndex && other.param === r.param);
+  if (clash >= 0 && clash < slot) {
+    found.push(problem(where, `modulation ${clash} already reaches that parameter — `
+                            + 'sum two modulators on one CV bus instead'));
+  }
+  return found;
+}
+
 export function validate(device, patch) {
   const caps = device.capabilities;
   const found = [];
@@ -137,6 +175,7 @@ export function validate(device, patch) {
 
   patch.nodes.forEach((_, i) => found.push(...validateNode(device, patch, i)));
   patch.ccMap.forEach((_, slot) => found.push(...validateMapping(device, patch, slot)));
+  (patch.modMap ?? []).forEach((_, slot) => found.push(...validateRoute(device, patch, slot)));
   return found;
 }
 

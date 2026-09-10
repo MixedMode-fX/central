@@ -5,20 +5,13 @@ static const Domain IN[1] = {Domain::Gate};
 static const Domain OUT[1] = {Domain::Gate};
 
 // The note values, as an editor lists them: slowest first, so the control
-// reads like a tempo control rather than like a divisor. Indexed from
-// Division's minimum, which is 1 - see the enum for why it is not 0.
-static const char* const DIVISION_NAMES[Metronome::DIVISIONS] = {
-    "8 bars", "4 bars", "2 bars", "1 bar",
-    "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
-};
-
-static const char* const FEEL_NAMES[Metronome::FEELS] = {
-    "straight", "dotted", "triplet",
-};
-
+// reads like a tempo control rather than like a divisor. The names and the
+// table are shared with every other algorithm that offers a note value
+// (clock/musical_division.h); indexed from the enum's minimum, which is 1 -
+// see the enum for why it is not 0.
 static const ParamDescriptor PARAMS[3] = {
-    {"division", Metronome::DIV_8_BARS, Metronome::DIVISIONS, Metronome::DIV_QUARTER, PARAM_ENUM, DIVISION_NAMES},
-    {"feel",     Metronome::FEEL_STRAIGHT, Metronome::FEELS,  Metronome::FEEL_STRAIGHT, PARAM_ENUM, FEEL_NAMES},
+    {"division", DIV_8_BARS,    DIVISIONS, DIV_QUARTER,   PARAM_ENUM, DIVISION_NAMES},
+    {"feel",     FEEL_STRAIGHT, FEELS,     FEEL_STRAIGHT, PARAM_ENUM, FEEL_NAMES},
     {"width",    0, 255, 0, PARAM_MILLIS, nullptr},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 3, PARAMS}};
@@ -31,42 +24,14 @@ const AlgorithmDescriptor Metronome::descriptor = {
     GROUPS, 1, IN_NAMES, OUT_NAMES,
     "The clock as note values: 1/4, 1/8, dotted, triplet. A divider you do not have to count." };
 
-// Subticks in one of each note value. A bar is four quarters (metronome.h
-// says why), so the table is the quarter scaled by powers of two and nothing
-// here depends on a time signature the module does not have.
-static const uint32_t DIVISION_SUBTICKS[Metronome::DIVISIONS] = {
-    CLOCK_SUBTICKS_PER_QUARTER * 32u,      // 8 bars
-    CLOCK_SUBTICKS_PER_QUARTER * 16u,      // 4 bars
-    CLOCK_SUBTICKS_PER_QUARTER * 8u,       // 2 bars
-    CLOCK_SUBTICKS_PER_QUARTER * 4u,       // 1 bar
-    CLOCK_SUBTICKS_PER_QUARTER * 2u,       // 1/2
-    CLOCK_SUBTICKS_PER_QUARTER,            // 1/4
-    CLOCK_SUBTICKS_PER_QUARTER / 2u,       // 1/8
-    CLOCK_SUBTICKS_PER_QUARTER / 4u,       // 1/16
-    CLOCK_SUBTICKS_PER_QUARTER / 8u,       // 1/32
-    CLOCK_SUBTICKS_PER_QUARTER / 16u,      // 1/64
-};
-
-// **Every division on this list is a whole number of subticks, in all three
-// feels.** That is the claim the friendly control rests on: a musician who
-// picks "1/16 triplet" gets the same exactness as one who worked out `/2` on
-// the divider, and never a rate that drifts by a subtick a bar.
-//
-// The fastest value is the binding one. A 1/64 is a quarter over sixteen; a
-// dotted 1/64 is three quarters over thirty-two, and a 1/64 triplet is a
-// quarter over twenty-four. Both are exact when the quarter is a multiple of
-// 96, which at CLOCK_SUBTICK = 24 it is by a factor of six.
-static_assert(CLOCK_SUBTICKS_PER_QUARTER % 96u == 0,
-              "a note value would not be a whole number of subticks; see config.h");
-
 static uint8_t clamp_division(uint8_t stored){
-    if (stored == 0) return Metronome::DIV_QUARTER;      // a zeroed preset is the beat
-    return stored > Metronome::DIVISIONS ? (uint8_t)Metronome::DIVISIONS : stored;
+    if (stored == 0) return DIV_QUARTER;                 // a zeroed preset is the beat
+    return stored > DIVISIONS ? (uint8_t)DIVISIONS : stored;
 }
 
 static uint8_t clamp_feel(uint8_t stored){
-    if (stored == 0) return Metronome::FEEL_STRAIGHT;
-    return stored > Metronome::FEELS ? (uint8_t)Metronome::FEEL_STRAIGHT : stored;
+    if (stored == 0) return FEEL_STRAIGHT;
+    return stored > FEELS ? (uint8_t)FEEL_STRAIGHT : stored;
 }
 
 Metronome::Metronome(const NodeConfig& config) :
@@ -83,9 +48,7 @@ Metronome::Metronome(const NodeConfig& config) :
 }
 
 void Metronome::derive(){
-    uint32_t p = DIVISION_SUBTICKS[div - 1];
-    if (how == FEEL_DOTTED) p = p * 3u / 2u;            // half as long again
-    else if (how == FEEL_TRIPLET) p = p * 2u / 3u;      // three in the space of two
+    const uint32_t p = division_subticks(div, how);
     div_period = p ? p : 1u;
 }
 

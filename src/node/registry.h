@@ -33,6 +33,10 @@ enum AlgorithmId : uint8_t {
     ALGO_POLY_SEQ     = 23,
     ALGO_DRUM_SEQ_GATE = 24,
     ALGO_DRUM_SEQ_MIDI = 25,
+    ALGO_GATE_HOLD    = 26,
+    ALGO_LFO          = 27,
+    ALGO_SAMPLE_HOLD  = 28,
+    ALGO_SLEW         = 29,
 };
 
 enum ConfigError : uint8_t {

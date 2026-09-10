@@ -9,6 +9,8 @@ export const CLOCK_DEFAULT_BPM = 120;
 export const CLOCK_MAX_BPM = 300;
 export const CLOCK_MIN_BPM = 20;
 export const CLOCK_SUBTICK = 24;
+export const CV_BITS = 12;
+export const CV_FULL = 4096;
 export const DRUM_SEQ_LANES = 8;
 export const EEPROM_BYTES = 4284;
 export const GPIO_N = 8;
@@ -22,6 +24,7 @@ export const N_CV_BUS = 8;
 export const N_GATE_BUS = 16;
 export const N_MIDI_IN_NODES = 4;
 export const N_MIDI_OUT_NODES = 4;
+export const N_MOD_ROUTE = 16;
 export const N_NODE = 32;
 export const N_NOTE_BUS = 8;
 export const N_PARAM = 336;
@@ -30,7 +33,7 @@ export const NOTE_SEQ_VOICES = 4;
 export const NRPN_CLOCK_BASE = 10752;
 export const NRPN_RESERVED_BASE = 10784;
 export const NRPN_TRANSPORT_BASE = 10768;
-export const PATCH_FORMAT_VERSION = 2;
+export const PATCH_FORMAT_VERSION = 3;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
 export const PATCH_SLOTS = 4;
@@ -45,7 +48,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 2;
+export const SYSEX_PROTOCOL_VERSION = 3;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 320;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -71,6 +74,8 @@ export const SysexCommand = Object.freeze({
   SYSEX_SET_PATTERN: 26,
   SYSEX_GET_PATTERN: 27,
   SYSEX_GET_CONTROL: 28,
+  SYSEX_SET_MOD_ROUTE: 29,
+  SYSEX_GET_MOD_ROUTE: 30,
   SYSEX_SLOT_SAVE: 32,
   SYSEX_SLOT_LOAD: 33,
   SYSEX_SLOT_ERASE: 34,
@@ -85,6 +90,7 @@ export const SysexCommand = Object.freeze({
   SYSEX_CC_MAP: 82,
   SYSEX_PATTERN: 83,
   SYSEX_CONTROL_VALUE: 84,
+  SYSEX_MOD_ROUTE: 85,
   SYSEX_SLOTS: 99,
   SYSEX_ACK: 112,
   SYSEX_NAK: 113,
@@ -162,6 +168,17 @@ export const CcFlags = Object.freeze({
   CC_PASS_THROUGH: 32,
 });
 
+export const ModMode = Object.freeze({
+  MOD_ABSOLUTE: 0,
+  MOD_OFFSET: 1,
+});
+
+export const ModFlags = Object.freeze({
+  MOD_MODE_MASK: 1,
+  MOD_BIPOLAR: 2,
+  MOD_INVERT: 4,
+});
+
 export const GatePortDirection = Object.freeze({
   GATE_PORT_UNUSED: 0,
   GATE_PORT_IN: 1,
@@ -217,6 +234,10 @@ export const AlgorithmId = Object.freeze({
   ALGO_POLY_SEQ: 23,
   ALGO_DRUM_SEQ_GATE: 24,
   ALGO_DRUM_SEQ_MIDI: 25,
+  ALGO_GATE_HOLD: 26,
+  ALGO_LFO: 27,
+  ALGO_SAMPLE_HOLD: 28,
+  ALGO_SLEW: 29,
 });
 
 export const ScaleId = Object.freeze({

@@ -97,6 +97,9 @@ export function emptyPatch() {
     midiOut: Array.from({ length: P.N_MIDI_OUT_NODES }, () => ({ targetMask: 0, channel: 0, bus: P.NO_BUS })),
     nodes: [],
     ccMap: Array.from({ length: P.N_CC_MAP }, () => null),
+    // Modulation routes: a CV bus reaching a parameter
+    // (src/control/mod_matrix.h). Null is an unused slot, exactly as ccMap.
+    modMap: Array.from({ length: P.N_MOD_ROUTE }, () => null),
   };
 }
 
@@ -214,6 +217,21 @@ export function encodePatch(patch, globals = emptyGlobals()) {
     w.u8(m.flags);
   }
 
+  const routes = (patch.modMap ?? []).map((m, slot) => ({ m, slot }))
+    .filter(({ m }) => m && m.bus !== P.NO_BUS && m.bus !== null && m.bus !== undefined);
+  w.u8(routes.length);
+  for (const { m, slot } of routes) {
+    w.u8(slot);
+    w.u8(m.bus);
+    w.u8(m.targetKind);
+    w.u8(m.targetIndex);
+    w.u16(m.param);
+    w.u16(m.min);
+    w.u16(m.max);
+    w.u8(m.depth);
+    w.u8(m.flags);
+  }
+
   const payload = w.bytes.length - payloadStart;
   w.bytes[6] = payload & 0xff;
   w.bytes[7] = (payload >> 8) & 0xff;
@@ -227,7 +245,10 @@ export function decodePatch(image) {
   const r = new Reader(image);
   if (r.u32() !== P.PATCH_MAGIC) throw new Error('not an MMMC patch (bad magic)');
   const version = r.u8();
-  if (version !== P.PATCH_FORMAT_VERSION) {
+  // Version 2 is read too: it is this format without the modulation block at
+  // the tail, so a patch saved before modulation existed still opens, exactly
+  // as the firmware's own decoder reads it (src/patch/patch_codec.h).
+  if (version < 2 || version > P.PATCH_FORMAT_VERSION) {
     throw new Error(`patch format version ${version}; this app speaks ${P.PATCH_FORMAT_VERSION}`);
   }
   r.u8();                        // flags
@@ -275,6 +296,25 @@ export function decodePatch(image) {
       flags: r.u8(),
     };
     if (slot < P.N_CC_MAP) patch.ccMap[slot] = mapping;
+  }
+
+  if (version >= 3 && r.at < crcAt) {
+    const nRoutes = r.u8();
+    if (nRoutes > P.N_MOD_ROUTE) throw new Error('more modulation routes than the module holds');
+    for (let i = 0; i < nRoutes; i++) {
+      const slot = r.u8();
+      const route = {
+        bus: r.u8(),
+        targetKind: r.u8(),
+        targetIndex: r.u8(),
+        param: r.u16(),
+        min: r.u16(),
+        max: r.u16(),
+        depth: r.u8(),
+        flags: r.u8(),
+      };
+      if (slot < P.N_MOD_ROUTE) patch.modMap[slot] = route;
+    }
   }
 
   return { patch, globals };

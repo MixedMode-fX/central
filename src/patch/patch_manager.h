@@ -89,14 +89,45 @@ class PatchManager {
         // so a mapping to a node that does not exist is refused rather than
         // silently doing nothing when the knob is turned.
         ApplyError commit_cc_map(uint8_t slot, uint32_t now_us);
+        // One modulation route: a CV bus reaching a parameter
+        // (control/mod_matrix.h). Validated against the running patch, so a
+        // route to a node that does not exist - or to a parameter another
+        // route already owns - is refused rather than silently doing nothing
+        // when the modulator moves.
+        ApplyError commit_mod_route(uint8_t slot, uint32_t now_us);
         // Globals only: no node is reconstructed, so a tempo change cannot
-        // restart a sequencer.
-        void set_globals(const GlobalSettings& globals, uint32_t now_us);
+        // restart a sequencer. `persist` is false for a write that will be
+        // made again next pass - see modulate_param below for why that
+        // matters.
+        void set_globals(const GlobalSettings& globals, uint32_t now_us, bool persist = true);
 
         // One live parameter write (#20), mirrored into the active patch
         // image so a save or a dump reports what is running. Marks the store
         // dirty rather than writing: a knob sweep must not cost flash.
         ParamError set_param(uint8_t node_index, uint16_t param_index, uint8_t value, uint32_t now_us);
+
+        // A parameter write from a **modulator**: the node takes the value,
+        // and neither the patch image nor the store is touched.
+        //
+        // Two reasons, and both are bugs if this goes through set_param.
+        //
+        //   * A modulator writes every pass, for ever. set_param marks the
+        //     store dirty, so a running LFO would re-arm the autosave timer
+        //     on every pass and rewrite slot 0 to EEPROM every couple of
+        //     seconds until the module was switched off. That is tens of
+        //     thousands of write cycles a day against a part rated for a
+        //     hundred thousand.
+        //   * The patch image is what reproduces this graph. A modulated
+        //     parameter's *stored* value is the set point a user chose; the
+        //     value it happens to hold right now is the modulator's, and
+        //     mirroring that would mean saving a preset captured whatever
+        //     phase the LFO was at - and an offset route would then take that
+        //     as its new centre and walk the parameter away a save at a time.
+        //
+        // The running value is still readable through
+        // MixedModeMaster::get_node_param, which is what the matrix's
+        // re-anchor rule and #11's GET_PARAM both use.
+        ParamError modulate_param(uint8_t node_index, uint16_t param_index, uint8_t value);
 
         // Once per main loop: the debounced autosave.
         void service(uint32_t now_us);

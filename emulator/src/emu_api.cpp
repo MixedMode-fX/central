@@ -25,6 +25,7 @@
 #include "protocol/sysex_handler.h"
 #include "control/cc_mapper.h"
 #include "control/nrpn.h"
+#include "control/mod_matrix.h"
 #include "led/status_leds.h"
 #include "web_hal.h"
 
@@ -45,6 +46,7 @@ static StatusLeds leds(led_driver);
 static PatchStore store(eeprom);
 static PatchManager patches(master, store, leds);
 static CcMapper cc_map(patches, master);
+static ModMatrix mod_matrix(patches, cc_map);
 static NrpnDecoder nrpn(patches, cc_map);
 static SysexHandler protocol(patches, master, store, leds, midi, cc_map);
 
@@ -133,6 +135,23 @@ EMU_EXPORT void emu_patch_node_out(uint32_t i, uint32_t k, uint32_t bus){
 EMU_EXPORT void emu_patch_node_param(uint32_t i, uint32_t k, uint32_t value){
     if (i < N_NODE && k < N_PARAM) patch.nodes[i].params[k] = (uint8_t)value;
 }
+// One modulation route in the patch under construction: a CV bus reaching a
+// parameter (control/mod_matrix.h). A bus of NO_BUS clears the slot.
+EMU_EXPORT void emu_patch_mod_route(uint32_t slot, uint32_t bus, uint32_t target_kind,
+                                    uint32_t target_index, uint32_t param,
+                                    uint32_t depth, uint32_t flags){
+    if (slot >= N_MOD_ROUTE) return;
+    ModRoute r = unused_route();
+    if (bus < N_CV_BUS){
+        r.bus = (uint8_t)bus;
+        r.target_kind = (uint8_t)target_kind;
+        r.target_index = (uint8_t)target_index;
+        r.param = (uint16_t)param;
+        r.depth = (uint8_t)depth;
+        r.flags = (uint8_t)flags;
+    }
+    patch.mod_map[slot] = r;
+}
 EMU_EXPORT void emu_patch_n_nodes(uint32_t n){ patch.n_nodes = (uint8_t)(n > N_NODE ? N_NODE : n); }
 
 // Loads the patch under construction. Returns LoadError; on success the
@@ -142,6 +161,7 @@ EMU_EXPORT uint32_t emu_load(){
     // protocol reports stay in step with what is running.
     if (patches.apply(patch, globals, 0) != APPLY_OK) return master.last_error();
     cc_map.reset();
+    mod_matrix.reset();
     return LOAD_OK;
 }
 EMU_EXPORT void emu_unload(){ master.unload(); }
@@ -383,6 +403,7 @@ static bool have_beat = false;
 // for itself when to flash would be showing something the module does not do.
 EMU_EXPORT void emu_control_service(uint32_t now_us){
     cc_map.apply(now_us);
+    mod_matrix.apply(master.buses(), now_us);
     protocol.service(now_us);
     nrpn.service(now_us);
     patches.service(now_us);
@@ -403,6 +424,23 @@ EMU_EXPORT uint32_t emu_running_defaults(){ return patches.running_defaults() ? 
 EMU_EXPORT uint32_t emu_const_patch_slots(){ return PATCH_SLOTS; }
 EMU_EXPORT uint32_t emu_const_patch_slot_bytes(){ return PATCH_SLOT_BYTES; }
 EMU_EXPORT uint32_t emu_const_n_cc_map(){ return N_CC_MAP; }
+EMU_EXPORT uint32_t emu_const_n_mod_route(){ return N_MOD_ROUTE; }
+// What a node parameter is *running*, which is not always what the patch was
+// loaded with: a modulation route or a mapped CC moves it between passes.
+EMU_EXPORT int32_t emu_get_param(uint32_t node, uint32_t param){
+    uint8_t value = 0;
+    if (!master.get_node_param((uint8_t)node, (uint16_t)param, value)) return -1;
+    return (int32_t)value;
+}
+EMU_EXPORT uint32_t emu_const_cv_full(){ return CV_FULL; }
+// What a modulation route last wrote, in the target's own units, so the
+// editor can draw a modulated parameter as modulated rather than as a value
+// that will not stay where it is put. -1 when the route has not written.
+EMU_EXPORT int32_t emu_mod_written(uint32_t slot){
+    uint16_t value = 0;
+    if (!mod_matrix.last_written((uint8_t)slot, value)) return -1;
+    return (int32_t)value;
+}
 EMU_EXPORT uint32_t emu_const_control_port(){ return MIDI_CONTROL_PORT; }
 EMU_EXPORT uint32_t emu_const_sysex_manufacturer(){ return SYSEX_MANUFACTURER; }
 EMU_EXPORT uint32_t emu_const_protocol_version(){ return SYSEX_PROTOCOL_VERSION; }

@@ -235,6 +235,46 @@ test('drum sequencers: 16 against 12 on the jacks, and note-offs on a patch swap
   assert.deepEqual(sent.slice(2), [{ target: USB_1, type: NOTE_OFF, d1: 36, d2: 0, channel: 10 }, { target: USB_1, type: NOTE_OFF, d1: 38, d2: 0, channel: 10 }], 'the handover flushed the note-offs');
 });
 
+// The whole modulation path, through the real main-loop order: an LFO writes
+// a CV bus, the matrix reads what it published and writes a parameter, and the
+// divider that parameter belongs to changes rate because of it. Nothing here
+// is a mock - `emu_control_service` is the same three calls `main.cpp` makes.
+test('an LFO on a control bus moves a parameter, and the divider follows', () => {
+  const CC_TARGET_NODE = 0;
+  const MOD_ABSOLUTE = 0;
+
+  // A 1 Hz ramp on CV bus 0, unipolar, driving the divider's amount over its
+  // whole range. The divider is on the master clock, its trigger on jack 0.
+  E.emu_patch_node(0, algo('LFO')); E.emu_patch_node_out(0, 0, 0);
+  E.emu_patch_node_param(0, 0, 3);            // ramp up
+  E.emu_patch_node_param(0, 1, 1);            // free-running
+  E.emu_patch_node_param(0, 2, 10);           // 1 Hz
+  E.emu_patch_node_param(0, 8, 2);            // unipolar
+  E.emu_patch_node(1, algo('ClockDiv')); E.emu_patch_node_out(1, 0, 0);
+  E.emu_patch_node_param(1, 1, 24);
+  E.emu_patch_gate_port(0, GATE_OUT, 0);
+  E.emu_patch_mod_route(0, 0, CC_TARGET_NODE, 1, 1, 255, MOD_ABSOLUTE);
+  assert.equal(E.emu_load(), 0);
+
+  const seen = new Set();
+  let lowest = 255;
+  let highest = 0;
+  for (let t = 0; t < 1000000; t += 1000) {
+    E.emu_control_service(t);
+    E.emu_pass(t);
+    const cv = E.emu_cv(0);
+    assert.ok(cv >= 0 && cv <= 4095, 'a unipolar LFO stays inside twelve bits');
+    seen.add(cv);
+    const amount = E.emu_get_param(1, 1);
+    if (amount < lowest) lowest = amount;
+    if (amount > highest) highest = amount;
+  }
+  // The control signal really is finer than seven bits: a modulator resolved
+  // to 128 steps could not produce this many distinct levels in one cycle.
+  assert.ok(seen.size > 500, `only ${seen.size} distinct control values in a cycle`);
+  assert.ok(lowest <= 4 && highest >= 250, `the sweep covered ${lowest}..${highest}`);
+});
+
 test('unload returns every jack to an input', () => {
   E.emu_patch_gate_port(2, GATE_OUT, 1);
   assert.equal(E.emu_load(), 0);

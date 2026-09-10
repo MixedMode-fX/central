@@ -345,11 +345,14 @@ the bar where the melody changes, because it is the same bit that moved. Two
 independent random sources sound like two random processes; one register
 sounds like a part.
 
-**Reset returns to the trunk**, not to a fresh pattern, so a wander that has
-gone somewhere unmusical is one edge away from the shape it grew out of.
-`seed` is what makes the trunk reproducible: at zero it is drawn from the
-entropy pool so a module does not play the same thing on every power cycle,
-and at anything else from that byte so a preset plays what it was saved with.
+**`seed` decides what the reset inlet means**, and it means one of the two
+things a user wants from that cable. At zero there is no trunk, so reset
+*shreds* — a new pattern out of the entropy pool every time, which is the same
+gesture `RandomSequencer`'s shred inlet is, and the reason a module does not
+play the same thing on every power cycle. At anything else reset *returns to
+the trunk*: the pattern that byte draws, exactly, however far the walk has
+wandered, so a preset plays what it was saved with and a wander that has gone
+somewhere unmusical is one edge away from the shape it grew out of.
 `write` is the hand on the register — `clear` feeds zeros in and empties the
 loop a step at a time, `fill` feeds ones — and neither is a reset: the loop is
 being rewritten while it runs.
@@ -469,6 +472,18 @@ so a dotted-eighth delay under a 1/16 sequence is exact for ever.
 Free-running, it is wall-clock time, which is what an echo that should *not*
 line up with the music needs. An echo already in flight keeps the clock it was
 scheduled on.
+
+**Transposing needs a root, so this node has one.** A scale step is only
+defined against a tonic — the same interval pattern rooted on A and on C are
+different keys — so `root` is the tonic used when this node *names* a scale,
+exactly as `NoteQuantise` has one, and it is ignored when the node follows the
+module's key, because following a key means following its root.
+
+**The pass-through is owned too.** `dry` sends the input on to the outlet, and
+an event this node emitted is an event it owes a note-off for, even one it
+only copied. Without that a patch swap would release the echoes and leave the
+copy sounding, because the note-off the node upstream emits during its own
+`silence()` lands on an intermediate bus nothing is reading any more.
 
 **The articulation is the input's, not a setting.** A repeat is released
 exactly as long after its note-on as the source note was held, because the

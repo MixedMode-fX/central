@@ -5,6 +5,7 @@
 #include "clock/musical_division.h"
 #include "algorithm/sequencer/step_engine.h"
 #include "util/random.h"
+#include "midi/sounding_notes.h"
 
 // A note delay that is also a canon generator: one line becomes an ensemble.
 //
@@ -43,6 +44,14 @@
 // keeps the clock it was scheduled on, so changing the mode does not strand
 // or stampede what is already out there.
 //
+// **Transposing needs a root, so this node has one.** A scale step is only
+// defined relative to a tonic: the same interval pattern rooted on A and on C
+// are different keys, and a delay that assumed C would put its canon a third
+// away in the wrong one. So `root` is here for exactly the reason
+// NoteQuantise has it - it is the tonic used when this node *names* a scale,
+// and it is ignored when the node follows the module's key, because following
+// a key means following its root.
+//
 // **The articulation is the input's, not a setting.** A repeat is released
 // exactly as long after its note-on as the source note was held, because the
 // note-off is scheduled when the source's note-off arrives, at the same
@@ -51,6 +60,15 @@
 // thing it is echoing. The consequence is honest and worth stating - a source
 // that never sends a note-off has echoes that never end, exactly as the
 // source note never ends. The `clear` inlet and a patch swap release them.
+//
+// **The pass-through is owned too.** `dry` sends the input on to the outlet,
+// and an event this node emitted is an event this node owes a note-off for -
+// even one it only copied. Without that, a patch swap releases the *echoes*
+// from the table and leaves the copy sounding, because the note-off the node
+// upstream emits during its own silence() lands on a bus nothing is reading
+// any more. So the copies go through a ledger like every other modifier's,
+// which also swallows a note-off for a note that was never passed and applies
+// the channel override to the copy as well as to the repeats.
 //
 // **A repeat that cannot be released is never emitted.** Each pending echo
 // holds the pitch and channel it will be released with, decided when it was
@@ -77,8 +95,9 @@
 // params[7]  chance    percent that each repeat happens at all
 // params[8]  spread    signed percent the gaps grow by, per repeat
 // params[9]  scale     0 follows the module's key
-// params[10] channel   0 keeps the source's
-// params[11] dry       pass the input through, or emit only the repeats
+// params[10] root      pitch class, when this node names its own scale
+// params[11] channel   0 keeps the source's
+// params[12] dry       pass the input through, or emit only the repeats
 class NoteDelay : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -114,6 +133,7 @@ class NoteDelay : public Node{
         // Diagnostics / tests.
         uint8_t scheduled() const;      // echoes waiting to sound
         uint8_t sounding_count() const; // echoes that have sounded and not been released
+        uint8_t passed_count() const { return passed.count(); }
         uint32_t dropped() const { return drops; }
         // The pitch repeat `k` of `pitch` would be emitted at, or 0xFF when
         // it would leave 0..127. k is 1-based, as the repeats are.
@@ -157,12 +177,14 @@ class NoteDelay : public Node{
         uint8_t chance;
         uint8_t spread;          // as stored, signed
         uint8_t scale;
+        uint8_t root;            // pitch class, when this node names its own scale
         uint8_t channel;
         uint8_t dry;
         uint32_t subtick;        // the master clock's count, when synced
         uint32_t drops;
         EdgeIn clear_in;
         Xorshift32 rng;
+        SoundingNotes passed;      // the dry copies, so a patch swap releases them
         Echo echoes[MAX_ECHOES];
 };
 

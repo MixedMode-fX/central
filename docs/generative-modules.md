@@ -447,6 +447,17 @@ and the code follows the corrected version rather than this document.
   repeat, which is what walking off the grid actually is. A flat offset would
   only have been a slower grid.
 
+- **Two defects only showed up when the patch was actually played.** Sixty
+  seconds of the worked example, run through the WebAssembly build and every
+  note checked against the key, found both. `NoteDelay` had no root of its
+  own, so a node that named its own scale transposed in that scale's interval
+  pattern rooted on C — a third away in the wrong key. And with `dry` passing
+  the input through, it forwarded notes it did not own, so a patch swap
+  released the echoes and left the copy sounding: the note-off from the node
+  upstream lands on an intermediate bus nothing reads any more. Both are the
+  kind of thing a unit test of one node cannot see, because both are about
+  what the node is *connected to*.
+
 - **The node pool had to grow, and that was not free.** The registry passed 32
   algorithms, so a patch could no longer hold one of every algorithm. `N_NODE`
   is 40 — and the ceiling is the NRPN address space rather than memory, so the

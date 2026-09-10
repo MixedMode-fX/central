@@ -349,6 +349,26 @@ static void test_a_new_seed_is_what_the_next_reset_returns_to() {
     TEST_ASSERT_EQUAL_UINT32(twin.pattern(), node.pattern());
 }
 
+// With no seed there is no trunk to return to, so the reset inlet is a
+// shred - the same gesture RandomSequencer's third inlet is, and the reason
+// `seed` is the parameter that decides which of the two the cable means.
+static void test_reset_with_no_seed_shreds_instead() {
+    BusManager bus;
+    NodeConfig c = turing_config(16, 0, 0);
+    Turing node(c);
+    uint32_t now = 0;
+
+    uint32_t seen[8];
+    uint8_t distinct = 0;
+    for (uint8_t i = 0; i < 8; i++){
+        pulse_reset(node, bus, now);
+        bool known = false;
+        for (uint8_t k = 0; k < distinct; k++) if (seen[k] == node.pattern()) known = true;
+        if (!known) seen[distinct++] = node.pattern();
+    }
+    TEST_ASSERT_TRUE_MESSAGE(distinct > 5, "an unseeded reset kept drawing the same pattern");
+}
+
 static void test_two_registers_on_one_seed_agree_and_on_none_do_not() {
     NodeConfig a = turing_config(16, 0, 55);
     NodeConfig b = turing_config(16, 0, 55);
@@ -389,6 +409,7 @@ int main(int, char**) {
     RUN_TEST(test_clear_empties_the_loop_a_step_at_a_time);
     RUN_TEST(test_shortening_a_loop_keeps_the_steps_that_just_played);
     RUN_TEST(test_a_new_seed_is_what_the_next_reset_returns_to);
+    RUN_TEST(test_reset_with_no_seed_shreds_instead);
     RUN_TEST(test_two_registers_on_one_seed_agree_and_on_none_do_not);
     RUN_TEST(test_the_register_never_allocates);
     return UNITY_END();

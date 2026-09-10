@@ -49,7 +49,7 @@ static NodeConfig delay_config(uint8_t sync, uint8_t time_tens, uint8_t repeats,
     c.params[4] = repeats;
     c.params[5] = interval;
     c.params[6] = decay;
-    c.params[11] = NoteDelay::ND_MUTE;      // the repeats alone, so the log is only echoes
+    c.params[12] = NoteDelay::ND_MUTE;      // the repeats alone, so the log is only echoes
     return c;
 }
 
@@ -204,6 +204,48 @@ static void test_no_interval_is_transparent_to_a_chromatic_line() {
     for (uint8_t p = 55; p < 70; p++){
         for (uint8_t k = 1; k <= 3; k++) TEST_ASSERT_EQUAL_UINT8(p, node.pitch_for(p, k));
     }
+}
+
+// A scale step is only defined against a tonic, so a node that names a scale
+// has to name its root too - the same reason NoteQuantise has one. Without it
+// this node would transpose in A minor's interval pattern rooted on C, which
+// is a different key and the wrong canon.
+static void test_a_named_scale_transposes_against_its_own_root() {
+    BusManager bus;
+    NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 2, 1, 100);
+    c.params[9] = SCALE_NATURAL_MINOR;
+    c.params[10] = 9;                            // A
+    NoteDelay named(c);
+
+    // A minor from A3: A B C D E F G. One step above E4 is F4, and two is G4.
+    TEST_ASSERT_EQUAL_UINT8(65, named.pitch_for(64, 1));
+    TEST_ASSERT_EQUAL_UINT8(67, named.pitch_for(64, 2));
+
+    // The module is in C major and this node is not following it, so the key
+    // moving changes nothing.
+    global_scale::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL_UINT8(65, named.pitch_for(64, 1));
+
+    // A node that names no scale follows the key, root and all: in A minor
+    // the same note steps the same way, and in C major it does not.
+    NodeConfig f = delay_config(NoteDelay::ND_FREE, 10, 2, 1, 100);
+    NoteDelay follower(f);
+    global_scale::set(SCALE_NATURAL_MINOR, 9);
+    TEST_ASSERT_EQUAL_UINT8(65, follower.pitch_for(64, 1));
+    global_scale::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL_UINT8(65, follower.pitch_for(64, 1));   // E -> F in C major too
+    TEST_ASSERT_EQUAL_UINT8(64, follower.pitch_for(62, 1));   // D -> E in C major
+    global_scale::set(SCALE_NATURAL_MINOR, 9);
+    TEST_ASSERT_EQUAL_UINT8(64, follower.pitch_for(62, 1));   // D -> E in A minor as well
+    // ... and the two keys disagree where they should: B is the seventh of C
+    // major and the second of A minor.
+    global_scale::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL_UINT8(72, follower.pitch_for(71, 1));   // B -> C
+    global_scale::set(SCALE_NATURAL_MINOR, 9);
+    TEST_ASSERT_EQUAL_UINT8(72, follower.pitch_for(71, 1));   // B -> C here too
+    TEST_ASSERT_EQUAL_UINT8(69, follower.pitch_for(67, 1));   // G -> A in A minor
+    global_scale::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL_UINT8(69, follower.pitch_for(67, 1));   // G -> A in C major
 }
 
 static void test_a_note_outside_the_key_echoes_inside_it() {
@@ -409,7 +451,7 @@ static void test_dry_pass_sends_the_input_through_and_mute_does_not() {
     BusManager bus;
     logged = 0;
     NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 1, 0, 100);
-    c.params[11] = NoteDelay::ND_PASS;
+    c.params[12] = NoteDelay::ND_PASS;
     NoteDelay node(c);
 
     const MidiEvent on = {MIDI_NOTE_ON, 1, 60, 100};
@@ -427,6 +469,67 @@ static void test_dry_pass_sends_the_input_through_and_mute_does_not() {
     uint8_t notes = 0;
     for (uint16_t i = 0; i < logged; i++) if (emitted[i].pitch == 74 && emitted[i].on) notes++;
     TEST_ASSERT_EQUAL_UINT8(0, notes);
+}
+
+// The pass-through is this node's to release. Without that, a patch swap
+// releases the echoes from the table and leaves the dry copy sounding,
+// because the note-off the node upstream emits during its own silence() lands
+// on an intermediate bus that nothing is reading any more - which is exactly
+// what a Metronome, a CvToNote and a NoteDelay in a row is.
+static void test_a_patch_swap_releases_the_copy_as_well_as_the_echoes() {
+    BusManager bus;
+    logged = 0;
+    NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 2, 0, 100);
+    c.params[12] = NoteDelay::ND_PASS;
+    NoteDelay node(c);
+
+    const MidiEvent on = {MIDI_NOTE_ON, 1, 60, 100};
+    pass(node, bus, 0, &on, 0);
+    TEST_ASSERT_EQUAL_UINT8(1, node.passed_count());
+    run(node, bus, 1000, 150);                   // the first echo has sounded
+    TEST_ASSERT_EQUAL_UINT8(1, node.sounding_count());
+
+    node.silence(bus);
+    bus.swap();
+    uint8_t offs = 0;
+    for (uint8_t i = 0; i < bus.note_count(NOTE_OUT); i++){
+        TEST_ASSERT_TRUE(is_note_off(bus.note_read(NOTE_OUT, i)));
+        offs++;
+    }
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(2, offs, "the copy or the echo was left sounding");
+    TEST_ASSERT_EQUAL_UINT8(0, node.passed_count());
+}
+
+static void test_a_note_off_for_a_note_that_was_never_passed_is_swallowed() {
+    BusManager bus;
+    logged = 0;
+    NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 2, 0, 100);
+    c.params[12] = NoteDelay::ND_PASS;
+    NoteDelay node(c);
+
+    // Half a phrase - the note-off of something played before this node was
+    // in the patch. A verbatim pass-through would send it on and release a
+    // note somebody else owns.
+    const MidiEvent off = {MIDI_NOTE_OFF, 1, 60, 0};
+    pass(node, bus, 0, &off, 0);
+    TEST_ASSERT_EQUAL_UINT16(0, logged);
+}
+
+static void test_the_channel_override_moves_the_copy_too() {
+    BusManager bus;
+    logged = 0;
+    NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 1, 0, 100);
+    c.params[11] = 7;
+    c.params[12] = NoteDelay::ND_PASS;
+    NoteDelay node(c);
+
+    const MidiEvent on = {MIDI_NOTE_ON, 1, 60, 100};
+    pass(node, bus, 0, &on, 0);
+    run(node, bus, 1000, 200);
+    TEST_ASSERT_TRUE(logged >= 2);
+    for (uint16_t i = 0; i < logged; i++){
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(7, emitted[i].channel, "an event kept the source's channel");
+    }
 }
 
 static void test_the_delay_never_allocates() {
@@ -455,6 +558,7 @@ int main(int, char**) {
     RUN_TEST(test_decay_quietens_each_repeat_and_stops_when_it_runs_out);
     RUN_TEST(test_the_interval_is_scale_steps_so_a_canon_stays_in_key);
     RUN_TEST(test_no_interval_is_transparent_to_a_chromatic_line);
+    RUN_TEST(test_a_named_scale_transposes_against_its_own_root);
     RUN_TEST(test_a_note_outside_the_key_echoes_inside_it);
     RUN_TEST(test_an_echo_off_the_end_of_the_keyboard_is_a_rest);
     RUN_TEST(test_spread_makes_each_gap_longer_than_the_last);
@@ -465,6 +569,9 @@ int main(int, char**) {
     RUN_TEST(test_a_patch_swap_releases_every_echo);
     RUN_TEST(test_an_echo_that_cannot_be_released_is_never_emitted);
     RUN_TEST(test_dry_pass_sends_the_input_through_and_mute_does_not);
+    RUN_TEST(test_a_patch_swap_releases_the_copy_as_well_as_the_echoes);
+    RUN_TEST(test_a_note_off_for_a_note_that_was_never_passed_is_swallowed);
+    RUN_TEST(test_the_channel_override_moves_the_copy_too);
     RUN_TEST(test_the_delay_never_allocates);
     return UNITY_END();
 }

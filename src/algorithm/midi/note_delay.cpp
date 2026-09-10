@@ -10,7 +10,7 @@ static const Domain OUT[1] = {Domain::Note};
 static const char* const SYNC_NAMES[NoteDelay::ND_SYNCS] = {"clock", "free"};
 static const char* const DRY_NAMES[NoteDelay::ND_DRYS] = {"pass", "mute"};
 
-static const ParamDescriptor PARAMS[12] = {
+static const ParamDescriptor PARAMS[13] = {
     {"sync",     NoteDelay::ND_CLOCK, NoteDelay::ND_SYNCS, NoteDelay::ND_CLOCK, PARAM_ENUM, SYNC_NAMES},
     {"division", DIV_8_BARS,    DIVISIONS, DIV_EIGHTH,    PARAM_ENUM, DIVISION_NAMES},
     {"feel",     FEEL_STRAIGHT, FEELS,     FEEL_STRAIGHT, PARAM_ENUM, FEEL_NAMES},
@@ -21,16 +21,17 @@ static const ParamDescriptor PARAMS[12] = {
     {"chance",   0, 100, 100, PARAM_PERCENT, nullptr},
     {"spread",   0, 255, 0,   PARAM_SIGNED,  nullptr},
     {"scale",    0, SCALE_COUNT - 1, 0, PARAM_ENUM, PARAM_SCALE_NAMES},
+    {"root",     0, 11, 0, PARAM_PITCH_CLASS, nullptr},
     {"channel",  0, 16, 0, PARAM_CHANNEL, nullptr},
     {"dry",      NoteDelay::ND_PASS, NoteDelay::ND_DRYS, NoteDelay::ND_PASS, PARAM_ENUM, DRY_NAMES},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 12, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, 13, PARAMS}};
 
 static const char* const IN_NAMES[2] = {"notes in", "clear"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor NoteDelay::descriptor = {
-    ALGO_NOTE_DELAY, "NoteDelay", 2, 1, 1, 12, IN, OUT, sizeof(NoteDelay), true,
+    ALGO_NOTE_DELAY, "NoteDelay", 2, 1, 1, 13, IN, OUT, sizeof(NoteDelay), true,
     construct_node<NoteDelay>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "A delay that is a canon: repeats transposed in the key, and spread off the grid.",
     CATEGORY_MIDI };
@@ -55,11 +56,13 @@ NoteDelay::NoteDelay(const NodeConfig& config) :
     chance(step_probability(config.params[7])),
     spread(config.params[8]),
     scale(config.params[9] < SCALE_COUNT ? config.params[9] : (uint8_t)0),
-    channel(config.params[10] > 16 ? (uint8_t)0 : config.params[10]),
-    dry(clamp_enum(config.params[11], ND_DRYS, ND_PASS)),
+    root((uint8_t)(config.params[10] % 12u)),
+    channel(config.params[11] > 16 ? (uint8_t)0 : config.params[11]),
+    dry(clamp_enum(config.params[12], ND_DRYS, ND_PASS)),
     subtick(0), drops(0),
     clear_in(config.in_bus[1]),
     rng(entropy::seed()),
+    passed(),
     echoes()
 {
     for (uint8_t i = 0; i < MAX_ECHOES; i++) echoes[i].state = ECHO_FREE;
@@ -118,7 +121,7 @@ uint8_t NoteDelay::pitch_for(uint8_t pitch, uint8_t k) const {
     const int8_t step = as_signed(interval);
     if (step == 0 || k == 0) return pitch;
     const uint16_t mask = global_scale::resolve_id(scale);
-    const uint8_t r = global_scale::resolve_root(scale, 0);
+    const uint8_t r = global_scale::resolve_root(scale, root);
     const int16_t rel = (int16_t)pitch - (int16_t)r;
     const int16_t degree = semitone_to_scale_degree(rel, mask);
     const int16_t moved = (int16_t)(degree + (int16_t)step * (int16_t)k);
@@ -201,15 +204,27 @@ void NoteDelay::process(BusManager& bus, uint32_t now_us){
             if (echoes[i].state == ECHO_SOUNDING) release(bus, echoes[i]);
             echoes[i].state = ECHO_FREE;
         }
+        // The copies are this node's too, and "clear" means everything.
+        passed.release_all(bus, out);
     }
 
     const uint8_t n = bus.note_count(in);
     for (uint8_t i = 0; i < n; i++){
         const MidiEvent e = bus.note_read(in, i);
-        if (dry == ND_PASS) bus.note_write(out, e);
-        if (is_note_off(e)){ note_off_arrived(e.data1, now_us); continue; }
-        if (!is_note_on(e)) continue;          // CC, bend and the rest are not echoed
-        schedule(e.data1, e.data2, channel ? channel : e.channel, now_us);
+        const uint8_t ch = channel ? channel : e.channel;
+        if (is_note_off(e)){
+            if (dry == ND_PASS) passed.release(bus, out, e.data1);
+            note_off_arrived(e.data1, now_us);
+            continue;
+        }
+        if (!is_note_on(e)){
+            // CC, bend and the rest travel with the dry signal and are not
+            // echoed: a delay of a controller is not a musical idea.
+            if (dry == ND_PASS) bus.note_write(out, e);
+            continue;
+        }
+        if (dry == ND_PASS) passed.emit(bus, out, e.data1, e.data1, e.data2, ch);
+        schedule(e.data1, e.data2, ch, now_us);
     }
 
     for (uint8_t i = 0; i < MAX_ECHOES; i++){
@@ -230,6 +245,7 @@ void NoteDelay::silence(BusManager& bus){
         if (echoes[i].state == ECHO_SOUNDING) release(bus, echoes[i]);
         echoes[i].state = ECHO_FREE;
     }
+    passed.release_all(bus, out);
 }
 
 bool NoteDelay::set_param(uint16_t index, uint8_t value){
@@ -244,8 +260,9 @@ bool NoteDelay::set_param(uint16_t index, uint8_t value){
         case 7: if (value > 100) return false; chance = step_probability(value); return true;
         case 8: spread = value; return true;
         case 9: if (value >= SCALE_COUNT) return false; scale = value; return true;
-        case 10: if (value > 16) return false; channel = value; return true;
-        case 11: if (value == 0 || value > ND_DRYS) return false; dry = value; return true;
+        case 10: if (value > 11) return false; root = value; return true;
+        case 11: if (value > 16) return false; channel = value; return true;
+        case 12: if (value == 0 || value > ND_DRYS) return false; dry = value; return true;
         default: return false;
     }
 }
@@ -262,8 +279,9 @@ uint8_t NoteDelay::get_param(uint16_t index) const {
         case 7: return chance;
         case 8: return spread;
         case 9: return scale;
-        case 10: return channel;
-        case 11: return dry;
+        case 10: return root;
+        case 11: return channel;
+        case 12: return dry;
         default: return 0;
     }
 }

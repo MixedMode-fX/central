@@ -37,13 +37,22 @@
 // same bit that moved. Two independent random sources sound like two random
 // processes; one register sounds like a part.
 //
-// **Reset returns to the trunk.** The pattern the node started with is
-// redrawn, so a wander that has gone somewhere unmusical is one edge away
-// from the shape it grew out of. `seed` is what makes that reproducible: at
-// zero the register is drawn from the entropy pool, so a module does not play
-// the same thing on every power cycle, and at anything else it is drawn from
-// that byte, so a preset plays the pattern it was saved with. This is the
-// rule RandomSequencer already follows, for the same two reasons.
+// **`seed` decides what the reset inlet means**, and it means one of the two
+// things a user wants from that cable:
+//
+//   seed 0        there is no trunk, so reset **shreds**: a new pattern out of
+//                 the entropy pool, every time. A module must not play the
+//                 same thing on every power cycle, which is why zero draws
+//                 that way at construction, and an edge is then the same
+//                 gesture RandomSequencer's shred inlet is.
+//   seed 1..255   reset **returns to the trunk**: the pattern that byte draws,
+//                 exactly, however far the walk has wandered. A preset plays
+//                 what it was saved with, and a wander that has gone somewhere
+//                 unmusical is one edge away from the shape it grew out of.
+//
+// Both halves are RandomSequencer's rule for the same parameter, and the
+// difference between them is the only thing `seed` does: it never disturbs
+// the register that is running.
 //
 // `write` is the hand on the register: `clear` feeds zeros in and empties the
 // loop a step at a time, `fill` feeds ones in and fills it. Neither is a

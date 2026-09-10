@@ -34,6 +34,17 @@
 // the root alone, which makes an unconfigured Chord a pass-through rather
 // than a silence.
 //
+// **`quality` names a stack so the intervals do not have to be typed.** Six
+// signed scale steps is the general case and a poor default: a triad, a
+// seventh and a ninth are the three chords almost every patch wants, and in
+// scale steps they are 2 4, 2 4 6 and 2 4 6 8 - short enough that typing them
+// is not hard and frequent enough that nobody should have to. While `quality`
+// names one, the `voices` and `interval` parameters are ignored rather than
+// overwritten, so a hand-built stack is still there when it is set back to
+// `custom`. Every named stack is degrees, like the typed ones, so `7th` on
+// degree 5 of a major key is a minor seventh and on degree 4 a dominant
+// seventh, with nothing anywhere naming either.
+//
 // **With nothing patched to `note in` the chord plays itself.** A voicer that
 // needs a keyboard is a voicer that cannot start a patch, and "set the notes
 // and let it run" is what a module with no keys attached is for: unpatched,
@@ -46,7 +57,16 @@
 // A held chord is not a silent one: it is **re-voiced** whenever what it
 // should be playing changes - a note-on on the root inlet (so a sequencer
 // moves the chord a bar at a time), the key changing under it, or any
-// parameter of the voicing being edited. Re-voicing releases every note it
+// parameter of the voicing being edited.
+//
+// **A root that repeats is not a change, and `retrigger` is what says
+// otherwise.** A held chord that re-struck itself every time a sequencer
+// resent the note it is already playing would be a chord nobody could drone
+// on, so by default it does not. But `Harmony` repeats a degree whenever its
+// style or its `gravity` says so, and there the silence is a hole in the
+// progression rather than a held note - one chord of the phrase simply does
+// not sound. So it is a switch, defaulting to the held behaviour, which is
+// what a stored zero has always meant here. Re-voicing releases every note it
 // had sounding from the ledger and sounds the new chord, so a chord editable
 // while it drones cannot strand a note, and a downstream arpeggiator simply
 // sees the figure change.
@@ -76,11 +96,33 @@
 // params[10] velocity  what a self-playing chord is sounded at. Ignored
 //                      while a note inlet is patched: a played note keeps
 //                      the velocity it was played with.
+// params[11] quality   a named stack of scale steps, or `custom` (0) to use
+//                      the intervals above.
+// params[12] retrigger re-strike the chord on every root note-on, including
+//                      one that names the note already sounding.
 class Chord : public Node{
     public:
         static constexpr uint8_t MAX_INTERVALS = 6;
-        static constexpr uint16_t P_SCALE = 7, P_ROOT = 8, P_OCTAVE = 9, P_VELOCITY = 10;
-        static constexpr uint8_t N_PARAMS = 11;
+        static constexpr uint16_t P_SCALE = 7, P_ROOT = 8, P_OCTAVE = 9, P_VELOCITY = 10,
+                                  P_QUALITY = 11, P_RETRIGGER = 12;
+        static constexpr uint8_t N_PARAMS = 13;
+
+        // Named interval stacks, in scale steps from the root. `custom` is 0
+        // so that a preset written before this existed - and any preset that
+        // never mentions quality - keeps playing the intervals it stored.
+        enum Quality : uint8_t {
+            QUALITY_CUSTOM  = 0,
+            QUALITY_TRIAD   = 1,
+            QUALITY_SEVENTH = 2,
+            QUALITY_NINTH   = 3,
+            QUALITY_SIXTH   = 4,
+            QUALITY_SUS2    = 5,
+            QUALITY_SUS4    = 6,
+            QUALITY_QUARTAL = 7,
+            QUALITY_SHELL   = 8,
+            QUALITY_FIFTH   = 9,
+            QUALITY_COUNT   = 10,
+        };
         // Middle C is 12 x 5: the octave a chord nobody has placed should
         // sound in, and the velocity a note nobody played should sound at.
         static constexpr uint8_t DEFAULT_OCTAVE = 5, MAX_OCTAVE = 10, DEFAULT_VELOCITY = 100;
@@ -101,6 +143,9 @@ class Chord : public Node{
         // The root a self-playing chord is sounding, or NO_NOTE.
         uint8_t voiced_note() const { return voiced; }
         uint32_t refused() const { return sounding.refused(); }
+        // The stack actually voiced: the named quality's steps, or the typed
+        // intervals when quality is `custom`. `count` is how many are used.
+        const int8_t* active_intervals(uint8_t& count) const;
         // The scale and root actually played, after the module's own have
         // been resolved into them.
         uint16_t active_mask() const;
@@ -123,6 +168,8 @@ class Chord : public Node{
         uint8_t root;
         uint8_t octave;
         uint8_t velocity;
+        uint8_t quality;
+        bool retrigger;
         // Free-running state. `free_note` is the note the root inlet last
         // named (NO_NOTE: derive it from the key and the octave), `voiced`
         // the root actually sounding, `voiced_mask` the scale it was voiced

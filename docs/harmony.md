@@ -4,6 +4,17 @@ A design note on what a harmony module family for the MMMC should be, why the
 circle of fifths is the right object to build it on, and what has to be added
 to the firmware to get there.
 
+> **Status.** `Harmony` (algorithm id 34) shipped on `main` while this was
+> being written, and it answers §1's root-motion gap — see
+> [generative-modules.md](generative-modules.md) for its own argument. What
+> §2 to §5 say about the circle of fifths is the theory underneath it and is
+> unchanged; §6 is now the four things still missing, and the reasoning about
+> where `Harmony` and this document disagree is kept in §6.1.
+>
+> `Voicer`, `Mirror` and `Tonnetz` (ids 37..39) and the two `Chord` changes
+> are built, with tests. §8 records the order they were built in and what the
+> building changed.
+
 The short version: **the module already has the top and the bottom of the
 harmonic stack and nothing in the middle.** It knows what key it is in, and
 it knows how to play a chord and how to arpeggiate one. It has no opinion at
@@ -20,12 +31,20 @@ stateless modifiers we have.
 | Layer | The question it answers | What answers it today |
 |---|---|---|
 | Key | which twelve-bit pitch collection, rooted where | `global_scale`, plus a per-node override (`src/midi/scale.h`) |
-| **Root motion** | **which degree is the chord on now** | **nothing** |
+| Root motion | which degree is the chord on now | `Harmony` — a weighted walk over the degrees |
 | Quality | how the chord is stacked on that degree | `Chord`, partially — the intervals are typed in by hand |
 | **Voicing** | where the notes of that chord actually sit | **nothing** — `Chord` always stacks upward from the root |
 | Figuration | in what order and rhythm they are played | `Arpeggiator`, the note sequencers |
 
-The two missing layers are missing for the same structural reason. Every
+When this was written both bold rows were empty. `Harmony` filled the first
+of them, and it filled it the way §2 argues for: **it emits a root and
+nothing else**, because `Chord`'s intervals are already scale steps and the
+quality of each chord therefore falls out of the degree it lands on. The
+second row is still empty, and it is the one a fifth-walk makes most audible
+— root-position triads a fifth apart leap, and the same two chords voice-led
+share a note and move one voice.
+
+The two layers were missing for the same structural reason. Every
 harmonic node in the tree so far is a function of the note in front of it:
 `NoteQuantise` snaps a pitch, `Transpose` shifts it, `Chord` stacks on it.
 Root motion and voicing are functions of the note in front of it *and the
@@ -332,31 +351,42 @@ which is most of the chromaticism in tonal music, for one `if` per voice.
 
 ## 6. What to build
 
-Five nodes and two small changes, in the order I would build them. A new
-`CATEGORY_HARMONY = 7` appended to `AlgorithmCategory` gives them a shelf;
-appending is legal and an older host shows an unknown category under "other".
+Four things, in the order I would build them. All three new nodes are
+`CATEGORY_MIDI`, which is where `Harmony` and `Chord` already are: an
+algorithm's category is the shelf a host lists it on, and "notes: what
+happens to them on the way past" is a true description of all three. A
+`CATEGORY_HARMONY` would split the harmony family across two shelves to gain
+nothing.
 
-### 6.1 `Progression` — the root-motion generator
+### 6.1 `Harmony` — the root-motion generator, and where it differs
 
-The one that matters. Everything in §2 to §4.
+This section proposed a node called `Progression`. `Harmony` was built
+instead, on the same argument and with the same outlet: **a root, not a
+chord**, because duplicating `Chord`'s diatonic voicing would be two places
+to fix a bug in. It has the advance and reset inlets, the phrase counter, the
+cadence probability, a `gravity` control and a degree outlet on the CV bus.
 
-It emits **a root, not a chord**, because `Chord` is already a correct
-diatonic voicer for any degree of any mask and duplicating that would be two
-places to fix a bug in. One note-on per advance edge, held until the next.
+Two things it does differently, and both are worth recording:
 
-| | |
-|---|---|
-| Inlets | 0 advance (gate, required) · 1 reset (gate) · 2 root (note) |
-| Outlets | 0 root out (note) · 1 phrase (gate — a trigger on each phrase start) |
-| Params | `motion` (enum: circle, gravity, modal, pattern) · `interval` (1..n−1, default 3) · `gravity` (0..100) · `modal` (0..100, the §4.4 crossfade) · `phrase` (0..32) · `cadence` (enum) · `tonicize` (0..100) · `scale` · `root` · `octave` · `velocity` · `steps[8]` for `pattern` mode |
+**It walks a 7 x 7 table per style rather than a distribution over motion.**
+Five tables — pop, modal, jazz, walk, pedal — where this document proposed one
+weighting of the six possible root motions. A destination table can say things
+a motion table cannot (V goes to vi far more often than iii goes to iv, though
+both are "up a step"), so for a seven-note key it is the more expressive of
+the two, and `jazz` is the fifth-walk written out as one.
 
-The phrase outlet is not decoration: a gate that fires on the harmonic
-downbeat is what resets a bass sequencer, opens a fill, or advances a
-brightness `SampleHold`. It is the cheapest way to make a patch's phrasing
-agree with itself.
+What it gives up is the generalisation in §2: `Harmony::DEGREES` is 7, so a
+key with fewer degrees uses part of the table and one with more never reaches
+past the seventh. That is documented in the node and is the right first
+version. If it is ever worth fixing, the fix is the motion distribution —
+`(degree + k) % n` with weights indexed by *k* is the only formulation that
+survives a scale of a size the tables were not written for.
 
-State: a cursor, a phrase counter, a seven-entry distance table, an
-`Xorshift32`, and eight pattern bytes. Well under a pool slot.
+**Its cadence is a probability, not a horizon.** `cadence` is the chance the
+phrase's last chord is the tonic, which is one number and lands where §3.2
+lands most of the time. The distance-table horizon buys the *approach* —
+arriving at the tonic through the dominant rather than jumping to it — and
+that is a refinement of a shipped node rather than a missing one.
 
 ### 6.2 `Voicer` — where the notes actually sit
 
@@ -390,7 +420,7 @@ is dropped into.
 
 ### 6.4 `Tonnetz` — the chromatic walker
 
-§5.1. A generator like `Progression` rather than a modifier, because P/L/R are
+§5.1. A generator like `Harmony` rather than a modifier, because P/L/R are
 defined on a triad the node should own rather than on an arbitrary set of
 notes it would have to parse back into one. Advance and reset inlets, a triad
 out, `cycle` (LR, PL, PR, free PLR), `deviation` (0..100), `diatonic` (bool,
@@ -412,7 +442,8 @@ root against `voiced` and returns early when they match, so a progression that
 plays the same degree twice in a row produces no second chord. That is right
 for a parameter sweep and wrong for a note-on, which is an event and not a
 level. Setting `dirty` when the root inlet delivers a note-on is a one-line
-change and is required before `Progression` is useful.
+change, and `Harmony` repeats a degree often enough that it is required
+before the two of them work together at all.
 
 ### 6.6 The one thing that does not fit, and why to defer it
 
@@ -423,7 +454,7 @@ is `global_scale`, control-plane state whose single writer is
 through `BusManager` would make the key a signal, which it is not.
 
 The partial answer available now is that a root inlet outranks the global key
-on every node that has one, so `Progression`'s root outlet already moves a
+on every node that has one, so `Harmony`'s root outlet already moves a
 whole subgraph — what it cannot move is the *mask*, so it tonicizes but does
 not modulate. The honest fix is a control-plane path: a node requesting a
 global-key change between passes, the way `set_param` writes are enqueued and
@@ -451,36 +482,73 @@ the twelve bits. They belong beside `scale_degree_to_semitone` in
 
 ## 8. Order of work
 
-1. `Chord`'s re-voice fix and its `quality` enum — small, and `Progression` is
-   not usable without the first.
-2. The scale helpers, with tests over every named mask.
-3. `Progression`, circle and gravity modes, no cadence — the patch in §9 works
-   at the end of this step.
-4. Cadence and phrase.
-5. `Voicer`.
-6. Modal mode, on top of the helpers from step 2.
-7. `Mirror`.
-8. `Tonnetz`.
+With `Harmony` shipped, the order that remained:
+
+1. **`Chord`'s re-voice fix.** A bug before it is a feature: `Harmony` repeats
+   a degree whenever `gravity` or `pedal` says so, and a repeated root
+   currently produces no second chord at all.
+2. **`Chord`'s `quality` enum.** Six typed intervals is the general case and a
+   poor default; the eight useful stacks are all short.
+3. **`Voicer`.** The empty row of §1, and the one that makes a fifth-walk
+   sound like voices rather than like block chords.
+4. **`Mirror`.** Cheap, and it changes the character of any patch it is
+   dropped into.
+5. **`Tonnetz`.** The chromatic complement, and it is voiced by `Voicer`
+   rather than voicing itself.
+
+The scale helpers of §4.3 are not on this list. `Voicer`, `Mirror` and
+`Tonnetz` need pitch-class arithmetic and none of them need to know what a
+mode's characteristic tone is; that helper belongs with whatever eventually
+uses it, which would be a modal mode on `Harmony`.
+
+### What changed in the building
+
+- **`Voicer` does not take a mode with a bass constraint and a
+  minimal-motion constraint at once**, because the two disagree and the
+  disagreement is musical rather than a bug. Voice-lead C E G to F A C with
+  the bass free and C stays put — total motion 3 semitones. Pin the bass to
+  the chord's root and it is 15. Both are things people want, so `bass` is
+  its own switch and the header says what it costs.
+- **The ledger is keyed on the emitted note, not on the source note.** Every
+  other modifier in the tree keys on the source, because it emits a function
+  of one note and must release exactly what it sent. `Voicer` emits a
+  function of the whole held *set*, and the question it has to answer on every
+  chord change is "is this pitch already sounding" — which is a question about
+  what was emitted. Keying it that way makes common-tone retention fall out:
+  the notes in both voicings are neither released nor re-struck, because
+  nothing asks them to be.
+- **`Mirror` reflects the pitch class and then re-registers**, rather than
+  reflecting the pitch. `2r + 7 - note` is the right map and the wrong octave
+  — reflecting middle C about C's tonic-dominant axis gives a note below zero
+  — so the reflection is taken modulo 12 and placed in the octave nearest the
+  note that caused it. Which is also what makes `amount` usable: at 50% the
+  reflected notes sit among the ones that passed through, instead of two
+  octaves under them.
+- **`Tonnetz` emits a root-position triad and leaves the voice leading to
+  `Voicer`.** Parsimonious voice leading is the entire point of the P/L/R
+  transforms, so a node that emitted them unvoiced looked wrong — until
+  `Voicer` existed, at which point `Tonnetz -> Voicer` produces exactly the
+  one-voice-moves motion by construction, and `Tonnetz` stays a generator
+  like `Harmony` rather than a second voicer.
 
 ---
 
 ## 9. The patch this makes possible
 
-With `Progression` and the `Chord` fix, and nothing else:
-
 ```
-Metronome (1 bar) ──advance──▶ Progression ──root out──▶ Chord ──▶ Arpeggiator ──▶ MIDI out
-                                    │                  (note in unpatched)   ▲
-                                    └──phrase──────────────────────────────reset
+Metronome (1 bar) ──advance──▶ Harmony ──root──▶ Chord ──▶ Voicer ──▶ Arpeggiator ──▶ MIDI out
+                                                (note in unpatched)
 ```
 
-No keyboard, no host, no sequence typed in. `Chord` free-runs, `Progression`
-walks it around the key with fifth-weighted gravity and lands on the tonic
-every eight bars, the arpeggiator re-anchors on the phrase downbeat, and the
-whole thing is four nodes and one clock. Turn `gravity` down and it wanders;
-turn `modal` up and it stops cadencing and starts shuttling; put a `Mirror`
-after the `Chord` and it plays its own shadow.
+No keyboard, no host, no sequence typed in. `Chord` free-runs, `Harmony`
+walks it around the key and resolves to the tonic at the end of each phrase,
+`Voicer` keeps the common tones so the chords move rather than jump, and the
+whole thing is five nodes and one clock. Turn `gravity` up and it settles onto
+a drone; switch the style to `modal` and it stops cadencing; put a `Mirror`
+after the `Chord` and it plays its own shadow; replace `Harmony` with
+`Tonnetz` and the same patch leaves the key entirely without any voice moving
+more than a tone.
 
 That is the test of whether this design is right: the interesting controls are
-the ones a musician can name, every one of them stays in key by construction,
-and none of them needed a note to be typed in.
+the ones a musician can name, every one of them stays in key by construction
+unless it was asked not to, and none of them needed a note to be typed in.

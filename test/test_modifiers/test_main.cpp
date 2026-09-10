@@ -664,6 +664,107 @@ static void test_a_self_playing_chord_takes_its_octave_and_velocity() {
     for (const MidiEvent& e : out) TEST_ASSERT_EQUAL(64, e.data2);
 }
 
+// A named quality is the intervals nobody should have to type. In C major on
+// the tonic, `7th` is C E G B - four voices from one parameter, and the
+// seventh is major because the fourth degree above C in this key is B.
+static void test_chord_quality_names_a_stack_of_scale_steps() {
+    BusManager bus;
+    NodeConfig c = free_chord(false);
+    c.params[0] = 0;                                   // no typed intervals at all
+    c.params[1] = 0; c.params[2] = 0;
+    c.params[Chord::P_QUALITY] = Chord::QUALITY_SEVENTH;
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(4, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);
+    TEST_ASSERT_EQUAL(64, out[1].data1);
+    TEST_ASSERT_EQUAL(67, out[2].data1);
+    TEST_ASSERT_EQUAL(71, out[3].data1);               // B: 2 4 6 are scale steps
+}
+
+// The same stack on the fifth degree is a dominant seventh and on the second a
+// minor seventh, with nothing anywhere naming either: the quality is degrees,
+// so the key decides what they sound like.
+static void test_chord_quality_takes_its_flavour_from_the_degree() {
+    BusManager bus;
+    NodeConfig c = free_chord(true);
+    c.params[0] = 0;
+    c.params[Chord::P_QUALITY] = Chord::QUALITY_SEVENTH;
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    run_pass(bus, node, 1);
+
+    bus.note_write(0, on(67));                         // G, the fifth degree
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(8, out.size());                  // four off, four on
+    TEST_ASSERT_EQUAL(67, out[4].data1);
+    TEST_ASSERT_EQUAL(71, out[5].data1);
+    TEST_ASSERT_EQUAL(74, out[6].data1);
+    TEST_ASSERT_EQUAL(77, out[7].data1);               // F natural: G7, not Gmaj7
+}
+
+// A quality does not overwrite the typed intervals, so switching back to
+// `custom` finds the hand-built stack exactly as it was left.
+static void test_chord_quality_leaves_the_typed_intervals_alone() {
+    BusManager bus;
+    NodeConfig c = free_chord(false);
+    c.params[0] = 2;
+    c.params[1] = 3; c.params[2] = 6;                  // a quartal stack, by hand
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(65, out[1].data1);               // F
+    TEST_ASSERT_EQUAL(71, out[2].data1);               // B: two diatonic fourths
+
+    node.set_param(Chord::P_QUALITY, Chord::QUALITY_TRIAD);
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+    TEST_ASSERT_EQUAL(64, out[4].data1);               // E: the named triad
+
+    node.set_param(Chord::P_QUALITY, Chord::QUALITY_CUSTOM);
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+    TEST_ASSERT_EQUAL(65, out[4].data1);               // F again, still stored
+    TEST_ASSERT_EQUAL(3, node.get_param(1));
+    TEST_ASSERT_EQUAL(6, node.get_param(2));
+}
+
+// `Harmony` repeats a degree whenever its style or its gravity says so, and a
+// progression where one chord of the phrase does not sound is a hole in it.
+// Held is still the default - this is the switch that says otherwise.
+static void test_a_repeated_root_re_strikes_only_when_asked() {
+    BusManager bus;
+    NodeConfig c = free_chord(true);
+    c.params[Chord::P_RETRIGGER] = 1;
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    run_pass(bus, node, 1);
+
+    bus.note_write(0, on(62));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+
+    // The same root again: three note-offs and the same three notes back.
+    bus.note_write(0, on(62));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(out[i]));
+    TEST_ASSERT_EQUAL(62, out[3].data1);
+    TEST_ASSERT_EQUAL(65, out[4].data1);
+    TEST_ASSERT_EQUAL(69, out[5].data1);
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+
+    // And nothing is left sounding when it goes quiet.
+    node.silence(bus);
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
 // A sequencer on the root inlet is what plays a self-playing chord: the whole
 // note, and the chords stay in the key rather than dragging it around. In C
 // major a root of D is D minor, which is what "diatonic" means and what a
@@ -1531,6 +1632,10 @@ int main() {
     RUN_TEST(test_a_chord_with_no_note_inlet_plays_itself_and_holds);
     RUN_TEST(test_a_self_playing_chord_takes_its_octave_and_velocity);
     RUN_TEST(test_a_sequenced_root_walks_a_self_playing_chord_through_the_key);
+    RUN_TEST(test_chord_quality_names_a_stack_of_scale_steps);
+    RUN_TEST(test_chord_quality_takes_its_flavour_from_the_degree);
+    RUN_TEST(test_chord_quality_leaves_the_typed_intervals_alone);
+    RUN_TEST(test_a_repeated_root_re_strikes_only_when_asked);
     RUN_TEST(test_editing_a_self_playing_chord_re_voices_it);
     RUN_TEST(test_a_self_playing_chord_feeds_an_arpeggiator);
     RUN_TEST(test_probability_pairs_every_note_it_passes);

@@ -274,13 +274,19 @@ rather than a missing feature.
 
 ### Reaching the music from the CV bus — `CvToNote` and `CvToGate`
 
-**The CV domain used to be a closed loop.** `Lfo`, `SampleHold` and `Slew`
-wrote it, the modulation matrix and the console read it, and nothing else
-touched it. A modulator could therefore move a *parameter* and could do
-nothing else: it could not play a note, it could not fire a trigger. The
-commonest generative patch there is — a slow, complex control signal through a
-quantiser is a melody — was not expressible, and the `CvInPort` under
-[Still open](#still-open) would have arrived into the same closed loop.
+**Nothing used to read a CV bus into a note or a gate.** `Lfo`, `SampleHold`,
+`Slew` and `MidiToCV` wrote one; `SampleHold` and `Slew` read one back; and
+the only other readers were the modulation matrix and the console. So a
+control signal could move a *parameter* and could do nothing else: it could
+not play a note, it could not fire a trigger. The commonest generative patch
+there is — a slow, complex control signal through a quantiser is a melody —
+was not expressible, and the `CvInPort` under [Still open](#still-open) would
+have arrived into the same closed loop.
+
+`MidiToCV` is `CvToNote`'s inverse, and the pair is the point: that one sends
+a note stream out as pitch, gate and velocity, this one brings a control
+signal back as notes. Between them the CV bus is a round trip, and a voltage
+can be operated on by every modulator in the module on the way past.
 
 These two are the doors, one per domain, and they ship together because a
 patch that can turn a voltage into a note but not into the trigger that plays
@@ -873,6 +879,14 @@ keyboard tracking is a route from the pitch outlet to a parameter, with nothing
 new in the matrix, and the app's *MIDI to CV and gate* example reads the pitch
 bus straight back into a note to show that what is on it is a pitch — and
 which become voltages the moment [`CvOutPort`](#still-open) exists.
+
+**And [`CvToNote`](#reaching-the-music-from-the-cv-bus--cvtonote-and-cvtogate)
+is this node read backwards.** That example reads the pitch bus back into a
+note through a modulation route, which is a demonstration rather than a patch;
+`CvToNote` is the cable. The pair is what makes the CV bus a round trip rather
+than a one-way street: send a line out as pitch and gate, put a `Slew` or a
+`SampleHold` in the middle of it, and bring it back as notes — which is a
+whole class of patch neither node can do alone.
 
 ## The key
 
@@ -1680,14 +1694,21 @@ picture above. Still unanswered.
 
 **Control voltage at the jacks.** The CV domain is now a real bus with real
 writers — three modulators and, since `MidiToCV`, a pitch, a velocity and a
-modulation signal that are only waiting for a converter — and none of it
-reaches a pin: `GateInPort` and `GateOutPort` are still the only hardware port
-nodes. A `CvOutPort` writing a DAC and a `CvInPort`
-reading the ADC would make every modulator in this document an output and
-every external voltage a modulation source, with no change to the matrix, the
-patch format or the editor — the scale is already twelve bits precisely so
-that a 12-bit DAC is a lossless rendering of what the bus carries. Calibration
-has a home reserved in `GlobalSettings`. Not built.
+modulation signal that are only waiting for a converter — and real readers,
+since `CvToNote` and `CvToGate`. None of it reaches a pin: `GateInPort` and
+`GateOutPort` are still the only hardware port nodes. A `CvOutPort` writing a
+DAC and a `CvInPort` reading the ADC would make every modulator in this
+document an output and every external voltage a modulation source, with no
+change to the matrix, the patch format or the editor — the scale is already
+twelve bits precisely so that a 12-bit DAC is a lossless rendering of what the
+bus carries. Calibration has a home reserved in `GlobalSettings`. Not built.
+
+**It is worth more than it was, at both ends.** A `CvInPort` used to lead into
+a bus whose only destination was a parameter; an external voltage would have
+reached the modulation matrix and nothing else. It would now reach notes and
+triggers as well, so the input jack is the missing half of a feature rather
+than a feature of its own — and with `MidiToCV` on the other side, the module
+would be a two-way converter rather than a one-way one.
 
 **Launchpad DAW mode over the USB host port** needs no new pins, so it is
 within the hardware surface, and it remains the module's only realistic

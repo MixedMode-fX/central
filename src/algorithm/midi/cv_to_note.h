@@ -8,13 +8,19 @@
 // A control signal becomes a melody: the quantiser.
 //
 // **This is the node that lets the CV bus reach the music.** Until it existed
-// `Domain::CV` appeared in three algorithm descriptors - Lfo, SampleHold,
-// Slew - and `cv_read` outside them only in the modulation matrix and the
-// console, so a modulator could move a *parameter* and could do nothing else.
-// It could not play a note. The commonest generative patch there is - a slow,
-// complex control signal through a quantiser is a melody - was not
-// expressible, and a CvInPort reading a jack would have landed in the same
-// closed loop.
+// nothing anywhere read a CV bus into a note or a gate: Lfo, SampleHold, Slew
+// and MidiToCv wrote one, SampleHold and Slew read one back, and the only
+// other readers were the modulation matrix and the console. So a control
+// signal could move a *parameter* and could do nothing else. It could not
+// play a note. The commonest generative patch there is - a slow, complex
+// control signal through a quantiser is a melody - was not expressible, and
+// a CvInPort reading a jack would have landed in the same closed loop.
+//
+// MidiToCv (algorithm/midi/midi_to_cv.h) is this node's inverse and the two
+// are worth patching together: that one sends a note stream out as pitch,
+// gate and velocity, this one brings a control signal back as notes. Between
+// them the CV bus is a round trip rather than a one-way street, and a voltage
+// can be operated on by every modulator in the module on the way past.
 //
 // It is not `NoteQuantise`, and the two are worth telling apart. NoteQuantise
 // takes notes that already exist and snaps their pitches into a scale. This

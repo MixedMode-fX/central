@@ -1,11 +1,11 @@
 # Five modules for generative music
 
-An audit of the twenty-nine algorithms in `src/algorithm/`, read against one
+An audit of the algorithms in `src/algorithm/`, read against one
 question — *what would this module need before it could be left running on its
 own and be worth listening to?* — and five proposals that answer it.
 
 > **All six are built.** `CvToNote`, `CvToGate`, `Turing`, `Harmony`,
-> `Automaton` and `NoteDelay` are algorithm ids 30..35, with 79 tests of their
+> `Automaton` and `NoteDelay` are algorithm ids 31..36, with 85 tests of their
 > own. The README's [Generative
 > Algorithms](../README.md#generative-algorithms) section is the user-facing
 > description; this document is kept as the argument for why they exist and
@@ -30,7 +30,7 @@ rather than a missing feature.
 
 ## 1. Where the module stands
 
-The twenty-nine algorithms, grouped by what they do for a patch nobody is
+The thirty algorithms, grouped by what they do for a patch nobody is
 touching:
 
 | | |
@@ -38,7 +38,7 @@ touching:
 | **Make time** | `ClockDiv`, `Metronome` |
 | **Make events** | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer`, `NoteSequencer`, `PolySequencer`, `DrumSeqGate`, `DrumSeqMidi`, `GateToNote` |
 | **Change events** | `Transpose`, `Arpeggiator`, `Chord`, `NoteQuantise`, `NotePriority`, `VelocityCurve`, `Probability` |
-| **Make control signals** | `Lfo`, `SampleHold`, `Slew` |
+| **Make control signals** | `Lfo`, `SampleHold`, `Slew`, `MidiToCV` |
 | **Decide** | seven logic gates, `Sustain`, `GateHold` |
 
 That is a strong list, and several of the decisions in it are worth more for
@@ -90,12 +90,12 @@ programmed. Everything downstream of a root is already built: `Chord` voices
 it in key, the note sequencers take it on an inlet, `NoteQuantise` snaps to
 it. There is no node that *generates* one.
 
-### 2.3 The CV bus is a closed loop
+### 2.3 Nothing reads a CV bus into a note or a gate
 
-This is the architectural one. `Domain::CV` appears in exactly three algorithm
-descriptors — `Lfo`, `SampleHold`, `Slew` — and `cv_read` outside those three
-appears only in `ModMatrix` and the console. There is no algorithm anywhere
-that turns a control signal into a gate or into a note.
+This is the architectural one. `Lfo`, `SampleHold`, `Slew` and `MidiToCV`
+write a CV bus; `SampleHold` and `Slew` read one back; and `cv_read` outside
+those appears only in `ModMatrix` and the console. There is no algorithm
+anywhere that turns a control signal into a gate or into a note.
 
 So a modulator in this module can move a **parameter** and can do nothing
 else. It cannot play a note. It cannot fire a trigger. The first patch anyone
@@ -129,7 +129,7 @@ on the grid; it has nothing that gets off the grid on purpose.
 ## 3. The five proposals
 
 Each is an ordinary `Node` with an `AlgorithmDescriptor`, appended to
-`AlgorithmId` (ids 30 upward, never renumbered), with named ports, a parameter
+`AlgorithmId` (appended, never renumbered), with named ports, a parameter
 block described the way `param.h` requires, and the existing ledger and key
 machinery underneath. Nothing here needs a change to the bus model, the patch
 format or the editor protocol.
@@ -457,6 +457,16 @@ and the code follows the corrected version rather than this document.
   upstream lands on an intermediate bus nothing reads any more. Both are the
   kind of thing a unit test of one node cannot see, because both are about
   what the node is *connected to*.
+
+- **`MidiToCV` landed on `main` while this branch was being written**, and it
+  is the other half of the CV story rather than a collision of ideas: that
+  node sends a note stream out as pitch, gate and velocity, `CvToNote` brings
+  a control signal back as notes. What it *did* collide with was the id — it
+  took 30, so these six moved to 31..36, because an id is preset format and
+  the one that shipped first keeps it. It also means the gap in §2.3 is
+  stated more carefully than it was: `MidiToCV` writes a CV bus, so the
+  finding was never "three descriptors mention CV", it was that nothing
+  anywhere *read* one into a note or a gate.
 
 - **The node pool had to grow, and that was not free.** The registry passed 32
   algorithms, so a patch could no longer hold one of every algorithm. `N_NODE`

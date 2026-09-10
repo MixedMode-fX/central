@@ -1039,15 +1039,41 @@ selectable, appended at the end of the list, and is what a node uses to opt
 out of the key entirely. Following the module's scale means following its
 root as well, because a scale without a root is not a key; a patched root
 inlet outranks both, because a cable is the most explicit thing a user can
-say. The note sequencers are the exception to the root half: theirs is an
-absolute pitch naming the octave the pattern starts in, and a pitch class
-cannot say that, so they take the scale and keep their own root.
+say.
+
+**A key can also name the register it sits in, and until it does it names
+none.** A scale and a pitch class say which notes and which of them is home;
+they cannot say *where* home is. So every node with an absolute root — a
+harmony deciding where its chords sit, a quantiser deciding the bottom of its
+range, a sequencer deciding what pitch its degrees are measured from — kept a
+register of its own, and moving a patch an octave meant editing each of them
+in turn. The note sequencers could not follow the key's root at all for
+exactly this reason: theirs is an absolute pitch naming the octave the pattern
+starts in, and a pitch class cannot say that.
+
+So the key has a third part, `root_octave`, and the whole of it is that **zero
+means the key names no register**. With none — which is what every patch
+written before it carries — each node keeps precisely the root it stored, and
+the note sequencers stay the exception they always were. Set one and it is the
+key's root *note*: every node that follows the module's scale plays from it,
+the sequencers included, and one setting moves the register of the whole
+patch. Naming your own scale opts out of it, as it opts out of the root, and a
+patched root inlet still outranks everything.
+
+It is another of `GlobalSettings`' reserved bytes, so the preset format did not
+have to move for it either. Set it from the console (`key <scale> <root>
+<octave>`), over `SYSEX_SET_GLOBALS` as an eleventh argument, or in the app
+under MIDI → key → register.
 
 The module is chromatic until a key is set, so **a patch written before this
 existed plays exactly the notes it always did.** Set it from the console
 (`key`), from a host over `SYSEX_SET_GLOBALS`, or in the app under MIDI;
 either way it is saved with the patch and pushed to the graph by
 `PatchManager::push_globals()`, the same route the tempo takes.
+
+A self-playing `Chord` sits in the key's register when it has one, and in its
+own `octave` when it does not — the same rule, applied to the one register
+decision that node makes.
 
 `Chord`'s intervals are **steps of that scale**, which is the same thing as
 semitones when the scale is chromatic — so 0 2 4 is a diatonic triad on every
@@ -1324,7 +1350,7 @@ configuration path until the SysEx protocol is finished.
 |---|---|
 | `info` | Firmware build, node count, store state |
 | `clock [bpm] [source]` | Show or set tempo and clock source |
-| `key [scale] [root]` | Show or set the scale every algorithm follows |
+| `key [scale] [root] [oct]` | Show or set the key every algorithm follows |
 | `patch` | The running patch: jacks, MIDI ports, nodes and their connections |
 | `buses` | Live bus state, with the overflow counters |
 | `errors` | Every counter behind the red LED |

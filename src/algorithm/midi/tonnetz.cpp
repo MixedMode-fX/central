@@ -140,9 +140,13 @@ uint8_t Tonnetz::scheduled() const {
     return CYCLE_STEP[cycle - TONNETZ_LR][step & 1u];
 }
 
+uint8_t Tonnetz::active_root() const {
+    return global_scale::resolve_tonic(scale, root);
+}
+
 bool Tonnetz::in_key(uint8_t root_pc, bool is_minor) const {
     const uint16_t mask = global_scale::resolve_id(scale);
-    const uint8_t key = global_scale::resolve_root(scale, (uint8_t)(root % 12u));
+    const uint8_t key = (uint8_t)(active_root() % 12u);
     const uint8_t third = is_minor ? 3u : 4u;
     const uint8_t notes[3] = {root_pc,
                               (uint8_t)((root_pc + third) % 12u),
@@ -176,11 +180,12 @@ uint8_t Tonnetz::choose(){
 
 void Tonnetz::strike(BusManager& bus){
     sounding.release_all(bus, note_out);
-    // Root position, in the octave `root` names: the walk moves the pitch
-    // class, and the register stays where it was put.
+    // Root position, in the register the key names or `root` does: the walk
+    // moves the pitch class, and the register stays where it was put.
+    const uint8_t home = active_root();
     int16_t pitch = (int16_t)current_root;
-    while (pitch + 12 <= (int16_t)root + 6) pitch += 12;
-    while (pitch > (int16_t)root + 6) pitch -= 12;
+    while (pitch + 12 <= (int16_t)home + 6) pitch += 12;
+    while (pitch > (int16_t)home + 6) pitch -= 12;
     while (pitch < 0) pitch += 12;
     const int16_t third = current_minor ? 3 : 4;
     const int16_t notes[3] = {pitch, (int16_t)(pitch + third), (int16_t)(pitch + 7)};
@@ -205,7 +210,7 @@ void Tonnetz::process(BusManager& bus, uint32_t){
     if (!advance_in.rising(bus)) return;
 
     if (at_first){
-        current_root = (uint8_t)(root % 12u);
+        current_root = (uint8_t)(active_root() % 12u);
         current_minor = minor;
         at_first = false;
         strike(bus);

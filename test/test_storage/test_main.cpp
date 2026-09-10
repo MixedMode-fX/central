@@ -120,6 +120,7 @@ static void test_patch_round_trips_through_the_codec() {
     g.pc_channel = 7;
     g.scale = SCALE_DORIAN;                        // the key travels with the patch
     g.root = 5;
+    g.root_octave = 4;                             // and the register it sits in
 
     size_t written = 0;
     TEST_ASSERT_EQUAL(CODEC_OK, patch_codec::encode(original, g, buffer, sizeof buffer, written));
@@ -135,6 +136,9 @@ static void test_patch_round_trips_through_the_codec() {
     TEST_ASSERT_EQUAL(7, decoded_globals.pc_channel);
     TEST_ASSERT_EQUAL(SCALE_DORIAN, decoded_globals.scale);
     TEST_ASSERT_EQUAL(5, decoded_globals.root);
+    // The register is another reserved byte, so this round-trips without the
+    // format version having had to move for it.
+    TEST_ASSERT_EQUAL(4, decoded_globals.root_octave);
 }
 
 // The whole point of trimming: a patch of ordinary nodes is a couple of

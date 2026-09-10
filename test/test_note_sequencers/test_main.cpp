@@ -166,6 +166,49 @@ static void test_root_change_releases_what_was_sent_and_transposes_the_rest() {
 
 // The same, with the root arriving on a note bus: playing a key transposes
 // the running sequence, and only note-ons count.
+// A sequencer's root names an octave and a pitch class cannot, which is why
+// it used to be the exception to the key's root half. A key with a register
+// can name one, so the exception is now only for the case that still cannot:
+// with no register the pattern keeps its anchor exactly as it always has.
+static void test_a_pattern_keeps_its_anchor_until_the_key_names_a_register() {
+    NodeConfig c = scale_run(4, 0);                    // no scale of its own: follows
+    NoteSequencer node(c);
+    Rig rig;
+
+    global_scale::set(SCALE_MAJOR, 9);                 // A major, and no register
+    expect("+60/100 ", rig.edge(node));                // still C4, as it always was
+    TEST_ASSERT_EQUAL(60, node.active_root());
+
+    global_scale::set(SCALE_MAJOR, 9, 3);              // now the key has one: A2
+    expect("-60/0 +47/100 ", rig.edge(node));          // step 1: degree 1 of A2
+    TEST_ASSERT_EQUAL(45, node.active_root());
+    TEST_ASSERT_EQUAL(60, node.root_note());           // the stored anchor is untouched
+
+    // A pattern that named its own scale is not moved by the key at all.
+    NodeConfig own = scale_run(4, scale_mask(SCALE_MAJOR));
+    NoteSequencer fixed(own);
+    Rig other;
+    expect("+60/100 ", other.edge(fixed));
+    TEST_ASSERT_EQUAL(60, fixed.active_root());
+}
+
+// A cable is the most explicit thing a user can say, so a patched root inlet
+// outranks the key's register as it outranks everything else.
+static void test_the_root_inlet_outranks_the_key_register() {
+    NodeConfig c = scale_run(4, 0);
+    c.in_bus[2] = ROOT_BUS;
+    NoteSequencer node(c);
+    Rig rig;
+
+    global_scale::set(SCALE_MAJOR, 9, 3);
+    expect("+60/100 ", rig.edge(node));                // the inlet is patched: its own
+    TEST_ASSERT_EQUAL(60, node.active_root());
+
+    rig.bus.note_write(ROOT_BUS, MidiEvent{MIDI_NOTE_ON, 1, 55, 90});
+    expect("-60/0 +57/100 ", rig.edge(node));          // step 1: degree 1 of G
+    TEST_ASSERT_EQUAL(55, node.active_root());
+}
+
 static void test_root_inlet_last_note_on_wins() {
     NodeConfig c = scale_run(4);
     c.in_bus[2] = ROOT_BUS;
@@ -608,6 +651,8 @@ int main() {
     RUN_TEST(test_mono_sequence_emits_the_expected_pitches_twice_over);
     RUN_TEST(test_root_change_releases_what_was_sent_and_transposes_the_rest);
     RUN_TEST(test_root_inlet_last_note_on_wins);
+    RUN_TEST(test_a_pattern_keeps_its_anchor_until_the_key_names_a_register);
+    RUN_TEST(test_the_root_inlet_outranks_the_key_register);
     RUN_TEST(test_scale_change_releases_what_was_sent);
     RUN_TEST(test_a_sequence_with_no_scale_of_its_own_follows_the_module);
     RUN_TEST(test_out_of_range_pitch_is_skipped);

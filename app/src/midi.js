@@ -212,6 +212,19 @@ export function globalsPanel(app) {
     keyRoot.append(option);
   });
 
+  // The register the key sits in. "none" is the default and means what it
+  // always meant: the key names a pitch class, and every node with an
+  // absolute root keeps its own octave (src/midi/global_scale.h).
+  const keyOctave = el('select', { onchange: (e) => { g.rootOctave = Number(e.target.value); push(); } });
+  for (let octave = 0; octave <= 10; octave++) {
+    const label = octave === 0
+      ? 'none'
+      : `${octave} (${PITCH_CLASSES[(g.root ?? 0) % 12]}${octave}, note ${Math.min(127, octave * 12 + (g.root ?? 0))})`;
+    const option = el('option', { value: String(octave) }, label);
+    if (octave === (g.rootOctave ?? 0)) option.selected = true;
+    keyOctave.append(option);
+  }
+
   const nrpnEnabled = el('input', { type: 'checkbox', class: 'switch',
     onchange: (e) => {
       g.nrpnEnabled = e.target.checked ? 1 : 0;
@@ -228,7 +241,8 @@ export function globalsPanel(app) {
     el('h2', {}, 'key'),
     el('div', { class: 'fields' },
       field('scale', keyScale, null),
-      field('root', keyRoot, null)),
+      field('root', keyRoot, null),
+      field('register', keyOctave, 'where the key sits; "none" leaves every root as it is')),
     el('h2', { class: 'spaced' }, 'clock and recall'),
     el('div', { class: 'fields' },
       field('clock source', source),

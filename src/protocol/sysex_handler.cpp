@@ -262,8 +262,12 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
                 g.scale = args[8];
                 g.root = args[9];
             }
+            // The key's register, appended after the key for the same reason
+            // the key was appended after the clock: a host that predates it
+            // sends ten arguments and leaves the register alone.
+            if (n >= 11) g.root_octave = args[10];
             if (g.clock_source > MasterClock::CLOCK_MIDI || g.pc_quantise > SWAP_NEXT_BAR
-                || g.scale >= SCALE_COUNT || g.root > 11){
+                || g.scale >= SCALE_COUNT || g.root > 11 || g.root_octave > 10){
                 nak(source, SYSEX_ERR_BAD_ARGUMENT);
                 return;
             }

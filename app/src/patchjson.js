@@ -288,6 +288,9 @@ export function fromPatchJson(json, device) {
   const globals = { ...codec.emptyGlobals(), ...(json.globals ?? {}) };
   globals.scale = scaleIdOf(globals.scale ?? P.ScaleId.SCALE_CHROMATIC) || P.ScaleId.SCALE_CHROMATIC;
   globals.root = Number(globals.root ?? 0) % 12;
+  // The register the key sits in: 0, or absent, means it names none and every
+  // node with an absolute root keeps the one it stored.
+  globals.rootOctave = Math.min(10, Math.max(0, Number(globals.rootOctave ?? globals.octave ?? 0)));
 
   for (const g of json.gate_ports ?? []) {
     const jack = Number(g.port) - 1;

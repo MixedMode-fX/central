@@ -461,7 +461,16 @@ through `BusManager` would make the key a signal, which it is not.
 The partial answer available now is that a root inlet outranks the global key
 on every node that has one, so `Harmony`'s root outlet already moves a
 whole subgraph — what it cannot move is the *mask*, so it tonicizes but does
-not modulate. The honest fix is a control-plane path: a node requesting a
+not modulate.
+
+Since this was written the key has gained a **register** — `root_octave` in
+`GlobalSettings`, a root that is a note rather than only a pitch class, so a
+node with an absolute root follows the module's octave as well as its pitch
+class (`src/midi/global_scale.h`). That closes the half of the gap that was
+about *where* rather than *which*, and the note sequencers stopped being the
+exception to the key's root. It does not change this section: the register is
+control-plane state with the same single writer, so a node still cannot move
+it, and a key walk is still the same open decision about who owns the key. The honest fix is a control-plane path: a node requesting a
 global-key change between passes, the way `set_param` writes are enqueued and
 applied. It is a real design decision about who owns the key, it deserves its
 own argument, and none of the five nodes above need it.

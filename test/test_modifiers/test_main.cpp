@@ -527,6 +527,50 @@ static void test_the_global_scale_is_the_default_and_an_override_wins() {
     TEST_ASSERT_EQUAL_HEX16(0x0FFF, global_scale::mask());
 }
 
+// A scale and a pitch class say which notes and which is home; they cannot
+// say *where* home is. The register is the third part of the key, it is unset
+// by default, and unset means every node keeps the root it stored - which is
+// what makes a patch written before it existed play what it always did.
+static void test_the_key_can_name_a_register() {
+    global_scale::set(SCALE_NATURAL_MINOR, 9);            // A minor, no register
+    TEST_ASSERT_EQUAL(0, global_scale::octave());
+    TEST_ASSERT_EQUAL(global_scale::NO_ROOT_NOTE, global_scale::root_note());
+
+    global_scale::set(SCALE_NATURAL_MINOR, 9, 3);         // A minor, at octave 3
+    TEST_ASSERT_EQUAL(3, global_scale::octave());
+    TEST_ASSERT_EQUAL(45, global_scale::root_note());  // 3 x 12 + 9
+
+    // The top octave cannot hold every pitch class, and a key that silently
+    // became a different note would be worse than one an octave lower.
+    global_scale::set(SCALE_NATURAL_MINOR, 11, 10);
+    TEST_ASSERT_EQUAL(119, global_scale::root_note());
+
+    // Out of range is clamped rather than wrapped.
+    global_scale::set(SCALE_NATURAL_MINOR, 0, 200);
+    TEST_ASSERT_EQUAL(10, global_scale::octave());
+}
+
+// The two resolvers, which is where the register actually reaches a node.
+// A node that names its own scale keeps its own root, which is the rule
+// resolve_root already set; one that follows the module takes the register
+// when there is one.
+static void test_the_register_resolves_for_both_kinds_of_root() {
+    // No register: a tonic takes the key's pitch class in its own octave, and
+    // a pattern's anchor is left exactly where it was.
+    global_scale::set(SCALE_NATURAL_MINOR, 9);
+    TEST_ASSERT_EQUAL(57, global_scale::resolve_tonic(SCALE_GLOBAL, 48));   // A3, from C3
+    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(0, 48));             // untouched
+
+    // With one, both take it.
+    global_scale::set(SCALE_NATURAL_MINOR, 9, 2);
+    TEST_ASSERT_EQUAL(33, global_scale::resolve_tonic(SCALE_GLOBAL, 48));
+    TEST_ASSERT_EQUAL(33, global_scale::resolve_anchor(0, 48));
+
+    // A node that named its own scale is not moved by either.
+    TEST_ASSERT_EQUAL(48, global_scale::resolve_tonic(SCALE_BLUES, 48));
+    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(scale_mask(SCALE_BLUES), 48));
+}
+
 static void test_note_quantise_follows_the_module_scale_until_it_names_one() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
@@ -763,6 +807,44 @@ static void test_a_repeated_root_re_strikes_only_when_asked() {
     // And nothing is left sounding when it goes quiet.
     node.silence(bus);
     TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
+// A self-playing chord sits in its own octave until the key names one, and
+// then it sits where the module says home is. The root inlet still outranks
+// both, because a cable is the most explicit thing a user can say.
+static void test_a_self_playing_chord_follows_the_key_register() {
+    BusManager bus;
+    NodeConfig c = free_chord(true);
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);                 // C major, no register
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);               // its own octave, middle C
+
+    global_scale::set(SCALE_MAJOR, 0, 3);              // and now the key has one
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(out[i]));
+    TEST_ASSERT_EQUAL(36, out[3].data1);               // C2: 3 x 12
+    TEST_ASSERT_EQUAL(40, out[4].data1);
+    TEST_ASSERT_EQUAL(43, out[5].data1);
+
+    // A root on the inlet is the note to play, register or no register.
+    bus.note_write(0, on(67));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+    TEST_ASSERT_EQUAL(67, out[3].data1);
+
+    // And a chord that named its own scale is not moved at all.
+    NodeConfig own = free_chord(false);
+    own.params[Chord::P_SCALE] = SCALE_MAJOR;
+    own.params[Chord::P_ROOT] = 0;
+    Chord fixed(own);
+    BusManager other;
+    out = run_pass(other, fixed, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);
 }
 
 // A sequencer on the root inlet is what plays a self-playing chord: the whole
@@ -1626,6 +1708,9 @@ int main() {
     RUN_TEST(test_note_quantise_snaps_and_releases_what_it_sent);
     RUN_TEST(test_note_quantise_takes_its_root_from_a_bus);
     RUN_TEST(test_the_global_scale_is_the_default_and_an_override_wins);
+    RUN_TEST(test_the_key_can_name_a_register);
+    RUN_TEST(test_the_register_resolves_for_both_kinds_of_root);
+    RUN_TEST(test_a_self_playing_chord_follows_the_key_register);
     RUN_TEST(test_note_quantise_follows_the_module_scale_until_it_names_one);
     RUN_TEST(test_chord_voices_its_intervals_in_the_scale);
     RUN_TEST(test_chord_in_the_chromatic_scale_is_fixed_semitones);

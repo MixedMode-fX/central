@@ -63,7 +63,10 @@
 // params[0] cycle      LR / PL / PR / free
 // params[1] deviation  percent chance of a transform the cycle did not name
 // params[2] diatonic   refuse a triad the key does not contain
-// params[3] root       the pitch the starting triad is built on
+// params[3] root       the pitch the starting triad is built on. Follows the
+//                      key like every other absolute root here: its pitch
+//                      class always, and its register too when the key names
+//                      one (midi/global_scale.h).
 // params[4] minor      start on a minor triad rather than a major one
 // params[5] scale      0 follows the module's key; only `diatonic` reads it
 // params[6] velocity
@@ -104,6 +107,9 @@ class Tonnetz : public Node{
         // One transform applied to a triad, as a pure function: what makes
         // the three definitions testable without a bus.
         static void apply(uint8_t transform, uint8_t& root_pc, bool& minor);
+        // Where the walk starts and which register it sits in, after the
+        // module's key has been resolved into `root`.
+        uint8_t active_root() const;
 
     private:
         // The transform the cycle names next, before `deviation` is rolled.

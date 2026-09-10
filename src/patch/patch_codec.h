@@ -79,7 +79,15 @@ struct GlobalSettings {
     // the end, so the format version does not have to move for it.
     uint8_t scale;             // ScaleId; SCALE_GLOBAL / 0 reads as chromatic
     uint8_t root;              // pitch class, 0..11
-    uint8_t reserved[19];      // #8's calibration lands here
+    // The register the key sits in: 0 means the key names none, 1..10 the
+    // octave. A pitch class cannot say which octave to play in, so until this
+    // existed every node with an absolute root had to be moved by hand and
+    // the note sequencers could not follow the key at all. Another reserved
+    // byte, so the format version still does not have to move - and zero
+    // being "no register" is what keeps every patch written before it playing
+    // the notes it always did.
+    uint8_t root_octave;
+    uint8_t reserved[18];      // #8's calibration lands here
 };
 
 inline GlobalSettings default_globals(){
@@ -96,6 +104,7 @@ inline GlobalSettings default_globals(){
     g.nrpn_source_mask = 0;
     g.scale = SCALE_CHROMATIC;          // no key until a user sets one
     g.root = 0;
+    g.root_octave = 0;                  // and no register until one is asked for
     return g;
 }
 

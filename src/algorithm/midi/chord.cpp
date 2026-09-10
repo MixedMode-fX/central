@@ -189,8 +189,13 @@ void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t ke
 void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t key){
     // The root inlet places it if anything does; otherwise it is the tonic of
     // the key, in the configured octave.
+    // Its own octave, unless the key names a register - in which case a
+    // self-playing chord sits where the module says home is, and `octave`
+    // is what it falls back to. The root inlet still outranks both.
+    const uint8_t own = (uint8_t)(((int16_t)key + (int16_t)octave * 12) > 127
+                                  ? 127 : ((int16_t)key + (int16_t)octave * 12));
     int16_t wanted = (free_note != NO_NOTE) ? (int16_t)free_note
-                                            : (int16_t)((int16_t)key + (int16_t)octave * 12);
+                                            : (int16_t)global_scale::resolve_anchor_id(scale, own);
     while (wanted > 127) wanted -= 12;               // dropped an octave, never wrapped
     const uint8_t base = scale_quantise((uint8_t)wanted, key, mask);
 

@@ -238,6 +238,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_LFO: 27,
   ALGO_SAMPLE_HOLD: 28,
   ALGO_SLEW: 29,
+  ALGO_MIDI_TO_CV: 30,
 });
 
 export const AlgorithmCategory = Object.freeze({

@@ -268,6 +268,20 @@ export const EXAMPLES = {
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
+  'MIDI to CV and gate': {
+    about: 'The converter that makes everything upstream reach something that is not a MIDI instrument. Play the keyboard under play: jack 1 is the gate, held for as long as a key is, and jack 2 is the trigger it fires on every attack. The pitch outlet is a control signal \u2014 twelve bits, one of them a fraction of a semitone so the wheel is not stepped \u2014 and a modulation route reads it straight back into a note here, which is what the DAC will do in volts. Five octaves of range from C2, so the note that comes back is the note you played; bend the wheel and it bends with you.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 0 }, { port: 2, dir: 'out', bus: 1 }],
+      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      nodes: [
+        { algo: 'MidiToCV', in: [0], out: [0, 0, 1, 2, 1], params: [3, 5, 36, 2, 1, 0, 1, 1] },
+        { algo: 'GateToNote', in: [0], out: [1], params: [36, 100, 1] },
+      ],
+      mod_map: [{ slot: 0, bus: 0, targetKind: 0, targetIndex: 1, param: 0,
+                  min: 36, max: 96, depth: 255, flags: 0 }],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
   'Feedback': {
     about: 'Buses are double-buffered, so feedback is a one-pass delay rather than a hang. Jack 1 flickers rather than the patch hanging.',
     patch: { gate_ports: [{ port: 1, dir: 'out', bus: 0 }], nodes: [{ algo: 'NOT', in: [0], out: [0] }] },

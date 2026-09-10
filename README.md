@@ -477,7 +477,7 @@ Algorithms available today:
 | Note sequencers | `NoteSequencer`, `PolySequencer` (degrees in a scale, from a root) |
 | Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator` |
-| Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off) |
+| Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off), `MidiToCV` (notes to pitch, gate, velocity, modulation and a trigger) |
 | Utility | `GateHold` (a switch, a latch, a toggle, or a gate of a set length) |
 | Modulators | `LFO`, `SampleHold`, `Slew` (all write a CV bus) |
 
@@ -558,6 +558,60 @@ physically held and drops only the rest, so lifting the latch under your
 fingers does not cut the notes you are actually playing — and everything the
 latch was keeping is released, because a latched note is still a note this
 node owes a note-off.
+
+## MIDI to CV/gate
+
+`MidiToCV` is the mirror of `GateToNote`, and the node that makes everything
+upstream of it — a keyboard, a sequencer, an arpeggiator, the modifiers —
+reach something that is not a MIDI instrument. One note stream in; pitch, gate,
+velocity, modulation and a trigger out.
+
+**One voice, because a CV pair is one voice.** Pitch is a level and a gate is a
+level: neither can carry a second note, so the node has to choose, and which
+note wins is the same question `NotePriority` answers — lowest, highest or
+latest. It is asked here rather than solved by patching a `NotePriority` in
+front, because the answer is not only which note sounds. It is also when the
+gate falls, when the trigger fires and which velocity the voice takes, and none
+of that survives a trip through a note bus as anything the next node could
+read.
+
+**What a number on the pitch bus means.** Full scale is `range` octaves, so
+`range` is what a 12-bit DAC's span will be in volts under the usual
+1 V/octave: ten octaves over ten volts by default, which puts a semitone at
+34.1 bus units. `base` is the note that sits at zero — C2 by default, the
+bottom of a five-octave controller — and notes under it clamp there, because
+a fixed range has a bottom and a pitch that wrapped round to the top of it
+would be a wrong note rather than a flat one. The arithmetic is carried with
+eight sub-bits so that pitch bend, which is a fraction of a semitone, is not
+rounded away before it reaches the bus — and bend is part of the pitch rather
+than a second output, because a DAC has one input per jack.
+
+**The gate and the trigger answer different questions.** The gate is up for as
+long as a key is held, which is what an envelope's sustain segment needs; the
+trigger is a fixed-width pulse on every attack, which re-strikes an envelope
+without releasing it. An attack is a note-on that *took* the voice —
+releasing the top of a legato line hands the voice back to the note underneath
+and moves the pitch, and that is not a strike. `gate` set to `retrigger` drops
+the gate itself for one pass on an attack as well, for envelopes with no
+trigger input of their own; it is not the default, because a legato line played
+into a re-gating converter loses its legato.
+
+Velocity and the modulation source — a controller of your choosing, or
+channel aftertouch — are held after the key comes up: an envelope in its
+release is still reading them.
+
+**The sustain pedal is deliberately not handled here.** Holding a note after
+its key has been released is an operation on the note stream, so it belongs in
+a modifier upstream where everything downstream of it benefits too — the same
+reason smoothing lives in `Slew` rather than inside the modulation matrix.
+
+Two of the five outlets reach a pin today: the gate and the trigger are gate
+buses, and `GateOutPort` already drives a jack from one. Pitch, velocity and
+modulation are CV buses, which the modulation matrix can read as it stands —
+keyboard tracking is a route from the pitch outlet to a parameter, with nothing
+new in the matrix, and the app's *MIDI to CV and gate* example reads the pitch
+bus straight back into a note to show that what is on it is a pitch — and
+which become voltages the moment [`CvOutPort`](#still-open) exists.
 
 ## The key
 
@@ -741,6 +795,13 @@ classDiagram
     MidiModifier --|> NoteQuantise
     MidiModifier --|> Probability
     MidiModifier --|> Arpeggiator
+
+    class MidiToCv{
+        + HeldNotes held
+        + TriggerPulse pulse
+        + int32_t per_semitone
+    }
+    Node --|> MidiToCv
 
     class HardwarePort
     HardwarePort --|> GateInPort
@@ -1351,8 +1412,10 @@ the module's only candidate for panel control, and that changes the whole
 picture above. Still unanswered.
 
 **Control voltage at the jacks.** The CV domain is now a real bus with real
-writers, and nothing reaches a pin: `GateInPort` and `GateOutPort` are still
-the only hardware port nodes. A `CvOutPort` writing a DAC and a `CvInPort`
+writers — three modulators and, since `MidiToCV`, a pitch, a velocity and a
+modulation signal that are only waiting for a converter — and none of it
+reaches a pin: `GateInPort` and `GateOutPort` are still the only hardware port
+nodes. A `CvOutPort` writing a DAC and a `CvInPort`
 reading the ADC would make every modulator in this document an output and
 every external voltage a modulation source, with no change to the matrix, the
 patch format or the editor — the scale is already twelve bits precisely so

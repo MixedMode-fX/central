@@ -210,6 +210,12 @@ that signal into parameter writes. Nothing about a modulator knows what it is
 modulating: it produces a signal, the matrix decides what the signal reaches,
 and one LFO can drive four parameters at four depths without four LFOs.
 
+The matrix is no longer the only thing a control signal can reach. `CvToNote`
+and `CvToGate` (below) turn one into a melody and into a trigger, so every
+modulator on this list is also a *source* — which is what makes "a complete
+generative patch with nothing patched into it" a sentence about this module
+rather than about a rack.
+
 ### LFO
 
 Seven shapes — sine, triangle, ramp up, ramp down, square, random step, random
@@ -254,6 +260,243 @@ rather than taking the same time.
 Smoothing is a signal operation, so it belongs in the signal path where it can
 be shared, metered and patched around — which is why the modulation matrix has
 no smoothing control of its own.
+
+## Generative Algorithms
+
+The five algorithms in this section were added together, to answer one
+question: what would this module need before it could be left running on its
+own and be worth listening to? The audit that produced them, and what was
+considered and rejected, is in
+[`docs/generative-modules.md`](docs/generative-modules.md).
+
+Four things were missing, and one of them was a hole in the architecture
+rather than a missing feature.
+
+### Reaching the music from the CV bus — `CvToNote` and `CvToGate`
+
+**The CV domain used to be a closed loop.** `Lfo`, `SampleHold` and `Slew`
+wrote it, the modulation matrix and the console read it, and nothing else
+touched it. A modulator could therefore move a *parameter* and could do
+nothing else: it could not play a note, it could not fire a trigger. The
+commonest generative patch there is — a slow, complex control signal through a
+quantiser is a melody — was not expressible, and the `CvInPort` under
+[Still open](#still-open) would have arrived into the same closed loop.
+
+These two are the doors, one per domain, and they ship together because a
+patch that can turn a voltage into a note but not into the trigger that plays
+it is still stuck.
+
+`CvToNote` is the quantiser. It is not `NoteQuantise`, and the two are worth
+telling apart: `NoteQuantise` takes notes that already exist and snaps their
+pitches, this takes a *level* — a signal with a value every pass and no events
+at all — and decides both what to play and when.
+
+**Two ways to turn a level into a pitch, and they are different instruments.**
+`degree` divides the range into the scale's *notes*, evenly, so a uniform
+signal picks every tone of the scale equally often and every value of the
+signal is already a tone. `snap` divides it into *semitones* and snaps the
+result into the scale, which is what a Eurorack quantiser does: a tone the
+scale contains has a wider catchment than one it does not, so a uniform signal
+stops being uniform — and that is exactly right when the signal is a melody
+somebody meant, because snapping preserves its shape.
+
+**The root names a pitch and the key names a pitch class.** Only an absolute
+note can say which octave a melody starts in, which is why the note sequencers
+keep a root of their own. What follows the module's key here is the pitch
+*class*: the tonic played is the key's root taken inside the octave `root`
+names, so a node set to C3 in A minor plays from A3, and moving the key moves
+it.
+
+`CvToGate` is the comparator: a level crossing a threshold becomes a gate, or
+a fixed-width trigger. **Hysteresis is not decoration** — a signal resting on
+the threshold crosses it on noise alone, and the answer to that on a gate bus
+is a stuck note or a machine-gunned drum, so the output falls only once the
+signal has dropped back by `hysteresis`. `invert` reverses the comparison
+rather than the wire, so the hysteresis stays on the side the signal is
+actually resting against. A slow LFO through one of these is a pulse train
+whose spacing breathes: regular enough to be a pulse, irregular enough not to
+be a grid.
+
+### `Turing`
+
+Every random source in the module used to be all or nothing. `RandomSequencer`
+shreds a whole new pattern, `SampleHold` draws a fresh level on every trigger,
+`Probability` flips a memoryless coin per step. None of them *remembers*, and
+the territory generative music actually lives in is the middle: a loop that
+repeats for eight bars and then changes one step.
+
+`length` bits in a ring; on each advance the top bit is fed back to the bottom,
+inverted with probability `chaos`. That one control has three landmarks:
+
+| `chaos` | what happens |
+|---|---|
+| `0` | nothing is ever inverted. The loop repeats for ever |
+| `50` | every bit is a coin flip. Nothing ever repeats |
+| `100` | every bit is inverted, every time — so the loop still repeats, but it takes two passes to come back to itself, and a length of 8 is a 16-step pattern whose second half is the negative of its first |
+
+Between 0 and 50 the loop survives and mutates one step at a time, which is
+the setting the node exists for.
+
+**Two outlets from one register, and that is the point.** The pulse is the bit
+that has just come round; the CV is the top `bits` of the register read as a
+number. Drive a rhythm from the first and a melody (through `CvToNote`) from
+the second and the two mutate *together* — the bar where the rhythm changes is
+the bar where the melody changes, because it is the same bit that moved. Two
+independent random sources sound like two random processes; one register
+sounds like a part.
+
+**Reset returns to the trunk**, not to a fresh pattern, so a wander that has
+gone somewhere unmusical is one edge away from the shape it grew out of.
+`seed` is what makes the trunk reproducible: at zero it is drawn from the
+entropy pool so a module does not play the same thing on every power cycle,
+and at anything else from that byte so a preset plays what it was saved with.
+`write` is the hand on the register — `clear` feeds zeros in and empties the
+loop a step at a time, `fill` feeds ones — and neither is a reset: the loop is
+being rewritten while it runs.
+
+### `Harmony`
+
+**The module had a key and nothing that ever moved inside it.**
+`GlobalSettings` carries one scale and one root, `Chord` voices a triad, the
+note sequencers pick degrees — and a patch left running played one chord until
+somebody stopped it. This section already named the patch that was missing:
+*a sequenced root walking through the chords of one key is a chord
+progression*. This is the node that walks it.
+
+**It only has to emit a root, and that is the whole trick.** `Chord`'s
+intervals are steps of the scale, so `0 2 4` is major on I, minor on ii and
+diminished on vii° — the quality of each chord is already correct by
+construction. A node that knows nothing whatever about chord quality produces
+a diatonic progression, because the module decided long ago that an interval
+is a scale step and not a semitone.
+
+**The walk is functional, not uniform.** Tonal music does not move at random
+between degrees: it falls by fifths, it approaches the tonic through the
+dominant, it substitutes vi for I. So each style is a 7×7 table of weights,
+and the five differ in what they think a chord wants to do next:
+
+- **pop** — I V vi IV, and the deceptive cadence. Strong dominant pull.
+- **modal** — plagal: I and IV and the degree below the tonic, few leading
+  tones. What a drone wants under it.
+- **jazz** — down a fifth, over and over. ii–V–I falls out of the table rather
+  than being written into it.
+- **walk** — every degree equally. The null model, so what the others are
+  doing can be heard rather than argued about.
+- **pedal** — almost always home, for a patch that should breathe rather than
+  move.
+
+`phrase` and `cadence` are what make it composed rather than drifting: a
+phrase of four with a cadence of 75% resolves to the tonic three times in
+four, which is a period. `loop` is the difference between improvising and
+writing — turn it on and the next `phrase` chords become the piece, repeated
+exactly, until it is turned off again. `gravity` mixes an increasing weight on
+the tonic into whichever style is running, from the style at full strength to
+a drone.
+
+**Degrees the key does not have are not reachable.** The walk runs over the
+first seven degrees of the scale, or over all of them when the scale has fewer,
+so a pentatonic key has five chords. A chromatic key has twelve degrees and
+the walk uses seven of them, which is chromatic nonsense and exactly what
+"the module is chromatic until a key is set" means: set a key.
+
+### `Automaton`
+
+The rhythm family was at one end of the axis or the other. `StepSequencer` and
+the drum grids play what somebody typed in. `EuclidianSequencer` plays a
+formula — perfectly even, and therefore perfectly predictable once you have
+heard a cycle. `RandomSequencer` has no memory. Nothing was in the middle: a
+pattern with structure, that repeats motifs, and never quite repeats itself.
+
+A Wolfram elementary rule lives exactly there and costs a byte. Each cell
+looks at itself and its two neighbours — eight possible neighbourhoods, one
+bit of answer each, so the rule *is* an eight-bit number:
+
+```
+next[i] = (rule >> ((left << 2) | (self << 1) | right)) & 1
+```
+
+Rule 90 is left XOR right and draws Sierpinski triangles: sparse,
+self-similar, unreasonably musical. Rule 110 is stable in places and chaotic
+in others. Rule 30 is noise. Rule 51 blinks. None of them is a pattern anybody
+typed and none of them is a coin flip.
+
+**The lanes are neighbours, and that is the point.** Eight
+`EuclidianSequencer`s give eight patterns that have nothing to do with each
+other; here a cell can only be switched on by the cells beside it, so a figure
+on lane 3 moves into lane 4 next generation. That is a rhythm section rather
+than eight sequencers in a rack. A lane with no jack still lives and still
+feeds its neighbours, so a three-lane drum part gets its variation from cells
+nobody hears.
+
+**What the mathematics does not give you is a way back**, and a drum machine
+that stops is a bug however correct the rule is. `revive` watches for the row
+that will never change again — all-empty under most rules, all-full under
+some, any other stable configuration — and reloads the seed. A row that merely
+blinks between two states changes every generation and is left alone, because
+blinking is a rhythm. `edges` decides whether the row is a **ring**, so
+activity that runs off one end arrives at the other and the pattern sustains,
+or bounded by **dead** cells, so it spreads outward and falls off.
+
+### `NoteDelay`
+
+Every node in this module is driven by an edge, and in practice every edge in
+a patch descends from one `ClockDiv` or `Metronome`. That is deliberate and it
+is what makes the module tight. It also means a patch has exactly one rhythmic
+surface, and nothing could put an event *between* the grid lines on purpose
+and stay musical. Two sequencers of length 16 and 12 are polyrhythm **on** the
+grid; Eno's *Music for Airports* is seven tape loops of incommensurable length
+that do not realign for twenty-seven days, and that shape had no expression
+here at all.
+
+A note in comes back `repeats` times, each transposed by `interval` **steps of
+the scale** — so a canon at the third stays in key, and the third above C is
+major while the one above E is minor without the node knowing either — each
+`decay` percent quieter, each subject to `chance`.
+
+**`spread` is the reason the node exists.** At 0 the repeats sit exactly on
+the grid and this is a musical delay. Above 0 each gap is a percentage longer
+than the one before, so the total grows with the square of the repeat and the
+echoes of a four-note figure stop lining up with each other or with the
+sequencer that produced them — the texture stops being a rhythm and becomes a
+cloud. Below 0 the gaps shorten and the echoes accelerate into each other,
+which is a ball settling. It is a percentage of the delay rather than a number
+of milliseconds so that it means the same thing at every tempo and in both
+timing modes.
+
+**Two rates, and only one of them is a guess** — the rule `Metronome` and
+`Lfo` already follow. Synced, the delay is a note value counted in subticks,
+so a dotted-eighth delay under a 1/16 sequence is exact for ever.
+Free-running, it is wall-clock time, which is what an echo that should *not*
+line up with the music needs. An echo already in flight keeps the clock it was
+scheduled on.
+
+**The articulation is the input's, not a setting.** A repeat is released
+exactly as long after its note-on as the source note was held, because the
+note-off is scheduled when the source's note-off arrives, at the same
+distance. There is no `hold` parameter and there should not be: one would
+flatten the phrasing of the thing being echoed. Each pending echo carries the
+pitch and channel it will be released with, decided when it was scheduled, so
+the scale, the interval and the key can all move underneath and the note-off
+still matches the note-on — and a repeat that will not fit the table is
+dropped and counted rather than emitted without a way to release it.
+
+### A patch that plays itself
+
+None of these needs anything plugged in. With the module's key set to A minor:
+
+```
+Metronome 1 bar ──> Harmony ──root──> Chord (0 2 4) ──> MIDI out
+                       │
+Metronome 1/8 ──┬──> Turing ──cv──> CvToNote (degree) ──> NoteDelay ──> MIDI out
+                │       └──pulse──> Automaton ──cell 1..3──> DrumSeqGate lanes
+                └──> Lfo (1/1) ──> CvToGate ──> Turing.reset
+```
+
+The chords move in the key; the melody is a loop that mutates a step at a
+time; the drums are a rhythm section whose lanes are related to each other;
+the echoes walk off the grid; and once a bar the register goes back to the
+pattern it grew out of. Nothing in it is a sequence anybody typed, and nothing
+in it is a coin flip.
 
 ## Logic Algorithms
 
@@ -441,7 +684,7 @@ an index that is out of range for that domain. `NO_BUS` leaves an optional
 inlet unconnected.
 
 **Allocation.** All algorithm code is always resident. Instances live in a
-static pool of `N_NODE = 32` uniform slots (`NODE_SLOT_SIZE = 640` bytes each,
+static pool of `N_NODE = 40` uniform slots (`NODE_SLOT_SIZE = 640` bytes each,
 checked per class with `static_assert`), placement-new'd on patch load and
 destroyed explicitly on unload. The slot is sized by the two largest nodes,
 `PolySequencer` and `DrumSeqMidi`, at about 540 bytes each: a 32-step grid
@@ -1144,7 +1387,7 @@ value inside a node it is CC or NRPN.**
 | SysEx | arbitrary length | structure, pattern data, bulk transfer, enumeration |
 
 CC has 120 usable numbers and a 7-bit value; this module has
-`N_NODE` × `N_PARAM` = 10 752 parameters before the clock and the transport
+`N_NODE` × `N_PARAM` = 13 440 parameters before the clock and the transport
 are counted, so CC cannot address the parameter space even if every value
 fitted.
 
@@ -1152,12 +1395,18 @@ fitted.
 message so an editor reads it rather than hardcoding it:
 
 ```
-0x0000 .. 0x29FF   a node's parameter: node = address / N_PARAM,
+0x0000 .. 0x347F   a node's parameter: node = address / N_PARAM,
                                        param = address % N_PARAM
-0x2A00 .. 0x2A0F   the master clock (tempo, source, CV PPQN)
-0x2A10 .. 0x2A1F   the transport (start, stop, continue, tap)
-0x2A20 .. 0x3FFF   reserved
+0x3480 .. 0x348F   the master clock (tempo, source, CV PPQN)
+0x3490 .. 0x349F   the transport (start, stop, continue, tap)
+0x34A0 .. 0x3FFF   reserved
 ```
+
+**The bases move when `N_NODE` moves**, and the protocol version moves with
+them — which is what happened when the pool went from 32 slots to 40 to make
+room for a patch that could hold one of every algorithm. The ceiling on the
+pool is this address space rather than memory: 40 × 336 leaves 2912 addresses
+reserved, and 48 would leave 224.
 
 It reaches the same target space CC mapping defines and ends at the same
 `set_param`, so NRPN and CC writing one parameter produce identical results

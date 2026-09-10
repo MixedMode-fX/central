@@ -4,6 +4,14 @@ An audit of the twenty-nine algorithms in `src/algorithm/`, read against one
 question — *what would this module need before it could be left running on its
 own and be worth listening to?* — and five proposals that answer it.
 
+> **All six are built.** `CvToNote`, `CvToGate`, `Turing`, `Harmony`,
+> `Automaton` and `NoteDelay` are algorithm ids 30..35, with 79 tests of their
+> own. The README's [Generative
+> Algorithms](../README.md#generative-algorithms) section is the user-facing
+> description; this document is kept as the argument for why they exist and
+> what was rejected. Where the build disagreed with the proposal, the reason
+> is recorded in "What changed in the building" at the end.
+
 The short version: the graph, the buses, the key and the note-off ledger are
 already the right substrate for generative music, and the algorithm table is
 missing four specific things. One of the four is a hole in the architecture
@@ -405,3 +413,46 @@ After 3, it is in a key that moves. After 5, it is an ensemble.
 - [Elementary cellular automaton](https://en.wikipedia.org/wiki/Elementary_cellular_automaton) and [Rule 110](https://en.wikipedia.org/wiki/Rule_110) — the rule numbering and the edge-of-chaos behaviour.
 - Music Thing Modular Workshop Computer, [Cellular Automata Sequencer](https://computer.musicthing.co.uk/programs/19-ca-sequencer/) — an existing gate-and-CV automaton in a Eurorack context.
 - Loopop, [Create Brian Eno style generative music](https://loopopmusic.com/create-brian-eno-style-generative-music-20-ideas-and-tools-for-ableton-eurorack-dawless-and-vcv) and MacProVideo, [Making Generative Music With Eurorack Synths](https://www.macprovideo.com/article/midi/making-generative-music-with-eurorack-synths) — the modulation-source-through-a-quantiser patch, and blending sequences of different lengths.
+
+
+## 7. What changed in the building
+
+Five things in the proposal above turned out to be wrong or under-specified,
+and the code follows the corrected version rather than this document.
+
+- **`CvToNote` and `CvToGate`, not `Quantiser` and `Comparator`.** The README
+  argues at length that `NoteQuantise` is called that, and not `Quantise`,
+  because the module quantises two unrelated things. The same argument applies
+  here, and the module already had the naming for it: `GateToNote` is a
+  gate-to-note bridge, so these are the CV ones. "Quantiser" and "comparator"
+  are what the summaries say, because that is what a user searches for.
+
+- **`gravity`, not `motion`.** A stored 0 means the descriptor's default
+  everywhere in this module, so a `motion` parameter whose useful default was
+  100 could never be *saved* at 0 — the setting that pins the walk to the
+  tonic would have been unreachable from a preset. Naming the parameter for
+  the pull rather than for the movement puts the musical default at zero,
+  where the format needs it. `cadence` pays a smaller version of the same
+  price and keeps its default of 75; "no cadence at all" is 1.
+
+- **`Automaton` has no CV outlet.** `MAX_OUT` is 8 and the eight lanes are the
+  point. Raising it is a preset-format change to buy a feature `Turing`
+  already provides better, so the row is eight gates and nothing else.
+
+- **`NoteDelay`'s `spread` is a percentage, not milliseconds.** Milliseconds
+  cannot mean the same thing in both timing modes, and the synced mode counts
+  subticks. As a percentage of the delay it works in either unit and at any
+  tempo — and it made the *shape* right as well: each gap is a percentage
+  longer than the one before, so the total grows with the square of the
+  repeat, which is what walking off the grid actually is. A flat offset would
+  only have been a slower grid.
+
+- **The node pool had to grow, and that was not free.** The registry passed 32
+  algorithms, so a patch could no longer hold one of every algorithm. `N_NODE`
+  is 40 — and the ceiling is the NRPN address space rather than memory, so the
+  block bases moved and the protocol version went to 4. Two other things
+  surfaced with it: the emulator's 4 KB SysEx buffer silently dropped five of
+  the thirty-six algorithm records (raised to 16 KB, and the seam now fails on
+  a drop rather than handing back a truncated reply), and
+  `semitone_to_scale_degree`'s comment claimed an offset outside the scale
+  resolves to the degree *below* it when it resolves to the next note above.

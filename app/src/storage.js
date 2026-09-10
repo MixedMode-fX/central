@@ -78,7 +78,7 @@ export class Library {
       // A quota error is the one failure a user can act on, and the action is
       // to delete something - so it says that rather than the DOM's wording.
       throw new Error(error.name === 'QuotaExceededError'
-        ? 'this browser will not store any more patches. Delete one, or export it to a file.'
+        ? 'no room left: delete a patch, or export it to a file'
         : `could not save: ${error.message}`);
     }
   }

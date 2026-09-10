@@ -134,10 +134,7 @@ function socketRow(app, block, port, isOutlet) {
     class: `socket dom-${domain}${connected ? ' on' : ''}${modulated ? ' mod' : ''}`
          + `${port.required && !connected ? ' needed' : ''}`,
     'data-block': block.id, 'data-at': String(port.at), 'data-outlet': isOutlet ? '1' : '',
-    title: modulated
-      ? `${port.name} is modulated from ${where} (right-click to stop)`
-      : `${port.name} — ${where}${connected ? ' (right-click to disconnect)' : ''}`
-        + `\ndrag to ${isOutlet ? 'an inlet' : 'an outlet'} to connect`,
+    title: `${port.name} — ${where}`,
     'aria-label': `${block.title} ${port.name}, `
                 + `${modulated ? `modulated from ${where}` : where}`,
     oncontextmenu: (e) => {
@@ -269,9 +266,7 @@ function startLink(app, event, ref) {
         askForParameter(app, ref, onBlock, { x, y });
         return;
       }
-      app.say(onBlock
-        ? 'dropped on a block — only a control signal can be pointed at a parameter'
-        : 'dropped on nothing — a connection ends on a socket');
+      app.say(onBlock ? 'only a control signal modulates a parameter' : 'drop on a socket');
     },
   });
 }
@@ -294,8 +289,8 @@ function askForParameter(app, ref, blockId, at) {
   const choices = modulationChoices(app.device, app.patch, index);
   if (!choices.length) {
     app.say(app.device?.byId.get(app.patch.nodes[index]?.algorithmId)?.params
-      ? 'every parameter of that block is already modulated'
-      : 'still reading that block’s parameters — try again in a moment');
+      ? 'every parameter is already modulated'
+      : 'still reading its parameters');
     return;
   }
 
@@ -510,9 +505,7 @@ function arrowLayer(app, geom) {
 
 export function canvasPanel(app, computed = null) {
   if (!app.device?.capabilities) {
-    return el('p', { class: 'hint' },
-      'The module is not answering yet, so there is nothing to draw. '
-      + 'The algorithms, their ports and the bus counts all come from it.');
+    return el('p', { class: 'hint' }, 'no module');
   }
   // The patch tab works the geometry out before it builds anything, so that
   // what the bar above the canvas says about the buses is about the patch
@@ -562,17 +555,13 @@ export function canvasPanel(app, computed = null) {
          + `--blk-row:${ROW_H}px; --blk-pad:${PAD_Y}px`,
   },
     el('div', { class: 'canvas-bar' },
-      el('span', { class: 'hint' },
-        geom.blocks.length
-          ? 'drag a socket onto another to connect · drag a block to move it '
-            + '· click one to edit it'
-          : 'nothing in this patch yet — add a block below'),
+      geom.blocks.length ? null : el('span', { class: 'hint' }, 'empty'),
       el('div', { class: 'canvas-zoom' },
         el('button', { class: 'ghost', title: 'zoom out', 'aria-label': 'zoom out',
                        onclick: () => zoomFromButton(app, 1 / 1.25) }, '−'),
         el('button', { class: 'ghost', title: 'zoom in', 'aria-label': 'zoom in',
                        onclick: () => zoomFromButton(app, 1.25) }, '+'),
-        el('button', { class: 'ghost', title: 'fit the whole patch',
+        el('button', { class: 'ghost',
                        onclick: () => { app.canvas.fit = true; app.render(); } }, 'fit'))),
     viewport,
     busLegend(app, geom));
@@ -599,10 +588,9 @@ function busLegend(app, geom) {
     .sort((a, b) => a.domain - b.domain || a.bus - b.bus)
     .map((arrow) => el('span', {
       class: `chip dom-${domainName(arrow.domain)}`,
-      title: `${arrow.writers} writing, ${arrow.readers} reading`,
     }, `${domainName(arrow.domain)} ${arrow.bus}`,
       arrow.writers > 1 ? el('span', { class: 'merge' }, ` ×${arrow.writers}` ) : null));
-  return el('div', { class: 'canvas-legend' }, el('span', { class: 'hint' }, 'buses in use:'), chips);
+  return el('div', { class: 'canvas-legend' }, chips);
 }
 
 // --- the inspector ----------------------------------------------------------
@@ -612,24 +600,20 @@ function busLegend(app, geom) {
 // way of *seeing* a patch and this is where it is edited in detail.
 export function canvasInspector(app) {
   const selected = app.canvas.selected;
-  if (!selected) {
-    return el('p', { class: 'hint' },
-      'Click a block to edit it, or an arrow to disconnect it.');
-  }
+  if (!selected) return null;
   if (selected.kind === 'arrow') {
     const arrow = app.canvas.geom?.arrows.find((a) => a.id === selected.id);
-    if (!arrow) return el('p', { class: 'hint' }, 'that arrow is no longer in the patch');
+    if (!arrow) return el('p', { class: 'hint' }, 'gone');
     const from = app.canvas.geom.blocks.find((b) => b.id === arrow.from.blockId);
     const to = app.canvas.geom.blocks.find((b) => b.id === arrow.to.blockId);
     return el('section', { class: 'panel' },
       el('h2', {}, 'the arrow'),
       el('p', {}, `${from?.title ?? '?'} → ${to?.title ?? '?'}, `
                 + `on ${domainName(arrow.domain)} bus ${arrow.bus}`),
-      el('p', { class: 'hint' }, arrow.writers > 1 || arrow.readers > 1
-        ? `${arrow.writers} port${arrow.writers > 1 ? 's write' : ' writes'} that bus and `
-          + `${arrow.readers} read${arrow.readers > 1 ? '' : 's'} it. There is no cable here: `
-          + 'disconnecting takes the inlet off the bus, so it stops hearing everything on it.'
-        : 'Disconnecting takes the inlet off the bus.'),
+      arrow.writers > 1 || arrow.readers > 1
+        ? el('p', { class: 'hint' },
+            `${arrow.writers} writing · ${arrow.readers} reading`)
+        : null,
       el('button', { class: 'danger', onclick: () => {
         const fresh = geometry(app);
         const same = fresh.arrows.find((a) => a.id === arrow.id);
@@ -638,13 +622,12 @@ export function canvasInspector(app) {
   }
 
   const block = app.canvas.geom?.blocks.find((b) => b.id === selected.id);
-  if (!block) return el('p', { class: 'hint' }, 'that block is no longer in the patch');
+  if (!block) return el('p', { class: 'hint' }, 'gone');
   if (block.kind === BlockKind.Node) return el('div', { class: 'nodes' }, nodeCard(app, block.index));
   if (block.kind === BlockKind.Jack) return jackCard(app, block.index);
   return el('section', { class: 'panel' },
     el('h2', {}, block.title),
-    routeCard(app, block.index, block.kind === BlockKind.MidiOut),
-    el('p', { class: 'hint' }, 'Every port, side by side, is under MIDI → MIDI routing.'));
+    routeCard(app, block.index, block.kind === BlockKind.MidiOut));
 }
 
 function jackCard(app, index) {
@@ -668,9 +651,6 @@ function jackCard(app, index) {
   }
   return el('section', { class: 'panel' },
     el('h2', {}, `jack ${index + 1}`),
-    el('p', { class: 'hint' },
-      '“in” means the jack drives a gate bus; “out” means a gate bus drives the jack. '
-      + 'Play it under play, at the top of the page.'),
     el('div', { class: 'row' }, select));
 }
 
@@ -697,29 +677,27 @@ export function refreshCanvasLive(app, live) {
 // patch's edges, and a canvas that could not add them would send you to
 // another tab to finish a patch you started here.
 export const ENDPOINTS = [
-  { key: 'jack-in', label: 'jack in — a gate arriving', kind: BlockKind.Jack, direction: 1 },
-  { key: 'jack-out', label: 'jack out — a gate leaving', kind: BlockKind.Jack, direction: 2 },
-  { key: 'midi-in', label: 'MIDI in — notes arriving', kind: BlockKind.MidiIn },
-  { key: 'midi-out', label: 'MIDI out — notes leaving', kind: BlockKind.MidiOut },
+  { key: 'jack-in', label: 'jack in', kind: BlockKind.Jack, direction: 1 },
+  { key: 'jack-out', label: 'jack out', kind: BlockKind.Jack, direction: 2 },
+  { key: 'midi-in', label: 'MIDI in', kind: BlockKind.MidiIn },
+  { key: 'midi-out', label: 'MIDI out', kind: BlockKind.MidiOut },
 ];
 
 export function addBar(app) {
   if (!app.device?.algorithms?.length) {
-    return el('div', { class: 'hint' },
-      'The algorithms come from the module, so there is no list here that can have drifted '
-      + 'from the firmware.');
+    return el('div', { class: 'hint' }, 'no module');
   }
   const select = el('select', { id: 'algo-pick', class: 'grow',
                                 onchange: (e) => { app.addPick = e.target.value; app.render(); } });
   const algorithms = el('optgroup', { label: 'algorithms' });
   for (const d of app.device.algorithms) {
     if (!d) continue;
-    const option = el('option', { value: String(d.id), title: d.summary ?? '' },
+    const option = el('option', { value: String(d.id) },
       `${d.name} — ${d.nIn} in, ${d.nOut} out`);
     if (String(d.id) === app.addPick) option.selected = true;
     algorithms.append(option);
   }
-  const edges = el('optgroup', { label: 'the edges of the patch' });
+  const edges = el('optgroup', { label: 'edges' });
   for (const endpoint of ENDPOINTS) {
     const option = el('option', { value: endpoint.key }, endpoint.label);
     if (endpoint.key === app.addPick) option.selected = true;
@@ -727,13 +705,11 @@ export function addBar(app) {
   }
   select.append(algorithms, edges);
   app.addPick ??= select.value;
-  const chosen = app.device.byId.get(Number(app.addPick));
 
   return el('section', { class: 'panel add' },
-    el('h2', {}, 'add a block'),
+    el('h2', {}, 'add'),
     el('div', { class: 'row' }, select,
-      el('button', { class: 'primary', onclick: () => app.add(select.value) }, 'add')),
-    chosen?.summary ? el('p', { class: 'summary' }, chosen.summary) : null);
+      el('button', { class: 'primary', onclick: () => app.add(select.value) }, 'add')));
 }
 
 // The free buses left, so "add" and a drag both stop being possible for a
@@ -749,8 +725,7 @@ export function busCapacity(app, geom) {
         if (port.domain === domain && port.bus !== P.NO_BUS) written.add(port.bus);
       }
     }
-    parts.push(`${busCount(caps, domain) - written.size} of ${busCount(caps, domain)} `
-             + `${domainName(domain)} buses free`);
+    parts.push(`${domainName(domain)} ${busCount(caps, domain) - written.size}/${busCount(caps, domain)}`);
   }
   return parts.join(' · ');
 }

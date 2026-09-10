@@ -363,11 +363,16 @@ protocol gains a message — never a private side channel — so the console, th
 app and an eventual Launchpad stay interchangeable.
 
 **Everything is read from the device.** The algorithms, **their inlets' and
-outlets' names** and domains, a one-line summary of each algorithm, every
-parameter's name, range, default, display kind and enum options, and the
-module's real capacities all come from the registry and capability messages. An
-algorithm added to the firmware appears here with a working, *described* panel
-and no change to any file in this directory.
+outlets' names** and domains, every parameter's name, range, default, display
+kind and enum options, and the module's real capacities all come from the
+registry and capability messages. An algorithm added to the firmware appears
+here with a working panel and no change to any file in this directory.
+
+**The interface carries labels, not prose.** Every control is named, every
+state is said in as few words as it takes, and nothing on screen explains
+itself at length: the explanations are in this file, where they can be read
+once instead of being scrolled past on every edit. The algorithm summaries the
+registry sends are still read off the device; nothing prints them.
 
 The only words not read from the device are the ones the protocol defines by
 enum rather than by description — MIDI port names, clock sources, takeover

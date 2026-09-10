@@ -432,8 +432,8 @@ export function planConnection(blocks, caps, a, b) {
   const target = a.isOutlet ? second : first;
   if (Boolean(a.isOutlet) === Boolean(b.isOutlet)) {
     return { ok: false, why: a.isOutlet
-      ? 'two outlets cannot be joined — drag an outlet onto an inlet'
-      : 'two inlets cannot be joined — an inlet reads a bus, it does not feed one' };
+      ? 'two outlets cannot be joined'
+      : 'two inlets cannot be joined' };
   }
   if (source.port.domain !== target.port.domain) {
     return { ok: false, why: `a ${domainName(source.port.domain)} outlet cannot drive a `
@@ -506,8 +506,7 @@ export function applyWrite(patch, { blockId, at, isOutlet, bus, modSlot }) {
 // another bus, and there is taking it out of use, which is removing the block.
 function endpointRefusal(block) {
   if (block.kind === BlockKind.Node) return null;
-  return { ok: false, why: `${block.title} is only in the patch while it is on a bus — `
-                         + 'point it at another one, or remove the block to stop using it' };
+  return { ok: false, why: `${block.title} is only in the patch while it is on a bus` };
 }
 
 // Removing one arrow. The reader comes off the bus, because that is the end
@@ -523,8 +522,7 @@ export function planDisconnect(blocks, arrow) {
   if (refused) return refused;
   const also = arrow.writers > 1
     ? ` — ${arrow.writers - 1} other source${arrow.writers > 2 ? 's were' : ' was'} on `
-      + `${domainName(arrow.domain)} bus ${arrow.bus}, so ${target.block.title} stops hearing `
-      + (arrow.writers > 2 ? 'them too' : 'it too')
+      + `${domainName(arrow.domain)} bus ${arrow.bus}`
     : '';
   return {
     ok: true, domain: arrow.domain, bus: arrow.bus,
@@ -568,8 +566,7 @@ export function planModulation(blocks, patch, caps, sourceRef, targetBlockId, pa
     return { ok: false, why: 'a modulation route starts at an outlet' };
   }
   if (source.port.domain !== Domain.CV) {
-    return { ok: false, why: `${domainName(source.port.domain)} is not a control signal — `
-                           + 'modulation comes from a CV outlet' };
+    return { ok: false, why: `${domainName(source.port.domain)} is not a control signal` };
   }
   const [kind, where] = String(targetBlockId).split(':');
   if (kind !== BlockKind.Node) {
@@ -577,8 +574,7 @@ export function planModulation(blocks, patch, caps, sourceRef, targetBlockId, pa
   }
   const index = Number(where);
   if (!caps?.modRoutes) {
-    return { ok: false, why: 'this module’s firmware predates modulation — '
-                           + 'it has no routes to point a control signal at a parameter' };
+    return { ok: false, why: 'this firmware has no modulation routes' };
   }
   const slot = freeModSlot(patch, caps.modRoutes);
   if (slot === null) {

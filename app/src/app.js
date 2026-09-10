@@ -224,8 +224,7 @@ class App {
       this.restoreWorking();
     } catch (error) {
       this.status = `the built-in module did not start: ${error.message}`;
-      this.pendingError = 'Without the module the app has nothing to read the algorithms from. '
-                        + 'Connect a module over Web MIDI, or serve the page with mmmc.wasm beside it.';
+      this.pendingError = 'no algorithms: connect a module, or serve mmmc.wasm beside the page';
     }
     this.render();
   }
@@ -233,7 +232,7 @@ class App {
   // Everything a connection means, once, for whichever transport it is: read
   // what the firmware has, then take its running patch. The app is the same
   // client either way - that is the point of the transport seam.
-  async adopt(transport, label, deviceId = P.SYSEX_DEFAULT_DEVICE) {
+  async adopt(transport, deviceId = P.SYSEX_DEFAULT_DEVICE) {
     this.device = new Device(transport);
     this.device.deviceId = deviceId;
     this.device.addEventListener('device-event', (e) => this.onDeviceEvent(e.detail));
@@ -245,7 +244,7 @@ class App {
     this.globals = dumped.globals;
     this.offline = false;
     this.diverged = false;
-    this.status = `connected to ${label}`;
+    this.status = 'connected';
   }
 
   // Back to (or on to) the module in the page.
@@ -253,7 +252,7 @@ class App {
     if (!this.module) return;
     if (!silent) this.stashWorking();
     this.module.start();
-    await this.adopt(this.module, this.module.name);
+    await this.adopt(this.module);
     this.usingModule = true;
     this.current = { id: null, name: 'untitled', dirty: false, savedAt: 0 };
     this.savedImage = null;
@@ -266,7 +265,7 @@ class App {
     this.stopLive?.();
     this.stopLive = this.module.onFrame(() => this.refreshLive());
     if (!silent) {
-      this.status = 'editing the built-in module';
+      this.status = 'connected';
       this.render();
     }
   }
@@ -283,8 +282,7 @@ class App {
       const access = await requestAccess();
       const found = await discover(access);
       if (!found.length) {
-        this.status = 'no module answered. Check it is plugged in, then try again — '
-                    + 'or build a patch here and export a .syx file.';
+        this.status = 'no module answered';
         this.render();
         return;
       }
@@ -294,11 +292,11 @@ class App {
       this.usingModule = false;
       this.stopLive?.();
       this.stopLive = null;
-      await this.adopt(new WebMidiTransport(port.input, port.output), port.name, port.deviceId);
+      await this.adopt(new WebMidiTransport(port.input, port.output), port.deviceId);
       this.current = { id: null, name: `on ${port.name}`, dirty: true, savedAt: 0 };
       this.savedImage = null;
       this.resetCanvas();
-      if (kept) this.status += ` — what you were editing is kept as “${kept.name}”`;
+      if (kept) this.status += ` — kept “${kept.name}”`;
     } catch (error) {
       this.status = `could not connect: ${error.message}`;
     }
@@ -308,7 +306,7 @@ class App {
   async connectController() {
     try {
       await this.controller.connect();
-      this.status = 'MIDI devices found — choose one to play the module from';
+      this.status = 'MIDI devices found';
     } catch (error) {
       this.status = `could not reach the MIDI devices: ${error.message}`;
     }
@@ -437,8 +435,7 @@ class App {
     const problems = validate(this.device, this.patch);
     if (problems.length) {
       this.diverged = true;
-      this.status = 'the module is still running the previous patch — '
-                  + 'fix what is listed above and it goes over automatically';
+      this.status = 'not sent: fix the problems above';
       this.render();
       return;
     }
@@ -605,8 +602,7 @@ class App {
     this.canvas.selected = { kind: 'block', id: `${endpoint.kind}:${index}` };
     this.edit(() => this.device.setMidiPort(index, isOut, mask, ports[index].channel, bus),
               isOut ? 'MIDI out' : 'MIDI in');
-    this.status = `MIDI ${isOut ? 'out' : 'in'} ${index + 1} on USB 1, note bus ${bus}`
-                + ' — choose its ports and channel below';
+    this.status = `MIDI ${isOut ? 'out' : 'in'} ${index + 1} on USB 1, note bus ${bus}`;
     this.render();
   }
 
@@ -642,17 +638,14 @@ class App {
 
   async learn(nodeIndex, param) {
     if (this.offline) {
-      this.pendingError = 'learn needs a module — but a binding can be typed in by hand '
-                        + 'under MIDI, with no controller present';
+      this.pendingError = 'learn needs a module';
       this.render();
       return;
     }
     const slot = this.patch.ccMap.findIndex((m) => !m || !m.sourceMask);
     if (slot < 0) { this.pendingError = 'every binding slot is in use'; this.render(); return; }
     this.learnTarget = { nodeIndex, param, slot };
-    this.status = this.usingModule && !this.controller?.inputId
-      ? 'turn a controller to bind it — connect one under MIDI → external controller first'
-      : 'turn a controller to bind it';
+    this.status = 'turn a controller to bind it';
     this.render();
     this.edit(() => this.device.learnCc(slot, P.CcTargetKind.CC_TARGET_NODE, nodeIndex, param), 'learn');
   }
@@ -738,11 +731,11 @@ class App {
         savedAt: entry?.updated ?? 0,
       };
       this.resetCanvas();
-      this.sendWhole(`picked up where you left off — “${this.current.name}”`);
+      this.sendWhole(`restored “${this.current.name}”`);
     } catch (error) {
       // A patch image from an older format version is not a crash: it is a
       // patch this build cannot read, and saying so beats an empty page.
-      this.status = `could not reopen the last patch (${error.message}); starting fresh`;
+      this.status = `could not reopen the last patch: ${error.message}`;
       this.library.clearWorking();
     }
   }
@@ -908,7 +901,7 @@ class App {
       this.savedImage = null;
       this.resetCanvas();
       this.tab = this.editingTab = 'patch';
-      this.sendWhole(`loaded ${file.name} — save it to keep it in this browser`);
+      this.sendWhole(`loaded ${file.name}`);
     } catch (error) {
       this.pendingError = `could not read that file: ${error.message}`;
       this.render();
@@ -985,14 +978,12 @@ class App {
       this.header(),
       this.tabs(),
       this.pendingError ? el('div', { class: 'error', onclick: () => { this.pendingError = null; this.render(); } },
-        this.pendingError, ' (tap to dismiss)') : null,
+        this.pendingError) : null,
       problems.length ? el('div', { class: 'problems' },
-        el('h4', {}, this.diverged
-          ? 'the module has not taken this patch yet'
-          : 'the module would reject this patch'),
+        el('h4', {}, this.diverged ? 'not sent' : 'rejected'),
         el('ul', {}, problems.map((p) => el('li', {}, `${p.where}: ${p.message}`)))) : null,
       notes.length ? el('div', { class: 'notes' },
-        el('h4', {}, 'worth a look'),
+        el('h4', {}, 'notes'),
         el('ul', {}, notes.map((p) => el('li', {}, `${p.where}: ${p.message}`)))) : null,
       this.tab === 'patch' ? this.patchTab() : null,
       this.tab === 'play' ? playTab(this) : null,
@@ -1021,22 +1012,19 @@ class App {
       blocks
         ? canvasInspector(this)
         : el('div', { class: 'nodes' }, this.patch.nodes.map((_, i) => nodeCard(this, i))),
-      !blocks && !this.patch.nodes.length ? el('p', { class: 'hint' },
-        'No nodes yet. Add one below — it arrives connected to a bus, so the patch stays valid.') : null,
       addBar(this));
   }
 
   viewSwitch() {
-    const pick = (view, label, title) => el('button', {
+    const pick = (view, label) => el('button', {
       class: `chip ${this.patchView === view ? 'on' : ''}`,
       'aria-pressed': this.patchView === view ? 'true' : 'false',
-      title,
       onclick: () => this.setPatchView(view),
     }, label);
     return el('div', { class: 'view-switch' },
       el('div', { class: 'ports-row' },
-        pick('blocks', 'blocks', 'the patch drawn: blocks, and an arrow wherever two ports share a bus'),
-        pick('list', 'list', 'every node in full, one card after another')),
+        pick('blocks', 'blocks'),
+        pick('list', 'list')),
       this.patchView === 'blocks' && this.canvas.geom
         ? el('span', { class: 'hint' }, busCapacity(this, this.canvas.geom))
         : null);
@@ -1044,8 +1032,7 @@ class App {
 
   midiTab() {
     if (!this.device?.capabilities) {
-      return el('p', { class: 'hint' },
-        'The module is not answering yet, so there is nothing to route MIDI to.');
+      return el('p', { class: 'hint' }, 'no module');
     }
     return el('div', {}, controllerPanel(this), mappingPanel(this), modulationPanel(this),
                          routingPanel(this), globalsPanel(this));
@@ -1053,7 +1040,7 @@ class App {
 
   header() {
     const where = this.usingModule
-      ? 'the module in this page'
+      ? 'built-in'
       : (this.device ? this.device.transport.name : 'nothing');
     return el('header', { class: 'top' },
       el('div', { class: 'title' },
@@ -1064,11 +1051,11 @@ class App {
           class: this.tab === 'play' ? 'active' : '',
           'aria-pressed': this.tab === 'play' ? 'true' : 'false',
           onclick: () => this.togglePlay(),
-        }, this.tab === 'play' ? 'back to editing' : 'play'),
+        }, this.tab === 'play' ? 'edit' : 'play'),
         el('button', { onclick: () => this.connect() },
           this.usingModule ? 'connect a module' : 'reconnect')),
       el('p', { class: `status ${this.offline ? 'offline' : 'online'}${this.diverged ? ' warn' : ''}` },
-        this.status, el('span', { class: 'hint' }, ` · editing ${where}`)));
+        this.status, el('span', { class: 'hint' }, ` · ${where}`)));
   }
 
   // play is the module running, not a fourth thing to edit, so it is a button
@@ -1096,9 +1083,7 @@ class App {
     const c = this.device.capabilities;
     return el('div', { class: 'caps' },
       `${this.patch.nodes.length}/${c.nodes} nodes · `,
-      `${c.gateBuses} gate, ${c.noteBuses} note, ${c.cvBuses} CV buses · `,
-      `${c.maxIn} in / ${c.maxOut} out per node · `,
-      `${c.nParams} parameters · ${c.slots} preset slots of ${c.slotBytes} bytes`);
+      `${c.gateBuses} gate, ${c.noteBuses} note, ${c.cvBuses} CV buses`);
   }
 
   jacks() {
@@ -1124,9 +1109,6 @@ class App {
     });
     return el('section', { class: 'panel' },
       el('h2', {}, 'jacks'),
-      el('p', { class: 'hint' },
-        '“in” means the jack drives a gate bus; “out” means a gate bus drives the jack. '
-        + 'Play them under play, at the top of the page.'),
       el('div', { class: 'jacks' }, jacks));
   }
 }

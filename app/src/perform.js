@@ -31,7 +31,7 @@ const WHITE_KEYS = [0, 2, 4, 5, 7, 9, 11];
 
 export function playTab(app) {
   if (!app.module) {
-    return el('p', { class: 'hint' }, 'The built-in module is not running.');
+    return el('p', { class: 'hint' }, 'the built-in module is not running');
   }
   if (!app.usingModule) {
     // A module on the end of a cable has its own jacks, its own LEDs and its
@@ -41,11 +41,9 @@ export function playTab(app) {
     return el('div', {},
       el('section', { class: 'panel' },
         el('h2', {}, 'playing the module on the cable'),
-        el('p', { class: 'hint' },
-          `This tab drives the built-in module, and the app is talking to ${app.device?.transport?.name ?? 'a module'} `
-          + 'instead. Its jacks, LEDs and MIDI are on the module itself; play it from its own inputs.'),
+        el('p', { class: 'hint' }, 'play it from its own inputs'),
         el('div', { class: 'row' },
-          el('button', { onclick: () => app.useModule() }, 'go back to the built-in module'))));
+          el('button', { onclick: () => app.useModule() }, 'use the built-in module'))));
   }
   return el('div', {},
     metersPanel(app),
@@ -109,12 +107,10 @@ function transportPanel(app) {
     });
     extras.push(el('div', { class: 'row' },
       el('button', { onclick: () => module.syncPulse() }, 'sync pulse'),
-      el('span', { class: 'hint' }, 'or pulse it at'), rate, el('span', { class: 'hint' }, 'Hz (0 is off)')));
+      rate, el('span', { class: 'hint' }, 'Hz')));
   }
   if (g.clockSource === 2) {
-    extras.push(el('p', { class: 'hint' },
-      'The clock follows MIDI clock. Connect a controller or a DAW under MIDI → external '
-      + 'controller and let it send clock, or the module will sit still.'));
+    extras.push(el('p', { class: 'hint' }, 'waiting for MIDI clock'));
   }
 
   return el('section', { class: 'panel' },
@@ -125,8 +121,7 @@ function transportPanel(app) {
       el('button', { class: 'ghost', onclick: () => module.clockResume() }, 'continue')),
     el('div', { class: 'row' },
       el('span', { class: 'field-name' }, 'source'), source,
-      el('span', { class: 'field-name' }, 'tempo'), bpm,
-      el('span', { class: 'hint' }, 'the patch carries both')),
+      el('span', { class: 'field-name' }, 'tempo'), bpm),
     extras);
 }
 
@@ -159,7 +154,7 @@ function jacksPanel(app) {
         }, module.jackSources[j].level ? 'held high' : 'hold'),
         rate, el('span', { class: 'hint' }, 'Hz'));
     } else if (mode === P.GatePortDirection.GATE_PORT_OUT) {
-      controls.push(el('span', { class: 'hint' }, 'driven by the patch'));
+      controls.push(el('span', { class: 'hint' }, 'from the patch'));
     } else {
       // Eight cards saying "not used" is a screenful of nothing on a phone.
       unused.push(j + 1);
@@ -176,13 +171,10 @@ function jacksPanel(app) {
     el('h2', {}, 'jacks'),
     cards.length
       ? el('div', { class: 'jack-cards' }, cards)
-      : el('p', { class: 'hint' }, 'This patch uses no jacks.'),
-    el('p', { class: 'hint' },
-      (unused.length
-        ? `${unused.length === 1 ? 'Jack' : 'Jacks'} ${unused.join(', ')} `
-          + `${unused.length === 1 ? 'is' : 'are'} unused — give one a bus under patch → jacks. `
-        : '')
-      + 'An input is driven from here; an output lights when the firmware drives it high.'));
+      : el('p', { class: 'hint' }, 'no jacks'),
+    unused.length
+      ? el('p', { class: 'hint' }, `unused: ${unused.join(', ')}`)
+      : null);
 }
 
 // --- playing ----------------------------------------------------------------
@@ -264,10 +256,7 @@ function keyboardPanel(app) {
       el('button', { class: 'ghost', onclick: () => {
         module.deliverMidi(state.port, 0xb0, state.channel, 123, 0);
         app.listener?.allOff(app.listener.ctx?.currentTime ?? 0);
-      } }, 'all notes off')),
-    el('p', { class: 'hint' },
-      'These go in exactly where a cable would: through the module’s MIDI input, on the port '
-      + 'and channel chosen here, so a routing or channel filter in the patch is visible.'));
+      } }, 'all notes off')));
 }
 
 function listenPanel(app) {
@@ -307,20 +296,10 @@ function listenPanel(app) {
         app.saveListen();
         app.render();
       } }, 'add a player'),
-      listener.players.length ? null : el('span', { class: 'hint' }, 'nothing is being listened to')),
-    el('p', { class: 'hint' },
-      'A player is one voice pointed at one thing. \u201cWhat the module sends\u201d is the MIDI leaving a '
-      + 'MIDI output node \u2014 what a synth on the far end of the cable would receive. A \u201cnote bus\u201d is '
-      + 'the patch\u2019s own signal, read straight off the bus, patched to an output or not: that is how '
-      + 'an unfinished patch is heard at all. Give two buses two players and two waveforms to tell '
-      + 'them apart.'),
+      listener.players.length ? null : el('span', { class: 'hint' }, 'no player')),
 
     drumsSection(app),
-    gatesSection(app, clicks, clickVolume),
-
-    el('p', { class: 'hint' },
-      'None of this is firmware: it is a small synth standing in for whatever would be downstream. '
-      + 'Browsers only start audio from a button, which is why this is one.'));
+    gatesSection(app, clicks, clickVolume));
 }
 
 // One player: what it listens to, what it sounds like, and how loud.
@@ -378,20 +357,14 @@ function drumsSection(app) {
   const rows = app.listener.drumRows();
   return el('div', {},
     el('h4', { class: 'spaced' }, 'drums'),
-    el('div', { class: 'players' }, rows.map((row) => drumRow(app, row))),
-    el('p', { class: 'hint' },
-      'Every drum sequencer in the patch gets its own kit and its own level, because two drum '
-      + 'machines in one patch are two instruments \u2014 and because \u201cwhich of these two am I hearing\u201d '
-      + 'is not a question one shared voice can answer. The kits are synthesised rather than '
-      + 'sampled: the page is one file that opens from a download, and the machines these are '
-      + 'named after were synthesisers too.'));
+    el('div', { class: 'players' }, rows.map((row) => drumRow(app, row))));
 }
 
 function drumRow(app, { source, voice }) {
   const kit = el('select', { 'aria-label': `kit for ${voice.label}`,
     onchange: (e) => { voice.setKit(e.target.value); app.saveListen(); app.render(); } });
   for (const option of KITS) {
-    const item = el('option', { value: option.id, title: option.about }, option.label);
+    const item = el('option', { value: option.id }, option.label);
     if (option.id === voice.kit) item.selected = true;
     kit.append(item);
   }
@@ -405,6 +378,7 @@ function drumRow(app, { source, voice }) {
     'aria-label': `level of ${voice.label}`,
   }, { onInput: (v) => voice.setVolume(Number(v) / 100), onCommit: () => app.saveListen() });
 
+  const hint = drumHint(app, source);
   return el('div', { class: 'player' },
     el('div', { class: 'row' },
       el('span', { class: 'field-name grow' }, voice.label),
@@ -413,32 +387,23 @@ function drumRow(app, { source, voice }) {
     el('div', { class: 'row' },
       el('span', { class: 'field-name' }, 'level'), volume,
       el('span', { class: 'hint', id: `drum-${domId(voice.key)}` }, '')),
-    el('p', { class: 'hint' }, drumHint(app, source)));
+    hint ? el('p', { class: 'hint' }, hint) : null);
 }
 
 // What this row is actually going to play, in the patch on screen. A kit
 // selector over a sequencer whose outlet is on no bus should say so rather
 // than sit there silently doing nothing.
 function drumHint(app, source) {
-  if (!source) {
-    return 'The on-screen keyboard, a controller, or any note bus on channel 10 that no drum '
-         + 'sequencer here explains. Note numbers are read as General MIDI \u2014 36 is a kick, '
-         + '38 a snare, 42 a closed hat \u2014 and anything outside that map gets a tuned percussion '
-         + 'voice at its own pitch.';
-  }
+  if (!source) return null;
   if (source.kind === 'note') {
-    if (source.bus === P.NO_BUS) return 'its note outlet is on no bus, so there is nothing to hear yet';
+    if (source.bus === P.NO_BUS) return 'on no bus';
     const { readers } = busUsers(app, Domain.Note, source.bus);
-    return `note bus ${source.bus}${readers.length ? ` \u00b7 to ${readers.join(', ')}` : ''}`
-         + ' \u2014 a note number per lane, read as General MIDI, at the velocity in the cell.';
+    return `note bus ${source.bus}${readers.length ? ` \u00b7 to ${readers.join(', ')}` : ''}`;
   }
-  if (!source.lanes.length) return 'none of its lanes is on a bus, so there is nothing to hear yet';
-  const lanes = source.lanes
+  if (!source.lanes.length) return 'on no bus';
+  return source.lanes
     .map((lane) => `lane ${lane.lane + 1}: ${PIECE_LABELS[lane.piece]} on gate bus ${lane.bus}`)
     .join(' \u00b7 ');
-  return `${lanes}. A gate carries no note number and no velocity, so the lane is the drum \u2014 the `
-       + 'one the firmware sends for it when its note is left at zero \u2014 and every hit is the same '
-       + 'weight, which is what the accent lane is for.';
 }
 
 // --- the gate listener --------------------------------------------------------
@@ -458,15 +423,7 @@ function gatesSection(app, clicks, clickVolume) {
         app.saveListen();
         app.render();
       } }, 'listen to another gate'),
-      listener.gateSources.length ? null : el('span', { class: 'hint' }, 'no gate is being listened to')),
-    el('p', { class: 'hint' },
-      'A blip on every rising edge, pitched by what fired \u2014 which is what makes a clock division, a '
-      + 'Euclidean pattern or a logic gate audible at all, since those patches send no MIDI. A gate '
-      + 'bus is the signal inside the module, whether or not it ever leaves; a jack is that same '
-      + 'signal on the outside, where a cable would be. The two are worth telling apart: a bus '
-      + 'nothing is patched to is exactly the one you cannot otherwise hear, and a jack says whether '
-      + 'it made it out. Its own level, because it is percussion under the notes rather than part of '
-      + 'them.'));
+      listener.gateSources.length ? null : el('span', { class: 'hint' }, 'no gate')));
 }
 
 function gateRow(app, source) {
@@ -525,18 +482,16 @@ function gateHint(app, source) {
   if (source.kind === 'jacks') {
     const outs = app.patch.gatePorts.filter((port) => port.direction === P.GatePortDirection.GATE_PORT_OUT).length;
     return outs
-      ? `every rising edge on the ${outs === 1 ? 'one output jack' : `${outs} output jacks`}, pitched by jack number`
-      : 'this patch drives no output jack, so this is silent \u2014 point it at a gate bus instead';
+      ? `${outs} output jack${outs === 1 ? '' : 's'}`
+      : 'no output jack: silent';
   }
   if (source.kind === 'jack') {
     const direction = app.patch.gatePorts[source.index]?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
     if (direction === P.GatePortDirection.GATE_PORT_UNUSED) return `jack ${source.index + 1} is not in this patch`;
-    return direction === P.GatePortDirection.GATE_PORT_IN
-      ? `jack ${source.index + 1}, as it is driven from the jacks panel above`
-      : `jack ${source.index + 1}, as the patch drives it`;
+    return `jack ${source.index + 1}`;
   }
   const { writers, readers } = busUsers(app, Domain.Gate, source.index);
-  if (!writers.length) return `nothing writes gate bus ${source.index} yet`;
+  if (!writers.length) return `nothing writes gate bus ${source.index}`;
   return `from ${writers.join(', ')}${readers.length ? ` \u00b7 to ${readers.join(', ')}` : ''}`;
 }
 
@@ -563,13 +518,10 @@ const domId = (key) => key.replace(/:/g, '-');
 function playerHint(app, player) {
   if (player.source !== 'bus') {
     const outs = app.patch.midiOut.filter((port) => port.targetMask).length;
-    return outs
-      ? 'the MIDI leaving the module, as a synth on the far end of the cable would hear it'
-      : 'nothing is patched to a MIDI output, so the module is sending nothing — '
-        + 'point this at a note bus instead';
+    return outs ? 'the MIDI leaving the module' : 'no MIDI output in this patch';
   }
   const { writers, readers } = busUsers(app, Domain.Note, player.bus);
-  if (!writers.length) return `nothing writes note bus ${player.bus} yet`;
+  if (!writers.length) return `nothing writes note bus ${player.bus}`;
   return `from ${writers.join(', ')}${readers.length ? ` · to ${readers.join(', ')}` : ''}`;
 }
 
@@ -598,7 +550,7 @@ function nextWave(listener) {
 
 function monitorPanel(app) {
   return el('section', { class: 'panel' },
-    el('h2', {}, 'what the module is sending'),
+    el('h2', {}, 'MIDI out'),
     el('div', { class: 'log-scroll' }, el('div', { class: 'log', id: 'midi-log' })),
     el('div', { class: 'row' },
       el('button', { class: 'ghost', onclick: () => { app.module.clearMidiLog(); app.refreshLive(); } }, 'clear')));
@@ -712,7 +664,7 @@ function refreshLog(app) {
 
   const log = module.midiLog;
   if (!log.length) {
-    box.replaceChildren(el('p', { class: 'hint' }, 'nothing yet \u2014 the module has sent no MIDI'));
+    box.replaceChildren(el('p', { class: 'hint' }, 'nothing yet'));
     return;
   }
   // Whether to follow the tail is the reader's choice: scrolling back through

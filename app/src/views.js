@@ -171,8 +171,8 @@ function busNeighbours(app, domain, bus, self) {
   // silence. An outlet nobody reads is ordinary - a spare drum lane, an output
   // waiting for a jack - so it is said, not flagged.
   return self.isOutlet
-    ? el('span', { class: 'wire' }, 'nothing reads this bus yet')
-    : el('span', { class: 'wire empty' }, 'nothing writes this bus');
+    ? el('span', { class: 'wire' }, 'no reader')
+    : el('span', { class: 'wire empty' }, 'no writer');
 }
 
 function port(app, index, isOutlet, i) {
@@ -187,7 +187,7 @@ function port(app, index, isOutlet, i) {
   return el('div', { class: `port bus-${domainName(domain)}` },
     el('label', { class: 'port-head' },
       el('span', { class: 'port-name' }, name,
-        optional ? null : el('span', { class: 'required', title: 'this inlet must be connected' }, '*')),
+        optional ? null : el('span', { class: 'required' }, '*')),
       busSelect(caps, domain, bus, optional, (chosen) => {
         if (isOutlet) node.outBus[i] = chosen; else node.inBus[i] = chosen;
         app.edit(() => app.device.setConnection(index, isOutlet, i, chosen), 'connection');
@@ -214,9 +214,8 @@ export function nodeCard(app, index) {
     el('header', {},
       el('span', { class: 'node-index' }, index),
       el('h3', {}, d.name),
-      d.wantsTick ? el('span', { class: 'tag', title: 'runs from the master clock' }, 'clocked') : null,
+      d.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null,
       el('button', { class: 'ghost danger', onclick: () => app.removeNode(index) }, 'remove')),
-    d.summary ? el('p', { class: 'summary' }, d.summary) : null,
     el('div', { class: 'ports' },
       el('div', { class: 'port-group' },
         el('h4', {}, inlets.length ? 'reads' : 'reads nothing'), inlets),
@@ -267,8 +266,6 @@ function modRow(app, slot, route) {
   const name = modParamName(app.device, app.patch, route);
 
   const modeSelect = el('select', {
-    title: 'offset swings around the value the parameter is set to; '
-         + 'absolute replaces it',
     onchange: (e) => write({
       flags: (route.flags & ~P.ModFlags.MOD_MODE_MASK) | Number(e.target.value),
     }),
@@ -287,19 +284,18 @@ function modRow(app, slot, route) {
     class: 'slider', min: '0', max: '255', step: '1',
     value: String(route.depth ?? 255),
     'aria-label': `${name} modulation depth`,
-    title: 'how much of the parameter’s range the signal covers',
   }, {
     onInput: (v) => { percent.textContent = `${Math.round(Number(v) * 100 / 255)} %`; },
     onCommit: (v) => write({ depth: Number(v) }),
   });
 
-  const flag = (bit, label, why) => {
+  const flag = (bit, label) => {
     const box = el('input', {
       type: 'checkbox', class: 'switch',
       onchange: (e) => write({ flags: e.target.checked ? (route.flags | bit) : (route.flags & ~bit) }),
     });
     box.checked = (route.flags & bit) !== 0;
-    return el('label', { class: 'bool', title: why }, box, el('span', {}, label));
+    return el('label', { class: 'bool' }, box, el('span', {}, label));
   };
 
   return el('div', { class: 'param mod-route' },
@@ -307,9 +303,8 @@ function modRow(app, slot, route) {
     el('span', { class: 'param-value dom-CV' }, `CV bus ${route.bus}`),
     el('div', { class: 'param-controls' }, modeSelect, depth, percent),
     el('div', { class: 'param-controls' },
-      flag(P.ModFlags.MOD_BIPOLAR, 'bipolar',
-           'read the signal as centred on zero, so it pushes both ways'),
-      flag(P.ModFlags.MOD_INVERT, 'invert', 'turn the signal upside down'),
+      flag(P.ModFlags.MOD_BIPOLAR, 'bipolar'),
+      flag(P.ModFlags.MOD_INVERT, 'invert'),
       el('button', { class: 'ghost danger', onclick: () => app.clearModRoute(slot) },
          'unroute')));
 }
@@ -414,14 +409,11 @@ function paramControl(app, index, at, pd) {
   const binding = app.bindingFor?.(index, at);
   return el('div', { class: 'param' },
     el('div', { class: 'param-head' },
-      el('span', { class: 'param-name', title: `parameter ${at}, ${pd.min}..${pd.max}` }, pd.name),
+      el('span', { class: 'param-name' }, pd.name),
       el('span', { class: 'param-value' }, paramText(pd, value))),
     el('div', { class: 'param-controls' }, controls,
       el('button', {
         class: `ghost learn ${binding ? 'bound' : ''}`,
-        title: binding
-          ? `CC ${binding.cc} on ${binding.channel === 0 ? 'any channel' : `channel ${binding.channel}`}`
-          : 'bind a controller to this, or set one up by hand in MIDI control',
         onclick: () => app.learn(index, at),
       }, binding ? `CC ${binding.cc}` : 'learn')));
 }
@@ -456,7 +448,7 @@ function stepGrid(app, index) {
       // every tick without re-rendering it: see perform.js.
       id: `cell-${index}-0-${step}`,
       class: `cell ${on ? 'on' : ''} ${step >= length ? 'beyond' : ''}`,
-      title: `step ${step + 1}${step >= length ? ' (past the length, kept but not played)' : ''}`,
+      title: `step ${step + 1}`,
       onclick: () => {
         node.params[byte] ^= bit;
         const value = node.params[byte];
@@ -466,7 +458,7 @@ function stepGrid(app, index) {
     }, ''));
   }
   return el('div', { class: 'grid' },
-    el('div', { class: 'grid-title' }, `steps — ${length} of ${P.MAX_SEQUENCE_LEN} play; the rest are kept`),
+    el('div', { class: 'grid-title' }, `steps (${length})`),
     scroller(app, `grid-${index}`,
       el('div', { class: 'lanes' },
         el('div', { class: 'lane-row' }, el('div', { class: 'lane' }, cells)))));
@@ -585,8 +577,7 @@ function noteLane(app, index, isPoly) {
       el('div', { class: 'lane notes' }, cells)));
   }
   return el('div', { class: 'grid' },
-    el('div', { class: 'grid-title' },
-      `degrees against root ${noteName(root)} — the stored pattern does not change when the root does`),
+    el('div', { class: 'grid-title' }, `degrees · root ${noteName(root)}`),
     scroller(app, `grid-${index}`, el('div', { class: 'lanes' }, rows)));
 }
 

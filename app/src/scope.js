@@ -120,14 +120,12 @@ export function scopePanel(app) {
                             onchange: (e) => { app.scopeAll = e.target.checked; app.render(); } });
   all.checked = Boolean(app.scopeAll);
   return el('section', { class: 'panel' },
-    el('h2', {}, 'scope — the last four seconds'),
+    el('h2', {}, 'scope'),
     rows.length
       ? el('div', { class: 'scope-wrap' }, canvas)
-      : el('p', { class: 'hint' },
-          'This patch drives no jack and no gate bus yet. Tick “every jack and bus” to watch them anyway.'),
+      : el('p', { class: 'hint' }, 'no jack, no gate bus'),
     el('div', { class: 'row' },
-      el('label', { class: 'bool' }, all, el('span', {}, 'every jack and bus')),
-      el('span', { class: 'hint' }, 'sampled once per pass — a 1 ms trigger is a line, not a maybe')));
+      el('label', { class: 'bool' }, all, el('span', {}, 'every jack and bus'))));
 }
 
 export function drawScope(app) {
@@ -249,15 +247,10 @@ export function rollPanel(app) {
     class: 'roll-key', style: `--key:${colours[source.colour] ?? source.colour}`,
   }, source.label));
   return el('section', { class: 'panel' },
-    el('h2', {}, 'piano roll — what is playing'),
+    el('h2', {}, 'piano roll'),
     el('div', { class: 'scope-wrap' }, canvas),
     el('div', { class: 'row' }, keys,
-      el('button', { class: 'ghost', onclick: () => { app.module.clearNotes(); } }, 'clear')),
-    el('p', { class: 'hint' },
-      'Every note on and off, on one time line, and a colour for each place it was seen: going in '
-      + 'from the keyboard or a controller, coming out of the module, and on each note bus the patch '
-      + 'writes. The same phrase usually appears more than once — a sequencer writes a bus and a MIDI '
-      + 'out sends it — and where the two disagree is the bug. A bar still growing is a note held.'));
+      el('button', { class: 'ghost', onclick: () => { app.module.clearNotes(); } }, 'clear')));
 }
 
 export function drawRoll(app) {
@@ -361,7 +354,7 @@ export function drawRoll(app) {
   if (!notes.length) {
     ctx.fillStyle = COLOUR.dim;
     ctx.font = '12px ui-sans-serif, system-ui, sans-serif';
-    ctx.fillText('nothing playing — start the clock, or press a key below', ROLL_GUTTER + 8, ROLL_H / 2);
+    ctx.fillText('nothing playing', ROLL_GUTTER + 8, ROLL_H / 2);
   }
 }
 

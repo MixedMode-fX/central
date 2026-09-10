@@ -134,9 +134,6 @@ export function routingPanel(app) {
 
   return el('section', { class: 'panel' },
     el('h2', {}, 'MIDI routing'),
-    el('p', { class: 'hint' },
-      'An input port copies what it accepts onto a note bus; an output port sends a note '
-      + 'bus to every port it names. Nodes sit between them, on the buses.'),
     el('div', { class: 'routes' },
       el('div', {}, el('h3', {}, 'inputs'), ins),
       el('div', {}, el('h3', {}, 'outputs'), outs)));
@@ -151,7 +148,7 @@ export function globalsPanel(app) {
 
   const source = el('select', { onchange: (e) => { g.clockSource = Number(e.target.value); push(); } });
   for (const s of CLOCK_SOURCES) {
-    const option = el('option', { value: String(s.value), title: s.hint }, s.label);
+    const option = el('option', { value: String(s.value) }, s.label);
     if (s.value === g.clockSource) option.selected = true;
     source.append(option);
   }
@@ -213,29 +210,22 @@ export function globalsPanel(app) {
 
   return el('section', { class: 'panel' },
     el('h2', {}, 'key'),
-    el('p', { class: 'hint' },
-      'The scale every algorithm follows unless it names one of its own - the quantiser, '
-      + 'the chord voicer and the note sequencers. Chromatic is no key at all.'),
     el('div', { class: 'fields' },
       field('scale', keyScale, null),
-      field('root', keyRoot, 'a change here moves the whole patch')),
+      field('root', keyRoot, null)),
     el('h2', { class: 'spaced' }, 'clock and recall'),
     el('div', { class: 'fields' },
       field('clock source', source),
-      field('tempo', bpm, `${P.CLOCK_MIN_BPM}–${P.CLOCK_MAX_BPM} BPM, when the source is internal`),
-      field('CV pulses per quarter', ppqn, 'how the sync jack is counted'),
+      field('tempo', bpm, `${P.CLOCK_MIN_BPM}–${P.CLOCK_MAX_BPM} BPM`),
+      field('CV pulses per quarter', ppqn, null),
       field('Program Change recalls presets', el('label', { class: 'bool' }, pcEnabled,
-        el('span', {}, g.pcEnabled ? 'on' : 'off')),
-        'off by default, so a Program Change meant for a downstream synth cannot switch your patch'),
+        el('span', {}, g.pcEnabled ? 'on' : 'off')), null),
       field('recall listens on', channelSelect(g.pcChannel, (c) => { g.pcChannel = c; push(); }), null),
-      field('recall lands', quantise, 'a swap mid-bar glitches; one on a boundary does not')),
+      field('recall lands', quantise, null)),
     el('div', { class: 'fields' },
       field('from these ports', portToggles(g.pcSourceMask, (mask) => { g.pcSourceMask = mask; push(); },
-        { label: 'Program Change source ports' }), 'none selected means any port')),
+        { label: 'Program Change source ports' }), 'none = any')),
     el('h2', { class: 'spaced' }, 'NRPN'),
-    el('p', { class: 'hint' },
-      'NRPN is a routable CC stream: 99/98/6/38 look like ordinary CCs to everything upstream, '
-      + 'so the module only consumes them when you say so.'),
     el('div', { class: 'fields' },
       field('accept NRPN', el('label', { class: 'bool' }, nrpnEnabled,
         el('span', {}, g.nrpnEnabled ? 'on' : 'off'))),
@@ -249,7 +239,7 @@ export function globalsPanel(app) {
         g.nrpnSourceMask = mask;
         app.edit(() => app.device.setNrpn(g.nrpnEnabled, g.nrpnChannel, g.nrpnSourceMask), 'NRPN');
         app.render();
-      }, { label: 'NRPN source ports' }), 'none selected means any port')));
+      }, { label: 'NRPN source ports' }), 'none = any')));
 }
 
 // --- an external controller ------------------------------------------------
@@ -268,24 +258,16 @@ export function controllerPanel(app) {
   if (!app.usingModule) {
     return el('section', { class: 'panel' },
       el('h2', {}, 'external controller'),
-      el('p', { class: 'hint' },
-        'The app is talking to a module on a cable, so a controller belongs in that module’s '
-        + 'own MIDI input rather than in this page.'));
+      el('p', { class: 'hint' }, 'plug it into the module on the cable'));
   }
   if (!support.ok) {
     return el('section', { class: 'panel' },
       el('h2', {}, 'external controller'),
-      el('p', { class: 'hint' }, support.reason),
-      el('p', { class: 'hint' },
-        'The on-screen keyboard under play needs none of this, and a binding can be typed in '
-        + 'by hand below with no controller present.'));
+      el('p', { class: 'hint' }, support.reason));
   }
   if (!controller.access) {
     return el('section', { class: 'panel' },
       el('h2', {}, 'external controller'),
-      el('p', { class: 'hint' },
-        'Play the built-in module from a controller plugged into this computer, and send what '
-        + 'the module plays back out to a real port.'),
       el('div', { class: 'row' },
         el('button', { onclick: () => app.connectController() }, 'find my MIDI devices')));
   }
@@ -320,13 +302,8 @@ export function controllerPanel(app) {
     el('h2', {}, 'external controller'),
     el('div', { class: 'fields' },
       field('play the module from', inputs),
-      field('arriving on', arrives,
-        el('span', { class: 'hint' }, 'the module’s own port, so a patch’s source filter applies')),
+      field('arriving on', arrives),
       field('send what it plays to', outputs)),
-    el('p', { class: 'hint' }, controller.inputId
-      ? 'Turn a knob and press “learn” beside a parameter to bind it — the binding is made by the '
-        + 'firmware’s own control plane, exactly as it would be on hardware.'
-      : 'Choose an input and the patch is played by it.'),
     controller.inputId || controller.outputId
       ? el('p', { class: 'hint', id: 'controller-activity' }, '')
       : null);
@@ -386,37 +363,33 @@ export function mappingPanel(app) {
             el('td', {}, described.range),
             el('td', {}, el('button', { class: 'ghost danger', onclick: () => app.clearMapping(slot) }, 'clear')));
         }))))
-    : el('p', { class: 'hint' },
-        'Nothing is bound. Add a binding below, or press “learn” beside any parameter '
-        + 'and turn a controller.');
+    : el('p', { class: 'hint' }, 'nothing bound');
 
   const editors = slots.map((m, slot) => mappingEditor(app, slot, m)).filter(Boolean);
 
   return el('section', { class: 'panel' },
     el('h2', {}, 'MIDI control'),
-    el('p', { class: 'hint' },
-      `${used.length} of ${slots.length} binding slots in use. A binding is part of the patch: `
-      + 'it is saved with a preset and exported with a file.'),
+    el('p', { class: 'hint' }, `${used.length}/${slots.length} slots`),
     summary,
     app.learnTarget
       ? el('div', { class: 'notes' },
           el('h4', {}, 'waiting for a controller'),
-          el('p', {}, `Turn one to bind it to ${describeTarget(app, {
+          el('p', {}, describeTarget(app, {
             targetKind: P.CcTargetKind.CC_TARGET_NODE,
             targetIndex: app.learnTarget.nodeIndex,
             param: app.learnTarget.param,
-          })}.`),
+          })),
           el('button', { onclick: () => app.cancelLearn() }, 'cancel'))
       : null,
     (() => {
       const all = el('details', { class: 'bindings-detail' },
-        el('summary', {}, `every binding slot (${slots.length})`),
+        el('summary', {}, `all slots (${slots.length})`),
         el('div', { class: 'binding-list' }, editors));
       all.open = app.isOpen('bindings');
       all.addEventListener('toggle', () => app.setOpen('bindings', all.open));
       return all;
     })(),
-    caps ? null : el('p', { class: 'hint' }, 'Connect a module to edit bindings.'));
+    caps ? null : el('p', { class: 'hint' }, 'no module'));
 }
 
 // --- modulation routes ------------------------------------------------------
@@ -452,16 +425,11 @@ export function modulationPanel(app) {
           el('td', {}, el('button', {
             class: 'ghost danger', onclick: () => app.clearModRoute(slot),
           }, 'clear')))))))
-    : el('p', { class: 'hint' },
-        'Nothing is modulated. Add an LFO or a sample and hold on the canvas and drag its '
-        + 'control outlet onto a block.');
+    : el('p', { class: 'hint' }, 'nothing modulated');
 
   return el('section', { class: 'panel' },
     el('h2', {}, 'modulation'),
-    el('p', { class: 'hint' },
-      `${used.length} of ${limit ?? slots.length} routes in use. A route points a control `
-      + 'signal at a parameter, the way a controller binding points a knob at one — and it '
-      + 'is part of the patch in exactly the same way.'),
+    el('p', { class: 'hint' }, `${used.length}/${limit ?? slots.length} routes`),
     summary);
 }
 
@@ -535,7 +503,7 @@ function mappingEditor(app, slot, existing) {
     push();
   } });
   for (const t of TAKEOVER.options) {
-    const option = el('option', { value: String(t.value), title: t.hint }, t.label);
+    const option = el('option', { value: String(t.value) }, t.label);
     if ((m.flags & TAKEOVER.mask) === t.value) option.selected = true;
     takeover.append(option);
   }
@@ -545,16 +513,16 @@ function mappingEditor(app, slot, existing) {
     push();
   } });
   for (const t of RELATIVE.options) {
-    const option = el('option', { value: String(t.value), title: t.hint }, t.label);
+    const option = el('option', { value: String(t.value) }, t.label);
     if ((m.flags & RELATIVE.mask) === t.value) option.selected = true;
     relative.append(option);
   }
 
-  const toggle = (bit, label, hint) => {
+  const toggle = (bit, label) => {
     const box = el('input', { type: 'checkbox', class: 'switch',
       onchange: (e) => { m.flags = e.target.checked ? (m.flags | bit) : (m.flags & ~bit); push(); } });
     box.checked = (m.flags & bit) !== 0;
-    return el('label', { class: 'bool', title: hint }, box, el('span', {}, label));
+    return el('label', { class: 'bool' }, box, el('span', {}, label));
   };
 
   const field = (name, ...controls) => el('div', { class: 'field' },
@@ -575,17 +543,17 @@ function mappingEditor(app, slot, existing) {
     el('div', { class: 'fields' },
       field('sweeps from', number(m.min, 0, 16383, `binding ${slot} low end`, (v) => { m.min = v; push(); })),
       field('to', number(m.max, 0, 16383, `binding ${slot} high end`, (v) => { m.max = v; push(); }),
-        el('span', { class: 'hint' }, 'both zero means the target’s full range, in its own units')),
+        el('span', { class: 'hint' }, 'both zero: full range')),
       field('knob catches up by', takeover),
       field('the controller sends', relative)),
     el('div', { class: 'fields' },
-      field('', toggle(FOURTEEN_BIT, '14-bit (this CC is the MSB, CC + 32 the LSB)')),
-      field('', toggle(PASS_THROUGH, 'also pass the CC to the graph'))),
+      field('', toggle(FOURTEEN_BIT, '14-bit')),
+      field('', toggle(PASS_THROUGH, 'pass the CC on'))),
     el('div', { class: 'row' },
-      el('button', { onclick: () => app.learnInto(slot, m) }, 'learn this one'),
+      el('button', { onclick: () => app.learnInto(slot, m) }, 'learn'),
       active ? el('button', { class: 'danger', onclick: () => app.clearMapping(slot) }, 'clear') : null,
       !m.sourceMask
-        ? el('span', { class: 'hint' }, 'a binding with no source port is off')
+        ? el('span', { class: 'hint' }, 'no source port: off')
         : null));
   if (active) editor.classList.add('active');
   return editor;

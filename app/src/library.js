@@ -39,16 +39,14 @@ function currentPanel(app) {
   return el('section', { class: 'panel' },
     el('h2', {}, 'this patch'),
     el('div', { class: 'row' }, name,
-      el('button', { class: 'primary', onclick: () => app.savePatch() },
-        current.id ? 'save' : 'save to this browser'),
-      current.id ? el('button', { onclick: () => app.savePatch({ asNew: true }) }, 'save as a copy') : null),
+      el('button', { class: 'primary', onclick: () => app.savePatch() }, 'save'),
+      current.id ? el('button', { onclick: () => app.savePatch({ asNew: true }) }, 'copy') : null),
     el('p', { class: 'hint' },
       current.id
-        ? `Saved here ${current.savedAt ? ago(current.savedAt) : 'earlier'}${current.dirty ? ' — with changes since' : ''}.`
-        : 'Not saved yet. Whatever is being edited is kept across a reload anyway; saving gives it a name '
-          + 'and a place in the list below.'),
+        ? `saved ${current.savedAt ? ago(current.savedAt) : 'earlier'}${current.dirty ? ' · changed' : ''}`
+        : 'not saved'),
     el('div', { class: 'row' },
-      el('button', { class: 'ghost', onclick: () => app.newPatch() }, 'start a new patch')));
+      el('button', { class: 'ghost', onclick: () => app.newPatch() }, 'new patch')));
 }
 
 function libraryPanel(app) {
@@ -77,12 +75,8 @@ function libraryPanel(app) {
 
   return el('section', { class: 'panel' },
     el('h2', {}, `in this browser (${entries.length})`),
-    entries.length ? el('div', { class: 'saved-list' }, rows) : el('p', { class: 'hint' },
-      'Nothing saved yet. Build a patch, give it a name above and save it — it stays in this '
-      + 'browser, on this device, and never leaves it.'),
-    entries.length ? el('p', { class: 'hint' },
-      'These live in this browser only. Export the ones you care about: clearing site data takes '
-      + 'them with it, and another device cannot see them.') : null);
+    entries.length ? el('div', { class: 'saved-list' }, rows)
+                   : el('p', { class: 'hint' }, 'nothing saved'));
 }
 
 // Somewhere to start. An empty library in front of a machine with thirty
@@ -98,13 +92,9 @@ function examplesPanel(app) {
   }
   app.example ??= names[0];
   return el('section', { class: 'panel' },
-    el('h2', {}, 'start from an example'),
+    el('h2', {}, 'examples'),
     el('div', { class: 'row' }, pick,
-      el('button', { onclick: () => app.loadExample(pick.value) }, 'load')),
-    el('p', { class: 'summary' }, EXAMPLES[app.example]?.about ?? ''),
-    el('p', { class: 'hint' },
-      'Each one exercises one part of the machine. It lands here unsaved, so nothing you have '
-      + 'saved is touched — give it a name above to keep your version of it.'));
+      el('button', { onclick: () => app.loadExample(pick.value) }, 'load')));
 }
 
 function filesPanel(app) {
@@ -112,11 +102,7 @@ function filesPanel(app) {
   const box = el('textarea', { class: 'json', spellcheck: 'false', rows: '12',
                                'aria-label': 'this patch as JSON' }, json);
   const jsonDetails = el('details', {},
-    el('summary', {}, 'this patch as JSON'),
-    el('p', { class: 'hint' },
-      'The patch in words: algorithms by name, jacks numbered from 1, MIDI ports as a user knows '
-      + 'them. It is readable, diffable and pasteable — and it carries the globals and the '
-      + 'controller bindings too, so nothing is lost by going through it.'),
+    el('summary', {}, 'JSON'),
     box,
     el('div', { class: 'row' },
       el('button', { onclick: async () => {
@@ -125,23 +111,20 @@ function filesPanel(app) {
           app.status = 'JSON copied to the clipboard';
         } catch {
           box.select();
-          app.status = 'selected — copy it with your keyboard';
+          app.status = 'selected';
         }
         app.render();
       } }, 'copy'),
-      el('button', { onclick: () => app.loadJson(box.value, 'the JSON above') }, 'load what is in the box')));
+      el('button', { onclick: () => app.loadJson(box.value, 'the JSON above') }, 'load')));
   jsonDetails.open = app.isOpen('json');
   jsonDetails.addEventListener('toggle', () => app.setOpen('json', jsonDetails.open));
 
   return el('section', { class: 'panel' },
     el('h2', {}, 'files'),
-    el('p', { class: 'hint' },
-      'A .syx file is the patch image — the bytes the module stores. Any SysEx librarian can send '
-      + 'one, which is how a patch built with nothing plugged in reaches a module.'),
     el('div', { class: 'row' },
       el('button', { onclick: () => app.exportSyx() }, 'export .syx'),
       el('button', { onclick: () => app.exportJson() }, 'export .json'),
-      el('label', { class: 'file' }, 'import a file',
+      el('label', { class: 'file' }, 'import',
         el('input', {
           type: 'file', accept: '.syx,.bin,.json',
           onchange: (e) => { if (e.target.files[0]) app.importFile(e.target.files[0]); },
@@ -154,7 +137,7 @@ function slotsPanel(app) {
   if (!slots) {
     return el('section', { class: 'panel' },
       el('h2', {}, 'on the module'),
-      el('p', { class: 'hint' }, 'Connect a module to use its preset slots.'));
+      el('p', { class: 'hint' }, 'no module'));
   }
   const buttons = [];
   for (let s = 0; s < slots; s++) {
@@ -178,12 +161,7 @@ function slotsPanel(app) {
       el('button', { class: 'ghost', onclick: () => app.edit(() => app.device.eraseSlot(s), 'erase') }, 'erase')));
   }
   return el('section', { class: 'panel' },
-    el('h2', {}, `on the module (${slots} slots of ${app.device.capabilities.slotBytes} bytes)`),
-    el('p', { class: 'hint' },
-      app.usingModule
-        ? 'The built-in module’s slots are RAM, so a reload empties them — they are here to try '
-          + 'Program Change recall, not to keep a patch. The library above is what keeps a patch.'
-        : 'These are the module’s own presets, in its EEPROM. Program Change recalls them once '
-          + 'recall is turned on under MIDI.'),
+    el('h2', {}, `on the module (${slots} slots)`),
+    app.usingModule ? el('p', { class: 'hint' }, 'RAM: a reload empties them') : null,
     el('div', { class: 'slots' }, buttons));
 }

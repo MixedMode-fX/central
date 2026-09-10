@@ -19,16 +19,14 @@ export function describeSupport() {
   if (!available) {
     return {
       ok: false,
-      reason: 'This browser has no Web MIDI. Chrome, Edge and Opera have it; '
-            + 'Firefox asks permission for it; Safari does not have it at all.',
+      reason: 'this browser has no Web MIDI',
       fallback: true,
     };
   }
   if (!secure) {
     return {
       ok: false,
-      reason: 'Web MIDI needs a secure context. Open this page over https:// or '
-            + 'from localhost - a file:// page cannot reach MIDI.',
+      reason: 'Web MIDI needs https:// or localhost',
       fallback: true,
     };
   }

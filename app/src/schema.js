@@ -554,7 +554,14 @@ export function patchSchema(device) {
   };
 }
 
-export const schemaText = (device) => `${JSON.stringify(patchSchema(device), null, 2)}\n`;
+// **Not indented, and that is deliberate.** This text is read by a machine,
+// never by a person - what a person reads about an algorithm is the panel on
+// the patch tab - and indenting it costs more than the schema itself: two
+// spaces per level and a line per brace more than doubled it, which for a
+// schema this size is tens of thousands of tokens of a context window spent on
+// nothing. A prompt that does not fit is not a prompt. Anyone who does want it
+// laid out has a formatter one keystroke away.
+export const schemaText = (device) => `${JSON.stringify(patchSchema(device))}\n`;
 
 // --- the prompt --------------------------------------------------------------
 //
@@ -635,13 +642,15 @@ export function schemaTab(app) {
   const algorithms = app.device.algorithms.filter(Boolean).length;
   const size = (text) => `${Math.round(text.length / 1024)} kB`;
 
-  const promptBox = el('textarea', { class: 'json', spellcheck: 'false', rows: '14',
+  // `wrap`, because the schema at the end of this is a single very long line
+  // and a box that scrolls sideways for a kilometre shows nothing at all.
+  const promptBox = el('textarea', { class: 'json wrap', spellcheck: 'false', rows: '14',
                                      'aria-label': 'the prompt to copy' }, promptString);
   const withPatch = el('input', { type: 'checkbox', class: 'switch',
                                   onchange: (e) => { app.schemaWithPatch = e.target.checked; app.render(); } });
   withPatch.checked = Boolean(app.schemaWithPatch);
 
-  const schemaBox = el('textarea', { class: 'json', spellcheck: 'false', rows: '12',
+  const schemaBox = el('textarea', { class: 'json wrap', spellcheck: 'false', rows: '12',
                                      'aria-label': 'the schema' }, schemaString);
   const schemaDetails = el('details', {},
     el('summary', {}, `the schema on its own (${algorithms} algorithms, ${size(schemaString)})`),

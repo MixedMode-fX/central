@@ -675,6 +675,23 @@ await test('the prompt carries the schema, the example and this module\'s shape'
   assert.ok(promptText(device, { patch: mine }).includes(mine), 'the prompt drops the patch it was given');
 });
 
+// The schema is the bulk of the prompt, and a prompt is paid for by the token.
+// Indenting it more than doubles it for a reader that does not exist: what a
+// person reads about an algorithm is the panel on the patch tab. So this is
+// what stops it being pretty-printed again by someone being helpful.
+await test('the schema is handed over with no whitespace in it', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const text = schemaText(device);
+  assert.equal(text.trimEnd().includes('\n'), false, 'the schema is being written a line at a time');
+  assert.equal(text.includes('": '), false, 'the schema is being written with spaces after its colons');
+  assert.deepEqual(JSON.parse(text), patchSchema(device), 'the text is not the schema');
+  // The saving is the point, so it is measured rather than assumed.
+  const indented = JSON.stringify(patchSchema(device), null, 2);
+  assert.ok(text.length < indented.length * 0.6,
+            `whitespace is still ${Math.round((1 - text.length / indented.length) * 100)}% of it`);
+});
+
 // The page itself. There is no browser here, so what is checked is that it
 // builds from a device and says the two things a first visit needs: that this
 // is where the prompt is, and - with no module - why there is nothing to copy.

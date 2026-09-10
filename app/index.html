@@ -465,6 +465,10 @@
     width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: .8rem; line-height: 1.45; resize: vertical; white-space: pre;
   }
+  /* Text that is not laid out to be read line by line - the schema, and the
+     prompt carrying it - is one line long, so it wraps instead of scrolling
+     sideways past the edge of the screen. */
+  textarea.json.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 
   noscript, .fallback { display: block; padding: 1rem; border: 1px solid var(--warn);
                         border-radius: var(--radius); }

@@ -40,18 +40,55 @@ it wraps inside the cycle) and `delay` (whole ticks of lag, which does not
 wrap). Both are exact from the master tick. See [Master clock](#master-clock)
 for what "exact" costs and where it stops.
 
+### Metronome
+
+`ClockDiv` is the exact instrument, and exact is not the same as usable: its
+amount is a count of PPQN ticks, so "one pulse per beat" is `/24`, a dotted
+eighth is `/18`, and a sixteenth-note triplet is `/4` — and none of those is
+readable as a note value unless you already know `MASTER_PPQN` is 24. Every
+one of them is a sum a musician has to do before hearing anything, and getting
+it wrong sounds like a tempo mistake rather than an arithmetic one.
+
+`Metronome` is the same clock said the way a musician says it. Two controls:
+
+- **division** — `8 bars`, `4 bars`, `2 bars`, `1 bar`, `1/2`, `1/4`, `1/8`,
+  `1/16`, `1/32`, `1/64`. A bar is four quarter notes; the module has no time
+  signature, and 4/4 is the only reading of "bar" that needs no other
+  information.
+- **feel** — `straight`, `dotted` (×3/2) or `triplet` (×2/3).
+
+Nothing is given up for the friendlier control. **Every one of the thirty
+rates is a whole number of subticks**, so a `Metronome` is exactly as tight as
+the `ClockDiv` it replaces — a quarter note and `/24` fire on the same subtick
+for as long as they both run, which is what `test_clock` asserts. The binding
+case is the fastest value: a dotted 1/64 is three quarters over thirty-two and
+a 1/64 triplet is a quarter over twenty-four, both exact because the quarter
+is 576 subticks. A `static_assert` in `metronome.cpp` fails the build if
+`config.h` ever moves out from under that.
+
+It takes a **reset inlet** and nothing else: a rising edge is a downbeat, so
+the grid re-anchors on it and the next division is counted from there. The
+divider is still there for the rates this list does not name — and since
+`ClockDiv` accepts a gate source, a `Metronome` into a `ClockDiv` is how one
+gets built.
+
+`Metronome` used to be a gate sequencer: a `StepSequencer` of length one that
+passed every advance edge through. A one-step pattern gives a length, a
+direction, a reset and thirty-two per-step probabilities nothing to do, and
+the rate was always the divider's upstream — so the controls said a great deal
+and none of it about the rate.
+
 ### Gate Sequencers
 
 Each writes a bool to a gate bus. A gate bus cannot carry pitch, velocity,
 note length or polyphony, so note sequencing (#13) and drum sequencing (#14)
 are separate families sharing this transport.
 
-- `Metronome` : every advance edge is output
 - `StepSequencer` : a classic step sequencer, 1..`MAX_SEQUENCE_LEN` steps, each ON/OFF
 - `EuclidianSequencer` : Bjorklund's distribution of *k* pulses over *n* steps, plus rotation
 - `RandomSequencer` : shred and load a random pattern
 
-All four share one base: an advance inlet, a reset inlet, a length, a
+All three share one base: an advance inlet, a reset inlet, a length, a
 direction (forward, reverse, ping-pong, random, Brownian), a per-step
 probability and a fixed-width trigger output. Reset means the same thing in
 all of them — the next advance plays the pattern's first step — and it is an
@@ -324,8 +361,8 @@ Algorithms available today:
 | Domain | Algorithms |
 |---|---|
 | Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR` (up to four inlets each) |
-| Clock | `ClockDiv` |
-| Gate sequencers | `Metronome`, `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
+| Clock | `ClockDiv`, `Metronome` (the clock in note values) |
+| Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` (degrees in a scale, from a root) |
 | Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator` |
@@ -497,6 +534,7 @@ classDiagram
     MixedModeMaster *-- Node
 
     Node --|> ClockDiv
+    Node --|> Metronome
     Node --|> GateSequencer
     Node --|> LogicGate
     Node --|> HardwarePort
@@ -507,6 +545,13 @@ classDiagram
         + uint8_t amount
         + uint8_t phase
         + uint8_t delay
+        + TriggerPulse pulse
+    }
+
+    class Metronome{
+        + uint8_t division
+        + uint8_t feel
+        + uint32_t period
         + TriggerPulse pulse
     }
 
@@ -523,7 +568,6 @@ classDiagram
         + bool step_on(uint8_t)
     }
     GateSequencer *-- StepEngine
-    GateSequencer --|> Metronome
     GateSequencer --|> StepSequencer
     GateSequencer --|> EuclidianSequencer
     GateSequencer --|> RandomSequencer
@@ -621,8 +665,9 @@ nothing must not be the normal case:
 
 - Slot 0 of the EEPROM is loaded if it checks out.
 - If it is missing or fails to validate, the **built-in default patch** runs
-  instead — MIDI thru across every musical transport, a metronome on jack 1 at
-  the default tempo, and a sustain pedal input on jack 8. A freshly flashed
+  instead — MIDI thru across every musical transport, a `Metronome` at a
+  quarter note on jack 1 at the default tempo, and a sustain pedal input on
+  jack 8. A freshly flashed
   module is therefore observably alive out of the box.
 - A *corrupt* stored patch also lights the red LED solid; an *empty* store
   does not, because a new module is not a fault.

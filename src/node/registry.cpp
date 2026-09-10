@@ -10,6 +10,7 @@
 #include "algorithm/midi/note_quantise.h"
 #include "algorithm/midi/probability.h"
 #include "algorithm/clock/clock_div.h"
+#include "algorithm/clock/metronome.h"
 #include "algorithm/sequencer/sequencers.h"
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/drum_sequencer.h"
@@ -29,12 +30,12 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &Transpose::descriptor,
     &Arpeggiator::descriptor,
     &ClockDiv::descriptor,
+    &Metronome::descriptor,
     &NotePriority::descriptor,
     &VelocityCurve::descriptor,
     &Chord::descriptor,
     &NoteQuantise::descriptor,
     &Probability::descriptor,
-    &Metronome::descriptor,
     &StepSequencer::descriptor,
     &EuclidianSequencer::descriptor,
     &RandomSequencer::descriptor,

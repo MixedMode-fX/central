@@ -17,11 +17,14 @@
 // A sequencer node may carry a `seq` block instead of raw `params`, which is
 // packed into the parameter layout the firmware documents in
 // `note_sequencer.h`, `drum_sequencer.h` and `gate_sequencer.h`. Nobody writes
-// a drum pattern as a list of 336 bytes.
+// a drum pattern as a list of 336 bytes. `Metronome` takes one too - it is a
+// clock node rather than a sequencer, but "division: 1/8, feel: triplet" is
+// the same idea: the controls in words rather than in bytes.
 
 import * as P from './protocol.js';
 import * as codec from './codec.js';
-import { MIDI_PORTS, portNames, scaleMaskOf, scaleIdOf, scaleName, STEP_DIRECTIONS } from './names.js';
+import { MIDI_PORTS, portNames, scaleMaskOf, scaleIdOf, scaleName, STEP_DIRECTIONS,
+         METRONOME_DIVISIONS, METRONOME_FEELS } from './names.js';
 
 const DIRECTIONS = { [P.GatePortDirection.GATE_PORT_UNUSED]: 'unused',
                      [P.GatePortDirection.GATE_PORT_IN]: 'in',
@@ -54,7 +57,7 @@ function usedBuses(buses, count) {
 // drum_sequencer.h, and the flag bits are NoteStep's.
 const SEQ_HEADER = 16, SEQ_LANE_STRIDE = 8;
 const NOTE_FLAG = { rest: 0x20, tie: 0x40, accent: 0x80 };
-const GATE_SEQUENCERS = ['Metronome', 'StepSequencer', 'EuclidianSequencer', 'RandomSequencer'];
+const GATE_SEQUENCERS = ['StepSequencer', 'EuclidianSequencer', 'RandomSequencer'];
 
 // A sequencer's scale, as the 12-bit mask the firmware stores. Omitted - or
 // named "global" - is an empty mask, and an empty mask is the firmware's
@@ -67,6 +70,19 @@ function directionOf(v) {
   const at = STEP_DIRECTIONS.indexOf(String(v).toLowerCase().replace(/[\s_-]+/g, ''));
   if (at < 0) throw new Error(`unknown direction "${v}" (one of ${STEP_DIRECTIONS.join(', ')})`);
   return at;
+}
+
+// A Metronome's note value and its feel, by the names on the control rather
+// than by the byte behind it. Both enums count from 1 (metronome.h), so a
+// name is its index plus one, and `undefined` is left as 0 - the parameter's
+// own default - rather than guessed at here.
+function fromList(list, v, what) {
+  if (v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  const key = (x) => String(x).toLowerCase().replace(/[\s_-]+/g, '');
+  const at = list.map(key).indexOf(key(v));
+  if (at < 0) throw new Error(`unknown ${what} "${v}" (one of ${list.join(', ')})`);
+  return at + 1;
 }
 
 // A hit is a velocity: 'x' is 100, 'X' 127, 'o' 60, '1'-'9' a ninth of the
@@ -153,6 +169,16 @@ export function packSeq(name, seq, params) {
         [...hits].forEach((ch, i) => { if (i < P.MAX_SEQUENCE_LEN) u8(velocities + i, hitVelocity(ch)); });
       }
     });
+    return;
+  }
+
+  if (name === 'Metronome') {
+    // Not a sequencer at all any more - a clock node - but this is where a
+    // patch file says what a node's controls mean in words, and "1/8" and
+    // "triplet" are exactly that.
+    u8(0, fromList(METRONOME_DIVISIONS, seq.division, 'division'));
+    u8(1, fromList(METRONOME_FEELS, seq.feel, 'feel'));
+    u8(2, seq.width ?? 0);
     return;
   }
 

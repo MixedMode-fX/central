@@ -223,7 +223,7 @@ static uint32_t seq_kind(uint32_t i, Node*& node){
     const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
     if (node == nullptr || d == nullptr) return SEQ_NONE;
     switch (d->id){
-        case ALGO_METRONOME: case ALGO_STEP_SEQ: case ALGO_EUCLID_SEQ: case ALGO_RANDOM_SEQ: return SEQ_GATE;
+        case ALGO_STEP_SEQ: case ALGO_EUCLID_SEQ: case ALGO_RANDOM_SEQ: return SEQ_GATE;
         case ALGO_NOTE_SEQ: case ALGO_POLY_SEQ: return SEQ_NOTE;
         case ALGO_DRUM_SEQ_GATE: case ALGO_DRUM_SEQ_MIDI: return SEQ_DRUM;
         default: return SEQ_NONE;

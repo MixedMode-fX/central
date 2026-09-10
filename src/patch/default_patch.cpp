@@ -1,11 +1,7 @@
 #include "patch/default_patch.h"
 #include "node/registry.h"
 #include "hal/midi_types.h"
-
-// One pulse per quarter note from the tick source: ClockDiv's amount is in
-// PPQN ticks and the master runs at MASTER_PPQN of them per quarter, so
-// dividing by MASTER_PPQN is exactly the beat.
-static_assert(MASTER_PPQN <= 255, "the metronome divisor has to fit a parameter byte");
+#include "algorithm/clock/metronome.h"
 
 Patch default_patch(){
     Patch p = empty_patch();
@@ -25,10 +21,12 @@ Patch default_patch(){
     p.nodes[0].out_bus[0] = 0;                                // note bus 0
 
     // A metronome on jack 1: the internal clock, one trigger per beat, so a
-    // module with nothing patched into it still shows a pulse.
-    p.nodes[1] = node_config(ALGO_CLOCK_DIV);
+    // module with nothing patched into it still shows a pulse. Metronome
+    // rather than a ClockDiv of MASTER_PPQN, because "a quarter note" is what
+    // this is - the divisor was only ever how it had to be spelled.
+    p.nodes[1] = node_config(ALGO_METRONOME);
     p.nodes[1].out_bus[0] = 1;                                // gate bus 1
-    p.nodes[1].params[1] = MASTER_PPQN;                       // one pulse per quarter
+    p.nodes[1].params[0] = Metronome::DIV_QUARTER;            // one trigger per beat
     p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 1};       // gate bus 1 -> jack 1
 
     p.n_nodes = 2;

@@ -1,9 +1,11 @@
 #include <unity.h>
+#include <stdio.h>
 
 #include "../fakes/fake_gpio.h"
 #include "../fakes/recording_midi_out.h"
 #include "clock/master_clock.h"
 #include "algorithm/clock/clock_div.h"
+#include "algorithm/clock/metronome.h"
 #include "master.h"
 #include "hal/midi_types.h"
 
@@ -487,6 +489,255 @@ static void test_sync_edge_only_counts_for_the_cv_source() {
                              master.clock().count());
 }
 
+// ---------------------------------------------------------------------------
+// Metronome: the same clock, said in note values
+// ---------------------------------------------------------------------------
+
+static NodeConfig metro_config(uint8_t division, uint8_t feel, uint8_t out_bus) {
+    NodeConfig c = node_config(ALGO_METRONOME);
+    c.out_bus[0] = out_bus;
+    c.params[0] = division;
+    c.params[1] = feel;
+    return c;
+}
+
+// Where the pulses landed, and whether they were evenly spaced. An uneven gap
+// is what a rate that is not a whole number of subticks looks like from
+// outside: the period rounds one way on one pulse and the other way on the
+// next.
+struct MetroRun {
+    uint32_t pulses;
+    uint32_t first_high;
+    uint32_t gap;
+    bool ever_high;
+    bool even_gaps;
+};
+
+static MetroRun run_metronome(Metronome& node, BusManager& bus, uint8_t out_bus,
+                              uint32_t subticks, uint32_t start_count = 0,
+                              uint32_t step_us = 1000) {
+    MetroRun r = {0, 0, 0, false, true};
+    bool was_high = false;
+    uint32_t now = 0, last_at = 0;
+    for (uint32_t t = 0; t < subticks; t++) {
+        node.process(bus, now);
+        node.tick(bus, start_count + t);
+        bus.swap();
+        const bool high = bus.gate_read(out_bus);
+        if (high && !was_high) {
+            const uint32_t at = start_count + t;
+            r.pulses++;
+            if (!r.ever_high) { r.first_high = at; r.ever_high = true; }
+            else if (r.gap == 0) r.gap = at - last_at;
+            else if (at - last_at != r.gap) r.even_gaps = false;
+            last_at = at;
+        }
+        was_high = high;
+        now += step_us;
+    }
+    return r;
+}
+
+// The claim the friendly control rests on: every note value, in every feel,
+// is a whole number of subticks. Spelled out against the arithmetic a
+// musician would do rather than against the table the node reads, so a table
+// entry that drifted from its name would fail here.
+static void test_every_note_value_is_a_whole_number_of_subticks() {
+    const uint32_t Q = CLOCK_SUBTICKS_PER_QUARTER;
+    struct Case { uint8_t division; uint8_t feel; uint32_t period; };
+    static const Case CASES[] = {
+        {Metronome::DIV_8_BARS,  Metronome::FEEL_STRAIGHT, Q * 32},
+        {Metronome::DIV_4_BARS,  Metronome::FEEL_STRAIGHT, Q * 16},
+        {Metronome::DIV_2_BARS,  Metronome::FEEL_STRAIGHT, Q * 8},
+        {Metronome::DIV_BAR,     Metronome::FEEL_STRAIGHT, Q * 4},
+        {Metronome::DIV_HALF,    Metronome::FEEL_STRAIGHT, Q * 2},
+        {Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, Q},
+        {Metronome::DIV_EIGHTH,  Metronome::FEEL_STRAIGHT, Q / 2},
+        {Metronome::DIV_16TH,    Metronome::FEEL_STRAIGHT, Q / 4},
+        {Metronome::DIV_32ND,    Metronome::FEEL_STRAIGHT, Q / 8},
+        {Metronome::DIV_64TH,    Metronome::FEEL_STRAIGHT, Q / 16},
+        // A dot is half as long again; a triplet is three in the space of two.
+        {Metronome::DIV_QUARTER, Metronome::FEEL_DOTTED,   Q * 3 / 2},
+        {Metronome::DIV_EIGHTH,  Metronome::FEEL_DOTTED,   Q * 3 / 4},
+        {Metronome::DIV_64TH,    Metronome::FEEL_DOTTED,   Q * 3 / 32},
+        {Metronome::DIV_QUARTER, Metronome::FEEL_TRIPLET,  Q * 2 / 3},
+        {Metronome::DIV_EIGHTH,  Metronome::FEEL_TRIPLET,  Q / 3},
+        {Metronome::DIV_64TH,    Metronome::FEEL_TRIPLET,  Q / 24},
+    };
+    for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
+        NodeConfig c = metro_config(CASES[i].division, CASES[i].feel, 0);
+        Metronome node(c);
+        char message[64];
+        snprintf(message, sizeof message, "division %u feel %u",
+                 CASES[i].division, CASES[i].feel);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(CASES[i].period, node.period(), message);
+    }
+
+    // And nothing in the list rounds, including the values the table above
+    // does not spell out: a dot is exactly three halves of its note value and
+    // a triplet exactly two thirds, stated as integer equalities so that a
+    // period off by one subtick fails rather than passing by a rounding.
+    for (uint8_t d = Metronome::DIV_8_BARS; d <= Metronome::DIVISIONS; d++) {
+        NodeConfig s_config = metro_config(d, Metronome::FEEL_STRAIGHT, 0);
+        NodeConfig d_config = metro_config(d, Metronome::FEEL_DOTTED, 0);
+        NodeConfig t_config = metro_config(d, Metronome::FEEL_TRIPLET, 0);
+        Metronome straight(s_config), dotted(d_config), triplet(t_config);
+        char message[48];
+        snprintf(message, sizeof message, "division %u", d);
+        TEST_ASSERT_TRUE_MESSAGE(straight.period() > 0, message);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(straight.period() * 3, dotted.period() * 2, message);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(straight.period() * 2, triplet.period() * 3, message);
+    }
+}
+
+// The acceptance case: a Metronome at a quarter note and a ClockDiv of
+// MASTER_PPQN are the same clock. The friendly control is a *name* for the
+// arithmetic, not an approximation of it, so the two fire on the same
+// subticks for as long as they run.
+static void test_a_quarter_note_is_a_divider_of_ppqn() {
+    BusManager bus;
+    NodeConfig m = metro_config(Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, 0);
+    NodeConfig d = div_config(0, MASTER_PPQN, 1);
+    Metronome metro(m);
+    ClockDiv divider(d);
+
+    uint32_t now = 0, metro_rises = 0, div_rises = 0;
+    bool was_metro = false, was_div = false;
+    for (uint32_t t = 0; t < 32 * CLOCK_SUBTICKS_PER_QUARTER; t++) {
+        metro.process(bus, now);
+        divider.process(bus, now);
+        metro.tick(bus, t);
+        divider.tick(bus, t);
+        bus.swap();
+        const bool a = bus.gate_read(0);
+        const bool b = bus.gate_read(1);
+        // Not "the same number of pulses" but "high together on every pass":
+        // two nodes a subtick apart would still count the same.
+        TEST_ASSERT_EQUAL_MESSAGE(b, a, "the metronome and the divider disagreed");
+        if (a && !was_metro) metro_rises++;
+        if (b && !was_div) div_rises++;
+        was_metro = a; was_div = b;
+        now += 1000;
+    }
+    TEST_ASSERT_EQUAL_UINT32(32, metro_rises);
+    TEST_ASSERT_EQUAL_UINT32(32, div_rises);
+}
+
+// Three in the space of two, and a dot that is half as long again - counted
+// from the output rather than from the period, and over enough bars that a
+// rate rounding by one subtick would show up as an uneven gap.
+static void test_triplets_and_dots_land_where_they_are_named() {
+    BusManager triplets;
+    NodeConfig t8 = metro_config(Metronome::DIV_EIGHTH, Metronome::FEEL_TRIPLET, 2);
+    Metronome triplet_node(t8);
+    const MetroRun tr = run_metronome(triplet_node, triplets, 2, 8 * CLOCK_SUBTICKS_PER_QUARTER);
+    TEST_ASSERT_EQUAL_UINT32(24, tr.pulses);                    // three per beat
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER / 3, tr.gap);
+    TEST_ASSERT_TRUE(tr.even_gaps);
+    TEST_ASSERT_EQUAL_UINT32(0, tr.first_high);
+
+    // A dotted eighth is three sixteenths, so eight of them span three beats.
+    BusManager dotted;
+    NodeConfig d8 = metro_config(Metronome::DIV_EIGHTH, Metronome::FEEL_DOTTED, 3);
+    Metronome dotted_node(d8);
+    const MetroRun dt = run_metronome(dotted_node, dotted, 3, 8 * CLOCK_SUBTICKS_PER_QUARTER);
+    TEST_ASSERT_EQUAL_UINT32(11, dt.pulses);                    // 8 beats / 0.75
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER * 3 / 4, dt.gap);
+    TEST_ASSERT_TRUE(dt.even_gaps);
+}
+
+// The grid is anchored on subtick 0 - the downbeat start() resets to - so a
+// metronome added to a patch that has been running lands on the beat rather
+// than on the subtick it was constructed on.
+static void test_a_metronome_loaded_late_lands_on_the_beat() {
+    BusManager bus;
+    NodeConfig c = metro_config(Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, 4);
+    Metronome node(c);
+    const uint32_t start = 1000 * CLOCK_SUBTICKS_PER_QUARTER + 7;      // mid-beat
+    const MetroRun r = run_metronome(node, bus, 4, 4 * CLOCK_SUBTICKS_PER_QUARTER, start);
+    TEST_ASSERT_TRUE(r.ever_high);
+    TEST_ASSERT_EQUAL_UINT32(0, r.first_high % CLOCK_SUBTICKS_PER_QUARTER);
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER, r.gap);
+    TEST_ASSERT_TRUE(r.even_gaps);
+}
+
+// A new division applies from the next period: the pulse already scheduled
+// lands where it was going, as in ClockDiv, rather than being dragged out
+// from under a musician counting on it.
+static void test_changing_the_division_keeps_the_rate_exact() {
+    BusManager bus;
+    NodeConfig c = metro_config(Metronome::DIV_QUARTER, Metronome::FEEL_STRAIGHT, 5);
+    Metronome node(c);
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER, node.period());
+
+    // Straight to triplet and back, and a division either side of it.
+    TEST_ASSERT_TRUE(node.set_param(1, Metronome::FEEL_TRIPLET));
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER * 2 / 3, node.period());
+    TEST_ASSERT_TRUE(node.set_param(0, Metronome::DIV_EIGHTH));
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER / 3, node.period());
+    TEST_ASSERT_TRUE(node.set_param(1, Metronome::FEEL_STRAIGHT));
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER / 2, node.period());
+
+    // A value outside the list is refused, and the node keeps what it had.
+    TEST_ASSERT_FALSE(node.set_param(0, Metronome::DIVISIONS + 1));
+    TEST_ASSERT_FALSE(node.set_param(1, Metronome::FEELS + 1));
+    TEST_ASSERT_EQUAL(Metronome::DIV_EIGHTH, node.division());
+    TEST_ASSERT_EQUAL(Metronome::FEEL_STRAIGHT, node.feel());
+
+    // And it still runs at the rate it now reads back at.
+    const MetroRun r = run_metronome(node, bus, 5, 8 * CLOCK_SUBTICKS_PER_QUARTER);
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER / 2, r.gap);
+    TEST_ASSERT_TRUE(r.even_gaps);
+}
+
+// The reset inlet is a downbeat: the grid re-anchors on the edge and the next
+// division is counted from there. Driven through the master from a jack,
+// because "another node can re-phase it" is the whole point of it being an
+// inlet rather than a parameter.
+static void test_reset_re_anchors_the_grid() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.gate_ports[7] = GatePortConfig{GATE_PORT_IN, 0};     // jack 8 -> gate bus 0
+    p.nodes[0] = node_config(ALGO_METRONOME);
+    p.nodes[0].in_bus[0] = 0;                              // reset
+    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].params[0] = Metronome::DIV_QUARTER;
+    p.n_nodes = 1;
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 1};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    // Four beats on the master's own grid, then a reset a third of a beat in.
+    const uint32_t beat = CLOCK_SUBTICKS_PER_QUARTER;
+    const uint32_t reset_at = 4 * beat + beat / 3;
+    uint32_t rises_before = 0, rises_after = 0, first_after = 0;
+    bool was = false;
+    uint32_t now = 0;
+    for (uint32_t t = 0; t < 8 * beat; t++) {
+        gpio.set_input(7, t == reset_at ? GPIO_HIGH : GPIO_LOW);
+        master.clock().advance();
+        master.pass(now);
+        const bool high = gpio.outputs[0] == GPIO_HIGH;
+        if (high && !was) {
+            if (t <= reset_at) rises_before++;
+            else { if (!rises_after) first_after = t; rises_after++; }
+        }
+        was = high;
+        now += 1000;
+    }
+    // Four on the original grid. The master's count runs one subtick ahead of
+    // the loop index - the pass reads the clock after advancing it - so the
+    // node joins at subtick 1 and the downbeat at 0 is already past; the
+    // pulses land on subticks 576, 1152, 1728 and 2304, the last of them a
+    // third of a beat before the reset.
+    TEST_ASSERT_EQUAL_UINT32(4, rises_before);
+    // The reset itself is a downbeat, within a pass or two of the edge, and
+    // the grid it starts is a beat apart from there.
+    TEST_ASSERT_UINT32_WITHIN(3, reset_at, first_after);
+    TEST_ASSERT_EQUAL_UINT32(4, rises_after);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_internal_interval_follows_tempo);
@@ -511,5 +762,11 @@ int main() {
     RUN_TEST(test_multiply_from_a_gate_source_is_refused);
     RUN_TEST(test_midi_clock_through_deliver_midi_drives_a_divider);
     RUN_TEST(test_sync_edge_only_counts_for_the_cv_source);
+    RUN_TEST(test_every_note_value_is_a_whole_number_of_subticks);
+    RUN_TEST(test_a_quarter_note_is_a_divider_of_ppqn);
+    RUN_TEST(test_triplets_and_dots_land_where_they_are_named);
+    RUN_TEST(test_a_metronome_loaded_late_lands_on_the_beat);
+    RUN_TEST(test_changing_the_division_keeps_the_rate_exact);
+    RUN_TEST(test_reset_re_anchors_the_grid);
     return UNITY_END();
 }

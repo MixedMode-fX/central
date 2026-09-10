@@ -3,20 +3,16 @@
 
 #include "algorithm/sequencer/gate_sequencer.h"
 
-// The README's four gate sequencers (#6). Each writes a bool to a gate bus
-// and nothing else: a gate bus cannot carry pitch, velocity, note length or
+// The README's gate sequencers (#6). Each writes a bool to a gate bus and
+// nothing else: a gate bus cannot carry pitch, velocity, note length or
 // polyphony, so note sequencing (#13) and drum sequencing (#14) are separate
 // families that share the step engine underneath (step_engine.h).
-
-// Every advance edge is output. GateSequencer with a length of one, and the
-// clearest demonstration that the divider upstream is what sets the rate.
-class Metronome : public GateSequencer{
-    public:
-        static const AlgorithmDescriptor descriptor;
-        explicit Metronome(const NodeConfig& config) : GateSequencer(config, 1) {}
-    protected:
-        bool step_on(uint8_t) const override { return true; }
-};
+//
+// Metronome used to be a fourth one, a GateSequencer of length one that
+// passed every advance edge through. A one-step pattern gives a length, a
+// direction and thirty-two per-step probabilities nothing to do, and the rate
+// was always the divider's upstream, so it is now a clock node that names its
+// own rate in note values: algorithm/clock/metronome.h.
 
 // A pattern of on/off steps, held as a bitfield.
 //

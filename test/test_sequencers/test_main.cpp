@@ -108,13 +108,6 @@ static NodeConfig seq_config(uint8_t id, uint8_t length) {
     return c;
 }
 
-// Every edge passes through: the divider upstream sets the rate.
-static void test_metronome_fires_on_every_edge() {
-    NodeConfig c = seq_config(ALGO_METRONOME, 1);
-    Metronome node(c);
-    TEST_ASSERT_EQUAL_STRING("11111111", run_sequence(node, 8).c_str());
-}
-
 // Length 5 wraps after step 5, not after 16.
 static void test_step_sequencer_wraps_at_its_length() {
     NodeConfig c = seq_config(ALGO_STEP_SEQ, 5);
@@ -181,8 +174,8 @@ static void test_directions() {
 // A pulse on the reset inlet returns the sequencer to step 0 on the next
 // advance - identically in all four.
 static void test_reset_returns_to_step_zero() {
-    // All four take a reset inlet, and it is the same inlet in each.
-    for (uint8_t id = ALGO_METRONOME; id <= ALGO_RANDOM_SEQ; id++) {
+    // All three take a reset inlet, and it is the same inlet in each.
+    for (uint8_t id = ALGO_STEP_SEQ; id <= ALGO_RANDOM_SEQ; id++) {
         NodeConfig c = seq_config(id, 4);
         c.in_bus[1] = 2;
         TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
@@ -301,7 +294,6 @@ static void test_brownian_direction_walks() {
 
 // No sequencer allocates after construction, and none names a pin.
 static void test_sequencers_fit_a_pool_slot() {
-    TEST_ASSERT_TRUE(sizeof(Metronome) <= NODE_SLOT_SIZE);
     TEST_ASSERT_TRUE(sizeof(StepSequencer) <= NODE_SLOT_SIZE);
     TEST_ASSERT_TRUE(sizeof(EuclidianSequencer) <= NODE_SLOT_SIZE);
     TEST_ASSERT_TRUE(sizeof(RandomSequencer) <= NODE_SLOT_SIZE);
@@ -324,10 +316,14 @@ static void test_two_sequencers_behind_dividers_stay_locked() {
     p.nodes[1] = node_config(ALGO_CLOCK_DIV);            // tick -> gate 1, /4
     p.nodes[1].out_bus[0] = 1;
     p.nodes[1].params[1] = 4;
-    p.nodes[2] = node_config(ALGO_METRONOME);            // gate 0 -> gate 2
+    // One step, on: a sequencer that passes every advance edge through, so
+    // what the jacks show is the divider's pattern and nothing else.
+    p.nodes[2] = node_config(ALGO_STEP_SEQ);             // gate 0 -> gate 2
     p.nodes[2].in_bus[0] = 0; p.nodes[2].out_bus[0] = 2;
-    p.nodes[3] = node_config(ALGO_METRONOME);            // gate 1 -> gate 3
+    p.nodes[2].params[0] = 1; p.nodes[2].params[3] = 1;
+    p.nodes[3] = node_config(ALGO_STEP_SEQ);             // gate 1 -> gate 3
     p.nodes[3].in_bus[0] = 1; p.nodes[3].out_bus[0] = 3;
+    p.nodes[3].params[0] = 1; p.nodes[3].params[3] = 1;
     p.n_nodes = 4;
     p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 2};
     p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 3};
@@ -456,7 +452,6 @@ int main() {
     RUN_TEST(test_euclidean_patterns_match_the_references);
     RUN_TEST(test_euclidean_edge_cases);
     RUN_TEST(test_rotation_is_separate_from_the_pattern);
-    RUN_TEST(test_metronome_fires_on_every_edge);
     RUN_TEST(test_step_sequencer_wraps_at_its_length);
     RUN_TEST(test_step_sequencer_uses_the_whole_length);
     RUN_TEST(test_euclidian_sequencer_plays_its_pattern_twice_over);

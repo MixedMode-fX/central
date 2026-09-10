@@ -573,6 +573,167 @@ static void test_chord_in_the_chromatic_scale_is_fixed_semitones() {
 }
 
 // ---------------------------------------------------------------------------
+// Chord with no note inlet: it plays itself
+// ---------------------------------------------------------------------------
+
+static NodeConfig free_chord(bool with_root_inlet) {
+    NodeConfig c = node_config(ALGO_CHORD);
+    c.in_bus[0] = NO_BUS;                              // nothing plays it
+    if (with_root_inlet) c.in_bus[1] = 0;
+    c.out_bus[0] = 1;
+    c.params[0] = 2;
+    c.params[1] = 2; c.params[2] = 4;                  // a triad, in scale steps
+    return c;
+}
+
+// The acceptance test for "set the notes and let it run": no keyboard, no
+// clock, no gate - and a chord sounding.
+static void test_a_chord_with_no_note_inlet_plays_itself_and_holds() {
+    BusManager bus;
+    NodeConfig c = free_chord(false);
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);                 // C major
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);               // middle C, the default octave
+    TEST_ASSERT_EQUAL(64, out[1].data1);
+    TEST_ASSERT_EQUAL(67, out[2].data1);
+    for (const MidiEvent& e : out) TEST_ASSERT_TRUE(is_note_on(e));
+
+    // Held, not repeated: a downstream arpeggiator sees one chord, not a
+    // note-on every pass.
+    for (uint8_t i = 0; i < 20; i++){
+        out = run_pass(bus, node, 1);
+        TEST_ASSERT_EQUAL(0, out.size());
+    }
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+}
+
+// The octave places it, and the velocity is the one nobody played.
+static void test_a_self_playing_chord_takes_its_octave_and_velocity() {
+    BusManager bus;
+    NodeConfig c = free_chord(false);
+    c.params[Chord::P_OCTAVE] = 3;
+    c.params[Chord::P_VELOCITY] = 64;
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    const std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(36, out[0].data1);
+    TEST_ASSERT_EQUAL(40, out[1].data1);
+    TEST_ASSERT_EQUAL(43, out[2].data1);
+    for (const MidiEvent& e : out) TEST_ASSERT_EQUAL(64, e.data2);
+}
+
+// A sequencer on the root inlet is what plays a self-playing chord: the whole
+// note, and the chords stay in the key rather than dragging it around. In C
+// major a root of D is D minor, which is what "diatonic" means and what a
+// fixed semitone stack would have got wrong.
+static void test_a_sequenced_root_walks_a_self_playing_chord_through_the_key() {
+    BusManager bus;
+    NodeConfig c = free_chord(true);
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    run_pass(bus, node, 1);                            // the tonic triad first
+
+    bus.note_write(0, on(62));                         // D, from a sequencer
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(out[i]));
+    TEST_ASSERT_EQUAL(62, out[3].data1);
+    TEST_ASSERT_EQUAL(65, out[4].data1);               // F, not F#
+    TEST_ASSERT_EQUAL(69, out[5].data1);
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+
+    // The same root again changes nothing: the chord is already there.
+    bus.note_write(0, on(62));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(0, out.size());
+
+    // An octave lower is a different chord, and the old one is released.
+    bus.note_write(0, on(50));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(6, out.size());
+    TEST_ASSERT_EQUAL(50, out[3].data1);
+    TEST_ASSERT_EQUAL(53, out[4].data1);
+    TEST_ASSERT_EQUAL(57, out[5].data1);
+}
+
+// Editing the voicing of a chord that is already droning has to be audible,
+// and cannot strand the notes it replaces.
+static void test_editing_a_self_playing_chord_re_voices_it() {
+    BusManager bus;
+    NodeConfig c = free_chord(false);
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    NoteBalance balance;
+    balance.observe(run_pass(bus, node, 1));
+
+    TEST_ASSERT_TRUE(node.set_param(0, 3));            // a seventh
+    TEST_ASSERT_TRUE(node.set_param(3, 6));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    balance.observe(out);
+    TEST_ASSERT_EQUAL(7, out.size());                  // three off, four on
+    TEST_ASSERT_EQUAL(71, out[6].data1);
+    TEST_ASSERT_EQUAL(4, balance.total());
+
+    // And the key moving under it moves the chord, with nothing left behind.
+    global_scale::set(SCALE_NATURAL_MINOR, 0);
+    out = run_pass(bus, node, 1);
+    balance.observe(out);
+    TEST_ASSERT_EQUAL(8, out.size());
+    TEST_ASSERT_EQUAL(63, out[5].data1);               // E flat now
+    TEST_ASSERT_EQUAL(4, balance.total());
+
+    // The patch swap takes it down: a drone is still a note somebody owns.
+    node.silence(bus);
+    bus.swap();
+    std::vector<MidiEvent> tail;
+    const uint8_t n = bus.note_count(1);
+    for (uint8_t i = 0; i < n; i++) tail.push_back(bus.note_read(1, i));
+    balance.observe(tail);
+    TEST_ASSERT_EQUAL(0, balance.total());
+    TEST_ASSERT_FALSE(balance.went_negative);
+}
+
+// The whole point of the pair: a chord nobody is holding, arpeggiated by a
+// clock. No MIDI input, no gate input, and a figure running.
+static void test_a_self_playing_chord_feeds_an_arpeggiator() {
+    BusManager bus;
+    NodeConfig cc = free_chord(false);
+    Chord chord(cc);
+    NodeConfig ac = node_config(ALGO_ARPEGGIATOR);
+    ac.in_bus[0] = 1;                                  // the chord bus
+    ac.in_bus[1] = 0;                                  // advance
+    ac.out_bus[0] = 2;
+    Arpeggiator arp(ac);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    std::vector<uint8_t> played;
+    // One swap a pass, as the master runs it: the nodes read what was written
+    // last time and write what the next pass will read.
+    for (uint32_t pass = 0; pass < 16; pass++){
+        chord.process(bus, pass * 1000u);
+        arp.process(bus, pass * 1000u);
+        bus.gate_write(0, (pass % 2) == 0);             // a clock, and nothing else
+        bus.swap();
+        const uint8_t n = bus.note_count(2);
+        for (uint8_t i = 0; i < n; i++){
+            const MidiEvent e = bus.note_read(2, i);
+            if (is_note_on(e)) played.push_back(e.data1);
+        }
+    }
+    TEST_ASSERT_TRUE(played.size() >= 3);
+    TEST_ASSERT_EQUAL(60, played[0]);
+    TEST_ASSERT_EQUAL(64, played[1]);
+    TEST_ASSERT_EQUAL(67, played[2]);
+}
+
+// ---------------------------------------------------------------------------
 // Arpeggiator
 // ---------------------------------------------------------------------------
 
@@ -993,6 +1154,11 @@ int main() {
     RUN_TEST(test_note_quantise_follows_the_module_scale_until_it_names_one);
     RUN_TEST(test_chord_voices_its_intervals_in_the_scale);
     RUN_TEST(test_chord_in_the_chromatic_scale_is_fixed_semitones);
+    RUN_TEST(test_a_chord_with_no_note_inlet_plays_itself_and_holds);
+    RUN_TEST(test_a_self_playing_chord_takes_its_octave_and_velocity);
+    RUN_TEST(test_a_sequenced_root_walks_a_self_playing_chord_through_the_key);
+    RUN_TEST(test_editing_a_self_playing_chord_re_voices_it);
+    RUN_TEST(test_a_self_playing_chord_feeds_an_arpeggiator);
     RUN_TEST(test_probability_pairs_every_note_it_passes);
     RUN_TEST(test_probability_defaults_to_passing_everything);
     RUN_TEST(test_arpeggiator_one_note_per_edge_in_order);

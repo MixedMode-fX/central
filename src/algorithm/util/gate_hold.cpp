@@ -8,19 +8,22 @@ static const char* const MODE_NAMES[GateHold::HOLD_MODES] = {
     "latch", "toggle", "extend", "limit",
 };
 
-static const ParamDescriptor PARAMS[2] = {
+static const ParamDescriptor PARAMS[3] = {
     {"mode", GateHold::HOLD_LATCH, GateHold::HOLD_MODES, GateHold::HOLD_LATCH, PARAM_ENUM, MODE_NAMES},
     {"hold", 1, 255, GateHold::DEFAULT_HOLD_MS, PARAM_MILLIS, nullptr},
+    {"gate", 0, 1, 0, PARAM_BOOL, nullptr},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 2, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, 3, PARAMS}};
 
 static const char* const IN_NAMES[2] = {"set", "reset"};
 static const char* const OUT_NAMES[1] = {"gate"};
 
+// min_in is 0: with nothing patched at all the node is a switch, and its
+// `gate` parameter is the level it sends (see the header).
 const AlgorithmDescriptor GateHold::descriptor = {
-    ALGO_GATE_HOLD, "GateHold", 2, 1, 1, 2, IN, OUT, sizeof(GateHold), false, construct_node<GateHold>,
+    ALGO_GATE_HOLD, "GateHold", 2, 0, 1, 3, IN, OUT, sizeof(GateHold), false, construct_node<GateHold>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Holds a gate up: latch it, toggle it, or stretch a trigger into a gate of a set length." };
+    "Holds a gate up: a switch that stays put, a latch, a toggle, or a trigger stretched to length." };
 
 static uint8_t clamp_mode(uint8_t stored){
     if (stored == 0) return GateHold::HOLD_LATCH;
@@ -33,7 +36,11 @@ GateHold::GateHold(const NodeConfig& config) :
     out(config.out_bus[0]),
     how(clamp_mode(config.params[0])),
     hold_param(config.params[1]),
-    since_us(0), timing(false), level(false), last_set(false), last_reset(false)
+    // A patch that stored the gate up loads with it up: the level is state a
+    // user set, not something to be re-derived from an input that may not
+    // even be patched.
+    since_us(0), timing(false), level(config.params[P_GATE] != 0),
+    last_set(false), last_reset(false)
 {}
 
 bool GateHold::set_param(uint16_t index, uint8_t value){
@@ -48,6 +55,14 @@ bool GateHold::set_param(uint16_t index, uint8_t value){
             if (value == 0) return false;       // the descriptor's minimum is 1
             hold_param = value;
             return true;
+        case P_GATE:
+            if (value > 1) return false;
+            // The same level an edge on `set` or `reset` moves, so a switch
+            // and a cable are one control rather than two. The timed modes
+            // recompute it from their input on the next pass.
+            level = value != 0;
+            if (!level) timing = false;
+            return true;
         default:
             return false;
     }
@@ -57,6 +72,7 @@ uint8_t GateHold::get_param(uint16_t index) const {
     switch (index){
         case 0: return how;
         case 1: return hold_param;
+        case P_GATE: return level ? 1u : 0u;
         default: return 0;
     }
 }

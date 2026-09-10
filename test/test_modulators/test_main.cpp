@@ -139,6 +139,51 @@ static void test_limit_cuts_a_long_gate_and_needs_a_new_edge() {
     TEST_ASSERT_TRUE(run_hold(node, bus, true, false, 62000));
 }
 
+// The switch: nothing patched at all, and the parameter is the gate. This is
+// what a patch needs when something has to be held open and there is no
+// trigger anywhere that should be doing it.
+static void test_the_gate_parameter_holds_a_level_with_nothing_patched() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_GATE_HOLD);
+    c.out_bus[0] = 2;                                 // both inlets stay NO_BUS
+    c.params[0] = GateHold::HOLD_LATCH;
+    c.params[GateHold::P_GATE] = 1;                   // stored up: it loads up
+    GateHold node(c);
+
+    // Ten seconds of passes with nothing driving it, and it is still there.
+    for (uint32_t t = 0; t < 10000000u; t += 100000u){
+        bus.swap();
+        node.process(bus, t);
+        bus.swap();
+        TEST_ASSERT_TRUE(bus.gate_read(2));
+    }
+    TEST_ASSERT_EQUAL(1, node.get_param(GateHold::P_GATE));
+
+    // And down again, from the same one control.
+    TEST_ASSERT_TRUE(node.set_param(GateHold::P_GATE, 0));
+    bus.swap();
+    node.process(bus, 10100000u);
+    bus.swap();
+    TEST_ASSERT_FALSE(bus.gate_read(2));
+    TEST_ASSERT_EQUAL(0, node.get_param(GateHold::P_GATE));
+}
+
+// A switch and a cable are one control, not two: either moves the level the
+// other reads back.
+static void test_the_switch_and_the_inlets_move_the_same_level() {
+    BusManager bus;
+    NodeConfig c = hold_config(GateHold::HOLD_LATCH, 0, true);
+    GateHold node(c);
+
+    TEST_ASSERT_TRUE(run_hold(node, bus, true, false, 0));          // set edge
+    TEST_ASSERT_EQUAL(1, node.get_param(GateHold::P_GATE));         // the switch agrees
+    TEST_ASSERT_TRUE(node.set_param(GateHold::P_GATE, 0));          // put it down by hand
+    TEST_ASSERT_FALSE(run_hold(node, bus, false, false, 1000));
+    TEST_ASSERT_TRUE(run_hold(node, bus, true, false, 2000));       // a new edge raises it
+    TEST_ASSERT_FALSE(run_hold(node, bus, false, true, 3000));      // reset still drops it
+    TEST_ASSERT_EQUAL(0, node.get_param(GateHold::P_GATE));
+}
+
 static void test_a_mode_change_does_not_drop_a_held_gate() {
     BusManager bus;
     NodeConfig c = hold_config(GateHold::HOLD_LATCH, 0, false);
@@ -908,6 +953,8 @@ int main() {
     RUN_TEST(test_extend_retriggers_rather_than_chopping);
     RUN_TEST(test_limit_cuts_a_long_gate_and_needs_a_new_edge);
     RUN_TEST(test_a_mode_change_does_not_drop_a_held_gate);
+    RUN_TEST(test_the_gate_parameter_holds_a_level_with_nothing_patched);
+    RUN_TEST(test_the_switch_and_the_inlets_move_the_same_level);
 
     RUN_TEST(test_a_free_ramp_covers_full_scale_over_its_cycle);
     RUN_TEST(test_a_free_lfo_completes_one_cycle_per_period);

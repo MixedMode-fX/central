@@ -23,7 +23,8 @@ static const char* const OUT_NAMES[1] = {"gate"};
 const AlgorithmDescriptor GateHold::descriptor = {
     ALGO_GATE_HOLD, "GateHold", 2, 0, 1, 3, IN, OUT, sizeof(GateHold), false, construct_node<GateHold>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Holds a gate up: a switch that stays put, a latch, a toggle, or a trigger stretched to length." };
+    "Holds a gate up: a switch that stays put, a latch, a toggle, or a trigger stretched to length.",
+    CATEGORY_UTILITY };
 
 static uint8_t clamp_mode(uint8_t stored){
     if (stored == 0) return GateHold::HOLD_LATCH;

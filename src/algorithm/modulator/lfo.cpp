@@ -32,7 +32,8 @@ static const char* const OUT_NAMES[1] = {"cv"};
 const AlgorithmDescriptor Lfo::descriptor = {
     ALGO_LFO, "LFO", 1, 0, 1, 9, IN, OUT, sizeof(Lfo), true, construct_node<Lfo>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "A modulation source on a control bus: seven shapes, free-running or locked to the clock." };
+    "A modulation source on a control bus: seven shapes, free-running or locked to the clock.",
+    CATEGORY_MODULATOR };
 
 // A quarter of a sine, 65 points at twelve bits, interpolated between. The
 // other three quarters are this one reflected, so the table is 130 bytes and

@@ -22,7 +22,8 @@ static const char* const OUT_NAMES[1] = {"trigger"};
 const AlgorithmDescriptor Metronome::descriptor = {
     ALGO_METRONOME, "Metronome", 1, 0, 1, 3, IN, OUT, sizeof(Metronome), true, construct_node<Metronome>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "The clock as note values: 1/4, 1/8, dotted, triplet. A divider you do not have to count." };
+    "The clock as note values: 1/4, 1/8, dotted, triplet. A divider you do not have to count.",
+    CATEGORY_CLOCK };
 
 static uint8_t clamp_division(uint8_t stored){
     if (stored == 0) return DIV_QUARTER;                 // a zeroed preset is the beat

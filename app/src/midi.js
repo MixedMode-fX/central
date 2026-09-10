@@ -15,7 +15,7 @@
 // button on a row rather than the whole feature.
 
 import * as P from './protocol.js';
-import { el } from './views.js';
+import { el, segmented } from './views.js';
 import { busCount, Domain, domainName } from './validate.js';
 import { describeSupport } from './webmidi.js';
 import {
@@ -85,6 +85,12 @@ function portToggles(mask, onChange, { label }) {
 
 // --- routing ---------------------------------------------------------------
 
+// The two ways a MIDI port can face, said the way the jacks say it.
+const DIRECTIONS = [
+  { value: 'in', label: 'in', hint: 'a cable plays a note bus' },
+  { value: 'out', label: 'out', hint: 'a note bus plays a cable' },
+];
+
 // One MIDI port, in full: what it accepts or sends, on which channel, and the
 // note bus it copies to or from. The routing panel is a grid of these and the
 // canvas inspector shows the one whose block was clicked, so a port edited
@@ -107,6 +113,16 @@ export function routeCard(app, index, isOut) {
           ? `note bus ${port.bus === P.NO_BUS ? '—' : port.bus} → ${portNames(mask()).join(', ')}`
           : `${portNames(mask()).join(', ')} → note bus ${port.bus === P.NO_BUS ? '—' : port.bus}`)
         : 'unused')),
+    // Which way the port faces, beside what it faces *at*. The module has
+    // four of each, so this moves the port rather than writing a field
+    // (`App.flipMidiPort`) - but from here it is the setting it looks like.
+    mask()
+      ? el('div', { class: 'route-direction' },
+          el('span', { class: 'field-name' }, 'direction'),
+          segmented(DIRECTIONS, isOut ? 'out' : 'in',
+                    () => app.flipMidiPort(index, isOut),
+                    { label: `${what} ${index + 1} direction` }))
+      : null,
     portToggles(mask(), (chosen) => {
       if (isOut) port.targetMask = chosen; else port.sourceMask = chosen;
       send();

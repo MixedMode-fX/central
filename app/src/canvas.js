@@ -21,7 +21,7 @@
 // for the detail of whichever block is selected.
 
 import * as P from './protocol.js';
-import { el, nodeCard } from './views.js';
+import { el, nodeCard, jackCard } from './views.js';
 import { Domain, domainName, busCount } from './validate.js';
 import { routeCard } from './midi.js';
 import {
@@ -31,6 +31,7 @@ import {
 import {
   BLOCK_W, HEAD_H, ROW_H, PAD_Y, blockHeight, socketPoint, layoutOf, worldSize, fitView,
 } from './layout.js';
+import { catalogue, richSelect, optionFor, optionsOf } from './picker.js';
 
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 1.8;
@@ -624,34 +625,19 @@ export function canvasInspector(app) {
   const block = app.canvas.geom?.blocks.find((b) => b.id === selected.id);
   if (!block) return el('p', { class: 'hint' }, 'gone');
   if (block.kind === BlockKind.Node) return el('div', { class: 'nodes' }, nodeCard(app, block.index));
-  if (block.kind === BlockKind.Jack) return jackCard(app, block.index);
+  if (block.kind === BlockKind.Jack) return jackPanel(app, block.index);
   return el('section', { class: 'panel' },
     el('h2', {}, block.title),
     routeCard(app, block.index, block.kind === BlockKind.MidiOut));
 }
 
-function jackCard(app, index) {
-  const port = app.patch.gatePorts[index];
-  const buses = app.device?.capabilities?.gateBuses ?? P.N_GATE_BUS;
-  const select = el('select', { class: 'grow', onchange: (e) => {
-    const [direction, bus] = e.target.value.split(':').map(Number);
-    app.patch.gatePorts[index] = { direction, bus: Number.isNaN(bus) ? P.NO_BUS : bus };
-    const chosen = app.patch.gatePorts[index];
-    app.edit(() => app.device.setGatePort(index, chosen.direction, chosen.bus), 'jack');
-    app.render();
-  } });
-  select.append(el('option', { value: '0:255' }, 'unused'));
-  for (const direction of [1, 2]) {
-    for (let b = 0; b < buses; b++) {
-      const option = el('option', { value: `${direction}:${b}` },
-        direction === 1 ? `in → gate bus ${b}` : `out ← gate bus ${b}`);
-      if (port.direction === direction && port.bus === b) option.selected = true;
-      select.append(option);
-    }
-  }
+// The jack's own card, in the panel the inspector gives every block. It is the
+// same card the list view puts in its grid: one jack, edited by one piece of
+// code, wherever it is being looked at.
+function jackPanel(app, index) {
   return el('section', { class: 'panel' },
     el('h2', {}, `jack ${index + 1}`),
-    el('div', { class: 'row' }, select));
+    jackCard(app, index));
 }
 
 // --- what is live -----------------------------------------------------------
@@ -671,45 +657,44 @@ export function refreshCanvasLive(app, live) {
 
 // --- adding ----------------------------------------------------------------
 
-// What can be put on the canvas: every algorithm the module reports, and the
-// four things a patch has that are not algorithms - a jack in either
-// direction, and a MIDI port in either direction. Those last four are the
-// patch's edges, and a canvas that could not add them would send you to
-// another tab to finish a patch you started here.
+// What can be put on the canvas besides an algorithm: the two things a patch
+// has that are not one. These are the patch's edges, and a canvas that could
+// not add them would send you to another tab to finish a patch you started
+// here.
+//
+// **A direction is not a kind of block.** There used to be four entries here -
+// a jack each way and a MIDI port each way - so "in or out" was a decision you
+// made in the list of things to add, before you had the thing, and changing
+// your mind meant deleting a block and adding its opposite. A jack is a jack;
+// which way it faces is one of its settings, and it is set where its other
+// settings are (`jackCard`, `routeCard`). What is added is the port, pointing
+// the way most patches want it: a jack listens, a MIDI port plays.
 export const ENDPOINTS = [
-  { key: 'jack-in', label: 'jack in', kind: BlockKind.Jack, direction: 1 },
-  { key: 'jack-out', label: 'jack out', kind: BlockKind.Jack, direction: 2 },
-  { key: 'midi-in', label: 'MIDI in', kind: BlockKind.MidiIn },
-  { key: 'midi-out', label: 'MIDI out', kind: BlockKind.MidiOut },
+  { key: 'jack', label: 'jack', kind: BlockKind.Jack,
+    direction: P.GatePortDirection.GATE_PORT_IN, note: 'gate',
+    hint: 'One of the module’s gate jacks. In or out is a toggle on the jack itself.' },
+  { key: 'midi', label: 'MIDI port', kind: BlockKind.MidiIn, note: 'notes',
+    hint: 'A cable’s worth of notes, on a note bus. In or out is a toggle on the port itself.' },
 ];
 
 export function addBar(app) {
   if (!app.device?.algorithms?.length) {
     return el('div', { class: 'hint' }, 'no module');
   }
-  const select = el('select', { id: 'algo-pick', class: 'grow',
-                                onchange: (e) => { app.addPick = e.target.value; app.render(); } });
-  const algorithms = el('optgroup', { label: 'algorithms' });
-  for (const d of app.device.algorithms) {
-    if (!d) continue;
-    const option = el('option', { value: String(d.id) },
-      `${d.name} — ${d.nIn} in, ${d.nOut} out`);
-    if (String(d.id) === app.addPick) option.selected = true;
-    algorithms.append(option);
-  }
-  const edges = el('optgroup', { label: 'edges' });
-  for (const endpoint of ENDPOINTS) {
-    const option = el('option', { value: endpoint.key }, endpoint.label);
-    if (endpoint.key === app.addPick) option.selected = true;
-    edges.append(option);
-  }
-  select.append(algorithms, edges);
-  app.addPick ??= select.value;
+  // Shelved by what each algorithm *is*, which the module says itself - so a
+  // list of thirty is six short lists of the kind of thing you came looking
+  // for, and an algorithm added to the firmware still arrives on a shelf.
+  const groups = catalogue(app.device.algorithms, ENDPOINTS);
+  if (!optionFor(groups, app.addPick)) app.addPick = optionsOf(groups)[0]?.value ?? null;
 
   return el('section', { class: 'panel add' },
     el('h2', {}, 'add'),
-    el('div', { class: 'row' }, select,
-      el('button', { class: 'primary', onclick: () => app.add(select.value) }, 'add')));
+    el('div', { class: 'row' },
+      el('div', { class: 'grow' }, richSelect({
+        value: app.addPick, groups, label: 'what to add',
+        onPick: (value) => { app.addPick = value; app.render(); },
+      })),
+      el('button', { class: 'primary', onclick: () => app.add(app.addPick) }, 'add')));
 }
 
 // The free buses left, so "add" and a drag both stop being possible for a

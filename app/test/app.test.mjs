@@ -34,8 +34,10 @@ import { Listener, gateHits } from '../src/audio.js';
 import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/drums.js';
 import {
   connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
-  applyWrite, freeBus, waitingBus,
+  applyWrite, freeBus, waitingBus, planJackDirection, planPortFlip, applyPortFlip,
 } from '../src/graph.js';
+import { catalogue, filterGroups, optionsOf } from '../src/picker.js';
+import { ENDPOINTS } from '../src/canvas.js';
 import {
   autoLayout, layoutOf, socketPoint, blockHeight, forgetNode, BLOCK_W, ROW_H,
 } from '../src/layout.js';
@@ -822,6 +824,123 @@ await test('a source added after its listener feeds it', async () => {
   patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
   assert.equal(waitingBus(patchBlocks(device, patch), 1), null, 'nothing is waiting once it is fed');
   assert.deepEqual(validate(device, patch), []);
+});
+
+// --- the patch's edges, and the list you add them from ------------------------
+
+// The add list is thirty algorithms. Grouped by what the *module* says each
+// one is, it is six short lists - and an algorithm added to the firmware
+// arrives on a shelf with no change here, which is the same promise the
+// registry has always made about names and summaries.
+await test('the add list is shelved by what the module says each algorithm is', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const groups = catalogue(device.algorithms, ENDPOINTS);
+
+  const labels = groups.map((g) => g.label);
+  assert.deepEqual(labels, ['sequencers', 'notes and MIDI', 'clock', 'modulators',
+                            'logic', 'utility', 'edges'],
+                   'the shelves, in the order the picker shows them');
+  assert.equal(optionsOf(groups).length, device.algorithms.length + ENDPOINTS.length,
+               'every algorithm is offered exactly once, and so is every edge');
+
+  // A row says what the algorithm is and what it costs, which is what the
+  // native <select> could not: its label was the whole of it.
+  const shelf = groups.find((g) => g.label === 'sequencers');
+  const euclid = shelf.options.find((o) => o.label === 'EuclidianSequencer');
+  assert.ok(euclid, 'a sequencer is on the sequencer shelf');
+  assert.match(euclid.note, /2 in · 1 out/);
+  assert.match(euclid.hint, /Bjorklund/);
+  const lfo = optionsOf(groups).find((o) => o.label === 'LFO');
+  assert.match(lfo.note, /clocked/, 'an algorithm the clock drives says so');
+
+  // Search is over everything a row shows, plus the shelf it is on - so the
+  // word a musician has in mind finds the row whether or not it is the name.
+  assert.deepEqual(
+    optionsOf(filterGroups(groups, 'euclid')).map((o) => o.label), ['EuclidianSequencer']);
+  const logic = optionsOf(filterGroups(groups, 'logic'));
+  assert.ok(logic.length >= 7 && logic.every((o) => o.hint), 'a shelf can be searched for by name');
+  assert.deepEqual(filterGroups(groups, 'nothing called this'), [],
+                   'a search that matches nothing leaves no empty shelves behind');
+});
+
+// An algorithm from firmware this app has never heard of still has to be
+// offered: the category is appended to the registry record precisely so that
+// an unknown one costs a shelf, not an algorithm.
+await test('an algorithm whose category this app does not know is still offered', () => {
+  const groups = catalogue([
+    { id: 200, name: 'Nova', nIn: 1, nOut: 1, category: 99, summary: 'from later firmware' },
+    { id: 201, name: 'Ancient', nIn: 1, nOut: 1, category: P.AlgorithmCategory.CATEGORY_NONE,
+      summary: 'from firmware with no categories at all' },
+  ]);
+  assert.deepEqual(groups.map((g) => g.label), ['other']);
+  assert.deepEqual(groups[0].options.map((o) => o.label), ['Nova', 'Ancient']);
+});
+
+// A jack faces one way or the other, and which way is a setting on the jack -
+// not a kind of jack you have to have chosen before you had one. What matters
+// is that the bus survives the turn: a jack in on gate bus 3 turned round is
+// the way you listen to gate bus 3, and finding that bus again by hand was
+// the old selector's whole cost.
+await test('a jack turned round keeps its bus, and an unused one lands on a real one', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const caps = device.capabilities;
+  const patch = codec.emptyPatch();
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, bus: 3 };
+
+  const turned = planJackDirection(patch, caps, 0, P.GatePortDirection.GATE_PORT_OUT);
+  assert.deepEqual(turned, { index: 0, direction: P.GatePortDirection.GATE_PORT_OUT, bus: 3 });
+
+  // Off, and the bus goes with it: a jack in use is one the module validates
+  // against its bus count, and an unused one carries NO_BUS.
+  const off = planJackDirection(patch, caps, 0, P.GatePortDirection.GATE_PORT_UNUSED);
+  assert.equal(off.bus, P.NO_BUS);
+  patch.gatePorts[0] = { direction: off.direction, bus: off.bus };
+  assert.deepEqual(validate(device, patch), []);
+
+  // And back on: NO_BUS is not a bus, so it lands on the first.
+  const on = planJackDirection(patch, caps, 0, P.GatePortDirection.GATE_PORT_IN);
+  assert.equal(on.bus, 0);
+  patch.gatePorts[0] = { direction: on.direction, bus: on.bus };
+  assert.deepEqual(validate(device, patch), [], 'the module takes what the toggle wrote');
+});
+
+// A MIDI port's direction is the same setting to the eye and a different thing
+// underneath: the module has four inputs and four outputs, so the toggle moves
+// the port. What it carries has to travel with it, or "turn it round" quietly
+// loses the cables and the channel it was set to.
+await test('a MIDI port turned round takes its cables, channel and bus with it', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const caps = device.capabilities;
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, bus: 2 };
+
+  const plan = planPortFlip(patch, caps, 0, false);
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.to, { index: 0, isOut: true }, 'the first free output takes it');
+  applyPortFlip(patch, plan);
+  assert.equal(patch.midiIn[0].sourceMask, 0, 'the input it left is unused');
+  assert.deepEqual(
+    { mask: patch.midiOut[0].targetMask, channel: patch.midiOut[0].channel, bus: patch.midiOut[0].bus },
+    { mask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, bus: 2 });
+  assert.deepEqual(validate(device, patch), []);
+
+  // The patch says one MIDI port, pointing the other way - not two.
+  const blocks = patchBlocks(device, patch);
+  assert.deepEqual(blocks.map((b) => b.id), ['midiOut:0']);
+
+  // And it can refuse: every port on the other side already in use is a
+  // failure with a reason, not a silently dropped edit.
+  const full = codec.emptyPatch();
+  for (let i = 0; i < caps.midiOut; i++) {
+    full.midiOut[i] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  }
+  full.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  const refused = planPortFlip(full, caps, 0, false);
+  assert.equal(refused.ok, false);
+  assert.match(refused.why, /every MIDI output port/);
 });
 
 // --- where the blocks go -----------------------------------------------------

@@ -17,7 +17,8 @@ static const char* const OUT_NAMES[1] = {"cv"};
 const AlgorithmDescriptor Slew::descriptor = {
     ALGO_SLEW, "Slew", 1, 1, 1, 3, IN, OUT, sizeof(Slew), false, construct_node<Slew>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Limits how fast a control signal may change, up and down separately. Steps become glides." };
+    "Limits how fast a control signal may change, up and down separately. Steps become glides.",
+    CATEGORY_MODULATOR };
 
 Slew::Slew(const NodeConfig& config) :
     in(config.in_bus[0]),

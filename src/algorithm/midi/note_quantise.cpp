@@ -20,7 +20,8 @@ static const char* const OUT_NAMES[1] = {"notes out"};
 const AlgorithmDescriptor NoteQuantise::descriptor = {
     ALGO_NOTE_QUANTISE, "Note Quantise", 2, 1, 1, 2, IN, OUT, sizeof(NoteQuantise), false,
     construct_node<NoteQuantise>, GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Snaps every note to the module's scale, or to one of its own. The root inlet moves it." };
+    "Snaps every note to the module's scale, or to one of its own. The root inlet moves it.",
+    CATEGORY_MIDI };
 
 // Root and scale can both move under a sounding note: the release is taken
 // from the ledger, so it is the pitch that was actually sent and never a

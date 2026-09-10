@@ -39,7 +39,7 @@
      narrower than their contents. Anything that then does not fit wraps, or
      scrolls in its own box - which is the difference between a card that fits
      the screen and one that is clipped off the side of it. */
-  .nodes > *, .ports > *, .port-group > *, .params > *, .fields > *, .jacks > *,
+  .nodes > *, .ports > *, .port-group > *, .params > *, .fields > *,
   .jack-cards > *, .routes > *, .slots > *, .saved-list > *, .lane-row > *,
   .players > *, .row > *, .grid > * { min-width: 0; }
   /* Nothing may make the page itself scroll sideways: an overflowing lane
@@ -165,6 +165,55 @@
              border-color: var(--accent); color: var(--ink); }
   .ports-row { display: flex; flex-wrap: wrap; gap: .35rem; }
 
+  /* --- the picker: a dropdown you can read (picker.js) --- */
+  /* The panel is positioned against the picker rather than the page, so it
+     moves with the layout and needs nothing measured in JavaScript. It is
+     the width of the control on a phone and no wider than a paragraph on a
+     desktop, because a row here is two lines of prose and a 60rem line is
+     not read, it is scanned past. */
+  .picker { position: relative; min-width: 0; }
+  .picker-face {
+    display: flex; width: 100%; gap: .5rem; align-items: center;
+    background: var(--raised); text-align: left;
+  }
+  .picker-face[aria-expanded="true"] { border-color: var(--accent); }
+  .picker-face-text { display: flex; gap: .5rem; align-items: baseline;
+                      flex-wrap: wrap; min-width: 0; margin-right: auto; }
+  .picker-caret { color: var(--dim); flex: none; }
+  .picker-name { overflow-wrap: anywhere; }
+  .picker-note { color: var(--dim); font-size: .78rem; white-space: nowrap; }
+  .picker-panel {
+    position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + .3rem);
+    display: flex; flex-direction: column;
+    max-width: 34rem; max-height: min(60vh, 26rem);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .45); overflow: hidden;
+  }
+  /* Opened upwards, when there is more room above than below - which is what
+     the add bar at the foot of the patch tab always has. */
+  .picker-panel.up { top: auto; bottom: calc(100% + .3rem); }
+  .picker-search { margin: .4rem; }
+  .picker-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .picker-shelf { min-width: 0; }
+  .picker-group {
+    position: sticky; top: 0; z-index: 1; padding: .35rem .7rem;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    color: var(--dim); font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
+  }
+  .picker-option {
+    display: grid; width: 100%; gap: .15rem; padding: .45rem .7rem; min-height: var(--tap);
+    background: none; border: none; border-radius: 0; text-align: left; cursor: pointer;
+  }
+  .picker-option-head { display: flex; gap: .5rem; align-items: baseline;
+                        justify-content: space-between; }
+  .picker-hint { color: var(--dim); font-size: .78rem; line-height: 1.35; }
+  .picker-option.chosen .picker-name { color: var(--accent); }
+  .picker-option.active, .picker-option:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .picker-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .picker-empty { padding: .6rem .7rem; color: var(--dim); font-size: .85rem; }
+
   /* --- boxes --- */
   .caps { color: var(--dim); font-size: .85rem; margin-bottom: 1rem; }
   .hint { color: var(--dim); font-size: .85rem; }
@@ -181,10 +230,6 @@
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
            padding: .9rem; margin-bottom: 1rem; }
-  .jacks { display: grid; gap: .5rem; }
-  .jack { display: grid; grid-template-columns: 4.5rem 1fr; gap: .5rem; align-items: center; }
-  .jack span { color: var(--dim); }
-  .jack select { width: 100%; }
 
   /* --- nodes --- */
   .nodes { display: grid; gap: 1rem; }
@@ -264,6 +309,9 @@
                 flex-wrap: wrap; margin-bottom: .5rem; }
   .route-head h4 { margin: 0; }
   .route-fields { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+  /* Named, because the chips below it are also a row of chips and "in / out"
+     has to read as the port's direction rather than as two more cables. */
+  .route-direction { display: flex; gap: .5rem; align-items: center; margin-bottom: .45rem; }
 
   /* --- bindings --- */
   .table-scroll, .lane-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; min-width: 0; }
@@ -335,6 +383,11 @@
   .jack-cards { display: grid; gap: .5rem; }
   .jack-card { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
   .jack-head { display: flex; gap: .5rem; align-items: center; margin-bottom: .3rem; }
+  .jack-head h4 { margin: 0; }
+  /* A jack nothing is patched into is still shown - it is where you go to
+     patch something into it - but it does not compete with the ones in use. */
+  .jack-card.unused { border-style: dashed; }
+  .jack-card .port { margin-top: .5rem; }
   .led.jack-lamp { background: var(--gate); }
   .led.jack-lamp.out { background: var(--warn); }
   .led.lit { opacity: 1; }
@@ -586,7 +639,6 @@
     .tab { flex: 0 0 auto; }
     .params { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem 1.5rem; }
     .fields { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
-    .jacks { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
     .jack-cards { grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
     .log-line { grid-template-columns: 4rem 5rem 1fr auto; }
     .log-where { grid-column: auto; }

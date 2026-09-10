@@ -17,7 +17,8 @@ static const char* const OUT_NAMES[1] = {"notes out"};
 const AlgorithmDescriptor Probability::descriptor = {
     ALGO_PROBABILITY, "Probability", 1, 1, 1, 2, IN, OUT, sizeof(Probability), false, construct_node<Probability>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Lets each note through with a chance, and keeps its note-off with it." };
+    "Lets each note through with a chance, and keeps its note-off with it.",
+    CATEGORY_MIDI };
 
 // The odds move freely: the pass/drop decision is taken on the note-on and
 // remembered, so a note already passed is always released whatever the

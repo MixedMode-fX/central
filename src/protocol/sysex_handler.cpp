@@ -554,6 +554,11 @@ void SysexHandler::reply_algorithms(uint8_t source){
             put_string(d->out_name != nullptr ? d->out_name[out] : nullptr);
         }
         put_string(d->summary, SUMMARY_MAX);
+        // Which shelf of the editor's list it belongs on, appended last for
+        // the same reason: a host that stops at the summary reads the record
+        // it always did, and one that does not shows thirty algorithms in six
+        // short lists rather than as one undivided wall.
+        put((uint8_t)d->category);
         send_reply(source);
     }
 }

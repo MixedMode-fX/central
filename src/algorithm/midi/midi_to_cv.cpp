@@ -6,13 +6,12 @@
 static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[5] = {Domain::CV, Domain::Gate, Domain::CV, Domain::CV, Domain::Gate};
 
-static const char* const PRIORITY_NAMES[3] = {"lowest", "highest", "latest"};
 static const char* const GATE_NAMES[2] = {"legato", "retrigger"};
 static const char* const MOD_SOURCE_NAMES[2] = {"cc", "pressure"};
 
 static const ParamDescriptor PARAMS[8] = {
     {"priority", MidiToCv::PRIORITY_LOWEST, MidiToCv::PRIORITIES, MidiToCv::PRIORITY_LATEST,
-     PARAM_ENUM, PRIORITY_NAMES},
+     PARAM_ENUM, PARAM_PRIORITY_NAMES},
     {"range",    1, MidiToCv::MAX_RANGE, MidiToCv::DEFAULT_RANGE, PARAM_NUMBER, nullptr},
     {"base",     0, 127, MidiToCv::DEFAULT_BASE, PARAM_PITCH, nullptr},
     {"bend",     0, MidiToCv::MAX_BEND, MidiToCv::DEFAULT_BEND, PARAM_NUMBER, nullptr},
@@ -102,22 +101,6 @@ void MidiToCv::derive(){
     per_semitone = (int32_t)(((uint32_t)CV_FULL << PITCH_SUB) / (12u * (uint32_t)range));
 }
 
-uint8_t MidiToCv::winner() const {
-    switch (priority){
-        case PRIORITY_HIGHEST: return held.highest();
-        case PRIORITY_LOWEST:  return held.lowest();
-        default:               return held.latest();
-    }
-}
-
-uint8_t MidiToCv::velocity_of(uint8_t note) const {
-    for (uint8_t i = 0; i < held.count(); i++){
-        const HeldNote& h = held.at(i);
-        if (h.note == note) return h.velocity;
-    }
-    return 0;
-}
-
 int16_t MidiToCv::pitch_of(uint8_t note) const {
     int32_t q = ((int32_t)note - (int32_t)base) * per_semitone;
     if (bend_semis != 0){
@@ -161,7 +144,7 @@ void MidiToCv::process(BusManager& bus, uint32_t now_us){
         }
     }
 
-    const uint8_t want = winner();
+    const uint8_t want = held.winner(rule());
     // An attack is a note-on this pass that *took* the voice. A note-off that
     // hands the voice back to a note still held is not one: releasing the top
     // of a legato line must not re-strike the envelope underneath it.
@@ -172,8 +155,9 @@ void MidiToCv::process(BusManager& bus, uint32_t now_us){
     if (want != playing || attack){
         playing = want;
         if (want != HeldNotes::NONE){
+            const HeldNote* h = held.find(want);
             last_note = want;
-            velocity_cv = seven_bit_cv(velocity_of(want));
+            velocity_cv = seven_bit_cv(h ? h->velocity : 0);
         }
     }
     if (attack) pulse.fire(now_us);

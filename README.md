@@ -538,7 +538,8 @@ somebody asks for it. That is also the clearest demonstration that routing is
 just bus assignment.
 
 **Modifiers** all compose over one held-note model (`src/midi/held_notes.h`):
-which notes are held, in what order, at what velocity. The rule that governs
+which notes are held, in what order, at what velocity — and, for the two nodes
+that play one of them at a time, which one wins and what it arrived with. The rule that governs
 every one of them is that **a modifier owns the note-off for every note-on it
 emitted, and releases it with the transformation it originally applied, not the
 current parameter value** — otherwise moving a transpose offset, or a
@@ -569,8 +570,10 @@ velocity, modulation and a trigger out.
 **One voice, because a CV pair is one voice.** Pitch is a level and a gate is a
 level: neither can carry a second note, so the node has to choose, and which
 note wins is the same question `NotePriority` answers — lowest, highest or
-latest. It is asked here rather than solved by patching a `NotePriority` in
-front, because the answer is not only which note sounds. It is also when the
+latest, and both ask it the same way: the rule is a `HeldNotes` query
+(`NotePriorityRule` in `src/midi/held_notes.h`), not a switch in each node.
+It is asked here rather than solved by patching a `NotePriority` in front,
+because the answer is not only which note sounds. It is also when the
 gate falls, when the trigger fires and which velocity the voice takes, and none
 of that survives a trip through a note bus as anything the next node could
 read.

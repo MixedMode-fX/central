@@ -16,7 +16,14 @@
 // params[0] mode  0 = lowest, 1 = highest, 2 = latest
 class NotePriority : public Node{
     public:
-        enum Mode : uint8_t { PRIORITY_LOW = 0, PRIORITY_HIGH = 1, PRIORITY_LATEST = 2 };
+        // The stored parameter, which is the preset format and cannot be
+        // renumbered - and which happens to be NotePriorityRule's own
+        // numbering, because this node's default is the first of them.
+        enum Mode : uint8_t {
+            PRIORITY_LOW    = NOTE_PRIORITY_LOWEST,
+            PRIORITY_HIGH   = NOTE_PRIORITY_HIGHEST,
+            PRIORITY_LATEST = NOTE_PRIORITY_LATEST,
+        };
 
         static const AlgorithmDescriptor descriptor;
         explicit NotePriority(const NodeConfig& config);
@@ -28,7 +35,6 @@ class NotePriority : public Node{
         uint8_t held_count() const { return held.count(); }
 
     private:
-        uint8_t winner() const;
         void follow(BusManager& bus);
 
         uint8_t in;

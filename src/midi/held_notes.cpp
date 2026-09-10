@@ -2,9 +2,9 @@
 
 HeldNotes::HeldNotes() : notes(), none{NONE, 0, 0}, n(0) {}
 
-bool HeldNotes::contains(uint8_t note) const {
-    for (uint8_t i = 0; i < n; i++) if (notes[i].note == note) return true;
-    return false;
+const HeldNote* HeldNotes::find(uint8_t note) const {
+    for (uint8_t i = 0; i < n; i++) if (notes[i].note == note) return &notes[i];
+    return nullptr;
 }
 
 bool HeldNotes::add(uint8_t note, uint8_t velocity, uint8_t channel,
@@ -74,4 +74,12 @@ uint8_t HeldNotes::highest() const {
 
 uint8_t HeldNotes::latest() const {
     return n == 0 ? NONE : notes[n - 1].note;
+}
+
+uint8_t HeldNotes::winner(NotePriorityRule rule) const {
+    switch (rule){
+        case NOTE_PRIORITY_HIGHEST: return highest();
+        case NOTE_PRIORITY_LATEST:  return latest();
+        default:                    return lowest();
+    }
 }

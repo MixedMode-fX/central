@@ -153,6 +153,42 @@ static void test_held_notes_repeat_updates_in_place() {
 // The panic path emits note-offs and nothing else. The original called the
 // note-off *path*, which re-triggered the next priority note - so the panic
 // routine sent note-ons.
+// The one place that answers "which held note wins", and the one lookup that
+// finds a note once it has been chosen. Two algorithms lean on these, so they
+// are tested here rather than only through whichever of them happens to run.
+static void test_held_notes_answers_the_priority_rules_and_finds_a_note() {
+    HeldNotes held;
+    HeldNote evicted = {0, 0, 0};
+    bool did = false;
+
+    // Nothing held has one answer, whatever the rule.
+    for (uint8_t rule = 0; rule < NOTE_PRIORITY_RULES; rule++) {
+        TEST_ASSERT_EQUAL(HeldNotes::NONE, held.winner((NotePriorityRule)rule));
+    }
+
+    held.add(60, 100, 1, evicted, did);
+    held.add(67, 90, 2, evicted, did);
+    held.add(64, 80, 3, evicted, did);
+    TEST_ASSERT_EQUAL(60, held.winner(NOTE_PRIORITY_LOWEST));
+    TEST_ASSERT_EQUAL(67, held.winner(NOTE_PRIORITY_HIGHEST));
+    TEST_ASSERT_EQUAL(64, held.winner(NOTE_PRIORITY_LATEST));
+
+    // A chosen note comes back with everything it arrived with.
+    const HeldNote* found = held.find(67);
+    TEST_ASSERT_NOT_NULL(found);
+    TEST_ASSERT_EQUAL(90, found->velocity);
+    TEST_ASSERT_EQUAL(2, found->channel);
+    TEST_ASSERT_NULL(held.find(72));
+    TEST_ASSERT_TRUE(held.contains(64));
+    TEST_ASSERT_FALSE(held.contains(72));
+
+    // And both parameter numberings land on the rule they name.
+    TEST_ASSERT_EQUAL(held.winner(NOTE_PRIORITY_HIGHEST),
+                      held.winner((NotePriorityRule)NotePriority::PRIORITY_HIGH));
+    TEST_ASSERT_EQUAL(held.winner(NOTE_PRIORITY_HIGHEST),
+                      held.winner((NotePriorityRule)(MidiToCv::PRIORITY_HIGHEST - 1)));
+}
+
 static void test_release_all_emits_only_note_offs() {
     BusManager bus;
     SoundingNotes sounding;
@@ -1475,6 +1511,7 @@ int main() {
     RUN_TEST(test_held_notes_empty_has_one_representation);
     RUN_TEST(test_held_notes_overflow_reports_the_evicted_note);
     RUN_TEST(test_held_notes_repeat_updates_in_place);
+    RUN_TEST(test_held_notes_answers_the_priority_rules_and_finds_a_note);
     RUN_TEST(test_release_all_emits_only_note_offs);
     RUN_TEST(test_sounding_notes_refuses_what_it_cannot_release);
     RUN_TEST(test_scale_masks_and_quantisation);

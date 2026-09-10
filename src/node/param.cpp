@@ -15,3 +15,9 @@ const char* const PARAM_SCALE_NAMES[15] = {
     "pentatonic major", "pentatonic minor", "blues", "dorian", "phrygian",
     "lydian", "mixolydian", "locrian", "whole tone", "chromatic",
 };
+
+// NotePriorityRule, in the enum's order. Both algorithms that offer a
+// priority use this table, whatever their parameter's own numbering.
+const char* const PARAM_PRIORITY_NAMES[3] = {
+    "lowest", "highest", "latest",
+};

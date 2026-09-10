@@ -79,15 +79,18 @@ class MidiToCv : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
 
-        // Indexed from 1, so a stored 0 still means the descriptor's default -
-        // which here is `latest`, the priority a keyboard player expects, and
-        // not the first entry in the list. (`NotePriority` numbers the same
-        // three from 0 because its default *is* the first of them.)
+        // The stored parameter. It is NotePriorityRule (midi/held_notes.h)
+        // indexed from 1, so that a stored 0 still means the descriptor's
+        // default - which here is `latest`, the priority a keyboard player
+        // expects, and not the first entry in the list. (`NotePriority`
+        // numbers the same three from 0 because its default *is* the first of
+        // them, and its numbering is preset format.) Defining these in terms
+        // of the rule keeps rule_of() below a fact rather than an assumption.
         enum Priority : uint8_t {
-            PRIORITY_LOWEST  = 1,
-            PRIORITY_HIGHEST = 2,
-            PRIORITY_LATEST  = 3,
-            PRIORITIES       = 3,
+            PRIORITY_LOWEST  = NOTE_PRIORITY_LOWEST + 1,
+            PRIORITY_HIGHEST = NOTE_PRIORITY_HIGHEST + 1,
+            PRIORITY_LATEST  = NOTE_PRIORITY_LATEST + 1,
+            PRIORITIES       = PRIORITY_LATEST,
         };
 
         enum GateMode : uint8_t {
@@ -130,10 +133,10 @@ class MidiToCv : public Node{
         // moves, never per pass: a division is not free and the answer only
         // changes when a parameter does.
         void derive();
-        // Which held note owns the voice, under the current priority.
-        uint8_t winner() const;
-        // The velocity a held note arrived with, or 0 if it is not held.
-        uint8_t velocity_of(uint8_t note) const;
+        // The stored parameter as the rule HeldNotes answers.
+        NotePriorityRule rule() const {
+            return (NotePriorityRule)(priority - PRIORITY_LOWEST);
+        }
         // Where a note sits on the pitch bus, bend included, clamped.
         int16_t pitch_of(uint8_t note) const;
 

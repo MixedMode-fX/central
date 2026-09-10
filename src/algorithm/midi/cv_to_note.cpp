@@ -61,16 +61,10 @@ uint16_t CvToNote::active_mask() const {
     return global_scale::resolve_id(scale);
 }
 
-// The octave is this node's, the pitch class is the key's. A pitch class
-// cannot name an octave and a key cannot have one, so the two halves come
-// from the two places that can say them - and a node that names its own scale
-// keeps its own root entirely, which is the rule everywhere else.
+// The octave is this node's, the pitch class is the key's - see
+// global_scale::resolve_tonic, which Harmony resolves its roots the same way.
 uint8_t CvToNote::active_root() const {
-    const uint8_t pc = global_scale::resolve_root(scale, (uint8_t)(root % 12u));
-    const int16_t base = (int16_t)root - (int16_t)(root % 12u);
-    int16_t tonic = (int16_t)(base + pc);
-    if (tonic > 127) tonic -= 12;
-    return (uint8_t)tonic;
+    return global_scale::resolve_tonic(scale, root);
 }
 
 // The matrix's reading of a signal (control/mod_matrix.cpp), so "bipolar"

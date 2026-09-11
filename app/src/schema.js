@@ -576,9 +576,9 @@ export function patchSchema(device) {
       + `${P.PATCH_FORMAT_VERSION}, ${algorithms.length} algorithms.`,
       'Nodes do not connect to each other: each reads and writes numbered buses, and a bus is where a '
       + 'writer and a reader meet. There are three kinds - gate (a trigger or a level), note (MIDI notes) '
-      + 'and CV (a value) - and a connection is only ever a bus index of the right kind. Buses are '
-      + 'double-buffered, so the order of "nodes" does not matter and feedback costs one pass rather than '
-      + 'hanging.',
+      + 'and CV (a value) - and a connection is only ever a bus index of the right kind. The module runs '
+      + 'the nodes in the order the buses connect them, so the order of "nodes" does not matter, a signal '
+      + 'crosses the whole patch in one pass, and feedback costs one pass rather than hanging.',
       `The module has ${caps.jacks} jacks, each either an input that drives a gate bus or an output driven `
       + `by one, ${caps.midiIn} MIDI input ports and ${caps.midiOut} MIDI output ports that read and write `
       + `note buses, and room for ${caps.nodes} nodes.`,

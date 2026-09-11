@@ -33,9 +33,8 @@
 // **Where it runs.** Between passes, from the main loop, after CcMapper::apply
 // and before MixedModeMaster::pass. The buses' front buffer holds what the
 // modulators wrote during the previous pass, so a route reads a value that is
-// finished and published rather than one being accumulated - the same
-// one-pass delay every reader in the module sees, and the reason evaluation
-// order does not matter here either.
+// finished and published rather than one a pass is still accumulating - which
+// is also why it does not matter which node wrote it.
 //
 // **Absolute and offset.** Absolute is the modulator behaving as a knob:
 // the signal is the value. Offset keeps the parameter's own setting as a

@@ -50,9 +50,8 @@ class Node {
         // pass, with the note-off after the note-on it cancels.
         //
         // A stop is not instantaneous in a graph with latency, so the master
-        // calls this for as many passes as the graph is deep (see
-        // MixedModeMaster::settle_stop) and a node has to tolerate being told
-        // more than once. Releasing an empty ledger writes nothing, so an
+        // calls this for several passes (see MixedModeMaster::settle_stop)
+        // and a node has to tolerate being told more than once. Releasing an empty ledger writes nothing, so an
         // implementation that is simply `silence(bus)` already does.
         virtual void transport_stopped(BusManager&) {}
 

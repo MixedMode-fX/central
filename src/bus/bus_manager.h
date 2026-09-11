@@ -7,11 +7,20 @@
 
 // All internal buses, double-buffered.
 //
-// Readers see the *front* buffer, which holds what was written during the
-// previous pass. Writers accumulate into the *back* buffer. swap() publishes
-// the back buffer and clears it. This makes evaluation order-independent,
-// turns feedback into a well-defined one-pass delay instead of recursion,
-// and makes every pass deterministic for the tests.
+// Readers see the *front* buffer; writers accumulate into the *back* buffer,
+// and publishing a bus moves one to the other. Feedback is therefore a
+// well-defined one-pass delay instead of recursion, and every pass is
+// deterministic for the tests.
+//
+// **A bus is published the moment its last writer has run**, not at the end
+// of the pass: the master runs the pool in an order where every writer of a
+// bus precedes its readers (node/schedule.h), so a reader sees this pass's
+// value rather than the previous one and a signal crosses the whole graph in
+// the pass that produced it. Every bus is published exactly once a pass -
+// one nothing writes any more empties rather than holding its last value -
+// and a bus written again after its publish point, which is what a node
+// releasing its notes during a handover does, is merged by the publish that
+// ends the pass rather than replaced by it.
 //
 // Merge rules (applied in the write functions):
 //   Gate: OR of all writers.
@@ -41,7 +50,12 @@ class BusManager {
         int16_t cv_read(uint8_t bus) const;
         void cv_write(uint8_t bus, int16_t value);
 
-        // Publishes this pass's writes and clears the back buffer.
+        // Publishes the selected buses - one bit per bus, per domain - and
+        // clears their back buffers. The first publish of a bus in a pass
+        // replaces what the readers see; a later one merges into it under
+        // the domain's own fan-in rule.
+        void publish(uint32_t gate_mask, uint16_t note_mask, uint16_t cv_mask);
+        // Publishes everything not yet published and ends the pass.
         void swap();
         // Clears everything (patch load).
         void reset();
@@ -54,6 +68,12 @@ class BusManager {
 
         uint32_t gate_front;
         uint32_t gate_back;
+        // Which buses have already been published this pass, so that a
+        // second publish merges into what the readers see instead of wiping
+        // it.
+        uint32_t gate_published;
+        uint16_t note_published;
+        uint16_t cv_published;
         NoteQueue note_front[N_NOTE_BUS];
         NoteQueue note_back[N_NOTE_BUS];
         uint32_t note_overflow[N_NOTE_BUS];
@@ -62,5 +82,7 @@ class BusManager {
 };
 
 static_assert(N_GATE_BUS <= 32, "gate buses are held in a 32-bit word");
+static_assert(N_NOTE_BUS <= 16, "a note bus mask is a 16-bit word");
+static_assert(N_CV_BUS <= 16, "a CV bus mask is a 16-bit word");
 
 #endif

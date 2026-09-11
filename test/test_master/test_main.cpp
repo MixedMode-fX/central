@@ -6,6 +6,7 @@
 #include "../fakes/recording_midi_out.h"
 #include "master.h"
 #include "hal/midi_types.h"
+#include "clock/musical_division.h"
 
 // Heap instrumentation: every operator new is counted, so the tests can
 // assert that the firmware allocates nothing after setup().
@@ -185,6 +186,34 @@ static void test_fan_in_rules() {
     TEST_ASSERT_EQUAL(5, master.buses().note_overflows(0));
 }
 
+// Fan-in survives the ordering. Node 0 reads a bus that nodes 1 and 2 both
+// write, so it runs after both of them however the patch lists them, and the
+// jack shows the OR of the two writers in the pass the jacks were sampled in
+// - not the half of it that happened to be written first.
+static void test_fan_in_holds_whatever_order_the_patch_is_in() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 1};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, 2};
+    p.nodes[0] = node(ALGO_LOGIC_NOT, 0, 3);          // the reader, listed first
+    p.nodes[1] = node(ALGO_LOGIC_NOT, 1, 0);          // one writer of bus 0
+    p.nodes[2] = node(ALGO_LOGIC_NOT, 2, 0);          // the other
+    p.n_nodes = 3;
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 3};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    // Bus 0 is the OR of two inverted jacks, so the jack out is their AND -
+    // and it is that one pass after the jacks were read.
+    for (uint8_t combo = 0; combo < 4; combo++) {
+        gpio.set_input(0, combo & 1);
+        gpio.set_input(1, (combo >> 1) & 1);
+        master.pass(0);
+        TEST_ASSERT_EQUAL(combo == 3 ? GPIO_HIGH : GPIO_LOW, gpio.outputs[2]);
+    }
+}
+
 // A patch assigning a gate bus index to a note inlet is rejected by the
 // validator, and the running patch is left untouched.
 static void test_validator_rejects_wrong_domain_index_and_keeps_running_patch() {
@@ -248,26 +277,34 @@ static void test_self_feedback_oscillates() {
     }
 }
 
-// Latency through an n-stage gate chain is exactly n passes.
-static void test_chain_latency_is_exactly_n_passes() {
+// A gate crosses a chain of inverters in the pass it was sampled in, however
+// many of them there are and whatever order they sit in the patch: the pool
+// runs in the graph's order (node/schedule.h), so a stage costs nothing.
+static void test_a_chain_costs_one_pass_whatever_its_order() {
     for (uint8_t stages = 0; stages <= 6; stages += 2) {
-        FakeGpio gpio; RecordingMidiOut midi;
-        MixedModeMaster master(gpio, midi);
-        Patch p = empty_patch();
-        p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
-        for (uint8_t s = 0; s < stages; s++) p.nodes[s] = node(ALGO_LOGIC_NOT, s, s + 1);
-        p.n_nodes = stages;
-        p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, stages};   // an even number of inverters: same polarity
-        TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
-        master.setup();
-        for (int i = 0; i < 20; i++) master.pass(0);
-        TEST_ASSERT_EQUAL(GPIO_LOW, gpio.outputs[1]);
+        for (int reversed = 0; reversed < 2; reversed++) {
+            FakeGpio gpio; RecordingMidiOut midi;
+            MixedModeMaster master(gpio, midi);
+            Patch p = empty_patch();
+            p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
+            for (uint8_t s = 0; s < stages; s++) {
+                // Reversed, the last stage of the signal is the first node in
+                // the patch, so patch order is exactly the wrong order.
+                const uint8_t stage = reversed ? (uint8_t)(stages - 1u - s) : s;
+                p.nodes[s] = node(ALGO_LOGIC_NOT, stage, stage + 1);
+            }
+            p.n_nodes = stages;
+            p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, stages};   // an even number of inverters: same polarity
+            TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+            master.setup();
+            for (int i = 0; i < 20; i++) master.pass(0);
+            TEST_ASSERT_EQUAL(GPIO_LOW, gpio.outputs[1]);
 
-        gpio.set_input(0, GPIO_HIGH);
-        int passes = 0;
-        while (gpio.outputs[1] != GPIO_HIGH && passes < 50) { master.pass(0); passes++; }
-        // Sampled in pass 1, visible at the jack after `stages` further passes.
-        TEST_ASSERT_EQUAL_MESSAGE(stages + 1, passes, "latency in passes (including the sampling pass)");
+            gpio.set_input(0, GPIO_HIGH);
+            int passes = 0;
+            while (gpio.outputs[1] != GPIO_HIGH && passes < 50) { master.pass(0); passes++; }
+            TEST_ASSERT_EQUAL_MESSAGE(1, passes, "latency in passes (including the sampling pass)");
+        }
     }
 }
 
@@ -613,18 +650,105 @@ static void test_transpose_arpeggiator_priority_chain() {
     TEST_ASSERT_EQUAL(0, final_sounding);
 }
 
+// ---------------------------------------------------------------------------
+// A clock advancing an arpeggiator, and the chord that same clock is choosing
+// two nodes away: Metronome -> Harmony -> Chord -> Arpeggiator, with a second
+// Metronome advancing the arpeggiator on the same grid.
+//
+// The pulse reaches the arpeggiator in one hop and the chord in three, so
+// reading the buses in patch order made the figure play the chord of the
+// *previous* bar: an arpeggio a step behind its own progression. The nodes
+// here are in the order somebody building the patch from the arpeggiator
+// backwards would leave them, which is the order that used to be worst.
+// ---------------------------------------------------------------------------
+static void test_the_arpeggio_plays_the_chord_the_same_pulse_chose() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+
+    NodeConfig arp = node_config(ALGO_ARPEGGIATOR);
+    arp.in_bus[0] = 1;                                  // chord in  <- note bus 1
+    arp.in_bus[1] = 1;                                  // advance   <- gate bus 1
+    arp.out_bus[0] = 2;
+    p.nodes[0] = arp;
+
+    NodeConfig chord = node_config(ALGO_CHORD);
+    chord.in_bus[1] = 0;                                // root      <- note bus 0
+    chord.out_bus[0] = 1;
+    chord.params[11] = 1;                               // quality: triad
+    p.nodes[1] = chord;
+
+    NodeConfig harmony = node_config(ALGO_HARMONY);
+    harmony.in_bus[0] = 0;                              // advance   <- gate bus 0
+    harmony.out_bus[0] = 0;                             // root      -> note bus 0
+    p.nodes[2] = harmony;
+
+    NodeConfig bar = node_config(ALGO_METRONOME);
+    bar.out_bus[0] = 0;
+    bar.params[0] = DIV_BAR;
+    p.nodes[3] = bar;
+
+    NodeConfig eighth = node_config(ALGO_METRONOME);
+    eighth.out_bus[0] = 1;
+    eighth.params[0] = DIV_EIGHTH;
+    p.nodes[4] = eighth;
+
+    p.n_nodes = 5;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 2};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+    master.clock().set_bpm(120);
+    master.clock().start();
+
+    bool in_chord[128] = {false};
+    uint32_t chord_changes = 0, steps = 0, steps_on_a_change = 0;
+    uint32_t now = 0, next_subtick = master.clock().subtick_interval_us();
+    for (uint32_t i = 0; i < 80000; i++) {                  // eight seconds, four bars
+        now += 100;
+        while (now >= next_subtick) { master.clock().advance(); next_subtick += master.clock().subtick_interval_us(); }
+        master.pass(now);
+
+        // This pass's chord first, because the whole question is whether the
+        // arpeggiator saw it in the pass it stepped in.
+        const BusManager& bus = master.buses();
+        bool changed = false;
+        for (uint8_t k = 0; k < bus.note_count(1); k++) {
+            const MidiEvent& e = bus.note_read(1, k);
+            if (e.type != MIDI_NOTE_ON && e.type != MIDI_NOTE_OFF) continue;
+            in_chord[e.data1 & 0x7F] = (e.type == MIDI_NOTE_ON && e.data2 != 0);
+            changed = true;
+        }
+        if (changed) chord_changes++;
+        for (uint8_t k = 0; k < bus.note_count(2); k++) {
+            const MidiEvent& e = bus.note_read(2, k);
+            if (e.type != MIDI_NOTE_ON || e.data2 == 0) continue;
+            TEST_ASSERT_TRUE_MESSAGE(in_chord[e.data1 & 0x7F], "the arpeggio is playing a chord it is not in");
+            steps++;
+            if (changed) steps_on_a_change++;
+        }
+    }
+    // The patch really did run: the harmony moved, the figure played, and the
+    // step that lands on the chord change - the one that used to be a bar
+    // late - happened.
+    TEST_ASSERT_GREATER_THAN_UINT32(2, chord_changes);
+    TEST_ASSERT_GREATER_THAN_UINT32(30, steps);
+    TEST_ASSERT_GREATER_THAN_UINT32(2, steps_on_a_change);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_gate_in_through_algorithms_to_midi_out);
     RUN_TEST(test_worked_example_arpeggio_to_two_outputs_an_octave_apart);
     RUN_TEST(test_fan_out_three_readers_one_pass);
     RUN_TEST(test_fan_in_rules);
+    RUN_TEST(test_fan_in_holds_whatever_order_the_patch_is_in);
     RUN_TEST(test_validator_rejects_wrong_domain_index_and_keeps_running_patch);
     RUN_TEST(test_self_feedback_oscillates);
-    RUN_TEST(test_chain_latency_is_exactly_n_passes);
+    RUN_TEST(test_a_chain_costs_one_pass_whatever_its_order);
     RUN_TEST(test_eight_of_the_same_and_one_of_everything);
     RUN_TEST(test_worked_example_with_a_real_clock_divider);
     RUN_TEST(test_transpose_arpeggiator_priority_chain);
+    RUN_TEST(test_the_arpeggio_plays_the_chord_the_same_pulse_chose);
     RUN_TEST(test_stopping_the_transport_releases_what_the_clock_was_playing);
     RUN_TEST(test_stopping_the_transport_leaves_a_held_note_alone);
     RUN_TEST(test_a_jack_clocked_patch_plays_with_the_transport_stopped);

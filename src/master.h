@@ -6,6 +6,7 @@
 #include "bus/bus_manager.h"
 #include "clock/master_clock.h"
 #include "node/node_pool.h"
+#include "node/schedule.h"
 #include "node/ports.h"
 #include "node/patch.h"
 #include "node/registry.h"
@@ -35,13 +36,21 @@ enum LoadError : uint8_t {
 // Owns the master clock, the buses, the reserved hardware port nodes and the
 // node pool, and runs the evaluation order every pass:
 //   0. collapse whatever subticks the clock produced since the last pass
-//   1. hardware input nodes sample and write their buses
-//   2. pool nodes process()
-//   3. if a clock tick fired, nodes that want it tick()
-//   3b. while a stop is settling, the pool releases what the clock was
+//   1. hardware input nodes sample and write their buses, which are then
+//      published along with every bus no pool node writes
+//   2. pool nodes, in the order node/schedule.h computed: each one's
+//      process(), then its tick() if a tick fired and it wants one, then the
+//      buses whose last writer it is
+//   2b. while a stop is settling, the pool releases what the clock was
 //       playing (Node::transport_stopped)
-//   4. swap buffers
-//   5. hardware output nodes read their buses and drive the pins/transports
+//   3. publish whatever those releases wrote, and end the pass
+//   4. hardware output nodes read their buses and drive the pins/transports
+//
+// A node therefore reads what the nodes upstream of it wrote **this** pass,
+// so a signal crosses the whole graph in the pass that produced it and two
+// paths out of one event - a pulse advancing an arpeggiator, and the chord
+// that same pulse chose three nodes away - arrive together. See
+// node/schedule.h for why that is the graph's order and what a loop costs.
 class MixedModeMaster {
     public:
         MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if);
@@ -167,6 +176,7 @@ class MixedModeMaster {
         MasterClock clk;
         BusManager bus;
         NodePool pool;
+        Schedule sched;
         GateInPort gate_in[GPIO_N];
         GateOutPort gate_out[GPIO_N];
         MidiInPort midi_in[N_MIDI_IN_NODES];

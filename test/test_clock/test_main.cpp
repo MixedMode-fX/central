@@ -720,7 +720,7 @@ static void test_reset_re_anchors_the_grid() {
         master.pass(now);
         const bool high = gpio.outputs[0] == GPIO_HIGH;
         if (high && !was) {
-            if (t <= reset_at) rises_before++;
+            if (t < reset_at) rises_before++;
             else { if (!rises_after) first_after = t; rises_after++; }
         }
         was = high;
@@ -732,8 +732,9 @@ static void test_reset_re_anchors_the_grid() {
     // pulses land on subticks 576, 1152, 1728 and 2304, the last of them a
     // third of a beat before the reset.
     TEST_ASSERT_EQUAL_UINT32(4, rises_before);
-    // The reset itself is a downbeat, within a pass or two of the edge, and
-    // the grid it starts is a beat apart from there.
+    // The reset itself is a downbeat: the edge reaches the node in the pass
+    // the jack was sampled in, and the grid it starts is a beat apart from
+    // there.
     TEST_ASSERT_UINT32_WITHIN(3, reset_at, first_after);
     TEST_ASSERT_EQUAL_UINT32(4, rises_after);
 }

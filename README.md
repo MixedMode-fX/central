@@ -63,17 +63,24 @@ CV is the internal control bus: `CV_FULL = 4096`, unipolar `0..4095`, bipolar
 `-2048..2047` (`src/bus/domain.h`). Twelve bits keeps eight summed writers
 inside `int16_t` and matches the DAC a jack would use.
 
-Buses are **double-buffered**: readers see the previous pass, writers write the
-next, `BusManager::swap()` publishes. Evaluation is order-independent, feedback
-is a one-pass delay, every pass is deterministic, each stage costs one pass of
-latency.
+Buses are **double-buffered**: a bus is published once a pass, and until it is,
+readers see the previous pass. The pool runs in the **graph's order** — every
+writer of a bus before any reader of it — and each bus is published as soon as
+its last writer has run (`src/node/schedule.h`). A signal therefore crosses the
+whole graph in the pass that produced it, so two paths out of one event arrive
+together however many nodes each of them crosses, and a reader still sees every
+writer of a bus. A loop has no such order, so one of its edges keeps the delay:
+feedback is a well-defined one pass rather than recursion. Every pass is
+deterministic.
 
 Every pass, `MixedModeMaster` runs:
 
-1. input port nodes sample and write their buses;
-2. pool nodes `process()`;
-3. on a clock tick, subscribers `tick()`;
-4. swap;
+1. input port nodes sample and write their buses, published together with every
+   bus the pool does not write;
+2. each pool node in turn: `process()`, then `tick()` if a clock tick fired and
+   it subscribes, then the buses whose last writer it is;
+3. while a transport stop is settling, `Node::transport_stopped()`;
+4. the end of the pass, which publishes what those releases wrote;
 5. output port nodes read their buses and drive the jacks and transports.
 
 **Nodes.** Every algorithm is a `Node` (`src/node/node.h`), described by an

@@ -2,7 +2,7 @@
 #include "hal/midi_types.h"
 
 MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
-    gpio(gpio_if), midi(midi_if), clk(), bus(), pool(),
+    gpio(gpio_if), midi(midi_if), clk(), bus(), pool(), sched(),
     gate_in(), gate_out(), midi_in(), midi_out(),
     tick_pending(false), was_running(clk.running()), stop_settle(0), tick_count(0),
     error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0),
@@ -120,7 +120,12 @@ LoadError MixedModeMaster::load(const Patch& patch){
         const MidiOutConfig& c = patch.midi_out[i];
         if (c.target_mask != 0) midi_out[i].configure(&midi, c.target_mask, c.channel, c.bus);
     }
-    for (uint8_t i = 0; i < patch.n_nodes; i++) pool.load(patch.nodes[i]);
+    sched.clear();
+    for (uint8_t i = 0; i < patch.n_nodes; i++){
+        if (pool.load(patch.nodes[i]) == nullptr) break;   // validated: the pool has room
+        sched.set(i, patch.nodes[i], *pool.descriptor(i));
+    }
+    sched.build();
     return LOAD_OK;
 }
 
@@ -136,6 +141,7 @@ void MixedModeMaster::unload(){
         for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, 0);
     }
     pool.unload_all();
+    sched.clear();
     for (uint8_t i = 0; i < GPIO_N; i++){ gate_in[i].release(); gate_out[i].release(); }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) midi_in[i].release();
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].release();
@@ -157,44 +163,58 @@ void MixedModeMaster::pass(uint32_t now_us){
     //    so nothing is lost, and no node code ever runs in the timer ISR.
     uint32_t count = 0;
     if (clk.consume(count)) tick(count);
-    // 1. hardware inputs (MIDI input arrives through deliver_midi() between passes)
+    // 1. hardware inputs (MIDI input arrives through deliver_midi() between
+    //    passes), and then everything the pool does not write: a jack's level
+    //    and that MIDI reach the graph in this pass rather than the next one,
+    //    and a bus with no writer left empties.
     for (uint8_t i = 0; i < GPIO_N; i++) gate_in[i].process(bus, now_us);
-    // 2. gate-rate nodes
-    const uint8_t n = pool.count();
-    for (uint8_t i = 0; i < n; i++) pool.node(i)->process(bus, now_us);
-    // 3. clocked nodes
-    if (tick_pending){
-        tick_pending = false;
-        for (uint8_t i = 0; i < n; i++){
-            if (pool.descriptor(i)->wants_tick) pool.node(i)->tick(bus, tick_count);
-        }
+    bus.publish(sched.before().gate, sched.before().note, sched.before().cv);
+    // 2. the pool, in the graph's order: every node runs after the nodes
+    //    whose buses it reads, and each bus is published the moment its last
+    //    writer has run (node/schedule.h). A node's own tick() follows its
+    //    process() as it always has - what changed is that both are published
+    //    before anything downstream of it runs.
+    const bool ticking = tick_pending;
+    tick_pending = false;
+    const uint8_t n = sched.count();
+    for (uint8_t pos = 0; pos < n; pos++){
+        const uint8_t i = sched.node_at(pos);
+        Node* node = pool.node(i);
+        if (node == nullptr) continue;
+        node->process(bus, now_us);
+        if (ticking && pool.descriptor(i)->wants_tick) node->tick(bus, tick_count);
+        bus.publish(sched.after(pos).gate, sched.after(pos).note, sched.after(pos).cv);
     }
-    // 3b. a transport that stopped. A node holding a note until its next
+    // 2b. a transport that stopped. A node holding a note until its next
     //     advance edge may never see one again, and this is the one moment
     //     the module knows it (Node::transport_stopped). It runs *after* the
     //     nodes, so a node that played on a stale edge this pass is released
-    //     in the same pass rather than left sounding, and before the swap, so
-    //     the note-offs go out with this pass's own writes - after the
-    //     note-ons they cancel, which is the order a transport needs them in.
+    //     in the same pass rather than left sounding, and before the pass
+    //     ends, so the note-offs go out with this pass's own writes - after
+    //     the note-ons they cancel, which is the order a transport needs them
+    //     in.
     const bool running = clk.running();
     if (!running) settle_stop();
     was_running = running;
-    // 4. publish
+    // 3. the end of the pass: what those releases wrote is merged into the
+    //    buses that have already been published, and anything written to a
+    //    bus the schedule does not know about is published too.
     bus.swap();
-    // 5. hardware outputs
+    // 4. hardware outputs
     for (uint8_t i = 0; i < GPIO_N; i++) gate_out[i].process(bus, now_us);
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, now_us);
 }
 
-// **A stop is not instantaneous in a graph that has latency.** The buses are
-// double-buffered, so a gate a clock source wrote before the stop is not read
-// until the next pass, and one that runs through a logic node or a gate
-// sequencer on the way arrives later still - and the note that last edge
-// plays is exactly the note that would be left hanging. So the stop is held
-// against the pool for as many passes as the graph can be deep, one per node
-// being the worst a chain can manage, and by the end of it whatever was in
-// flight has drained. Nothing is silenced after that: a patch advanced from a
-// jack has nothing to do with the transport and must keep playing.
+// **A stop is not instantaneous in a graph that has latency.** A bus is
+// published once a pass, so a gate a clock source wrote before the stop is
+// still read on the pass after it - and the note that last edge plays is
+// exactly the note that would be left hanging. Crossing the pool costs
+// nothing beyond that pass (node/schedule.h), but a gate going round a loop
+// costs one more every time round, so the stop is held against the pool for
+// as many passes as the pool has nodes, the longest loop a patch can build,
+// and by the end of it whatever was in flight has drained. Nothing is
+// silenced after that: a patch advanced from a jack has nothing to do with
+// the transport and must keep playing.
 void MixedModeMaster::settle_stop(){
     if (was_running) stop_settle = (uint8_t)(pool.count() + 1u);
     if (stop_settle == 0) return;
@@ -221,6 +241,10 @@ LoadError MixedModeMaster::replace_node(uint8_t index, const NodeConfig& config)
     Node* fresh = pool.replace(index, config);
     if (fresh == nullptr) return error = LOAD_NODE_INVALID;
     fresh->setup();
+    // A connection edit can move the whole graph's order, not just this
+    // node's place in it.
+    sched.set(index, config, *pool.descriptor(index));
+    sched.build();
     return error = LOAD_OK;
 }
 

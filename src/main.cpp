@@ -116,8 +116,9 @@ void loop(){
     //    moves the set point: applying them the other way round would make
     //    every knob move look like a modulation the matrix had not made and
     //    cost a re-anchor every pass. The matrix reads the CV buses' front
-    //    buffer - what the modulators published on the previous pass - which
-    //    is the same one-pass delay every reader in the module sees.
+    //    buffer - what the modulators published on the previous pass - so it
+    //    reads a value that is finished rather than one a pass is still
+    //    accumulating.
     cc_map.apply(now);
     mod_matrix.apply(master.buses(), now);
     master.pass(now);

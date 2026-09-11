@@ -48,10 +48,12 @@
 // **The root names a pitch, and the key names a pitch class.** `root` is an
 // absolute note, because only an absolute note can say which octave the
 // melody starts in - the same reason the note sequencers keep a root of their
-// own. What follows the module's key is the *pitch class*: the tonic actually
-// played is the key's root taken inside the octave `root` names, so a patch
-// set to C3 in A minor plays from A3 and moving the key moves it. Naming a
-// scale on this node opts out of both halves, as everywhere else.
+// own. What follows the module's key is the *pitch class*: with no register
+// set the tonic played is the key's root inside the octave `root` names, so a
+// patch set to C3 in A minor plays from A3; with one, `root` names the
+// register instead, an octave below the default being an octave below the key
+// (midi/global_scale.h). The `key` parameter is what opts out of all of it;
+// naming a scale changes only which notes are played.
 //
 // **How the level is read** is the modulation matrix's rule, not a new one:
 // bipolar adds half of full scale, so a signal centred on zero uses the whole
@@ -73,6 +75,7 @@
 // params[6] gate       note length in ms; 0 holds until the pitch changes
 // params[7] velocity   used when the velocity inlet is unpatched
 // params[8] channel
+// params[9] key        follow the module's root, or use this node's own
 //
 // The ledger owns the release, so every one of those nine can move under a
 // sounding note - the key changing under it included - and the note-off still
@@ -102,6 +105,11 @@ class CvToNote : public Node{
         };
 
         static constexpr uint8_t MAX_RANGE = 8;
+        // What `root` holds when nothing has moved it, and so the pitch a
+        // followed key's register is measured from.
+        static constexpr uint8_t DEFAULT_ROOT = 48;
+        static constexpr uint16_t P_KEY = 9;
+        static constexpr uint8_t N_PARAMS = 10;
 
         explicit CvToNote(const NodeConfig& config);
 
@@ -139,6 +147,7 @@ class CvToNote : public Node{
         uint8_t gate_ms;
         uint8_t velocity;
         uint8_t channel;
+        uint8_t key;
         EdgeIn trigger;
         uint8_t last_pitch;      // what tracking last struck; 0xFF for nothing
         uint32_t due_us;         // when a timed note is released

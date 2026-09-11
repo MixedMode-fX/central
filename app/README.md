@@ -23,7 +23,7 @@ live at <https://mixedmode-fx.github.io/central/>.
 
 ## The shape of it
 
-Four tabs — **patch**, **MIDI**, **library**, **schema** — and **play** as a
+Five tabs — **patch**, **key**, **MIDI**, **library**, **schema** — and **play** as a
 button at the top beside *connect a module*, because those two answer the same
 question: which module am I listening to, the one in the page or the one on the
 cable.
@@ -59,6 +59,11 @@ audible because it is in the patch. Kits are synthesised, not sampled, so the
 whole app stays one downloadable file. The gate listener blips per rising edge
 on a chosen gate bus or jack, which is the only way a clock division or a logic
 gate is audible at all.
+
+**key** — one scale, one root and one register for the whole patch. Every node
+follows it unless its own `scale` names other notes or its own `key` names
+another root; a following node plays in the key's register, moved by the octave
+its own root parameter names.
 
 **MIDI** — the external controller, the controller bindings, routing, the clock
 and Program Change recall. Every field of every binding is editable, so a
@@ -191,6 +196,7 @@ app/
     canvas.js         the patch drawn: blocks, arrows, dragging, the inspector
     picker.js         the add list, shelved by category
     views.js          node and jack cards: parameters and sequencer grids
+    key.js            the key: one scale, one root, one register
     midi.js           routing, bindings, the clock, the external controller
     perform.js        the play surface, and everything that updates live
     scope.js          the scope and the piano roll

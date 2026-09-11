@@ -147,6 +147,7 @@ export function packSeq(name, seq, params) {
     u8(3, mask & 0xff); u8(4, mask >> 8);
     u8(5, seq.root ?? 0); u8(6, seq.velScale ?? 0); u8(7, seq.velOffset ?? 0);
     u8(8, seq.channel ?? 0); u8(9, seq.accent ?? 0); u8(10, seq.stall ?? 0);
+    u8(14, seq.key ?? 0);
     const steps = seq.steps ?? [];
     if (steps.length > P.MAX_SEQUENCE_LEN) throw new Error(`${name}: at most ${P.MAX_SEQUENCE_LEN} steps`);
     if (seq.length === undefined) u8(0, steps.length);

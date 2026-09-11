@@ -16,6 +16,7 @@ static const ParamDescriptor PARAMS[Mirror::N_PARAMS] = {
     {"amount", 1, 100, Mirror::DEFAULT_AMOUNT, PARAM_PERCENT, nullptr},
     {"snap",   0, 1,   0, PARAM_BOOL,   nullptr},
     {"seed",   0, 255, 0, PARAM_NUMBER, nullptr},
+    {"key",    0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Mirror::N_PARAMS, PARAMS}};
 
@@ -45,6 +46,7 @@ Mirror::Mirror(const NodeConfig& config) :
                                    : DEFAULT_AMOUNT),
     snap(config.params[P_SNAP] != 0),
     seed(config.params[P_SEED]),
+    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     // Seeded from entropy when `seed` is zero and from the byte otherwise, so
     // a patch can be exactly reproducible or never the same twice.
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
@@ -76,6 +78,9 @@ bool Mirror::set_param(uint16_t index, uint8_t value){
             seed = value;
             rng.reseed(value ? (uint32_t)(value * 2654435761u) : entropy::seed());
             return true;
+        case P_KEY:
+            if (value >= global_scale::KEY_MODES) return false;
+            key = value; return true;
         default: return false;
     }
 }
@@ -88,6 +93,7 @@ uint8_t Mirror::get_param(uint16_t index) const {
         case P_AMOUNT: return amount;
         case P_SNAP:   return snap ? 1u : 0u;
         case P_SEED:   return seed;
+        case P_KEY:    return key;
         default: return 0;
     }
 }
@@ -97,22 +103,22 @@ uint16_t Mirror::active_mask() const {
 }
 
 // A patched root inlet wins outright - `root` is what it last wrote. With no
-// cable, following the module's scale means following its root too.
+// cable, the key's root unless this node names one of its own.
 uint8_t Mirror::active_root() const {
     if (root_in != NO_BUS) return root;
-    return global_scale::resolve_root(scale, root);
+    return global_scale::resolve_root(key, root);
 }
 
 uint8_t Mirror::reflect(uint8_t note) const {
-    const uint8_t key = active_root();
+    const uint8_t tonic = active_root();
     // Negative harmony reflects about the axis halfway between the tonic and
     // the dominant, which relative to the tonic is `7 - x`; inversion
     // reflects about the tonic itself. Both are done on the pitch class,
     // because reflecting the pitch lands nowhere near the keyboard.
-    const int16_t offset = (int16_t)((int16_t)note - (int16_t)key);
+    const int16_t offset = (int16_t)((int16_t)note - (int16_t)tonic);
     const int16_t axis = (mode == MIRROR_NEGATIVE) ? 7 : 0;
     int16_t pc = (int16_t)(((axis - offset) % 12 + 12) % 12);
-    int16_t pitch = (int16_t)key % 12 + pc;
+    int16_t pitch = (int16_t)tonic % 12 + pc;
     // The octave nearest the note that caused it, so a reflection sits among
     // the notes that passed through rather than under them.
     while (pitch + 12 <= (int16_t)note + 6) pitch += 12;

@@ -89,7 +89,7 @@ export const EXAMPLES = {
     },
   },
   'In key': {
-    about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad (0, 2 and 4 steps of the scale), the arpeggiator holds it, and a sixteenth-note metronome plays it. Press one key and let go: it keeps running. Change the key under \u201cMIDI\u201d and the whole patch moves.',
+    about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad (0, 2 and 4 steps of the scale), the arpeggiator holds it, and a sixteenth-note metronome plays it. Press one key and let go: it keeps running. Change the key under \u201ckey\u201d and the whole patch moves.',
     patch: {
       globals: { scale: 'minor', root: 9 },
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],

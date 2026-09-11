@@ -49,6 +49,7 @@ import { forgetNode } from './layout.js';
 import {
   canvasPanel, canvasInspector, geometry, addBar, busCapacity, ENDPOINTS,
 } from './canvas.js';
+import { keyPanel } from './key.js';
 import { routingPanel, globalsPanel, mappingPanel, modulationPanel,
          controllerPanel } from './midi.js';
 import { toPatchJsonText, fromPatchJson } from './patchjson.js';
@@ -71,6 +72,10 @@ import { schemaTab } from './schema.js';
 // in one place.
 const TABS = [
   { key: 'patch', label: 'patch' },
+  // The key is one scale, one root and one register for the whole patch, and
+  // it is what every node is measured against - not a MIDI setting, and no
+  // longer filed under one. See key.js.
+  { key: 'key', label: 'key' },
   { key: 'midi', label: 'MIDI' },
   { key: 'library', label: 'library' },
   // Not a fourth thing to edit either: the schema tab is where the module says
@@ -1027,6 +1032,7 @@ class App {
         el('ul', {}, notes.map((p) => el('li', {}, `${p.where}: ${p.message}`)))) : null,
       this.tab === 'patch' ? this.patchTab() : null,
       this.tab === 'play' ? playTab(this) : null,
+      this.tab === 'key' ? this.keyTab() : null,
       this.tab === 'midi' ? this.midiTab() : null,
       this.tab === 'library' ? libraryTab(this) : null,
       this.tab === 'schema' ? schemaTab(this) : null);
@@ -1069,6 +1075,11 @@ class App {
       this.patchView === 'blocks' && this.canvas.geom
         ? el('span', { class: 'hint' }, busCapacity(this, this.canvas.geom))
         : null);
+  }
+
+  keyTab() {
+    if (!this.device?.capabilities) return el('p', { class: 'hint' }, 'no module');
+    return el('div', {}, keyPanel(this));
   }
 
   midiTab() {

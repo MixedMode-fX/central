@@ -43,6 +43,7 @@ static const ParamDescriptor PARAMS[Chord::N_PARAMS] = {
     {"velocity",   1, 127,               Chord::DEFAULT_VELOCITY, PARAM_NUMBER, nullptr},
     {"quality",    0, Chord::QUALITY_COUNT - 1, Chord::QUALITY_CUSTOM, PARAM_ENUM, QUALITY_NAMES},
     {"retrigger",  0, 1,                 0, PARAM_BOOL, nullptr},
+    {"key",        0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Chord::N_PARAMS, PARAMS}};
 
@@ -108,6 +109,12 @@ bool Chord::set_param(uint16_t index, uint8_t value){
         retrigger = value != 0;
         return true;
     }
+    if (index == P_KEY){
+        if (value >= global_scale::KEY_MODES) return false;
+        key = value;
+        dirty = true;
+        return true;
+    }
     return false;
 }
 
@@ -120,6 +127,7 @@ uint8_t Chord::get_param(uint16_t index) const {
     if (index == P_VELOCITY) return velocity;
     if (index == P_QUALITY) return quality;
     if (index == P_RETRIGGER) return retrigger ? 1u : 0u;
+    if (index == P_KEY) return key;
     return 0;
 }
 
@@ -131,6 +139,7 @@ Chord::Chord(const NodeConfig& config) :
     scale(config.params[P_SCALE]),
     root((uint8_t)(config.params[P_ROOT] % 12u)),
     octave(config.params[P_OCTAVE] ? config.params[P_OCTAVE] : DEFAULT_OCTAVE),
+    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     quality(config.params[P_QUALITY] < QUALITY_COUNT ? config.params[P_QUALITY] : (uint8_t)QUALITY_CUSTOM),
     retrigger(config.params[P_RETRIGGER] != 0),
@@ -150,7 +159,7 @@ uint8_t Chord::active_root() const {
     // the chords a sequencer walks through stay in one key rather than
     // dragging the key along with them.
     if (root_in != NO_BUS && in != NO_BUS) return root;
-    return global_scale::resolve_root(scale, root);
+    return global_scale::resolve_root(key, root);
 }
 
 // A named quality is read from the table; `custom` plays what was typed. The
@@ -168,14 +177,14 @@ const int8_t* Chord::active_intervals(uint8_t& count) const {
 
 // Every voice of one chord, recorded against `source` so that one release
 // takes all of it down at the pitches it was actually sent at.
-void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t key,
+void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t tonic,
                        uint16_t mask, uint8_t velocity_out, uint8_t channel){
-    const int16_t degree = semitone_to_scale_degree((int16_t)((int16_t)base - (int16_t)key), mask);
+    const int16_t degree = semitone_to_scale_degree((int16_t)((int16_t)base - (int16_t)tonic), mask);
     uint8_t count = 0;
     const int8_t* steps = active_intervals(count);
     sounding.emit(bus, out, source, base, velocity_out, channel);
     for (uint8_t v = 0; v < count; v++){
-        const int16_t note = (int16_t)key
+        const int16_t note = (int16_t)tonic
                            + scale_degree_to_semitone((int16_t)(degree + steps[v]), mask);
         if (note < 0 || note > 127) continue;
         if (note == base) continue;                                       // no unisons
@@ -186,24 +195,25 @@ void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t ke
 // A chord with nothing patched to `note in`: it plays itself, and keeps
 // playing. The pass costs one comparison once the chord is up - the work only
 // happens when what it should be sounding has actually moved.
-void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t key){
+void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t tonic){
     // The root inlet places it if anything does; otherwise it is the tonic of
-    // the key, in the configured octave.
-    // Its own octave, unless the key names a register - in which case a
-    // self-playing chord sits where the module says home is, and `octave`
-    // is what it falls back to. The root inlet still outranks both.
-    const uint8_t own = (uint8_t)(((int16_t)key + (int16_t)octave * 12) > 127
-                                  ? 127 : ((int16_t)key + (int16_t)octave * 12));
-    int16_t wanted = (free_note != NO_NOTE) ? (int16_t)free_note
-                                            : (int16_t)global_scale::resolve_anchor_id(scale, own);
+    // the key, in the octave this node names - and when the key names a
+    // register of its own, `octave` says how far from that register the chord
+    // sits, so one key moves every voice and each still keeps its place
+    // (midi/global_scale.h). The root inlet outranks both.
+    const uint8_t own = (uint8_t)(((int16_t)tonic + (int16_t)octave * 12) > 127
+                                  ? 127 : ((int16_t)tonic + (int16_t)octave * 12));
+    int16_t wanted = (free_note != NO_NOTE)
+        ? (int16_t)free_note
+        : (int16_t)global_scale::resolve_anchor(key, own, (uint8_t)(DEFAULT_OCTAVE * 12));
     while (wanted > 127) wanted -= 12;               // dropped an octave, never wrapped
-    const uint8_t base = scale_quantise((uint8_t)wanted, key, mask);
+    const uint8_t base = scale_quantise((uint8_t)wanted, tonic, mask);
 
     if (!dirty && base == voiced && mask == voiced_mask) return;
     // Re-voicing is a release and a new chord, both from the ledger, so
     // editing one while it drones cannot strand a note.
     sounding.release_all(bus, out);
-    emit_chord(bus, base, base, key, mask, velocity, free_channel);
+    emit_chord(bus, base, base, tonic, mask, velocity, free_channel);
     voiced = base;
     voiced_mask = mask;
     dirty = false;
@@ -235,9 +245,9 @@ void Chord::process(BusManager& bus, uint32_t){
     }
 
     const uint16_t mask = active_mask();
-    const uint8_t key = active_root();
+    const uint8_t tonic = active_root();
     if (self_playing){
-        play_free(bus, mask, key);
+        play_free(bus, mask, tonic);
         return;
     }
 
@@ -255,7 +265,7 @@ void Chord::process(BusManager& bus, uint32_t){
         // The root voice, in key. In the chromatic scale this is the note
         // itself and every interval below is a semitone, which is what this
         // algorithm did before it had a scale.
-        emit_chord(bus, e.data1, scale_quantise(e.data1, key, mask), key, mask, e.data2, e.channel);
+        emit_chord(bus, e.data1, scale_quantise(e.data1, tonic, mask), tonic, mask, e.data2, e.channel);
     }
 }
 

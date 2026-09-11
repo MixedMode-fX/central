@@ -33,8 +33,11 @@
 // Inlet 0 (note): the notes to quantise.
 // Inlet 1 (note, optional): the root. Note-ons set it; nothing else is read.
 // params[0] scale id (see ScaleId; 0 follows the module's scale)
-// params[1] root pitch class, when this node names its own scale and no root
+// params[1] root pitch class, when this node names its own key and no root
 //           inlet is patched
+// params[2] key: follow the module's root, or use this node's own. Separate
+//           from the scale, so a quantiser can snap to a mode of its own
+//           without leaving the key (midi/global_scale.h).
 class NoteQuantise : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -50,6 +53,7 @@ class NoteQuantise : public Node{
         // sounding note.
         void set_scale(uint8_t id){ scale = id; }
         void set_root(uint8_t pitch_class){ root = (uint8_t)(pitch_class % 12u); }
+        void set_key(uint8_t follow){ key = follow; }
         uint8_t root_note() const { return root; }
         // The scale and root actually played, after the module's own have
         // been resolved into them.
@@ -62,6 +66,7 @@ class NoteQuantise : public Node{
         uint8_t out;
         uint8_t scale;
         uint8_t root;
+        uint8_t key;
         SoundingNotes sounding;
 };
 

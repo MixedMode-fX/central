@@ -27,6 +27,7 @@ static const ParamDescriptor PARAMS[Tonnetz::N_PARAMS] = {
     {"velocity",  1, 127, Tonnetz::DEFAULT_VELOCITY, PARAM_NUMBER,  nullptr},
     {"channel",   1, 16,  1, PARAM_CHANNEL, nullptr},
     {"seed",      0, 255, 0, PARAM_NUMBER,  nullptr},
+    {"key",       0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Tonnetz::N_PARAMS, PARAMS}};
 
@@ -57,6 +58,7 @@ Tonnetz::Tonnetz(const NodeConfig& config) :
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
     seed(config.params[P_SEED]),
+    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     current_root(0), current_minor(false), step(0), started(false), at_first(true),
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
@@ -92,6 +94,9 @@ bool Tonnetz::set_param(uint16_t index, uint8_t value){
             // seed that changed the chord the moment it was typed would make
             // the parameter unusable while the patch is playing.
             seed = value; return true;
+        case P_KEY:
+            if (value >= global_scale::KEY_MODES) return false;
+            key = value; return true;
         default: return false;
     }
 }
@@ -107,6 +112,7 @@ uint8_t Tonnetz::get_param(uint16_t index) const {
         case P_VELOCITY:  return velocity;
         case P_CHANNEL:   return channel;
         case P_SEED:      return seed;
+        case P_KEY:       return key;
         default: return 0;
     }
 }
@@ -141,18 +147,18 @@ uint8_t Tonnetz::scheduled() const {
 }
 
 uint8_t Tonnetz::active_root() const {
-    return global_scale::resolve_tonic(scale, root);
+    return global_scale::resolve_tonic(key, root, DEFAULT_ROOT);
 }
 
 bool Tonnetz::in_key(uint8_t root_pc, bool is_minor) const {
     const uint16_t mask = global_scale::resolve_id(scale);
-    const uint8_t key = (uint8_t)(active_root() % 12u);
+    const uint8_t tonic = (uint8_t)(active_root() % 12u);
     const uint8_t third = is_minor ? 3u : 4u;
     const uint8_t notes[3] = {root_pc,
                               (uint8_t)((root_pc + third) % 12u),
                               (uint8_t)((root_pc + 7u) % 12u)};
     for (uint8_t i = 0; i < 3; i++){
-        const uint8_t degree = (uint8_t)(((int16_t)notes[i] - (int16_t)key + 12) % 12);
+        const uint8_t degree = (uint8_t)(((int16_t)notes[i] - (int16_t)tonic + 12) % 12);
         if (!(mask & (uint16_t)(1u << degree))) return false;
     }
     return true;

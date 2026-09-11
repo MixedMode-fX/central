@@ -60,15 +60,16 @@
 // params[0] mode     negative / inversion
 // params[1] scale    0 follows the module's key
 // params[2] root     the pitch class the axis is built on, when this node
-//                    names its own scale and no root inlet is patched
+//                    names its own key and no root inlet is patched
 // params[3] amount   percent of note-ons reflected; the rest pass through
 // params[4] snap     put the reflection back in the scale
 // params[5] seed     0 draws from the entropy pool, anything else is exact
+// params[6] key      follow the module's root, or use this node's own
 class Mirror : public Node{
     public:
         static constexpr uint16_t P_MODE = 0, P_SCALE = 1, P_ROOT = 2, P_AMOUNT = 3,
-                                  P_SNAP = 4, P_SEED = 5;
-        static constexpr uint8_t N_PARAMS = 6;
+                                  P_SNAP = 4, P_SEED = 5, P_KEY = 6;
+        static constexpr uint8_t N_PARAMS = 7;
         static constexpr uint8_t DEFAULT_AMOUNT = 100;
 
         enum Mode : uint8_t {
@@ -103,6 +104,7 @@ class Mirror : public Node{
         uint8_t amount;
         bool snap;
         uint8_t seed;
+        uint8_t key;                  // global_scale::KeyFollow
         Xorshift32 rng;
         SoundingNotes sounding;
 };

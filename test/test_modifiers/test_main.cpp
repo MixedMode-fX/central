@@ -551,24 +551,32 @@ static void test_the_key_can_name_a_register() {
 }
 
 // The two resolvers, which is where the register actually reaches a node.
-// A node that names its own scale keeps its own root, which is the rule
-// resolve_root already set; one that follows the module takes the register
-// when there is one.
+// Which notes and which of them is home are two questions now: a node that
+// names a scale of its own still plays the key's root, and only its `key`
+// parameter takes it out of the key.
 static void test_the_register_resolves_for_both_kinds_of_root() {
     // No register: a tonic takes the key's pitch class in its own octave, and
     // a pattern's anchor is left exactly where it was.
     global_scale::set(SCALE_NATURAL_MINOR, 9);
-    TEST_ASSERT_EQUAL(57, global_scale::resolve_tonic(SCALE_GLOBAL, 48));   // A3, from C3
-    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(0, 48));             // untouched
+    TEST_ASSERT_EQUAL(57, global_scale::resolve_tonic(global_scale::KEY_FOLLOW, 48, 48));
+    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(global_scale::KEY_FOLLOW, 48, 48));
 
     // With one, both take it.
     global_scale::set(SCALE_NATURAL_MINOR, 9, 2);
-    TEST_ASSERT_EQUAL(33, global_scale::resolve_tonic(SCALE_GLOBAL, 48));
-    TEST_ASSERT_EQUAL(33, global_scale::resolve_anchor(0, 48));
+    TEST_ASSERT_EQUAL(33, global_scale::resolve_tonic(global_scale::KEY_FOLLOW, 48, 48));
+    TEST_ASSERT_EQUAL(33, global_scale::resolve_anchor(global_scale::KEY_FOLLOW, 48, 48));
 
-    // A node that named its own scale is not moved by either.
-    TEST_ASSERT_EQUAL(48, global_scale::resolve_tonic(SCALE_BLUES, 48));
-    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(scale_mask(SCALE_BLUES), 48));
+    // A node moved off the register its root parameter holds by default keeps
+    // that distance from the key rather than being flattened onto it: one key
+    // for the patch, one octave per node.
+    TEST_ASSERT_EQUAL(21, global_scale::resolve_tonic(global_scale::KEY_FOLLOW, 36, 48));
+    TEST_ASSERT_EQUAL(45, global_scale::resolve_anchor(global_scale::KEY_FOLLOW, 60, 48));
+
+    // `own` is the opt-out, and the only one. Naming a scale is not one.
+    TEST_ASSERT_EQUAL(48, global_scale::resolve_tonic(global_scale::KEY_OWN, 48, 48));
+    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(global_scale::KEY_OWN, 48, 48));
+    TEST_ASSERT_EQUAL(7, global_scale::resolve_root(global_scale::KEY_OWN, 7));
+    TEST_ASSERT_EQUAL(9, global_scale::resolve_root(global_scale::KEY_FOLLOW, 7));
 }
 
 static void test_note_quantise_follows_the_module_scale_until_it_names_one() {
@@ -584,10 +592,24 @@ static void test_note_quantise_follows_the_module_scale_until_it_names_one() {
     TEST_ASSERT_EQUAL(61, out[0].data1);
     TEST_ASSERT_EQUAL(2, node.active_root());
 
-    // Naming a scale opts out of the key, root and all.
+    // Naming a scale says which notes, and nothing about which of them is
+    // home: the key's root still is. D pentatonic major has no C# to reach,
+    // so C lands on the B below it.
     bus.note_write(0, off(60));
     run_pass(bus, node, 1);
-    node.set_scale(SCALE_CHROMATIC);
+    node.set_scale(SCALE_PENTATONIC_MAJOR);
+    TEST_ASSERT_EQUAL(2, node.active_root());
+    bus.note_write(0, on(60));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(59, out[0].data1);               // B, the nearest tone it has
+
+    // `key` is what leaves the key, and it leaves only the root behind: the
+    // node's own root parameter, C, is what the pentatonic is built on now.
+    bus.note_write(0, off(62));
+    run_pass(bus, node, 1);
+    node.set_key(global_scale::KEY_OWN);
+    TEST_ASSERT_EQUAL(0, node.active_root());
     bus.note_write(0, on(60));
     out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(1, out.size());
@@ -836,10 +858,21 @@ static void test_a_self_playing_chord_follows_the_key_register() {
     TEST_ASSERT_EQUAL(6, out.size());
     TEST_ASSERT_EQUAL(67, out[3].data1);
 
-    // And a chord that named its own scale is not moved at all.
+    // An octave below the one it sits in by default is an octave below the
+    // key, not a chord flattened onto it.
+    NodeConfig lower = free_chord(false);
+    lower.params[Chord::P_OCTAVE] = Chord::DEFAULT_OCTAVE - 1;
+    Chord below(lower);
+    BusManager third;
+    out = run_pass(third, below, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(24, out[0].data1);               // C1, an octave under C2
+
+    // And a chord told to keep its own key is not moved at all.
     NodeConfig own = free_chord(false);
     own.params[Chord::P_SCALE] = SCALE_MAJOR;
     own.params[Chord::P_ROOT] = 0;
+    own.params[Chord::P_KEY] = global_scale::KEY_OWN;
     Chord fixed(own);
     BusManager other;
     out = run_pass(other, fixed, 1);

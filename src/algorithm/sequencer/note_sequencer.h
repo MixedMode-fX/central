@@ -21,7 +21,8 @@
 // (midi/global_scale.h), so one key change moves every sequencer in the
 // patch.
 //
-// **The root follows the key only when the key names a register.** It is an
+// **The root follows the key only when the key names a register**, and only
+// while `key` says to follow it. It is an
 // absolute pitch here, naming the octave the pattern starts in, and a pitch
 // class cannot say that - which is why a sequencer used to be the exception
 // to the key's root half. A key with a register (midi/global_scale.h) can
@@ -81,7 +82,9 @@
 //  [11] rest key    the note that writes a rest when recording (0 -> note 0)
 //  [12] tie key     the note that writes a tie when recording (0 -> note 1)
 //  [13] rec velocity 0 keeps the velocity played, 1..127 forces one
-//  [14..15]         reserved, zero
+//  [14] key         follow the module's root, or use this pattern's own
+//                   anchor (global_scale::KeyFollow)
+//  [15]             reserved, zero
 //
 // Steps, from params[STEP_BASE], stride(voices) bytes each:
 //   per voice: degree (int8), velocity (1..127; 0 -> the voice is silent)
@@ -122,7 +125,8 @@ class NoteSequencerBase : public Node{
         static constexpr uint16_t STEP_BASE = 16;
         static constexpr uint8_t P_LENGTH = 0, P_DIRECTION = 1, P_GATE = 2, P_SCALE_LO = 3, P_SCALE_HI = 4,
                                  P_ROOT = 5, P_VEL_SCALE = 6, P_VEL_OFFSET = 7, P_CHANNEL = 8, P_ACCENT = 9,
-                                 P_STALL = 10, P_REST_KEY = 11, P_TIE_KEY = 12, P_REC_VELOCITY = 13;
+                                 P_STALL = 10, P_REST_KEY = 11, P_TIE_KEY = 12, P_REC_VELOCITY = 13,
+                                 P_KEY = 14;
         static constexpr uint8_t LENGTH_MASK = 0x1F, FLAG_REST = 0x20, FLAG_TIE = 0x40, FLAG_ACCENT = 0x80;
         static constexpr uint8_t NO_PITCH = 0xFF;
         static constexpr uint8_t DEFAULT_LENGTH = 8, DEFAULT_ROOT = 60, DEFAULT_ACCENT = 30, DEFAULT_STALL = 4;
@@ -238,6 +242,7 @@ class NoteSequencerBase : public Node{
         uint8_t rest_key;
         uint8_t tie_key;
         uint8_t rec_velocity;
+        uint8_t key;                  // global_scale::KeyFollow
         uint8_t rec_cursor;
         uint32_t snap_count;
         uint32_t last_edge_us;

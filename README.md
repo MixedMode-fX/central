@@ -263,16 +263,21 @@ One scale and one root for the module, in the patch's `GlobalSettings`
 (`src/midi/global_scale.h`). A scale is a 12-bit mask, one bit per semitone
 (`src/midi/scale.h`).
 
-It is the **default**, and an algorithm overrides it by naming a scale —
-`ScaleId` 0 is `SCALE_GLOBAL`, not a mode, so a parameter left alone follows
-the key. Following the scale means following its root. **A patched root inlet
+It is the **default**, and an algorithm overrides it with two parameters that
+answer two questions. `scale` says **which notes**: `ScaleId` 0 is
+`SCALE_GLOBAL`, not a mode, so a parameter left alone follows the key's scale.
+`key` says **whose root** they are measured from: `follow` (0) takes the key's,
+`own` takes the node's own `root` parameter. A node naming a mode of its own
+therefore stays in the key unless it also says `own`. **A patched root inlet
 outranks both.**
 
-`root_octave` is the third part: zero means the key names no register and each
-node keeps its own root; set it and every node following the key plays from
-that absolute note. Set the key from the console (`key <scale> <root> <oct>`),
-over `SYSEX_SET_GLOBALS`, or in the app. The module is chromatic until a key is
-set.
+`root_octave` is the third part of the key: zero means the key names no
+register and each node keeps the octave it stored; set it and every following
+node plays from that absolute note, moved by the octave its own root parameter
+names — so one setting moves the patch and a bass an octave below its default
+stays an octave below the key. Set the key from the console
+(`key <scale> <root> <oct>`), over `SYSEX_SET_GLOBALS`, or on the app's key
+page. The module is chromatic until a key is set.
 
 `Chord`'s intervals are **steps of the scale**, so `0 2 4` is a diatonic triad
 on every degree. `quality` names one of nine such stacks without overwriting

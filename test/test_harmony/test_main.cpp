@@ -464,7 +464,7 @@ static void test_a_triad_on_every_degree_comes_out_the_right_quality() {
 static void test_loop_keeps_the_first_phrase_and_repeats_it() {
     BusManager bus;
     NodeConfig c = harmony_config(4, 1, 0, 9);
-    c.params[4] = 1;                       // loop
+    c.params[Harmony::P_LOOP] = 1;
     Harmony node(c);
     uint32_t now = 0;
 
@@ -480,7 +480,7 @@ static void test_loop_keeps_the_first_phrase_and_repeats_it() {
     }
 
     // Turning it off walks again, from wherever the loop left it.
-    TEST_ASSERT_TRUE(node.set_param(4, 0));
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_LOOP, 0));
     uint8_t different = 0;
     for (uint8_t round = 0; round < 20; round++){
         for (uint8_t i = 0; i < 4; i++){
@@ -500,7 +500,7 @@ static void test_switching_loop_on_waits_for_the_top_of_a_phrase() {
     advance(node, bus, now);               // phrase position is now 1
     advance(node, bus, now);               // ... 2
     TEST_ASSERT_EQUAL_UINT8(2, node.phrase_position());
-    TEST_ASSERT_TRUE(node.set_param(4, 1));
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_LOOP, 1));
 
     // Nothing is recorded until the phrase comes round, so what is captured
     // is a phrase and not the tail of one.

@@ -428,8 +428,6 @@ of its chords with this probability and *keeps* the new one. At 0 the loop is
 exact. A few percent is a piece that is recognisably itself and never quite
 the same twice, which is most of what this node is for.
 
-The byte `style` used to occupy is kept, legal and read by nothing: a patch
-that once chose a style should play differently, not fail to load.
 
 **Degrees the key does not have are not reachable.** The walk runs over the
 first seven degrees of the scale, or over all of them when the scale has fewer,

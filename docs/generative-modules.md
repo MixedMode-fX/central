@@ -161,7 +161,7 @@ out 1  cv    degree     optional; the degree over full scale, for the matrix
 
 | param | what it does |
 |---|---|
-| `style` | `pop`, `modal`, `jazz`, `walk`, `pedal` &mdash; **superseded.** The five tables were replaced by a computed walk; see [harmony.md](harmony.md) and `src/midi/root_motion.h`. The byte is kept legal so an old preset still loads |
+| `style` | `pop`, `modal`, `jazz`, `walk`, `pedal` &mdash; **removed.** The five tables were replaced by a walk computed from the scale, and the parameter went with them; see [harmony.md](harmony.md) and `src/midi/root_motion.h` |
 | `phrase` | chords per phrase, 2..16 |
 | `cadence` | how strongly the end of a phrase is pulled to the tonic |
 | `motion` | scales the off-diagonal weights: at 0 it sits on I, at 100 the table is used as written |

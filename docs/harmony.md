@@ -366,8 +366,9 @@ chord**, because duplicating `Chord`'s diatonic voicing would be two places
 to fix a bug in. It has the advance and reset inlets, the phrase counter, the
 cadence probability, a `gravity` control and a degree outlet on the CV bus.
 
-**It shipped with five 7 × 7 tables of weights, one per named style, and they
-have since been replaced by the computation §2 and §3.1 argued for.** The
+**It shipped with five 7 × 7 tables of weights, one per named style. They and
+the parameter that selected them are gone, replaced by the computation §2 and
+§3.1 argued for.** The
 reason is the one this document gave and then failed to insist on: a table is
 written for seven degrees, so a pentatonic key used five columns tuned for
 diatonic function and a key nobody anticipated got numbers that meant nothing.

@@ -290,7 +290,7 @@ export const EXAMPLES = {
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1 bar' } },
         { algo: 'Metronome', out: [1], seq: { division: '1/8' } },
-        { algo: 'Harmony', in: [0], out: [0, 0], params: [0, 4, 75, 0, 0, 45, 0, 80, 1, 0, 80, 25, 40, 30, 6] },
+        { algo: 'Harmony', in: [0], out: [0, 0], params: [4, 75, 0, 0, 45, 0, 80, 1, 0, 80, 25, 40, 30, 6] },
         { algo: 'Chord', in: [null, 0], out: [1], params: [3, 0, 2, 4] },
         { algo: 'Turing', in: [1, 6], out: [2, 1], params: [8, 8, 5, 1, 21, 0, 1] },
         { algo: 'CvToNote', in: [1, 1, null], out: [2], params: [1, 57, 2, 0, 1, 2, 0, 90, 2] },

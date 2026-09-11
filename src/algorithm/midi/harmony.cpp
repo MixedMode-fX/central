@@ -8,12 +8,6 @@ static const Domain IN[2] = {Domain::Gate, Domain::Gate};
 static const Domain OUT[2] = {Domain::Note, Domain::CV};
 
 static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
-    // Was `style`, when the walk came out of a table (midi/root_motion.h says
-    // why it no longer does). Kept, stored and read by nothing: the byte is
-    // preset format, so it has to stay *legal* - pinning it to zero would
-    // make every patch that ever chose a style fail to load rather than play
-    // differently, which is the worse of the two.
-    {"legacy",   0, 5,                 0, PARAM_NUMBER,  nullptr},
     {"phrase",   2, Harmony::MAX_PHRASE, 4, PARAM_NUMBER,  nullptr},
     {"cadence",  0, 100,              75, PARAM_PERCENT, nullptr},
     {"gravity",  0, 100,               0, PARAM_PERCENT, nullptr},
@@ -44,20 +38,23 @@ const AlgorithmDescriptor Harmony::descriptor = {
 
 
 Harmony::Harmony(const NodeConfig& config) :
-    legacy(config.params[0] > 5 ? (uint8_t)0 : config.params[0]),
     advance_in(config.in_bus[0]),
     reset_in(config.in_bus[1]),
     note_out(config.out_bus[0]),
     cv_out(config.out_bus[1]),
-    phrase(config.params[1] ? (config.params[1] > MAX_PHRASE ? MAX_PHRASE : config.params[1]) : (uint8_t)4),
-    cadence(config.params[2] ? (config.params[2] > 100 ? (uint8_t)100 : config.params[2]) : (uint8_t)75),
-    gravity(config.params[3] > 100 ? (uint8_t)100 : config.params[3]),
-    loop(config.params[4] ? 1 : 0),
-    root(config.params[5] ? (uint8_t)(config.params[5] & 0x7F) : (uint8_t)48),
-    scale(config.params[6] < SCALE_COUNT ? config.params[6] : (uint8_t)0),
-    velocity(config.params[7] ? (uint8_t)(config.params[7] & 0x7F) : (uint8_t)100),
-    channel(config.params[8] ? config.params[8] : (uint8_t)1),
-    seed(config.params[9]),
+    phrase(config.params[P_PHRASE] ? (config.params[P_PHRASE] > MAX_PHRASE ? MAX_PHRASE
+                                                                          : config.params[P_PHRASE])
+                                   : (uint8_t)4),
+    cadence(config.params[P_CADENCE] ? (config.params[P_CADENCE] > 100 ? (uint8_t)100
+                                                                      : config.params[P_CADENCE])
+                                     : (uint8_t)75),
+    gravity(config.params[P_GRAVITY] > 100 ? (uint8_t)100 : config.params[P_GRAVITY]),
+    loop(config.params[P_LOOP] ? 1 : 0),
+    root(config.params[P_ROOT] ? (uint8_t)(config.params[P_ROOT] & 0x7F) : (uint8_t)48),
+    scale(config.params[P_SCALE] < SCALE_COUNT ? config.params[P_SCALE] : (uint8_t)0),
+    velocity(config.params[P_VELOCITY] ? (uint8_t)(config.params[P_VELOCITY] & 0x7F) : (uint8_t)100),
+    channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
+    seed(config.params[P_SEED]),
     fifths(config.params[P_FIFTHS] ? (config.params[P_FIFTHS] > 100 ? (uint8_t)100
                                                                     : config.params[P_FIFTHS])
                                    : DEFAULT_FIFTHS),
@@ -70,7 +67,7 @@ Harmony::Harmony(const NodeConfig& config) :
                                    : DEFAULT_SPREAD),
     drift(config.params[P_DRIFT] > 100 ? (uint8_t)100 : config.params[P_DRIFT]),
     current(0), position(0), recorded(0), started(false), at_first(true), written(),
-    rng(config.params[9] ? (uint32_t)(config.params[9] * 2654435761u) : entropy::seed()),
+    rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
 {
     if (phrase < 2) phrase = 2;
@@ -298,10 +295,7 @@ void Harmony::silence(BusManager& bus){
 
 bool Harmony::set_param(uint16_t index, uint8_t value){
     switch (index){
-        // The byte `style` used to occupy. Stored so that it round-trips and
-        // an old preset still loads; read by nothing.
-        case 0: if (value > 5) return false; legacy = value; return true;
-        case 1:
+        case P_PHRASE:
             if (value < 2 || value > MAX_PHRASE) return false;
             if (value == phrase) return true;
             // A phrase of a different length is a different phrase, so the
@@ -310,19 +304,19 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
             recorded = 0;
             if (position >= phrase) position = 0;
             return true;
-        case 2: if (value > 100) return false; cadence = value; return true;
-        case 3: if (value > 100) return false; gravity = value; return true;
-        case 4:
+        case P_CADENCE: if (value > 100) return false; cadence = value; return true;
+        case P_GRAVITY: if (value > 100) return false; gravity = value; return true;
+        case P_LOOP:
             if (value > 1) return false;
             if (value == loop) return true;
             loop = value;
             recorded = 0;          // on: record the next phrase. off: walk again.
             return true;
-        case 5: if (value > 127) return false; root = value; return true;
-        case 6: if (value >= SCALE_COUNT) return false; scale = value; return true;
-        case 7: if (value == 0 || value > 127) return false; velocity = value; return true;
-        case 8: if (value == 0 || value > 16) return false; channel = value; return true;
-        case 9: seed = value; return true;
+        case P_ROOT: if (value > 127) return false; root = value; return true;
+        case P_SCALE: if (value >= SCALE_COUNT) return false; scale = value; return true;
+        case P_VELOCITY: if (value == 0 || value > 127) return false; velocity = value; return true;
+        case P_CHANNEL: if (value == 0 || value > 16) return false; channel = value; return true;
+        case P_SEED: seed = value; return true;
         // The walk. None of them re-derives anything: the weights are
         // computed on the next advance, from whatever these say by then, so a
         // knob sweep costs nothing until a chord is due.
@@ -337,16 +331,15 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
 
 uint8_t Harmony::get_param(uint16_t index) const {
     switch (index){
-        case 0: return legacy;
-        case 1: return phrase;
-        case 2: return cadence;
-        case 3: return gravity;
-        case 4: return loop;
-        case 5: return root;
-        case 6: return scale;
-        case 7: return velocity;
-        case 8: return channel;
-        case 9: return seed;
+        case P_PHRASE: return phrase;
+        case P_CADENCE: return cadence;
+        case P_GRAVITY: return gravity;
+        case P_LOOP: return loop;
+        case P_ROOT: return root;
+        case P_SCALE: return scale;
+        case P_VELOCITY: return velocity;
+        case P_CHANNEL: return channel;
+        case P_SEED: return seed;
         case P_FIFTHS:  return fifths;
         case P_SMOOTH:  return smooth;
         case P_LEADING: return leading;

@@ -118,35 +118,31 @@
 // Outlet 1 (CV, optional): the degree over full scale, so the modulation
 //         matrix can move something else per chord.
 //
-// params[0] legacy    was `style`, when the walk came out of a table. Read by
-//                     nothing now, and kept *legal* rather than pinned to
-//                     zero, because a patch that once chose a style should
-//                     play differently and not fail to load.
-// params[1] phrase    chords per phrase
-// params[2] cadence   percent chance the phrase's last chord is the tonic
-// params[3] gravity   percent pull to the tonic; 100 never leaves it
-// params[4] loop      keep the first phrase and repeat it
-// params[5] root      the pitch degree 0 sits on
-// params[6] scale     0 follows the module's key
-// params[7] velocity
-// params[8] channel
-// params[9] seed      0 draws from the entropy pool, anything else is exact
-// params[10] fifths   1 rises by fifths, 100 falls by them, 50 neither
-// params[11] smooth   how much a shared tone is worth
-// params[12] leading  1 avoids the leading tone, 100 wants it
-// params[13] spread   below 50 sharpens toward a loop, above it flattens
+// params[0] phrase    chords per phrase
+// params[1] cadence   percent chance the phrase's last chord is the tonic
+// params[2] gravity   percent pull to the tonic; 100 never leaves it
+// params[3] loop      keep the first phrase and repeat it
+// params[4] root      the pitch degree 0 sits on
+// params[5] scale     0 follows the module's key
+// params[6] velocity
+// params[7] channel
+// params[8] seed      0 draws from the entropy pool, anything else is exact
+// params[9] fifths    1 rises by fifths, 100 falls by them, 50 neither
+// params[10] smooth   which theory of motion: interval, or shared tones
+// params[11] leading  1 avoids the leading tone, 100 wants it
+// params[12] spread   below 50 sharpens toward a loop, above it flattens
 //                     toward a uniform walk
-// params[14] drift    percent chance a looping phrase redraws one chord and
+// params[13] drift    percent chance a looping phrase redraws one chord and
 //                     keeps it
 class Harmony : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
 
-        static constexpr uint16_t P_PHRASE = 1, P_CADENCE = 2, P_GRAVITY = 3, P_LOOP = 4,
-                                  P_ROOT = 5, P_SCALE = 6, P_VELOCITY = 7, P_CHANNEL = 8,
-                                  P_SEED = 9, P_FIFTHS = 10, P_SMOOTH = 11, P_LEADING = 12,
-                                  P_SPREAD = 13, P_DRIFT = 14;
-        static constexpr uint8_t N_PARAMS = 15;
+        static constexpr uint16_t P_PHRASE = 0, P_CADENCE = 1, P_GRAVITY = 2, P_LOOP = 3,
+                                  P_ROOT = 4, P_SCALE = 5, P_VELOCITY = 6, P_CHANNEL = 7,
+                                  P_SEED = 8, P_FIFTHS = 9, P_SMOOTH = 10, P_LEADING = 11,
+                                  P_SPREAD = 12, P_DRIFT = 13;
+        static constexpr uint8_t N_PARAMS = 14;
 
         static constexpr uint8_t DEGREES = 7;        // functional degrees a triad stack means
         static constexpr uint8_t MAX_PHRASE = 16;
@@ -195,9 +191,6 @@ class Harmony : public Node{
         void strike(BusManager& bus, uint8_t deg);
         void restart();
 
-        // The byte `style` used to occupy, kept legal so an old preset still
-        // loads. Declared first because it is constructed first.
-        uint8_t legacy;
         EdgeIn advance_in;
         EdgeIn reset_in;
         uint8_t note_out;

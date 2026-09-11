@@ -905,6 +905,22 @@ static void test_the_global_scale_travels_with_the_globals() {
     TEST_ASSERT_EQUAL(SCALE_LYDIAN, global_scale::id());       // and it is live
     TEST_ASSERT_EQUAL(7, global_scale::root());
 
+    // The register rides one further along, for the same reason and with the
+    // same rule: ten arguments leave it alone, eleven set it.
+    TEST_ASSERT_EQUAL(0, rig.patches.globals().root_octave);
+    TEST_ASSERT_EQUAL(global_scale::NO_ROOT_NOTE, global_scale::root_note());
+    rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
+                                 (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
+                                 0, 1, 0, 0, SCALE_LYDIAN, 7, 3});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(3, rig.patches.globals().root_octave);
+    TEST_ASSERT_EQUAL(43, global_scale::root_note());          // 3 x 12 + 7
+
+    rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
+                                 (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
+                                 0, 1, 0, 0, SCALE_LYDIAN, 7, 11});  // no such octave
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+
     rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
                                  (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
                                  0, 1, 0, 0, SCALE_COUNT, 0});  // no such scale

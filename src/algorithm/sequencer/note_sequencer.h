@@ -19,9 +19,15 @@
 // every named mode and any user scale. An empty mask - what a pattern that
 // never named a scale carries - follows the module's own
 // (midi/global_scale.h), so one key change moves every sequencer in the
-// patch. The root is not taken from there: it is an absolute pitch here,
-// naming the octave the pattern starts in, and a pitch class cannot say
-// that. Patch the root inlet to move it from a keyboard.
+// patch.
+//
+// **The root follows the key only when the key names a register.** It is an
+// absolute pitch here, naming the octave the pattern starts in, and a pitch
+// class cannot say that - which is why a sequencer used to be the exception
+// to the key's root half. A key with a register (midi/global_scale.h) can
+// say it, so one that has one moves the pattern bodily and one that has none
+// leaves the anchor exactly where it was. Patch the root inlet to move it
+// from a keyboard, which outranks both.
 //
 // Inlet 0 (gate): advance. One step per rising edge, from a ClockDiv, a
 //         logic gate, a jack, or another sequencer.
@@ -160,6 +166,11 @@ class NoteSequencerBase : public Node{
         // What is actually played: the module's scale when this one named
         // none. Every pitch this class produces goes through it.
         uint16_t active_mask() const;
+        // The pitch the degrees are measured from. Its own root unless the
+        // key names a register (midi/global_scale.h), and a patched root
+        // inlet outranks both. Every pitch this class produces goes through
+        // it, step-record included.
+        uint8_t active_root() const;
         uint8_t channel_number() const { return channel; }
         uint8_t length() const { return engine.length(); }
         uint8_t position() const { return engine.position(); }

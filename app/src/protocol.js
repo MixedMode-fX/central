@@ -245,6 +245,9 @@ export const AlgorithmId = Object.freeze({
   ALGO_HARMONY: 34,
   ALGO_AUTOMATON: 35,
   ALGO_NOTE_DELAY: 36,
+  ALGO_VOICER: 37,
+  ALGO_MIRROR: 38,
+  ALGO_TONNETZ: 39,
 });
 
 export const AlgorithmCategory = Object.freeze({

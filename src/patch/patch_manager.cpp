@@ -16,7 +16,7 @@ void PatchManager::push_globals(){
     // The key, for every algorithm that did not name a scale of its own.
     // Pushed rather than read from here, because a node's process() sees the
     // buses and nothing else (midi/global_scale.h).
-    global_scale::set(live_globals.scale, live_globals.root);
+    global_scale::set(live_globals.scale, live_globals.root, live_globals.root_octave);
 }
 
 ApplyError PatchManager::commit(uint32_t now_us){

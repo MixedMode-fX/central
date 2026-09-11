@@ -147,7 +147,7 @@ void Console::dispatch(uint32_t now_us){
 void Console::cmd_help(){
     put_line("info                    firmware, patch and store summary");
     put_line("clock [bpm] [source]    show, or set tempo and source (0 int, 1 cv, 2 midi)");
-    put_line("key [scale] [root]      show, or set the scale every algorithm follows");
+    put_line("key [scale] [root] [oct] show, or set the key every algorithm follows");
     put_line("patch                   the running patch: ports, nodes, connections");
     put_line("buses                   live bus state");
     put_line("errors                  the counters behind the red LED");
@@ -228,11 +228,26 @@ void Console::cmd_key(uint8_t n, uint32_t now_us){
             if (!ok || root > 11){ put_line("key: root is a pitch class, 0..11"); return; }
             g.root = (uint8_t)root;
         }
+        // The register, optional and separate: a key without one names no
+        // pitch, and every node with an absolute root keeps its own - which
+        // is what the module did before a register existed. 0 turns it off
+        // again (midi/global_scale.h).
+        if (n >= 4){
+            const uint32_t octave = arg_uint(3, ok);
+            if (!ok || octave > 10){ put_line("key: octave is 0 (none) or 1..10"); return; }
+            g.root_octave = (uint8_t)octave;
+        }
         patches.set_globals(g, now_us);
     }
     put("scale     ");
     put_line(PARAM_SCALE_NAMES[global_scale::id()]);
     put_kv("root     ", global_scale::root());
+    if (global_scale::octave() == 0){
+        put_line("octave    none");
+    } else {
+        put_kv("octave   ", global_scale::octave());
+        put_kv("root note", global_scale::root_note());
+    }
 }
 
 void Console::cmd_patch(){

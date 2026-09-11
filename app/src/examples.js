@@ -283,14 +283,14 @@ export const EXAMPLES = {
     },
   },
   'Generative': {
-    about: 'Nothing is plugged in, and nothing in it was typed. The module is in A minor. Harmony walks the degrees of the key a bar at a time and Chord voices a triad on each root, so the quality of every chord falls out of the key rather than out of a setting. Turing is an eight-bit loop with chaos at 8: it repeats, and about one step in twelve changes each time round — its pulse drives the automaton and its level becomes the melody, so the bar where the rhythm moves is the bar where the tune moves. NoteDelay echoes that melody a dotted eighth later, two scale steps up, with spread pushing each echo further off the grid. The automaton is Wolfram rule 110 on a ring of eight; the three lanes on jacks 1 to 3 are neighbours, so a figure walks across them. Once every two bars a slow LFO crosses a comparator and sends the register back to the pattern it grew out of. Enable audio under play, then move Turing’s chaos, Harmony’s style, or the delay’s spread while it runs.',
+    about: 'Nothing is plugged in, and nothing in it was typed. The module is in A minor. Harmony walks the degrees of the key a bar at a time and Chord voices a triad on each root, so the quality of every chord falls out of the key rather than out of a setting. Its walk is weighed rather than looked up \u2014 at fifths 80 the roots mostly fall by fifths, spread 30 hardens that into something close to a loop, and drift 6 redraws one chord of the phrase now and then and keeps it, so the progression is recognisably itself and never quite the same twice. Turing is an eight-bit loop with chaos at 8: it repeats, and about one step in twelve changes each time round — its pulse drives the automaton and its level becomes the melody, so the bar where the rhythm moves is the bar where the tune moves. NoteDelay echoes that melody a dotted eighth later, two scale steps up, with spread pushing each echo further off the grid. The automaton is Wolfram rule 110 on a ring of eight; the three lanes on jacks 1 to 3 are neighbours, so a figure walks across them. Once every two bars a slow LFO crosses a comparator and sends the register back to the pattern it grew out of. Enable audio under play, then move Turing’s chaos, Harmony’s style, or the delay’s spread while it runs.',
     patch: {
       globals: { scale: 'minor', root: 9 },
       gate_ports: [{ port: 1, dir: 'out', bus: 3 }, { port: 2, dir: 'out', bus: 4 }, { port: 3, dir: 'out', bus: 5 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1 bar' } },
         { algo: 'Metronome', out: [1], seq: { division: '1/8' } },
-        { algo: 'Harmony', in: [0], out: [0, 0], params: [1, 4, 75, 0, 0, 45, 0, 80, 1] },
+        { algo: 'Harmony', in: [0], out: [0, 0], params: [4, 75, 0, 0, 45, 0, 80, 1, 0, 80, 25, 40, 30, 6] },
         { algo: 'Chord', in: [null, 0], out: [1], params: [3, 0, 2, 4] },
         { algo: 'Turing', in: [1, 6], out: [2, 1], params: [8, 8, 5, 1, 21, 0, 1] },
         { algo: 'CvToNote', in: [1, 1, null], out: [2], params: [1, 57, 2, 0, 1, 2, 0, 90, 2] },

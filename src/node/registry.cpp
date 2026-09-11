@@ -25,6 +25,9 @@
 #include "algorithm/midi/harmony.h"
 #include "algorithm/sequencer/automaton.h"
 #include "algorithm/midi/note_delay.h"
+#include "algorithm/midi/voicer.h"
+#include "algorithm/midi/mirror.h"
+#include "algorithm/midi/tonnetz.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -65,6 +68,9 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &Harmony::descriptor,
     &Automaton::descriptor,
     &NoteDelay::descriptor,
+    &Voicer::descriptor,
+    &Mirror::descriptor,
+    &Tonnetz::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

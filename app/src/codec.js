@@ -87,6 +87,7 @@ export function emptyGlobals() {
     // (src/midi/global_scale.h). Chromatic is "no key set".
     scale: P.ScaleId.SCALE_CHROMATIC,
     root: 0,
+    rootOctave: 0,
   };
 }
 
@@ -145,7 +146,8 @@ function writeGlobals(w, g) {
   w.u8(g.nrpnSourceMask);
   w.u8(g.scale ?? P.ScaleId.SCALE_CHROMATIC);
   w.u8(g.root ?? 0);
-  for (let i = 0; i < GLOBALS_BYTES - 13; i++) w.u8(0);
+  w.u8(g.rootOctave ?? 0);
+  for (let i = 0; i < GLOBALS_BYTES - 14; i++) w.u8(0);
 }
 
 function readGlobals(r) {
@@ -165,8 +167,12 @@ function readGlobals(r) {
     // rather than as a scale the module cannot be in (src/midi/scale.h).
     scale: r.u8() || P.ScaleId.SCALE_CHROMATIC,
     root: r.u8(),
+    // The register the key sits in, 0 when it names none - which is what an
+    // image written before it existed carries, and what leaves every node
+    // with an absolute root on the one it stored.
+    rootOctave: r.u8(),
   };
-  for (let i = 0; i < GLOBALS_BYTES - 13; i++) r.u8();
+  for (let i = 0; i < GLOBALS_BYTES - 14; i++) r.u8();
   return g;
 }
 

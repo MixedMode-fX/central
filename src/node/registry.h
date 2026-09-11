@@ -44,6 +44,9 @@ enum AlgorithmId : uint8_t {
     ALGO_HARMONY      = 34,
     ALGO_AUTOMATON    = 35,
     ALGO_NOTE_DELAY   = 36,
+    ALGO_VOICER       = 37,
+    ALGO_MIRROR       = 38,
+    ALGO_TONNETZ      = 39,
 };
 
 enum ConfigError : uint8_t {

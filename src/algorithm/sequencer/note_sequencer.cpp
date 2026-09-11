@@ -236,9 +236,17 @@ uint16_t NoteSequencerBase::active_mask() const {
     return global_scale::resolve(scale_mask);
 }
 
+// A patched root inlet outranks everything, as it does on every node that has
+// one - `root` is then whatever it last wrote. Otherwise the key's root note
+// if it names one, and this sequencer's own anchor if it does not.
+uint8_t NoteSequencerBase::active_root() const {
+    if (root_in != NO_BUS) return root;
+    return global_scale::resolve_anchor(scale_mask, root);
+}
+
 uint8_t NoteSequencerBase::pitch(uint8_t step, uint8_t v) const {
     if (velocity(step, v) == 0) return NO_PITCH;
-    const int16_t p = (int16_t)root + scale_degree_to_semitone(degree(step, v), active_mask());
+    const int16_t p = (int16_t)active_root() + scale_degree_to_semitone(degree(step, v), active_mask());
     if (p < 0 || p > 127) return NO_PITCH;                // skipped, never wrapped
     return (uint8_t)p;
 }
@@ -285,11 +293,14 @@ void NoteSequencerBase::advance_record_cursor(){
 // counted so a user can see it happening.
 void NoteSequencerBase::record_note(uint8_t pitch, uint8_t velocity){
     const uint16_t mask = active_mask();
-    const uint8_t snapped_pitch = scale_quantise(pitch, (uint8_t)(root % 12u), mask);
+    const uint8_t anchor = active_root();
+    const uint8_t snapped_pitch = scale_quantise(pitch, (uint8_t)(anchor % 12u), mask);
     if (snapped_pitch != pitch) snap_count++;
 
-    // Semitones from the root, then which degree of the scale that is.
-    const int16_t semitones = (int16_t)snapped_pitch - (int16_t)root;
+    // Semitones from the root, then which degree of the scale that is. The
+    // root here is the one the pattern is *played* from, so a step recorded
+    // while the key names a register reads back as the pitch that was played.
+    const int16_t semitones = (int16_t)snapped_pitch - (int16_t)anchor;
     const int16_t degree = semitone_to_scale_degree(semitones, mask);
 
     const uint8_t vel = rec_velocity ? rec_velocity : (velocity ? velocity : 100);

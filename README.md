@@ -1,1628 +1,432 @@
 # MixedMode Modular Central (MMMC)
 
-An expandable Eurorack CV & MIDI processor based around a Teensy 4.1
+An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
 
-It provides `N_IO_PORT = 8` configurable input / output ports. Each port can be assigned to it's own independant algorithms. 
+- `GPIO_N` configurable gate jacks, each an input or an output.
+- MIDI over two DIN ports (3.5 mm TRS), a class-compliant USB device with four
+  cables, and a USB host port.
+- No encoder, no switches, no display. The module is configured from a host:
+  the serial console, the SysEx protocol, or the browser app.
 
-MMMC supports MIDI I/O over several transports : DIN Midi (3.5mm TRS) and USB MIDI and USB Host. The class compliant USB device shows up as 4 independant MIDI ports when connected to a host computer.
+Sizing constants are in `src/config.h`, pins in `src/hardware.h`. This file
+names them rather than repeating their values.
 
-
-
-## Basics
-
-The MixedMode Modular Central (MMMC) can clock off three sources:
-
-- Internal
-- CV
-- MIDI
-
-The behaviour of the rest of the module is the same regardless of the clock
-source. The MMMC operates under a `PPQN = 24` master clock derived from any of
-the sources listed above — see [Master clock](#master-clock).
-
-Each I/O channel can be configured as either an **input** or an **output**. They can be assigned to their own **algorithm** or be part of an algorithm that uses multiple inputs and/or outputs.
-
-Each MIDI I/O can be routed to each other and MIDI Modifier Algorithms can be applied independently. 
-
-## Output Algorithms
-
-### Clock Dividers / Multipliers
-
-Division is an algorithm, not something every clocked algorithm carries:
-`ClockDiv` is an ordinary node that writes a gate bus, and sequencers take an
-edge-triggered advance inlet. So one divider can drive several sequencers —
-which locks them together by construction, because they read the same edge —
-a divider can divide another divider, and a sequencer can just as well be
-advanced by a logic gate or an external jack.
-
-Each `ClockDiv` has its own `phase` (a fraction of its own output period, so
-it wraps inside the cycle) and `delay` (whole ticks of lag, which does not
-wrap). Both are exact from the master tick. See [Master clock](#master-clock)
-for what "exact" costs and where it stops.
-
-### Metronome
-
-`ClockDiv` is the exact instrument, and exact is not the same as usable: its
-amount is a count of PPQN ticks, so "one pulse per beat" is `/24`, a dotted
-eighth is `/18`, and a sixteenth-note triplet is `/4` — and none of those is
-readable as a note value unless you already know `MASTER_PPQN` is 24. Every
-one of them is a sum a musician has to do before hearing anything, and getting
-it wrong sounds like a tempo mistake rather than an arithmetic one.
-
-`Metronome` is the same clock said the way a musician says it. Two controls:
-
-- **division** — `8 bars`, `4 bars`, `2 bars`, `1 bar`, `1/2`, `1/4`, `1/8`,
-  `1/16`, `1/32`, `1/64`. A bar is four quarter notes; the module has no time
-  signature, and 4/4 is the only reading of "bar" that needs no other
-  information.
-- **feel** — `straight`, `dotted` (×3/2) or `triplet` (×2/3).
-
-Nothing is given up for the friendlier control. **Every one of the thirty
-rates is a whole number of subticks**, so a `Metronome` is exactly as tight as
-the `ClockDiv` it replaces — a quarter note and `/24` fire on the same subtick
-for as long as they both run, which is what `test_clock` asserts. The binding
-case is the fastest value: a dotted 1/64 is three quarters over thirty-two and
-a 1/64 triplet is a quarter over twenty-four, both exact because the quarter
-is 576 subticks. A `static_assert` in `metronome.cpp` fails the build if
-`config.h` ever moves out from under that.
-
-It takes a **reset inlet** and nothing else: a rising edge is a downbeat, so
-the grid re-anchors on it and the next division is counted from there. The
-divider is still there for the rates this list does not name — and since
-`ClockDiv` accepts a gate source, a `Metronome` into a `ClockDiv` is how one
-gets built.
-
-`Metronome` used to be a gate sequencer: a `StepSequencer` of length one that
-passed every advance edge through. A one-step pattern gives a length, a
-direction, a reset and thirty-two per-step probabilities nothing to do, and
-the rate was always the divider's upstream — so the controls said a great deal
-and none of it about the rate.
-
-### Gate Sequencers
-
-Each writes a bool to a gate bus. A gate bus cannot carry pitch, velocity,
-note length or polyphony, so note sequencing (#13) and drum sequencing (#14)
-are separate families sharing this transport.
-
-- `StepSequencer` : a classic step sequencer, 1..`MAX_SEQUENCE_LEN` steps, each ON/OFF
-- `EuclidianSequencer` : Bjorklund's distribution of *k* pulses over *n* steps, plus rotation
-- `RandomSequencer` : shred and load a random pattern
-
-All three share one base: an advance inlet, a reset inlet, a length, a
-direction (forward, reverse, ping-pong, random, Brownian), a per-step
-probability and a fixed-width trigger output. Reset means the same thing in
-all of them — the next advance plays the pattern's first step — and it is an
-inlet, so one sequencer can reset another.
-
-The transport underneath — step counter, length, direction, the rule for
-"the next step" — is `StepEngine` (`src/algorithm/sequencer/step_engine.h`),
-shared with the note and drum sequencers below, so a gate sequencer and a
-note sequencer at the same length and direction visit steps identically by
-construction.
-
-### Note Sequencers
-
-`NoteSequencer` (one voice) and `PolySequencer` (`NOTE_SEQ_VOICES = 4`
-voices a step) write a note bus. Same advance and reset inlets, plus an
-optional **root inlet** on a note bus.
-
-**A step stores a scale degree, never an absolute note.** The pitch is
-`root + degree_to_semitone(degree, scale)`, so changing the root transposes
-the whole pattern and keeps it in key, and changing the scale gives the same
-pattern a different character — both one-parameter operations on a pattern
-nobody touches. The root comes from the root inlet when it is patched (last
-note-on wins: play a key and the running sequence transposes) and from a
-parameter otherwise. The scale is a 12-bit mask, one bit per semitone
-(`src/midi/scale.h`): two bytes that cover every named mode and any user
-scale. Beyond the octave, degree *n* in an *n*-note scale is the root an
-octave up and negative degrees go down the same way; when the scale changes
-under a pattern, degrees index the new scale's notes, so the pattern survives
-as an interval shape rather than as pitches (that is what makes it different
-from `NoteQuantise`, which snaps pitches). A pattern that names no scale of
-its own follows the module's key — see [The key](#the-key).
-
-Per step: degree and velocity per voice, then a length, three flags (rest,
-tie, accent) and a probability. Global velocity scale and offset, an accent
-amount, a channel.
-
-**Note length has one exact half and one estimated half.** Length is counted
-in advance edges — a note is released on the Nth edge after the one that
-played it — so ties and holds need nothing but the advance inlet and are
-exactly in time. A *tie* extends every sounding note by its own length
-instead of retriggering; a *rest* plays nothing while sounding notes keep
-counting down. A sub-step gate (the `gate` percentage) needs the *duration*
-of a step, which the sequencer only sees edges of, so it measures the
-interval between the last two advances and extrapolates: wrong on the first
-step after a tempo change and on any irregular trigger, the same caveat as
-multiplying from a gate in `ClockDiv`, and labelled as such. Ratcheting has
-the identical problem and is deliberately not built until the estimate has
-proved itself on hardware.
-
-**The sequencer owns a note-off for every note-on it emits** and releases it
-with the pitch it actually sent, from the same ledger the modifiers use —
-never recomputed from the current root or scale. The root moving under a held
-note, the scale changing, the pattern changing, the clock stopping (after a
-configurable number of silent periods the sequencer releases what it holds
-rather than hanging it for ever) and the patch being swapped all release
-correctly, and each has a test.
-
-### Drum Sequencers
-
-A drum pattern is a grid — `DRUM_SEQ_LANES = 8` lanes × up to
-`MAX_SEQUENCE_LEN` steps — that a user edits as one object, so it is one
-node with a `StepEngine` per lane, not eight gate sequencers. Advance and
-reset are shared; **each lane has its own length**, which is polyrhythm for
-free (lanes of 16 and 12 realign after 48 advances). Probability is per lane.
-
-Two algorithms rather than one with a mode switch, because the destinations
-want different things:
-
-- `DrumSeqGate` — one gate outlet per lane, fixed-width triggers. Velocity
-  has no representation in the gate domain, so accent is a second lane, the
-  modular way. Lanes without a jack are left unconnected.
-- `DrumSeqMidi` — one note outlet, a note number and channel per lane
-  (General MIDI defaults), a velocity per cell. Every note-on is released
-  after a fixed number of milliseconds from the ledger; a lane retriggered
-  before then releases first, and a patch swap releases everything.
-
-## Utility Algorithms
-
-### GateHold
-
-Every clock source in this module makes a **trigger** — `TRIGGER_WIDTH_US`, 5 ms
-(`src/config.h`) — because a trigger whose width followed the tempo would stop
-being a trigger. That is right for clocking things and useless for the other
-half of what a gate is for: opening an envelope, latching a mute, holding a
-note down. `GateHold` is the piece between the two.
-
-| Mode | What it does |
-|---|---|
-| `latch` | a rising edge on `set` raises the output and it stays up; a rising edge on `reset` drops it. An SR latch — the mode that answers "hold a gate high until I say otherwise" |
-| `toggle` | each rising edge on `set` flips the output; `reset` still drops it. One button, two states |
-| `extend` | a minimum length: the output follows `set` but stays up for at least `hold`, retriggering cleanly. This is what turns a 5 ms trigger into a gate |
-| `limit` | a maximum length: the output drops after `hold` even if the input is still up, and does not rise again until the input has gone low and come back |
-
-`reset` is optional — a latch with nothing patched to it holds until the patch
-changes, which is a legitimate thing to ask for. **Reset wins**: an edge on
-`reset` in the same pass as one on `set` leaves the output low, in every mode.
-Changing the mode does not clear the output: a mode change is not a reset, and
-silently dropping a gate somebody is holding is worse than either reading.
-
-**`set` is optional too, which makes the node a switch.** The `gate` parameter
-*is* the output level, so with nothing patched into either inlet a latch set
-high sends a high gate and keeps it there — which is the other thing a patch
-wants from a gate and had no way to ask for. Something has to be held open,
-a logic input tied high, a run switch put where a hand can reach it, and none
-of those is a trigger that somebody has to remember to fire. It is one control
-from either end: the parameter moves from the editor, a CC or a modulation
-route, an edge on `set` or `reset` moves the same level, and reading the
-parameter back says what the node is actually doing — so a patch saved with
-the gate up loads with it up. In the timed modes the level is recomputed from
-`set` every pass, so the switch there is a starting value rather than a hold;
-holding one up with nothing patched in is what `latch` is for.
-
-## Modulators
-
-Modulators write a **CV bus** — the internal control bus described under
-[Signal bus model](#signal-bus-model) — and the
-[modulation matrix](#modulation-a-control-signal-reaching-a-parameter) turns
-that signal into parameter writes. Nothing about a modulator knows what it is
-modulating: it produces a signal, the matrix decides what the signal reaches,
-and one LFO can drive four parameters at four depths without four LFOs.
-
-The matrix is no longer the only thing a control signal can reach. `CvToNote`
-and `CvToGate` (below) turn one into a melody and into a trigger, so every
-modulator on this list is also a *source* — which is what makes "a complete
-generative patch with nothing patched into it" a sentence about this module
-rather than about a rack.
-
-### LFO
-
-Seven shapes — sine, triangle, ramp up, ramp down, square, random step, random
-glide — with depth, offset, start phase and a bipolar/unipolar choice.
-
-**Two rates, and only one of them is a guess.** Synced to the master clock the
-cycle is a note value from the same list `Metronome` offers, counted in
-subticks, so an LFO set to `1/4` and a Metronome set to `1/4` are locked
-together for ever and neither drifts. Free-running the cycle is wall-clock
-time in tenths of a hertz, 0.1 Hz to 25.5 Hz — which is what a modulator that
-should *not* line up with the music needs, and a synced one cannot express.
-
-A synced LFO's cycle is anchored on **subtick zero**, not on whichever subtick
-the node was constructed on, so an LFO added to a patch that has been running
-for an hour is in phase with the Metronome beside it. The optional `reset`
-inlet is the one thing that moves the anchor. Changing the rate or the
-division re-derives the period **without moving the phase**: a rate swept
-under a running modulation sweeps continuously instead of jumping back to the
-top of its cycle, the same rule `ClockDiv` follows for a pulse it has already
-scheduled.
-
-### SampleHold
-
-One reading of a control signal, held until the next trigger. With nothing
-patched to `signal` it samples its own noise, which is the classic patch — a
-random level per step, held steady between steps — and with something patched
-it holds a reading of that, which is how a slow LFO becomes a stepped sequence
-locked to the clock. `sample` reads on the rising edge; `track` follows the
-input for as long as the trigger is up and freezes on the fall. `steps`
-quantises what is held onto that many evenly spaced levels; at 0 or 1 the full
-twelve bits are held.
-
-### Slew
-
-What a value is allowed to change by, per unit of time — the node that turns a
-step into a glide. Rise and fall are separate (a fast attack and a slow decay
-out of a sample and hold is an envelope; one rate for both is not) and `link`
-ties them for the case where they are not. Times are **per full scale**, in
-tens of milliseconds, so two different step sizes glide at the same speed
-rather than taking the same time.
-
-Smoothing is a signal operation, so it belongs in the signal path where it can
-be shared, metered and patched around — which is why the modulation matrix has
-no smoothing control of its own.
-
-## Generative Algorithms
-
-The five algorithms in this section were added together, to answer one
-question: what would this module need before it could be left running on its
-own and be worth listening to? The audit that produced them, and what was
-considered and rejected, is in
-[`docs/generative-modules.md`](docs/generative-modules.md).
-
-Four things were missing, and one of them was a hole in the architecture
-rather than a missing feature.
-
-### Reaching the music from the CV bus — `CvToNote` and `CvToGate`
-
-**Nothing used to read a CV bus into a note or a gate.** `Lfo`, `SampleHold`,
-`Slew` and `MidiToCV` wrote one; `SampleHold` and `Slew` read one back; and
-the only other readers were the modulation matrix and the console. So a
-control signal could move a *parameter* and could do nothing else: it could
-not play a note, it could not fire a trigger. The commonest generative patch
-there is — a slow, complex control signal through a quantiser is a melody —
-was not expressible, and the `CvInPort` under [Still open](#still-open) would
-have arrived into the same closed loop.
-
-`MidiToCV` is `CvToNote`'s inverse, and the pair is the point: that one sends
-a note stream out as pitch, gate and velocity, this one brings a control
-signal back as notes. Between them the CV bus is a round trip, and a voltage
-can be operated on by every modulator in the module on the way past.
-
-These two are the doors, one per domain, and they ship together because a
-patch that can turn a voltage into a note but not into the trigger that plays
-it is still stuck.
-
-`CvToNote` is the quantiser. It is not `NoteQuantise`, and the two are worth
-telling apart: `NoteQuantise` takes notes that already exist and snaps their
-pitches, this takes a *level* — a signal with a value every pass and no events
-at all — and decides both what to play and when.
-
-**Two ways to turn a level into a pitch, and they are different instruments.**
-`degree` divides the range into the scale's *notes*, evenly, so a uniform
-signal picks every tone of the scale equally often and every value of the
-signal is already a tone. `snap` divides it into *semitones* and snaps the
-result into the scale, which is what a Eurorack quantiser does: a tone the
-scale contains has a wider catchment than one it does not, so a uniform signal
-stops being uniform — and that is exactly right when the signal is a melody
-somebody meant, because snapping preserves its shape.
-
-**The root names a pitch and the key names a pitch class.** Only an absolute
-note can say which octave a melody starts in, which is why the note sequencers
-keep a root of their own. What follows the module's key here is the pitch
-*class*: the tonic played is the key's root taken inside the octave `root`
-names, so a node set to C3 in A minor plays from A3, and moving the key moves
-it.
-
-`CvToGate` is the comparator: a level crossing a threshold becomes a gate, or
-a fixed-width trigger. **Hysteresis is not decoration** — a signal resting on
-the threshold crosses it on noise alone, and the answer to that on a gate bus
-is a stuck note or a machine-gunned drum, so the output falls only once the
-signal has dropped back by `hysteresis`. `invert` reverses the comparison
-rather than the wire, so the hysteresis stays on the side the signal is
-actually resting against. A slow LFO through one of these is a pulse train
-whose spacing breathes: regular enough to be a pulse, irregular enough not to
-be a grid.
-
-### `Turing`
-
-Every random source in the module used to be all or nothing. `RandomSequencer`
-shreds a whole new pattern, `SampleHold` draws a fresh level on every trigger,
-`Probability` flips a memoryless coin per step. None of them *remembers*, and
-the territory generative music actually lives in is the middle: a loop that
-repeats for eight bars and then changes one step.
-
-`length` bits in a ring; on each advance the top bit is fed back to the bottom,
-inverted with probability `chaos`. That one control has three landmarks:
-
-| `chaos` | what happens |
-|---|---|
-| `0` | nothing is ever inverted. The loop repeats for ever |
-| `50` | every bit is a coin flip. Nothing ever repeats |
-| `100` | every bit is inverted, every time — so the loop still repeats, but it takes two passes to come back to itself, and a length of 8 is a 16-step pattern whose second half is the negative of its first |
-
-Between 0 and 50 the loop survives and mutates one step at a time, which is
-the setting the node exists for.
-
-**Two outlets from one register, and that is the point.** The pulse is the bit
-that has just come round; the CV is the top `bits` of the register read as a
-number. Drive a rhythm from the first and a melody (through `CvToNote`) from
-the second and the two mutate *together* — the bar where the rhythm changes is
-the bar where the melody changes, because it is the same bit that moved. Two
-independent random sources sound like two random processes; one register
-sounds like a part.
-
-**`seed` decides what the reset inlet means**, and it means one of the two
-things a user wants from that cable. At zero there is no trunk, so reset
-*shreds* — a new pattern out of the entropy pool every time, which is the same
-gesture `RandomSequencer`'s shred inlet is, and the reason a module does not
-play the same thing on every power cycle. At anything else reset *returns to
-the trunk*: the pattern that byte draws, exactly, however far the walk has
-wandered, so a preset plays what it was saved with and a wander that has gone
-somewhere unmusical is one edge away from the shape it grew out of.
-`write` is the hand on the register — `clear` feeds zeros in and empties the
-loop a step at a time, `fill` feeds ones — and neither is a reset: the loop is
-being rewritten while it runs.
-
-### `Harmony`
-
-**The module had a key and nothing that ever moved inside it.**
-`GlobalSettings` carries one scale and one root, `Chord` voices a triad, the
-note sequencers pick degrees — and a patch left running played one chord until
-somebody stopped it. This section already named the patch that was missing:
-*a sequenced root walking through the chords of one key is a chord
-progression*. This is the node that walks it.
-
-**It only has to emit a root, and that is the whole trick.** `Chord`'s
-intervals are steps of the scale, so `0 2 4` is major on I, minor on ii and
-diminished on vii° — the quality of each chord is already correct by
-construction. A node that knows nothing whatever about chord quality produces
-a diatonic progression, because the module decided long ago that an interval
-is a scale step and not a semitone.
-
-**The walk is computed, not tabulated.** Tonal music does not move at random
-between degrees, and the first version of this node said so with five 7×7
-tables of weights named after genres. Tables are honest about what tonal music
-does and dishonest about everything else: they are written for seven degrees,
-so a pentatonic key used five columns tuned for diatonic function and a key
-nobody anticipated got numbers that meant nothing; they say what a genre does
-rather than why; and the only progressions reachable are the ones somebody
-typed. **There is no room in a table for an accident.**
-
-So the weight of every move is derived from the scale instead
-(`src/midi/root_motion.h`), out of facts that hold in any key — with one
-control over each:
-
-| | |
-|---|---|
-| `fifths` | how far the root moved, and which way round the circle. A root falling a fifth drives tonal music forward; one rising a fifth is the retrograde, and is how a dominant gets approached rather than resolved. At 100 the walk falls by fifths — the circle, and ii–V–I with it — at 1 it rises by them, at 50 it does not care. Measured in **semitones**, so a fifth is a fifth in a key this control has never seen |
-| `smooth` | which theory of motion is in use. At 0 a move is worth what its interval is worth and the fifths lead; at 100 it is worth what the two chords *share* — triads a third apart share two notes, a fifth apart one, a step apart none — and the mediants lead, which is what Romantic harmony sounds like |
-| `leading` | how much the triad carrying the semitone below the tonic is wanted. That note is what an authentic cadence is made of and what modal music must avoid, so one control reads as "how tonal" upward and "how modal" downward — and it is **inert by itself** in a mode that has no leading tone, because there is then no such triad to weight |
-| `spread` | the one that makes accidents. Below 50 the weights sharpen and the walk hardens toward a loop; above 50 they flatten toward every legal move being equally likely; at 50 they are played as computed. Nothing is ever weighted to zero, so the tritone root motion that turns up once in a hundred bars is always available and always in key |
-
-The five old styles are five points in that space and everything between them
-is now reachable, which is where the accidents live. `spread` at 100 is the
-uniform walk, `fifths` at 100 with `spread` low is the circle, `leading` at 1
-is the modal shuttle, `gravity` at 100 is the drone.
-
-**Because the rule measures semitones rather than scale steps, it knows things
-a table would have to be told.** At `fifths` 100 the move it most wants to
-make, from six of the seven degrees of a major key, is the one whose root
-falls a perfect fifth — worked out from twelve bits with nothing naming a
-degree. The seventh is IV, and that exception is the point: a table counting
-scale steps would send IV to vii° like every other row, and the fifth below IV
-is *diminished*, which is exactly why IV–vii° is the weak link in the diatonic
-circle. The same rule finds the fifths of a pentatonic key and declines to
-invent the ones it does not have.
-
-`phrase` and `cadence` are what make it composed rather than drifting: a
-phrase of four with a cadence of 75% resolves to the tonic three times in
-four, which is a period. `loop` is the difference between improvising and
-writing — turn it on and the next `phrase` chords become the piece, repeated
-exactly, until it is turned off again. `gravity` mixes an increasing weight on
-the tonic into whatever the walk wanted, from the walk at full strength to a
-drone.
-
-**`drift` is what keeps a loop alive.** An accident that happens once is a
-glitch and one that comes back is a decision, so a looping phrase redraws one
-of its chords with this probability and *keeps* the new one. At 0 the loop is
-exact. A few percent is a piece that is recognisably itself and never quite
-the same twice, which is most of what this node is for.
-
-
-**Degrees the key does not have are not reachable.** The walk runs over the
-first seven degrees of the scale, or over all of them when the scale has fewer,
-so a pentatonic key has five chords. A chromatic key has twelve degrees and
-the walk uses seven of them, which is chromatic nonsense and exactly what
-"the module is chromatic until a key is set" means: set a key.
-
-### `Automaton`
-
-The rhythm family was at one end of the axis or the other. `StepSequencer` and
-the drum grids play what somebody typed in. `EuclidianSequencer` plays a
-formula — perfectly even, and therefore perfectly predictable once you have
-heard a cycle. `RandomSequencer` has no memory. Nothing was in the middle: a
-pattern with structure, that repeats motifs, and never quite repeats itself.
-
-A Wolfram elementary rule lives exactly there and costs a byte. Each cell
-looks at itself and its two neighbours — eight possible neighbourhoods, one
-bit of answer each, so the rule *is* an eight-bit number:
+## Build
 
 ```
-next[i] = (rule >> ((left << 2) | (self << 1) | right)) & 1
-```
-
-Rule 90 is left XOR right and draws Sierpinski triangles: sparse,
-self-similar, unreasonably musical. Rule 110 is stable in places and chaotic
-in others. Rule 30 is noise. Rule 51 blinks. None of them is a pattern anybody
-typed and none of them is a coin flip.
-
-**The lanes are neighbours, and that is the point.** Eight
-`EuclidianSequencer`s give eight patterns that have nothing to do with each
-other; here a cell can only be switched on by the cells beside it, so a figure
-on lane 3 moves into lane 4 next generation. That is a rhythm section rather
-than eight sequencers in a rack. A lane with no jack still lives and still
-feeds its neighbours, so a three-lane drum part gets its variation from cells
-nobody hears.
-
-**What the mathematics does not give you is a way back**, and a drum machine
-that stops is a bug however correct the rule is. `revive` watches for the row
-that will never change again — all-empty under most rules, all-full under
-some, any other stable configuration — and reloads the seed. A row that merely
-blinks between two states changes every generation and is left alone, because
-blinking is a rhythm. `edges` decides whether the row is a **ring**, so
-activity that runs off one end arrives at the other and the pattern sustains,
-or bounded by **dead** cells, so it spreads outward and falls off.
-
-### `NoteDelay`
-
-Every node in this module is driven by an edge, and in practice every edge in
-a patch descends from one `ClockDiv` or `Metronome`. That is deliberate and it
-is what makes the module tight. It also means a patch has exactly one rhythmic
-surface, and nothing could put an event *between* the grid lines on purpose
-and stay musical. Two sequencers of length 16 and 12 are polyrhythm **on** the
-grid; Eno's *Music for Airports* is seven tape loops of incommensurable length
-that do not realign for twenty-seven days, and that shape had no expression
-here at all.
-
-A note in comes back `repeats` times, each transposed by `interval` **steps of
-the scale** — so a canon at the third stays in key, and the third above C is
-major while the one above E is minor without the node knowing either — each
-`decay` percent quieter, each subject to `chance`.
-
-**`spread` is the reason the node exists.** At 0 the repeats sit exactly on
-the grid and this is a musical delay. Above 0 each gap is a percentage longer
-than the one before, so the total grows with the square of the repeat and the
-echoes of a four-note figure stop lining up with each other or with the
-sequencer that produced them — the texture stops being a rhythm and becomes a
-cloud. Below 0 the gaps shorten and the echoes accelerate into each other,
-which is a ball settling. It is a percentage of the delay rather than a number
-of milliseconds so that it means the same thing at every tempo and in both
-timing modes.
-
-**Two rates, and only one of them is a guess** — the rule `Metronome` and
-`Lfo` already follow. Synced, the delay is a note value counted in subticks,
-so a dotted-eighth delay under a 1/16 sequence is exact for ever.
-Free-running, it is wall-clock time, which is what an echo that should *not*
-line up with the music needs. An echo already in flight keeps the clock it was
-scheduled on.
-
-**Transposing needs a root, so this node has one.** A scale step is only
-defined against a tonic — the same interval pattern rooted on A and on C are
-different keys — so `root` is the tonic used when this node *names* a scale,
-exactly as `NoteQuantise` has one, and it is ignored when the node follows the
-module's key, because following a key means following its root.
-
-**The pass-through is owned too.** `dry` sends the input on to the outlet, and
-an event this node emitted is an event it owes a note-off for, even one it
-only copied. Without that a patch swap would release the echoes and leave the
-copy sounding, because the note-off the node upstream emits during its own
-`silence()` lands on an intermediate bus nothing is reading any more.
-
-**The articulation is the input's, not a setting.** A repeat is released
-exactly as long after its note-on as the source note was held, because the
-note-off is scheduled when the source's note-off arrives, at the same
-distance. There is no `hold` parameter and there should not be: one would
-flatten the phrasing of the thing being echoed. Each pending echo carries the
-pitch and channel it will be released with, decided when it was scheduled, so
-the scale, the interval and the key can all move underneath and the note-off
-still matches the note-on — and a repeat that will not fit the table is
-dropped and counted rather than emitted without a way to release it.
-
-### A patch that plays itself
-
-None of these needs anything plugged in. With the module's key set to A minor:
-
-```
-Metronome 1 bar ──> Harmony ──root──> Chord (0 2 4) ──> MIDI out
-                       │
-Metronome 1/8 ──┬──> Turing ──cv──> CvToNote (degree) ──> NoteDelay ──> MIDI out
-                │       └──pulse──> Automaton ──cell 1..3──> DrumSeqGate lanes
-                └──> Lfo (1/1) ──> CvToGate ──> Turing.reset
-```
-
-The chords move in the key; the melody is a loop that mutates a step at a
-time; the drums are a rhythm section whose lanes are related to each other;
-the echoes walk off the grid; and once a bar the register goes back to the
-pattern it grew out of. Nothing in it is a sequence anybody typed, and nothing
-in it is a coin flip.
-
-## Harmonic Algorithms
-
-`Harmony` fills the first of the two holes the design note in
-[`docs/harmony.md`](docs/harmony.md) names — *which chord comes next*. These
-three fill the second and open two doors out of the key. The theory they are
-built on is in that document; what follows is what each one is for.
-
-### `Voicer`
-
-**A progression in root position is block chords.** `Harmony` chooses the
-roots and `Chord` stacks the right notes on them, and between the two every
-voice still jumps as far as the root does and every chord is struck from
-nothing. `Voicer` is the layer between them: the chord arrives, and what
-leaves is the same chord placed so the voices move as little as they can.
-
-**The notes two chords share are held, not re-struck.** Two triads a fifth
-apart share one tone and two a third apart share two, so on the fifth-walk
-`Harmony` is best at, this is the difference between a chord change and a
-chord *moving*. C E G to F A C is three semitones of motion in total, because
-C is in both chords and stays exactly where it is; the same change in root
-position is fifteen.
-
-That is also why this node's note-off ledger is keyed on the note it
-**emitted** rather than on the note that caused it, which every other modifier
-here does the other way round. A modifier that emits a function of one note
-must release exactly what that note sent. This one emits a function of the
-whole held chord, and the question it answers on every change is *is this
-pitch already sounding* — a question about what was emitted. Keyed that way,
-common-tone retention is not code but the absence of it: the shared notes are
-neither released nor emitted, because nothing asks them to be.
-
-**A chord is what is held at the end of a pass, not what arrived during it.**
-`Chord` re-voices by releasing everything it had and sounding the new chord,
-so a change reaches this node as a handful of note-offs and a handful of
-note-ons in one pass. Reading them as they arrive would voice the silence in
-between.
-
-Four modes — `closest`, `root` (what the chord did before this node existed),
-`drop 2` and `spread` — plus `low` and `high` for the range, `voices` to cap
-a ninth down to a shell, and `retrigger` to turn the retention off for a part
-that should be articulated rather than sustained.
-
-`bass` pins the lowest voice to the chord's own bass, so the root motion is
-audible. **It disagrees with minimal motion, and the disagreement is
-musical**: pinning the bass in the example above costs the twelve semitones
-the common tone was saving. Both are wanted, neither is a compromise of the
-other, so it is a switch.
-
-### `Mirror`
-
-**Negative harmony is the circle of fifths reflected.** Take the axis halfway
-between the tonic and the dominant — between E♭ and E in C — and reflect every
-pitch class through it. Relative to the tonic that is `7 − x`, and the whole
-theory is that one expression:
-
-| Chord in C | Reflected | What it became |
-|---|---|---|
-| C E G (I) | C E♭ G | i |
-| G B D (V) | F A♭ C | iv |
-| F A C (IV) | G B♭ D | v |
-
-The dominant becomes the subdominant minor and the subdominant becomes the
-minor dominant, because the reflection exchanges the two halves of the circle
-about the tonic. A progression put through it comes back as its own shadow — a
-different piece of music, derived for nothing from one that already works.
-`inversion` is the same operation about the tonic itself, which is what a
-melody wants rather than what a progression does.
-
-**It reflects the pitch class and then re-registers.** Reflecting the pitch is
-the obvious reading and the wrong one: middle C about C's axis is `7 − 60`,
-which is not a note. So the result is taken modulo twelve and placed in the
-octave nearest the note that caused it — which is also what makes `amount`
-usable, because at 50% the reflected notes sit among the ones that passed
-straight through instead of two octaves underneath them.
-
-The axis follows the module's key unless the node names its own scale, and a
-patched root inlet outranks both — the rule `NoteQuantise` sets. `snap` puts
-the reflection back in the scale and is off by default, because a reflection
-that stayed in the key would be a transposition and leaving it is the point.
-
-### `Tonnetz`
-
-**Every chord `Harmony` can reach is one of seven, because that is what a key
-is.** This is the other walk. Three transforms take a major or minor triad to
-another one, each moving exactly one voice by a semitone or a tone and leaving
-the other two alone:
-
-| | | |
-|---|---|---|
-| **P** parallel | C major ↔ C minor | the third moves a semitone |
-| **L** leading-tone | C major ↔ E minor | the root moves down a semitone |
-| **R** relative | C major ↔ A minor | the fifth moves up a tone |
-
-**The circle of fifths is one of the cycles of this object.** Alternate two of
-the three and the roots trace a symmetric division of the octave: `LR` gives
-fifths, `PL` major thirds, `PR` minor thirds. So this is not a different idea
-from `Harmony`, it is the same one with the other two axes exposed — which is
-the argument for having both. `LR` sounds like a progression; `PL` and `PR`
-leave the key at once and sound like film music, because every step is still
-one voice moving one semitone.
-
-`deviation` is the chance of taking one of the other two transforms instead of
-the cycle's next: at 0 the cycle repeats exactly — `PL` closes after six
-steps, `PR` after eight, `LR` after twenty-four — and a few percent is what
-turns a cycle into a walk. `diatonic` refuses any triad the key does not hold;
-since `P` is never diatonic, in practice it restricts the walk to `L` and `R`,
-which is the fifth cycle, which is `Harmony`'s territory arrived at from the
-other direction.
-
-**It emits a triad in root position and leaves the voice leading to
-`Voicer`.** Parsimonious voice leading is the entire point of these
-transforms, and `Tonnetz → Voicer` produces it by construction: two triads
-that share two notes are exactly the case a closest voicing holds two notes
-through. Doing it here would be a second voicer.
-
-### A harmonic patch
-
-```
-Metronome 1 bar ──> Harmony ──root──> Chord (7th) ──> Voicer (closest) ──> MIDI out
-                                                          └──> Mirror ──> MIDI out
-```
-
-`Chord` free-runs — nothing is patched to its note inlet — so the patch needs
-no keyboard. `Harmony` walks it around the key, `Voicer` keeps the common
-tones so the chords move rather than jump, and the `Mirror` branch plays the
-same progression's shadow alongside it. Swap `Harmony` for `Tonnetz` and the
-same patch leaves the key entirely without any voice moving more than a tone.
-
-## Logic Algorithms
-
-Configurable logic gates (all gates can also be inverted) & latches:
-
-- `NOT`
-- `AND`
-- `NAND`
-- `OR`
-- `NOR`
-- `XOR`
-- `NXOR`
-- `ASTABLE`
-- `LATCH`
-
-Logic algorithms are not clocked by the master clock and happen at a much higher sample rate
-
-Decisions recorded for the logic gates:
-
-- A gate folds its operation over every input in its mask, starting from the
-  gate's identity element (1 for AND/NAND, 0 for OR/NOR/XOR/XNOR). **XOR over
-  more than two inputs is therefore parity**: the output is high when an odd
-  number of inputs is high. XNOR is the inverse.
-- Gate inputs are normalised in the hardware layer (see `GATE_INPUT_ACTIVE_LOW`
-  in `src/hardware.h`): an algorithm reads `1` when a gate is present at the
-  jack and `0` otherwise, so an **unpatched input reads 0** and does not force
-  an OR or XOR gate high.
-- `NOT` and `Sustain` take exactly one input port. A mask selecting zero or
-  several ports is rejected at construction (`is_valid()` is false) and the
-  algorithm never touches the hardware.
-- Ports start as inputs at boot. An algorithm claims its outputs in `setup()`
-  and returns every port it claimed to an input when it is destroyed.
-
-# Building
-
-The toolchain is PlatformIO, installed into a project-local `.venv/`. A clone
-needs nothing but `python3`:
-
-```
-make setup     # install PlatformIO and pre-fetch the toolchains (~600 MB, once)
-make build     # build firmware for the Teensy 4.1
-make test      # run the native unit tests, no hardware needed
+make setup     # install PlatformIO into .venv/ and pre-fetch toolchains
+make build     # firmware for the Teensy 4.1
+make test      # native unit tests, no hardware
 make size      # flash and RAM usage
 make upload    # flash an attached Teensy
+make app       # the WebAssembly build and the browser app (clang, lld, node)
 ```
 
-`make` targets bootstrap PlatformIO on first use, so `make test` works in a
-fresh clone on its own. Claude Code on the web provisions the same toolchain
-through `.claude/hooks/session-start.sh` when a session starts.
+`make` bootstraps PlatformIO on first use, so a fresh clone needs only
+`python3`. The Teensy platform version in `platformio.ini` is pinned so the
+core's MIDI Library and USBHost_t36 versions are reproducible.
 
-The Teensy platform version in `platformio.ini` is pinned on purpose. The core
-ships MIDI Library and USBHost_t36, so the platform pin is what makes those
-dependencies reproducible — an unpinned build resolves whatever the registry
-published most recently, and that has already broken this project's DIN MIDI
-settings once.
+Sources build with `-Wall -Wextra -Weffc++ -Wshadow -Werror`; framework
+includes are passed as `-isystem` (`scripts/project_warnings.py`) so `-Werror`
+judges our code only. Headers live next to their sources under `src/`;
+`include/` and `lib/` are unused.
 
-Our sources are compiled with `-Wall -Wextra -Weffc++ -Wshadow -Werror`;
-framework and library include paths are passed as `-isystem`
-(`scripts/project_warnings.py`) so that `-Werror` judges our code and not the
-Teensy core's headers, which are included through
-`src/hal/teensy/teensy_includes.h`. Headers live next to their sources
-under `src/`; the `include/` and `lib/` directories are not used.
+### Versions
 
-## Versions and releases
+`VERSION` at the root is the single source of truth. Builds stamp it with
+`git describe` into `MMMC_VERSION`, `MMMC_GIT_REV` and `MMMC_BUILD`
+(`src/version.h`). To release: update `VERSION`, commit, tag `v<version>` and
+push the tag. The release workflow refuses a tag that disagrees with
+`VERSION`, then publishes the `.hex`, `.elf` and `SHA256SUMS`.
 
-`VERSION` at the repository root is the single source of truth. Every build
-stamps it into the binary along with `git describe`, reachable from firmware as
-`MMMC_VERSION`, `MMMC_GIT_REV` and `MMMC_BUILD` (see `src/version.h`), and
-printed to the serial console at startup:
+### Tests
 
-```
-MMMC 0.1.0+cbb862d
-```
+Hardware sits behind `IGpio` (`src/hal/igpio.h`) and `IMidiOut`
+(`src/hal/imidi_out.h`). Teensy implementations are in `src/hal/teensy/`,
+fakes in `test/fakes/`. Everything else is framework-free and builds on the
+host: `pio test -e native`. Nothing under `src/algorithm/` includes
+`Arduino.h`. CI builds firmware and runs the native tests on every push and
+pull request.
 
-CI builds every push and pull request, and attaches the resulting `.hex` and
-`.elf` to the run for 14 days, so any branch can be flashed and tried without
-cutting a release.
+## Signal bus model
 
-To publish a release:
+Algorithms never bind to hardware. They read and write **buses**; the jacks
+and MIDI endpoints are nodes too. A bus is a virtual patch cable.
 
-1. Update `VERSION` and commit it.
-2. Tag the commit `v<version>` and push the tag.
-
-```
-git tag -a v0.2.0 -m "MMMC 0.2.0"
-git push origin v0.2.0
-```
-
-The release workflow refuses to publish if the tag and `VERSION` disagree, then
-runs the tests, builds firmware, and publishes a GitHub Release carrying
-`mmmc-v<version>-teensy41.hex`, the matching `.elf`, and `SHA256SUMS`.
-
-## Tests
-
-The hardware is behind two narrow interfaces, `IGpio` (`src/hal/igpio.h`) and
-`IMidiOut` (`src/hal/imidi_out.h`). The Teensy implementations live in
-`src/hal/teensy/`; the fakes used by the tests (`FakeGpio`, `RecordingMidiOut`)
-live in `test/fakes/`. Everything else is framework-free and is built on the
-host by the `native` environment:
-
-```sh
-pio test -e native
-```
-
-Nothing under `src/algorithm/` includes `Arduino.h`.
-
-CI (`.github/workflows/ci.yml`) builds the firmware and runs the native tests
-on every push to `main` and on every pull request.
-
-## The module in a browser
-
-The same framework-free core compiles unchanged to WebAssembly, with the
-browser as the hardware: `emulator/` adds a web implementation of `IGpio` and
-`IMidiOut` next to the Teensy one, and `app/` is the app that drives it — the
-patch editor and the emulator, which are one program because the module in the
-page is both the thing being edited and the thing running.
-
-```sh
-make app                         # needs clang, lld and node; no PlatformIO
-open emulator/dist/index.html    # a single self-contained file
-```
-
-The build from `main` is published at
-<https://mixedmode-fx.github.io/central/> (`.github/workflows/pages.yml`),
-and CI attaches every branch's `index.html` to its run. What the WebAssembly
-build can and cannot verify, and how it was arrived at, is in
-`emulator/README.md`; the app is `app/README.md`.
-
-# Signal bus model
-
-Algorithms do not bind to hardware. They read and write **internal buses**,
-and the hardware ports are nodes too. An internal bus is a virtual patch cable.
-
-| Domain | Carries | Buses | Fan-in rule |
+| Domain | Carries | Count | Fan-in |
 |---|---|---|---|
-| Gate | a level (`bool`) | 16 | OR of all writers (a passive mult) |
-| Note | MIDI events (notes, CC, bend, ...) | 8 | arrival order; overflow is counted, never silent |
-| CV | `int16_t`, 12-bit full scale | 8 | sum with saturation |
+| Gate | a level (`bool`) | `N_GATE_BUS` | OR of all writers |
+| Note | MIDI events | `N_NOTE_BUS` | arrival order; overflow counted |
+| CV | `int16_t`, 12-bit full scale | `N_CV_BUS` | sum with saturation |
 
-**The CV domain is the internal control bus.** A modulator writes it, the
-modulation matrix reads it and turns it into parameter writes, and #8's jacks
-will read and write it as voltage. It is deliberately not the note bus: a note
-bus carries MIDI events, whose data bytes are seven bits, so a modulator sent
-that way would arrive at 128 steps and would have to invent a controller
-number to be recognised by. A control signal is a *value*, not an event — it
-has a level every pass whether or not anything changed, which is what a bus of
-`int16_t` already is.
+CV is the internal control bus: `CV_FULL = 4096`, unipolar `0..4095`, bipolar
+`-2048..2047` (`src/bus/domain.h`). Twelve bits keeps eight summed writers
+inside `int16_t` and matches the DAC a jack would use.
 
-Full scale is **twelve bits**: `CV_FULL = 4096`, unipolar `0 .. 4095`, bipolar
-`-2048 .. 2047` (`src/bus/domain.h`). Seven bits is 128 steps across a
-parameter's whole range, which is audible as stepping on anything worth
-modulating — a filter sweep, a detune, a slow glide — and twelve is finer than
-any parameter the module has (a parameter byte is eight bits) and matches the
-12-bit DAC a jack would use, so the matrix rounds *down* into the target's
-range rather than interpolating up from something coarser. It is not fourteen
-because fan-in is a sum and the bus is an `int16_t`: at twelve bits, all eight
-buses' worth of writers at full positive scale come to 32768, one LSB past
-`INT16_MAX`, so eight modulators summed on one bus clip by a single step at
-the very top and nowhere else. At fourteen bits, two writers would clip.
-
-Buses are **double-buffered**: readers see the previous pass, writers write
-the next, and `BusManager::swap()` publishes. Evaluation is therefore
-order-independent, feedback is a one-pass delay instead of a hang (a `NOT`
-feeding itself oscillates at half the pass rate), and every pass is
-deterministic. Each processing stage costs exactly one pass of latency, which
-at gate rate is microseconds.
+Buses are **double-buffered**: readers see the previous pass, writers write the
+next, `BusManager::swap()` publishes. Evaluation is order-independent, feedback
+is a one-pass delay, every pass is deterministic, each stage costs one pass of
+latency.
 
 Every pass, `MixedModeMaster` runs:
 
-1. hardware input nodes (`GateInPort`, `MidiInPort`) sample and write their buses;
+1. input port nodes sample and write their buses;
 2. pool nodes `process()`;
-3. if a clock tick fired, nodes that subscribe `tick()` (the clock is not a bus:
-   a tick carries a count, see #4);
+3. on a clock tick, subscribers `tick()`;
 4. swap;
-5. hardware output nodes (`GateOutPort`, `MidiOutPort`) read their buses and
-   drive the jacks and transports.
+5. output port nodes read their buses and drive the jacks and transports.
 
-**Nodes.** Every algorithm is a `Node` (`src/node/node.h`). It is described by
-an `AlgorithmDescriptor` in the registry (`src/node/registry.cpp`): id, name,
-inlets and outlets with their *domain*, parameter count, state size, and a
-placement-new constructor. A `NodeConfig` (also the preset format) selects an
-algorithm by id and gives a bus index per inlet and outlet; the index is
-interpreted in the domain the descriptor declares, and the validator rejects
-an index that is out of range for that domain. `NO_BUS` leaves an optional
-inlet unconnected.
+**Nodes.** Every algorithm is a `Node` (`src/node/node.h`), described by an
+`AlgorithmDescriptor` in `src/node/registry.cpp`: id, name, summary, category,
+inlets and outlets with names and domains, parameter count, state size and a
+placement-new constructor. A `NodeConfig` selects an algorithm by id and gives
+a bus index per port; `NO_BUS` leaves an optional inlet unconnected. Algorithm
+ids are part of the preset format: append, never renumber.
 
-**Allocation.** All algorithm code is always resident. Instances live in a
-static pool of `N_NODE = 40` uniform slots (`NODE_SLOT_SIZE = 640` bytes each,
-checked per class with `static_assert`), placement-new'd on patch load and
-destroyed explicitly on unload. The slot is sized by the two largest nodes,
-`PolySequencer` and `DrumSeqMidi`, at about 540 bytes each: a 32-step grid
-plus the note-off ledger. The 8 jacks and the MIDI endpoints are reserved
-nodes owned by the master, outside the pool, so a patch cannot delete its own
-MIDI output. **There is no heap allocation after boot**; the native tests
-assert it by instrumenting `operator new`.
+**Allocation.** All algorithm code is resident. Instances live in a static pool
+of `N_NODE` slots of `NODE_SLOT_SIZE` bytes (checked per class with
+`static_assert`), placement-new'd on load and destroyed on unload. The jacks
+and MIDI endpoints are reserved nodes owned by the master, outside the pool.
+**No heap allocation after boot** — the native tests assert it.
 
-**Parameters.** `NodeConfig` carries `N_PARAM = 336` parameter bytes, the
-width of the poly and drum sequencers' step grids (a 16-byte header plus 320
-bytes of steps). Every other algorithm uses the first few and leaves the rest
-zero, which is what makes a `Patch` 11 KB in RAM: fine against 1 MB, but the
-patch storage (#7) and the wire format (#11) will want to skip trailing zeros
-rather than store them. An outlet left at `NO_BUS` is unused, not an error —
-a drum sequencer with three of its eight lanes patched is the normal case.
+**Parameters.** `NodeConfig` carries `N_PARAM` parameter bytes, sized by the
+poly and drum sequencers' step grids. A zero byte means the parameter's
+default (`src/node/param.h`).
 
-**Handover.** Before a patch is unloaded, the master calls `Node::silence()`
-on every pool node, which emits a note-off for everything the node still has
-sounding, then swaps and flushes the MIDI outputs — so a patch swap under a
-held chord or mid-sequence never hangs a note downstream. Node state does not
-survive a swap: the new patch's nodes are constructed fresh.
+**Handover.** Before unload the master calls `Node::silence()` on every pool
+node, which releases everything it has sounding, then swaps and flushes the
+MIDI outputs. Node state does not survive a swap.
 
-Sizing constants live in `src/config.h`. Algorithm ids in
-`src/node/registry.h` are part of the preset format: append, never renumber.
+## Master clock
 
-Algorithms available today:
+One monotonic counter in **subticks**: `CLOCK_SUBTICK` per `MASTER_PPQN` tick.
+The subdivision caps the fastest multiplier — `xN` is exact only when N divides
+`CLOCK_SUBTICK`.
+
+**No node's `tick()` runs in interrupt context.** The ISR increments; the main
+loop reads the count through `MasterClock::consume()`. Subticks arriving
+between passes collapse into one `tick()` with the newest count.
+
+| Source | Driven by |
+|---|---|
+| Internal | interval timer, from BPM (`CLOCK_MIN_BPM`..`CLOCK_MAX_BPM`) |
+| CV | rising edges on the sync jack, `cv_ppqn` per quarter |
+| MIDI | MIDI clock bytes; start / stop / continue drive the transport |
+
+For external sources the timer free-runs between edges at the last measured
+period and each edge re-phases the count **forward only**, so a node never sees
+time reverse. Multiplication from a gate source is refused: it would have to
+extrapolate. Trigger width is wall-clock (`TRIGGER_WIDTH_US`), never ticks.
+
+## Algorithms
 
 | Domain | Algorithms |
 |---|---|
-| Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR` (up to four inlets each) |
-| Clock | `ClockDiv`, `Metronome` (the clock in note values) |
+| Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR` |
+| Clock | `ClockDiv`, `Metronome` |
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
-| Note sequencers | `NoteSequencer`, `PolySequencer` (degrees in a scale, from a root) |
-| Drum sequencers | `DrumSeqGate` (a gate per lane), `DrumSeqMidi` (a note per lane, velocity per cell) |
+| Note sequencers | `NoteSequencer`, `PolySequencer` |
+| Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay` |
-| Harmony | `Harmony` (a progression in the key), `Voicer` (voice leading), `Mirror` (negative harmony), `Tonnetz` (chromatic triads) |
-| Conversion | `Sustain` (gate to CC), `GateToNote` (gate edge to note on/off), `MidiToCV` (notes to pitch, gate, velocity, modulation and a trigger), `CvToNote`, `CvToGate` |
-| Utility | `GateHold` (a switch, a latch, a toggle, or a gate of a set length) |
-| Modulators | `LFO`, `SampleHold`, `Slew`, `Turing` (all write a CV bus) |
-| Rhythm | `Automaton` (a cellular grid of related lanes) |
-
-# Master clock
-
-One monotonic counter for the whole module, in **subticks**: `CLOCK_SUBTICK`
-= 24 of them per PPQN tick, 576 per quarter note. The subdivision is what caps
-the fastest multiplier — `xN` is exact only when N divides `CLOCK_SUBTICK` —
-and 24 was chosen for its divisors, so a triplet is as exact as a duplet. That
-puts the timer at 1.2 kHz at 120 BPM, for an ISR that increments one counter.
-
-**No node's `tick()` runs in interrupt context.** The ISR increments; the main
-loop reads the count through `MasterClock::consume()` and the pass does the
-work, so a slow algorithm cannot stall the clock. Subticks that arrive between
-two passes are collapsed into one `tick()` with the newest count — a node works
-from the count, so nothing is lost.
-
-Three sources feed that counter:
-
-| Source | Driven by | Notes |
-|---|---|---|
-| Internal | the interval timer, from BPM | 20–300 BPM |
-| CV | rising edges on the sync jack | `cv_ppqn` pulses per quarter |
-| MIDI | MIDI clock bytes, at 24 PPQN | start / stop / continue drive the transport |
-
-For both external sources the timer free-runs between edges at the last
-measured period, and each edge re-phases the count onto its subtick boundary.
-Re-phasing only ever moves the count **forward**: a node comparing two readings
-never sees time reverse. An edge whose period is implausible is counted rather
-than believed.
-
-**Multiplication from a gate source is refused**, and says so. With only past
-edges to go on, a multiplier has to estimate the period and extrapolate, which
-puts its extra pulses in the wrong place exactly when the tempo moves — which
-is when a musician notices. From the master tick, where the count is already
-known, multiplication is exact. An inexact multiplier off the tick (one that
-does not divide `CLOCK_SUBTICK`) is refused the same way.
-
-Trigger width is wall-clock, never ticks. A 24-PPQN tick at 120 BPM is ~20 ms
-and a Eurorack trigger is 1–10 ms, so a width in ticks would stop being a
-trigger as soon as the tempo changed.
-
-# MIDI
-
-Two DIN ports, a four-cable class-compliant USB device and a USB host port all
-feed the same algorithm graph.
-
-**In.** Every parser is drained into one queue, tagged with the transport the
-message arrived on; the transport side does nothing but enqueue, and the pass
-dispatches. A full queue drops the newest message and counts it, so "MIDI went
-strange under load" is a number rather than a mystery. Realtime messages
-(clock, start, stop, continue) are transport-level: they reach the master clock
-and no bus.
-
-**Thru is a patch, not a default.** Library soft-thru is off on both DIN ports;
-a `MidiInPort` and a `MidiOutPort` on a shared note bus give thru back when
-somebody asks for it. That is also the clearest demonstration that routing is
-just bus assignment.
-
-**Modifiers** all compose over one held-note model (`src/midi/held_notes.h`):
-which notes are held, in what order, at what velocity — and, for the two nodes
-that play one of them at a time, which one wins and what it arrived with. The rule that governs
-every one of them is that **a modifier owns the note-off for every note-on it
-emitted, and releases it with the transformation it originally applied, not the
-current parameter value** — otherwise moving a transpose offset, or a
-quantiser's root, under a held note hangs it on the downstream synth for ever.
-A modifier that cannot record an emission does not make it.
-
-**`Arpeggiator` holds.** A module with no keyboard attached needs the figure
-to keep running with nobody touching one, so hold latches the chord: it is a
-parameter and an optional gate inlet, either one on its own, so a footswitch
-on a jack and an editor do the same thing. It is deliberately not a sustain
-pedal — while hold is on, the *next* note-on played after every key has been
-released replaces the figure rather than adding to it, which is what every
-hardware arpeggiator does and the reason is that adding makes the chord grow
-by one note every time a player fumbles a change. Adding is still possible:
-keep one key down and play the rest. Taking hold off keeps whatever is still
-physically held and drops only the rest, so lifting the latch under your
-fingers does not cut the notes you are actually playing — and everything the
-latch was keeping is released, because a latched note is still a note this
-node owes a note-off.
-
-## MIDI to CV/gate
-
-`MidiToCV` is the mirror of `GateToNote`, and the node that makes everything
-upstream of it — a keyboard, a sequencer, an arpeggiator, the modifiers —
-reach something that is not a MIDI instrument. One note stream in; pitch, gate,
-velocity, modulation and a trigger out.
-
-**One voice, because a CV pair is one voice.** Pitch is a level and a gate is a
-level: neither can carry a second note, so the node has to choose, and which
-note wins is the same question `NotePriority` answers — lowest, highest or
-latest, and both ask it the same way: the rule is a `HeldNotes` query
-(`NotePriorityRule` in `src/midi/held_notes.h`), not a switch in each node.
-It is asked here rather than solved by patching a `NotePriority` in front,
-because the answer is not only which note sounds. It is also when the
-gate falls, when the trigger fires and which velocity the voice takes, and none
-of that survives a trip through a note bus as anything the next node could
-read.
-
-**What a number on the pitch bus means.** Full scale is `range` octaves, so
-`range` is what a 12-bit DAC's span will be in volts under the usual
-1 V/octave: ten octaves over ten volts by default, which puts a semitone at
-34.1 bus units. `base` is the note that sits at zero — C2 by default, the
-bottom of a five-octave controller — and notes under it clamp there, because
-a fixed range has a bottom and a pitch that wrapped round to the top of it
-would be a wrong note rather than a flat one. The arithmetic is carried with
-eight sub-bits so that pitch bend, which is a fraction of a semitone, is not
-rounded away before it reaches the bus — and bend is part of the pitch rather
-than a second output, because a DAC has one input per jack.
-
-**The gate and the trigger answer different questions.** The gate is up for as
-long as a key is held, which is what an envelope's sustain segment needs; the
-trigger is a fixed-width pulse on every attack, which re-strikes an envelope
-without releasing it. An attack is a note-on that *took* the voice —
-releasing the top of a legato line hands the voice back to the note underneath
-and moves the pitch, and that is not a strike. `gate` set to `retrigger` drops
-the gate itself for one pass on an attack as well, for envelopes with no
-trigger input of their own; it is not the default, because a legato line played
-into a re-gating converter loses its legato.
-
-Velocity and the modulation source — a controller of your choosing, or
-channel aftertouch — are held after the key comes up: an envelope in its
-release is still reading them.
-
-**The sustain pedal is deliberately not handled here.** Holding a note after
-its key has been released is an operation on the note stream, so it belongs in
-a modifier upstream where everything downstream of it benefits too — the same
-reason smoothing lives in `Slew` rather than inside the modulation matrix.
-
-Two of the five outlets reach a pin today: the gate and the trigger are gate
-buses, and `GateOutPort` already drives a jack from one. Pitch, velocity and
-modulation are CV buses, which the modulation matrix can read as it stands —
-keyboard tracking is a route from the pitch outlet to a parameter, with nothing
-new in the matrix, and the app's *MIDI to CV and gate* example reads the pitch
-bus straight back into a note to show that what is on it is a pitch — and
-which become voltages the moment [`CvOutPort`](#still-open) exists.
-
-**And [`CvToNote`](#reaching-the-music-from-the-cv-bus--cvtonote-and-cvtogate)
-is this node read backwards.** That example reads the pitch bus back into a
-note through a modulation route, which is a demonstration rather than a patch;
-`CvToNote` is the cable. The pair is what makes the CV bus a round trip rather
-than a one-way street: send a line out as pitch and gate, put a `Slew` or a
-`SampleHold` in the middle of it, and bring it back as notes — which is a
-whole class of patch neither node can do alone.
-
-## The key
-
-**`NoteQuantise` is called that, and not `Quantise`, because this module
-quantises two unrelated things**: a pitch to a scale, and a patch swap to a
-bar. A name that does not say which is a name a user has to guess at.
-
-Several algorithms have a scale — `NoteQuantise` snaps to one, `Chord` voices
-its intervals in one, `NoteSequencer` and `PolySequencer` pick degrees out of
-one — and having a copy each is right for the algorithm and wrong for the
-instrument: changing key meant editing four nodes and hoping they agreed. So
-the key is one setting for the module, a scale and a root, carried in the
-patch's `GlobalSettings` (`src/midi/global_scale.h`).
-
-**It is the default, and an algorithm overrides it by naming a scale.** That
-falls out of a convention the module already had — a zero parameter byte means
-the default (`src/node/param.h`) — so a scale parameter left alone follows the
-key, and `ScaleId` 0 is `SCALE_GLOBAL` rather than a mode. Chromatic is still
-selectable, appended at the end of the list, and is what a node uses to opt
-out of the key entirely. Following the module's scale means following its
-root as well, because a scale without a root is not a key; a patched root
-inlet outranks both, because a cable is the most explicit thing a user can
-say.
-
-**A key can also name the register it sits in, and until it does it names
-none.** A scale and a pitch class say which notes and which of them is home;
-they cannot say *where* home is. So every node with an absolute root — a
-harmony deciding where its chords sit, a quantiser deciding the bottom of its
-range, a sequencer deciding what pitch its degrees are measured from — kept a
-register of its own, and moving a patch an octave meant editing each of them
-in turn. The note sequencers could not follow the key's root at all for
-exactly this reason: theirs is an absolute pitch naming the octave the pattern
-starts in, and a pitch class cannot say that.
-
-So the key has a third part, `root_octave`, and the whole of it is that **zero
-means the key names no register**. With none — which is what every patch
-written before it carries — each node keeps precisely the root it stored, and
-the note sequencers stay the exception they always were. Set one and it is the
-key's root *note*: every node that follows the module's scale plays from it,
-the sequencers included, and one setting moves the register of the whole
-patch. Naming your own scale opts out of it, as it opts out of the root, and a
-patched root inlet still outranks everything.
-
-It is another of `GlobalSettings`' reserved bytes, so the preset format did not
-have to move for it either. Set it from the console (`key <scale> <root>
-<octave>`), over `SYSEX_SET_GLOBALS` as an eleventh argument, or in the app
-under MIDI → key → register.
-
-The module is chromatic until a key is set, so **a patch written before this
-existed plays exactly the notes it always did.** Set it from the console
-(`key`), from a host over `SYSEX_SET_GLOBALS`, or in the app under MIDI;
-either way it is saved with the patch and pushed to the graph by
-`PatchManager::push_globals()`, the same route the tempo takes.
-
-A self-playing `Chord` sits in the key's register when it has one, and in its
-own `octave` when it does not — the same rule, applied to the one register
-decision that node makes.
-
-`Chord`'s intervals are **steps of that scale**, which is the same thing as
-semitones when the scale is chromatic — so 0 2 4 is a diatonic triad on every
-degree, and the fixed semitone stack it always was when nothing names a key.
-`quality` names one of nine such stacks so it does not have to be typed, in
-the same scale steps: `7th` is a dominant seventh on the fifth degree and a
-minor seventh on the second, with nothing anywhere naming either. `custom`
-is the default and a named stack does not overwrite the typed intervals, so
-switching back finds the hand-built chord as it was left.
-
-**And with nothing patched to its note inlet, `Chord` plays itself.** A voicer
-that needs a keyboard is a voicer that cannot start a patch, and "set the notes
-and let it run" is what a module with no keys attached is for: unpatched, the
-node sounds the tonic triad of the key it is in, at the octave it is given, and
-holds it — no clock, no player, nothing to remember to press. That is exactly
-the shape an `Arpeggiator` downstream wants, because an arpeggiator arpeggiates
-held notes and does not care whose fingers are holding them, so a chord, a
-metronome and an arpeggiator are a complete patch with no input at all.
-
-A held chord is not a frozen one. It is **re-voiced** whenever what it should
-be playing changes — a note-on on the root inlet, the module's key moving under
-it, or any parameter of the voicing being edited — and re-voicing releases every
-note it had sounding from the ledger before sounding the new chord, so editing
-one while it drones cannot strand a note. On a self-playing node the root inlet
-means what `note in` means everywhere else: the whole note rather than only its
-pitch class, and it does not touch the key. That is the difference between a
-sequenced root walking through the chords of one key and one dragging the key
-along behind it, and only the first is a chord progression.
-
-**A root that repeats is not a change**, so by default it does not re-strike
-the chord: a held chord that sounded again every time a sequencer resent the
-note it is already playing is a chord nobody could drone on. `retrigger` says
-otherwise, and `Harmony` is why it exists — that node repeats a degree
-whenever its style or its `gravity` says so, and there the silence is a hole
-in the progression rather than a held note.
-
-What the module cannot do yet is *choose* that root. Root motion and voicing
-are the two layers of the harmonic stack nothing here owns — see
-[docs/harmony.md](docs/harmony.md) for the design of a harmony family built on
-scale-degree arithmetic, where the circle of fifths is one modulo add and
-modal brightness is the same circle read the other way.
-
-# Code structure
-
-Everything is a `Node`. A node reads and writes bus indices and never names a
-pin or a transport; only the hardware port nodes hold an `IGpio` or an
-`IMidiOut`. `MixedModeMaster` owns the clock, the buses, the reserved port
-nodes and the pool, and runs the evaluation order every pass.
-
-Note what the diagram does *not* contain: a `Clock` inside every clocked
-algorithm. Division is `ClockDiv`, a node like any other, and a sequencer
-takes an edge on a gate bus. The three sequencer families share one
-`StepEngine` and differ only in what a step holds and which bus it writes.
-
-```mermaid
-classDiagram
-
-    class MixedModeMaster{
-        + MasterClock clock
-        + BusManager buses
-        + NodePool pool
-        + GateInPort/GateOutPort ports[GPIO_N]
-        + MidiInPort/MidiOutPort midi[]
-        + LoadError load(Patch)
-        + void pass(uint32_t now_us)
-        + uint8_t deliver_midi(source, event, now_us)
-    }
-
-    class MasterClock{
-        + uint32_t subticks
-        + uint8_t source
-        + void advance()
-        + void external_edge(uint32_t now_us)
-        + bool consume(uint32_t&)
-    }
-
-    class BusManager{
-        + gate_read/gate_write
-        + note_read/note_write
-        + cv_read/cv_write
-        + void swap()
-    }
-
-    class Node{
-        + void setup()
-        + void process(BusManager&, uint32_t now_us)
-        + void tick(BusManager&, uint32_t count)
-        + void silence(BusManager&)
-    }
-
-    MixedModeMaster *-- MasterClock
-    MixedModeMaster *-- BusManager
-    MixedModeMaster *-- Node
-
-    Node --|> ClockDiv
-    Node --|> Metronome
-    Node --|> GateSequencer
-    Node --|> LogicGate
-    Node --|> HardwarePort
-    Node --|> MidiModifier
-
-    class ClockDiv{
-        + uint8_t mode
-        + uint8_t amount
-        + uint8_t phase
-        + uint8_t delay
-        + TriggerPulse pulse
-    }
-
-    class Metronome{
-        + uint8_t division
-        + uint8_t feel
-        + uint32_t period
-        + TriggerPulse pulse
-    }
-
-    class StepEngine{
-        + uint8_t length
-        + uint8_t direction
-        + uint8_t advance(rng)
-        + void reset()
-    }
-
-    class GateSequencer{
-        + StepEngine engine
-        + uint8_t probability[]
-        + bool step_on(uint8_t)
-    }
-    GateSequencer *-- StepEngine
-    GateSequencer --|> StepSequencer
-    GateSequencer --|> EuclidianSequencer
-    GateSequencer --|> RandomSequencer
-
-    class NoteSequencerBase{
-        + StepEngine engine
-        + uint16_t scale_mask
-        + uint8_t root
-        + SoundingNotes sounding
-        + uint8_t pitch(step, voice)
-    }
-    Node --|> NoteSequencerBase
-    NoteSequencerBase *-- StepEngine
-    NoteSequencerBase --|> NoteSequencer
-    NoteSequencerBase --|> PolySequencer
-
-    class DrumSequencer{
-        + StepEngine lanes[8]
-        + bool hit(lane, step)
-    }
-    Node --|> DrumSequencer
-    DrumSequencer *-- StepEngine
-    DrumSequencer --|> DrumSeqGate
-    DrumSequencer --|> DrumSeqMidi
-
-    LogicGate --|> NOT
-    LogicGate --|> AND
-    LogicGate --|> OR
-    LogicGate --|> XOR
-
-    class MidiModifier{
-        + HeldNotes held
-        + SoundingNotes sounding
-    }
-    MidiModifier --|> Transpose
-    MidiModifier --|> NotePriority
-    MidiModifier --|> VelocityCurve
-    MidiModifier --|> Chord
-    MidiModifier --|> NoteQuantise
-    MidiModifier --|> Probability
-    MidiModifier --|> Arpeggiator
-
-    class MidiToCv{
-        + HeldNotes held
-        + TriggerPulse pulse
-        + int32_t per_semitone
-    }
-    Node --|> MidiToCv
-
-    class HardwarePort
-    HardwarePort --|> GateInPort
-    HardwarePort --|> GateOutPort
-    HardwarePort --|> MidiInPort
-    HardwarePort --|> MidiOutPort
-
-```
-
-# Control & Feedback
-
-**There is no human input on this module at all.** `src/hardware.h` declares
-eight jacks, two DIN MIDI ports, four USB MIDI cables, a USB host port, a CV
-expansion header, a KeyMech header, two consoles and two status LEDs. No
-encoder, no switches, no display, and no per-output RGB LEDs. Earlier drafts
-of this README promised all four; the hardware does not have them, and this
-project is not going to design them in.
-
-Two things follow, and they shape everything downstream.
-
-**Configuration is entirely host-side.** The serial console and the SysEx
-patch protocol are not conveniences sitting next to a panel menu — between
-them they are the only way to configure the module.
-
-**A bad patch must never be able to lock you out.** With no button to hold at
-power-on there is no hardware recovery path, so the console and the protocol
-run independently of whatever patch is loaded: neither is a graph node,
-neither is reachable from a bus, and a patch cannot disable either or reroute
-the port it talks through. A module that could be bricked by a malformed patch
-would be a module you have to reflash over USB to recover.
-
-## The two status LEDs
-
-`GREEN_LED` (pin 36) and `RED_LED` (pin 37) are the module's entire feedback
-surface. Both are PWM-capable on a Teensy 4.1, so brightness is a second
-dimension and the vocabulary uses it. It is worth learning, because it is the
-only way the module explains itself without a host attached:
+| Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz` |
+| Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
+| Utility | `GateHold` |
+| Modulators | `LFO`, `SampleHold`, `Slew`, `Turing` |
+| Rhythm | `Automaton` |
+
+Every algorithm reports its own name, summary, category, port names, parameter
+ranges, defaults and enum options over the protocol, so a host never hardcodes
+a list, and `params <node>` on the console prints the same thing. What follows
+is only what a parameter list cannot say.
+
+- **Division is a node.** `ClockDiv` writes a gate bus and sequencers take an
+  edge-triggered advance inlet, so one divider can drive several (locking them
+  by construction), a divider can divide a divider, and any gate can advance a
+  sequencer. `Metronome` is the same clock in note values with a straight,
+  dotted or triplet feel; every one of its rates is a whole number of subticks,
+  asserted against `config.h` at compile time.
+- **All three sequencer families share `StepEngine`**
+  (`src/algorithm/sequencer/step_engine.h`), so a gate and a note sequencer at
+  the same length and direction visit steps identically.
+- **Note sequencers store a scale degree, never an absolute note.** Pitch is
+  `root + degree_to_semitone(degree, scale)`, so moving the root transposes in
+  key and changing the scale re-reads the pattern as an interval shape. The
+  root comes from the root inlet when patched (last note-on wins), from a
+  parameter otherwise. Length is counted in advance edges and is exact; the
+  sub-step `gate` percentage extrapolates from the last two advances and is
+  therefore wrong after a tempo change. Ratcheting and real-time record need
+  the same estimate and are deliberately not built.
+- **A drum pattern is one node**, a `StepEngine` per lane, because a user edits
+  the grid as one object. Advance and reset are shared and **each lane has its
+  own length**, which is polyrhythm for free. `DrumSeqGate` has a gate per
+  lane (accent is a second lane); `DrumSeqMidi` has one note outlet with a note
+  number and channel per lane and a velocity per cell.
+- **`GateHold` turns a trigger into a gate** — `latch`, `toggle`, `extend`
+  (minimum length), `limit` (maximum length). **Reset wins** over `set` in
+  every mode, and a mode change is not a reset. Both inlets are optional: the
+  `gate` parameter *is* the output level, so with nothing patched a latch is a
+  switch that a CC or a modulation route can also throw.
+- **Modulators write a CV bus** and know nothing about what they modulate; the
+  modulation matrix decides what the signal reaches. A synced `Lfo` is anchored
+  on subtick zero rather than on construction, and changing its rate re-derives
+  the period without moving the phase. `Slew` rates are **per full scale**, so
+  two different step sizes glide at the same speed.
+- **`CvToNote` and `CvToGate` are the doors from the CV bus into the musical
+  domains**, and `MidiToCV` is the inverse, which makes the CV bus a round
+  trip. `CvToNote` is not `NoteQuantise`: it takes a *level*, with no events at
+  all, and decides both what to play and when. `degree` divides the range into
+  the scale's notes evenly; `snap` divides it into semitones and snaps, which
+  preserves the shape of a signal that was already a melody. `CvToGate`'s
+  hysteresis is not decoration — a signal resting on the threshold would
+  chatter into a stuck note.
+- **`MidiToCV` is one voice, because a CV pair is one voice.** Which note wins
+  is a `NotePriorityRule` (`src/midi/held_notes.h`), asked here rather than
+  patched in front because the answer also decides when the gate falls, when
+  the trigger fires and which velocity the voice takes. Pitch is carried with
+  eight sub-bits so bend is not rounded away, and bend is part of the pitch
+  because a DAC has one input per jack. The gate follows the key; the trigger
+  is a fixed-width pulse on every attack. Sustain is deliberately not handled
+  here — it is an operation on the note stream, so it belongs upstream.
+- **`Turing` is the random source with memory.** `length` bits in a ring, the
+  top bit fed back inverted with probability `chaos` — 0 is a fixed loop, 50 is
+  noise, 100 is a loop of twice the length, and between 0 and 50 the loop
+  mutates a step at a time. Its pulse and its CV come from **one register**, so
+  a rhythm and a melody driven from it change on the same bar. `seed` decides
+  what reset means: at zero it shreds, otherwise it returns to that pattern.
+- **`Harmony` only emits a root.** `Chord`'s intervals are scale steps, so the
+  quality of each degree is already correct. The weight of every move is
+  computed from the scale (`src/midi/root_motion.h`) rather than tabulated, out
+  of facts that hold in any key: `fifths` (which way round the circle, measured
+  in **semitones**, so it finds a pentatonic key's fifths and declines to
+  invent the ones it has not got), `smooth` (interval distance versus shared
+  tones), `leading`, and `spread`, which flattens or sharpens the weights and
+  never zeroes one — so an unlikely move is always available and always in key.
+  `phrase` and `cadence` make it periodic, `loop` fixes the next phrase,
+  `gravity` biases the tonic, `drift` redraws one chord of a loop and keeps it.
+  The walk runs over the first seven degrees, or all of them in a smaller
+  scale.
+- **`Automaton`'s lanes are neighbours.** A Wolfram elementary rule,
+  `next[i] = (rule >> ((left << 2) | (self << 1) | right)) & 1`, so a figure on
+  one lane moves to the next generation's neighbour and a lane with no jack
+  still feeds the ones that have. `revive` reloads the seed on a row that can
+  never change again; a row that merely blinks is a rhythm and is left alone.
+- **`NoteDelay`'s `spread` is why it exists**: each successive gap is a
+  percentage longer (or shorter) than the last, which takes the echoes off the
+  grid — the one thing a module where every edge descends from one divider
+  could not otherwise do. Repeats are transposed by `interval` **scale steps**.
+  Each pending echo carries the pitch it will be released with, so the scale,
+  the interval and the key can all move underneath it, and `dry` copies are
+  owned too.
+- **`Voicer`'s ledger is keyed on the note it emitted**, not the note that
+  caused it, because it emits a function of the whole held chord rather than of
+  one note. Common-tone retention is then the *absence* of code: a shared note
+  is neither released nor re-emitted. `bass` pins the lowest voice to the
+  chord's bass and disagrees with minimal motion, which is why it is a switch.
+- **`Mirror` reflects the pitch class and then re-registers** into the octave
+  nearest the source note; reflecting the pitch itself gives numbers that are
+  not notes. `snap` puts the result back in the scale and is off by default,
+  because a reflection that stayed in the key would be a transposition.
+- **`Tonnetz` is the other walk.** P, L and R each move one voice by a semitone
+  or a tone; alternating two of them traces a cycle — `LR` fifths, `PL` major
+  thirds, `PR` minor thirds. `deviation` is the chance of leaving the cycle,
+  `diatonic` refuses triads the key does not hold. It emits root position and
+  leaves the voice leading to `Voicer`.
+- **Logic gates fold over every input in the mask** from the gate's identity
+  element, so **XOR over more than two inputs is parity**. Inputs are
+  normalised in the HAL (`GATE_INPUT_ACTIVE_LOW`), so an unpatched input reads
+  0 and cannot force an OR high. `NOT` and `Sustain` take exactly one port and
+  are invalid otherwise. Logic is not clocked by the master clock.
+
+## MIDI
+
+All four transports feed the same graph. Every parser drains into one queue
+tagged with its transport; the pass dispatches. A full queue drops the newest
+message and counts it. Realtime messages are transport-level and reach the
+master clock, not a bus.
+
+**Thru is a patch, not a default.** Library soft-thru is off; a `MidiInPort`
+and a `MidiOutPort` on a shared note bus is thru.
+
+**Modifiers** compose over one held-note model (`src/midi/held_notes.h`). The
+rule that governs all of them: **a modifier owns the note-off for every note-on
+it emitted and releases it with the transformation it originally applied**,
+never the current parameter value. A modifier that cannot record an emission
+does not emit.
+
+`Arpeggiator`'s hold is a parameter and an optional gate inlet. While hold is
+on, the next note-on after every key has been released replaces the figure
+rather than adding to it; taking hold off keeps what is still physically held.
+
+### The key
+
+One scale and one root for the module, in the patch's `GlobalSettings`
+(`src/midi/global_scale.h`). A scale is a 12-bit mask, one bit per semitone
+(`src/midi/scale.h`).
+
+It is the **default**, and an algorithm overrides it by naming a scale —
+`ScaleId` 0 is `SCALE_GLOBAL`, not a mode, so a parameter left alone follows
+the key. Following the scale means following its root. **A patched root inlet
+outranks both.**
+
+`root_octave` is the third part: zero means the key names no register and each
+node keeps its own root; set it and every node following the key plays from
+that absolute note. Set the key from the console (`key <scale> <root> <oct>`),
+over `SYSEX_SET_GLOBALS`, or in the app. The module is chromatic until a key is
+set.
+
+`Chord`'s intervals are **steps of the scale**, so `0 2 4` is a diatonic triad
+on every degree. `quality` names one of nine such stacks without overwriting
+the typed intervals. With nothing patched to its note inlet `Chord` **plays
+itself**: the tonic triad of its key, held, which makes a chord + metronome +
+arpeggiator a complete patch with no input. A held chord is re-voiced whenever
+what it should play changes, releasing from the ledger first. A repeated root
+does not re-strike unless `retrigger` is set.
+
+## Control and feedback
+
+There is no human input on the module, so the console and the SysEx protocol
+are the only way to configure it. **Neither is a graph node**, neither is
+reachable from a bus, and a patch cannot disable either — a bad patch must not
+be able to lock you out.
+
+### Status LEDs
+
+`GREEN_LED` and `RED_LED` are the whole feedback surface. Both are PWM, so
+brightness is part of the vocabulary. Nothing in the LED path blocks.
 
 | What you see | What it means |
 |---|---|
-| Green, bright flash on the beat | The clock is running. The flash rate *is* the tempo. |
-| Green, slow dim pulse | Alive, but no clock is running. |
-| Red, solid | No valid patch: the module is running the built-in default. |
-| Red, brief flash | Something was dropped or refused — a MIDI message, a full note bus, a rejected transfer or parameter write. `errors` on the console has the counters. |
-| Both, alternating | Boot, and the answer to a device inquiry, so you can tell two modules apart. |
+| Green, bright flash on the beat | the clock is running; the flash rate is the tempo |
+| Green, slow dim pulse | alive, no clock |
+| Red, solid | no valid patch; running the built-in default |
+| Red, brief flash | something dropped or refused; `errors` has the counters |
+| Both, alternating | boot, and the answer to a device inquiry |
 
-Nothing in the LED path blocks: no delays, no busy waits, and no LED work
-inside a node's `process()` or `tick()`.
+### Boot
 
-## Boot behaviour
+Slot 0 is loaded if it validates. Otherwise the **built-in default patch** runs
+— MIDI thru across every musical transport, a `Metronome` at a quarter note on
+jack 1, a sustain pedal input on jack 8 — so a freshly flashed module is
+observably alive. A corrupt stored patch also lights the red LED; an empty
+store does not. Restoring defaults is host-side (`defaults`, or SysEx).
 
-There is no screen to explain a silence, so a module that appears to do
-nothing must not be the normal case:
+### Patch storage
 
-- Slot 0 of the EEPROM is loaded if it checks out.
-- If it is missing or fails to validate, the **built-in default patch** runs
-  instead — MIDI thru across every musical transport, a `Metronome` at a
-  quarter note on jack 1 at the default tempo, and a sustain pedal input on
-  jack 8. A freshly flashed
-  module is therefore observably alive out of the box.
-- A *corrupt* stored patch also lights the red LED solid; an *empty* store
-  does not, because a new module is not a fault.
-- Restoring defaults is a host-side command (`defaults` on the console, or
-  SysEx) — there is no button to hold at power-on.
+A patch is the node list, the bus per port, and the global settings. It is
+stored in flash-emulated EEPROM (`EEPROM_BYTES`) as `PATCH_SLOTS` independent
+images, each with its own magic, format version and CRC. Slot 0 is current; the
+rest are Program Change presets. A slot failing CRC cannot affect the others.
 
-## Patch storage
+The stored image trims each node's parameter block at its last non-zero byte,
+and the same encoding goes on the wire, so a patch round-trips through the
+store and over SysEx byte for byte.
 
-A patch is the node list plus the bus each inlet and outlet is assigned to,
-plus the global settings — clock source, tempo, PPQN. It is stored in the
-Teensy 4.1's flash-emulated EEPROM (`EEPROM_BYTES` = 4284) as
-`PATCH_SLOTS` = 4 independent images, each with its own magic, format version
-and CRC. Slot 0 is the current patch; the rest are presets for Program Change
-recall. A slot that fails its CRC cannot make the others unreadable.
+Nothing writes flash on a parameter change: an edit marks the patch dirty and
+the autosave writes slot 0 once, two seconds later.
 
-`sizeof(Patch)` is about 11 KB — `N_PARAM` is 336 because the poly and drum
-sequencers carry a 32-step grid — so the stored image trims every node's
-parameter block at its last non-zero byte. A patch of logic and dividers is a
-couple of hundred bytes. The same encoding goes on the wire, so a patch that
-round-trips through the store round-trips over SysEx byte for byte.
+### Serial console
 
-Writes are deliberate: nothing writes flash on a parameter change. An edit
-marks the patch dirty and the autosave writes slot 0 once, two seconds later,
-collapsing a whole knob sweep into a single write.
-
-> **Deferred, not rejected:** the Teensy's microSD socket would hold hundreds
-> of presets, sits on dedicated SDIO pins and needs no pin from `hardware.h`,
-> so it can be added later without touching the hardware surface. Out of scope
-> for now because it is not declared hardware.
-
-## The serial console
-
-USB serial and `SERIAL_UART` (`Serial6`, 115200) both carry the same text
-console. It is how anyone sees inside a running module, and it is the interim
-configuration path until the SysEx protocol is finished.
+USB serial and `SERIAL_UART` both carry the same text console.
 
 | Command | What it does |
 |---|---|
-| `info` | Firmware build, node count, store state |
-| `clock [bpm] [source]` | Show or set tempo and clock source |
-| `key [scale] [root] [oct]` | Show or set the key every algorithm follows |
-| `patch` | The running patch: jacks, MIDI ports, nodes and their connections |
-| `buses` | Live bus state, with the overflow counters |
-| `errors` | Every counter behind the red LED |
-| `algos` | Every algorithm this firmware has, with inlet and outlet counts |
-| `params <node>` | One node's parameters, with ranges, defaults and enum names |
-| `get` / `set <node> <param> [value]` | Read or write one parameter |
-| `slots` | What each preset slot holds |
-| `save` / `load` / `erase <slot>` | Preset management |
-| `defaults` | Back to the built-in patch |
-| `maps` / `map` / `unmap` / `learn` | Controller bindings |
-| `mods` | The modulation routes, and the live level on every CV bus |
-| `mod <slot> <cv bus> <node> <param> [depth] [flags]` | Point a control signal at a parameter |
-| `unmod <slot>` | Forget a route |
+| `info` | build, node count, store state |
+| `clock [bpm] [source]` | show or set tempo and clock source |
+| `key [scale] [root] [oct]` | show or set the key |
+| `patch` | the running patch: jacks, ports, nodes, connections |
+| `buses` | live bus state and overflow counters |
+| `errors` | every counter behind the red LED |
+| `algos` | every algorithm, with port counts |
+| `params <node>` | one node's parameters, ranges, defaults, enum names |
+| `get` / `set <node> <param> [value]` | read or write a parameter |
+| `slots`, `save` / `load` / `erase <slot>` | presets |
+| `defaults` | back to the built-in patch |
+| `maps` / `map` / `unmap` / `learn` | controller bindings |
+| `mods` / `mod` / `unmod` | modulation routes |
 
-## The patch protocol (SysEx)
+### SysEx
 
-Everything the console can do, a host can do over SysEx — and a few things it
-cannot. The wire format *is* the patch format: a bulk transfer carries exactly
-the bytes the EEPROM stores, so a patch that round-trips through the store
-round-trips over the wire byte for byte, and there is no second
-representation to drift.
+Everything the console can do, plus enumeration and bulk transfer. **The wire
+format is the patch format** — there is no second representation to drift.
 
-Framing is `F0 7D <device> <command> <version> … F7`. `0x7D` is the MIDI
-specification's non-commercial manufacturer ID: **it must never ship in a
-product**, and a real ID from the MIDI Association is a decision for whoever
-ships hardware. The version byte is in every message, not just a handshake, so
-an older editor talking to newer firmware is refused per message instead of
-getting half a transfer in first. Binary payloads are 7-in-8 packed, so every
-byte on the wire is `<= 0x7F`.
+Framing is `F0 7D <device> <command> <version> … F7`. `0x7D` is the
+non-commercial manufacturer ID and **must never ship in a product**. The
+version byte is in every message, so a mismatch is refused per message rather
+than mid-transfer. Binary payloads are 7-in-8 packed.
 
-**Discovery.** The module answers the standard Universal identity request
-(`F0 7E <dev> 06 01 F7`) and blinks both LEDs, so an editor finds it among the
-host's ports and a user with two modules can see which one answered. It then
-reports its capabilities (`N_NODE`, bus counts per domain, `MAX_IN`/`MAX_OUT`,
-`N_PARAM`, slot count and size, how many controller bindings and modulation
-routes it holds, and what full scale on a control bus is) and enumerates every
-algorithm and every
-parameter descriptor straight off the compiled table — so an algorithm added
-to the firmware appears in an editor with no editor change, and a hardcoded
-list cannot silently drift.
+- **Discovery.** The module answers the Universal identity request
+  (`F0 7E <dev> 06 01 F7`) and blinks both LEDs, then reports its capabilities
+  and enumerates every algorithm and parameter descriptor off the compiled
+  table — names, summaries, categories, port names, ranges, defaults, enums.
+- **14-bit values.** A parameter byte is eight bits and a SysEx data byte is
+  seven, so `SYSEX_SET_PARAM` carries the eighth bit in an optional argument
+  and `SYSEX_PARAM_VALUE` and `SYSEX_PARAM_DESC` answer with 14-bit values.
+- **Two tiers of write.** A bulk transfer is chunked with a sequence number and
+  a checksum per chunk and accumulates into a staging buffer; the live graph is
+  untouched until the whole image passes magic, version, CRC and validation. An
+  incremental edit is one message changing one field.
+- **Program Change recall** is off by default, with a configurable channel and
+  port. A recall can be immediate or quantised to the next beat or bar;
+  immediate with the clock stopped. The module announces a recall to the host.
 
-**An algorithm describes itself, not just its shape.** The registry reply
-carries a name for every inlet and every outlet, a one-line summary of the
-algorithm and the **category** it belongs to — logic, clock, sequencer, MIDI,
-modulator, utility — alongside the domains and counts. The category is the
-shelf an editor files it on, and it is the firmware's to say for the same
-reason the names are: a host that grouped thirty algorithms by guessing from
-their names would guess wrong the first time the firmware gained one.
-`test_params` fails on an algorithm that ships without a category, as it does
-on one that ships without port names. A host that has only counts can
-say *in 0* and *in 1*; it cannot say which one advances the sequencer and
-which one resets it, so a user has to read the firmware to patch a node.
-Parameters have carried names since the parameter descriptors landed, and this
-is the same argument at port scope — `test_params` fails if an algorithm in
-the table ships without them. The strings are appended after the algorithm's
-name rather than spliced into the record, so a host that only knows the older
-layout stops where it always did and needs no version bump. The capabilities
-reply grew the same way, for the same reason.
+What survives a change:
 
-**A parameter value is eight bits and a SysEx data byte is seven.** Several
-ranges reach 255, and the high byte of a step pattern *is* step 8 — so
-`SYSEX_SET_PARAM` carries the eighth bit in an optional extra argument and
-`SYSEX_PARAM_VALUE` answers with a 14-bit value. Truncating instead does not
-round the value: writing step 8 would clear the byte and take the other seven
-steps with it.
-
-The same is true of a *descriptor*: `SYSEX_PARAM_DESC` sends `min`, `max` and
-`def` as 14-bit too (protocol version 2). It did not, and a range of 0..255
-arrived as 0..127 — so the app drew a slider that could not reach step 8 and
-its validator refused every patch that had one, which is a pattern with a hit
-on the eighth step of any lane. A truncated descriptor is worse than a
-truncated value: it makes legal patches unreachable rather than wrong.
-
-**Two tiers of write.** A bulk transfer is chunked, with a sequence number and
-a checksum per chunk, and accumulates into a staging buffer: the live graph is
-untouched until the last chunk has arrived and the whole image has passed the
-magic, version, CRC and validator checks. An incremental edit is one message
-changing one field — *node 4, inlet 0, now reads bus 6* — which under the bus
-model is one byte, with no re-sort, no graph rebuild and no cycle re-check.
-
-**What survives a change**, written down once because it is the part that
-bites:
-
-| Change | What is reconstructed |
+| Change | Reconstructed |
 |---|---|
-| A parameter | Nothing. A running sequencer keeps its step position, a divider its phase. |
-| A connection | Only the node whose connection changed. It gets its handover — every note it owns is released — and starts fresh; every other node keeps its state. |
-| A port | Nothing. Port nodes are configured, not constructed. |
-| A whole patch | Everything. Sequencers restart, dividers re-phase onto the master count. |
+| A parameter | nothing |
+| A connection | only that node — it gets its handover and starts fresh |
+| A port | nothing; port nodes are configured, not constructed |
+| A whole patch | everything |
 
-**Program Change recall** is **off by default**, and both the listening
-channel and the port are configurable. Otherwise a Program Change intended for
-a downstream synth silently switches the user's patch, which would be the most
-likely field complaint in the whole feature. A recall can be immediate,
-quantised to the next beat, or quantised to the next bar (four beats); with
-the clock stopped it is immediate, because a recall that never happens is
-worse than one that glitches. The module announces a recall to the host, so an
-editor follows along without polling.
+### Controller mapping (MIDI CC)
 
-**A bad patch cannot lock the module out.** The handler is not a node, holds no
-bus index, and nothing a patch can express reaches it. A malformed transfer
-never touches the active patch, a partial one is abandoned on a timeout, and
-the test for all of it is to send garbage — an unknown command, a chunk from
-nowhere, a bad checksum, a lost chunk, a patch that fails validation — and
-then a good patch, and watch the good one land.
+`N_CC_MAP` bindings live in the patch, apply at the MIDI input layer before the
+graph runs, and write through the same validated entry point the console and
+SysEx use. Deliberately **not** a node: a parameter has no domain, no fan-in
+rule and no per-pass value.
 
-## Controller mapping (MIDI CC)
+A target has a kind: `node` (index plus parameter), `clock` (tempo, source, CV
+PPQN) and `transport` (start, stop, continue, tap tempo). `port` is reserved.
 
-SysEx is the right answer for an editor and the wrong answer for a
-performance. A CC is what a musician already has under their fingers, and with
-no encoder and no display it is the only way to change anything while playing.
+- **14-bit**, as CC *n* MSB and CC *n*+32 LSB, because tempo does not fit in
+  seven bits. A lone MSB is applied rather than stalling.
+- **Takeover**: `jump` (default), `pickup`, `scale` (anchor on first move and
+  map the travel either side of it).
+- **Relative encoders** in all three encodings (two's complement, signed bit,
+  offset-64). A relative mapping sidesteps takeover entirely.
+- **Pass-through** is off by default.
+- **Learn** binds the next CC seen, times out, and ignores the control cable.
+- **Rate limiting at the pass boundary**: only the newest value per mapping
+  survives to the next pass.
 
-A mapping table lives in the patch, applies at the MIDI input layer before the
-graph runs, and writes through the same validated entry point SysEx edits and
-the console use. It is deliberately **not** a node: a parameter is not a bus
-signal — it has no domain, no fan-in rule and no per-pass value — so routing it
-through the graph would mean a mapping only worked when the CC's port happened
-to be patched to a bus, and stopped existing the moment a swap removed the
-node.
+### Modulation
 
-`N_CC_MAP` = 32 bindings, a controller's worth. Unused entries cost nothing in
-the stored image or on the wire.
+`N_MOD_ROUTE` routes in the `Patch` (`src/control/mod_matrix.h`), built like
+`CcMapper` and ending at the same `PatchManager::set_param`. Runs between
+passes, after `CcMapper::apply` and before `MixedModeMaster::pass`, reading the
+front buffer — so a route sees a published value and order does not matter.
 
-**What a mapping can reach.** A node's parameter is the common case, but the
-master clock is not a node, so the target space has a kind: `node` (index plus
-parameter), `clock` (tempo, source, CV PPQN), and `transport` (start, stop,
-continue, and tap tempo — `MasterClock`'s header has promised tap since the
-clock was built and this is the entry point). `port` is reserved.
+- **Absolute** sweeps the target across the route's range; **offset** keeps the
+  parameter's own setting as a centre. Each offset lane remembers what it
+  wrote, so a target that has moved elsewhere re-takes the centre.
+- Each route carries a depth, a sub-range in the target's units, and
+  `bipolar` and `invert` flags. Polarity belongs to the route, not the bus.
+- **Two routes may not share a target** — the validator refuses it; the CV bus
+  is where two modulators mix. A route cannot reach a `transport` target.
 
-**Tempo does not fit in seven bits.** 20 to 300 BPM over 128 CC steps is 2.2
-BPM per step, which is unusable for anything but a coarse sweep. A mapping can
-be flagged 14-bit — CC *n* as the MSB, CC *n*+32 as the LSB, the standard
-convention — which resolves the full range finely enough to be worth turning.
-A lone MSB with no LSB is applied rather than stalling, which costs one message
-of latency on a controller that sends LSB first.
+One write per route per pass. Routes travel in the patch image, over SysEx as
+`SET_MOD_ROUTE` / `GET_MOD_ROUTE`, and through the console as `mods`.
 
-**Takeover**, because a patch recall or a SysEx edit moves a value while the
-physical knob stays put, and with no display the user cannot see it coming:
+### NRPN
 
-- **Jump** (the default) takes the value immediately. Loud, but it is the only
-  mode that always responds, and a silent knob is a worse first impression.
-- **Pickup** ignores the knob until it crosses the current value. Correct, and
-  confusing the first time a knob does nothing.
-- **Scale** freezes an anchor when the knob is first moved and maps the travel
-  either side of it onto the range either side of the value, so the knob still
-  reaches both ends and the move is reversible.
-
-**Relative encoders** send an increment, not a position, in one of three
-incompatible encodings (two's complement, signed bit, offset-64). All three are
-supported: an encoder read as absolute makes a parameter jump to the extremes
-with nothing to diagnose it by. A relative mapping sidesteps takeover
-entirely, which is why it is the mode worth recommending.
-
-**Pass-through** is off by default — the user bound this CC deliberately — and
-is one flag away. A consumed CC never reaches a note bus; a forwarded one does
-and reaches a `MidiOutPort` as well as moving the parameter.
-
-**Learn**, without a panel: the editor or the console says *the next CC you see
-binds to node 4 parameter 1*, and the module answers with what it bound. It
-times out, and it ignores the reserved control cable — a learn that bound to
-its own control port would be a trap.
-
-**Rate limiting is at the pass boundary, not per event.** A stuck controller or
-a MIDI loop can hammer a CC thousands of times a second; only the newest value
-per mapping survives to the next pass, so a full-rate sweep costs exactly one
-parameter write per mapping per pass. That is the same "collapse the subticks"
-discipline the master clock already uses.
-
-Console: `maps`, `map <slot> <cc> <node> <param> [min] [max]`,
-`learn <slot> <node> <param>`, `unmap <slot>`.
-
-## Modulation: a control signal reaching a parameter
-
-A modulator produces a value every pass on a CV bus. A parameter is a byte on
-a node. The **modulation matrix** (`src/control/mod_matrix.h`) is the piece
-between them, and it is built the same way `CcMapper` is, because it is
-answering the same question with a different source:
-
-- **The table is part of the `Patch`, not the graph.** Everything the CC
-  section says about a parameter not being a bus signal applies here word for
-  word. A route is not a node: it would need a pool slot each, and the
-  modulation would stop existing the moment a swap removed that node.
-- **It writes through the same applier** a mapped CC does, which ends at
-  `PatchManager::set_param`. One validator, one set of tests. A modulator
-  cannot reach anything a knob could not, and is refused identically when it
-  asks for something out of range.
-- **One write per route per pass**, whatever the signal did in between — the
-  same rate-limiting discipline, for the same reason.
-
-`N_MOD_ROUTE` = 16 routes, two per CV bus, which is the shape that actually
-occurs: one modulator reaching several parameters. Unused entries cost nothing
-stored or on the wire.
-
-**Where it runs.** Between passes, from the main loop, after `CcMapper::apply`
-and before `MixedModeMaster::pass`. The buses' front buffer holds what the
-modulators wrote during the *previous* pass, so a route reads a value that is
-finished and published — the same one-pass delay every reader in the module
-sees, and the reason evaluation order does not matter here either.
-
-**Absolute and offset.** Absolute is the modulator behaving as a knob: the
-signal *is* the value, swept across the route's range, which is what "connect
-it as if it were a MIDI CC" asks for. Offset keeps the parameter's own setting
-as a centre and swings around it — what a modulator means on a synthesiser,
-and the mode that lets a CC and an LFO share one target and *cooperate*: the
-knob moves the centre, the LFO moves around the centre. That only works if the
-matrix can tell "the user moved the set point" from "this is what I wrote last
-pass", so every offset lane remembers what it wrote; a target that is not
-where the matrix left it has been moved by somebody else and the centre is
-re-taken from it. That is the same anchor discipline scale takeover uses.
-
-Each route also carries a **depth** (a fraction of the swept range), a
-sub-range in the target's own units, and two flags: **bipolar**, which says to
-read the signal as centred on zero rather than as a level from zero, and
-**invert**. Polarity is a property of the *route* and not of the bus, because
-the same signal can legitimately be read either way by two different routes.
-
-**Two routes may not share a target.** The validator refuses it: two writers
-racing over one value has no defined result — and the module already has a
-place to mix two modulators, which is the CV bus itself, where fan-in is a
-sum. A modulator also cannot reach a `transport` target: those fire, they do
-not hold a value, and there is nothing for a continuous signal to set.
-
-Routes travel in the patch image (format version 3; a version 2 image is still
-read and simply has none), over SysEx as `SET_MOD_ROUTE` / `GET_MOD_ROUTE`,
-and through the console as `mods`, `mod` and `unmod`.
-
-## What CC cannot reach: NRPN and pattern data
-
-The rule that decides the tier is address space and payload width, not
-importance: **if it changes the graph's shape it is SysEx; if it changes a
-value inside a node it is CC or NRPN.**
+The rule: **if it changes the graph's shape it is SysEx; if it changes a value
+inside a node it is CC or NRPN.**
 
 | Tier | Carries | Use |
 |---|---|---|
-| CC | one 7-bit scalar, or 14-bit as a pair | performance: turn a knob, move a parameter |
-| NRPN | 14-bit address + 14-bit value | every parameter of every node, addressed |
-| SysEx | arbitrary length | structure, pattern data, bulk transfer, enumeration |
-
-CC has 120 usable numbers and a 7-bit value; this module has
-`N_NODE` × `N_PARAM` = 13 440 parameters before the clock and the transport
-are counted, so CC cannot address the parameter space even if every value
-fitted.
-
-**The NRPN address space**, written down here and reported in the capability
-message so an editor reads it rather than hardcoding it:
+| CC | one 7-bit scalar, or 14-bit as a pair | performance |
+| NRPN | 14-bit address + 14-bit value | every parameter, addressed |
+| SysEx | arbitrary length | structure, patterns, bulk, enumeration |
 
 ```
 0x0000 .. 0x347F   a node's parameter: node = address / N_PARAM,
@@ -1632,305 +436,53 @@ message so an editor reads it rather than hardcoding it:
 0x34A0 .. 0x3FFF   reserved
 ```
 
-**The bases move when `N_NODE` moves**, and the protocol version moves with
-them — which is what happened when the pool went from 32 slots to 40 to make
-room for a patch that could hold one of every algorithm. The ceiling on the
-pool is this address space rather than memory: 40 × 336 leaves 2912 addresses
-reserved, and 48 would leave 224.
+The bases move when `N_NODE` moves, and the protocol version with them. This
+address space, not memory, is the ceiling on the pool. The capability message
+reports it so an editor does not hardcode it.
 
-It reaches the same target space CC mapping defines and ends at the same
-`set_param`, so NRPN and CC writing one parameter produce identical results
-and are rejected identically. Data Increment and Decrement (CC 96/97) are
-supported, reading the current value rather than tracking it.
+NRPN is **off by default**, enabled per port and channel, because CC 99, 98, 6
+and 38 look like ordinary CCs to everything upstream. A partial sequence writes
+nothing and times out. Data Increment / Decrement (CC 96/97) read the current
+value rather than tracking it.
 
-**NRPN is off by default, and enabled per port and channel.** CC 99, 98, 6 and
-38 look like ordinary CCs to everything upstream, so a module that always
-consumed them would silently eat a stream on its way to a downstream synth. A
-partial sequence writes nothing: the address is buffered, the write happens on
-the data MSB, and a sequence that stops halfway times out rather than pairing
-one gesture's address with the next one's value.
+### Step-record
 
-**Pattern data.** `N_PARAM` is 336 because the poly and drum sequencers carry
-a 32-step grid, so a note sequence is already inside `NodeConfig::params` and
-travels with the patch — no separate arena is needed, and a full four-voice
-32-step grid fits a preset slot with room to spare. Two SysEx messages read
-and write a run of a node's parameter bytes, going through the same validated
-`set_param` as everything else.
+A note sequencer stores degrees and a keyboard sends pitches, so entry is a
+conversion. A `record` note inlet and a `record enable` gate inlet: a note-on
+writes the step under the record cursor and advances it; reset returns both
+cursors to the first step. A note outside the scale snaps to the nearest tone
+in it and the snap is counted. `rest key` and `tie key` (default MIDI notes 0
+and 1, configurable) enter rests and ties.
 
-## Entering notes: step-record
+## The module in a browser
 
-A note sequencer stores **scale degrees** and a keyboard sends **pitches**, so
-entry is a real conversion. Two inlets do it: a `record` note inlet and a
-`record enable` gate inlet. A note-on writes the step under the record cursor
-and advances it; reset returns both the playback and the record cursor to the
-first step. It works with any keyboard patched to any port and needs no host.
+The same framework-free core compiles unchanged to WebAssembly with the browser
+as the hardware. `emulator/` is the web implementation of `IGpio` and
+`IMidiOut`; `app/` is the app that drives it — the patch editor and the
+emulator are one program, because the module in the page is both the thing
+being edited and the thing running.
 
-**A played note outside the current scale snaps to the nearest tone in it** —
-the same rule `NoteQuantise` follows — rather than being refused, because a
-step-record that silently dropped a note would be worse than one that put it a
-semitone away. Snaps are counted so a user can see it happening.
+```sh
+make app                         # clang, lld and node; no PlatformIO
+open emulator/dist/index.html    # a single self-contained file
+```
 
-**Rest and tie** are enterable, or step-record is only good for continuous
-runs: two note numbers are reserved for them (`rest key`, default MIDI note 0;
-`tie key`, default note 1), both below anything a keyboard plays and both
-configurable.
+The build from `main` is at <https://mixedmode-fx.github.io/central/>, which is
+also what satisfies Web MIDI's secure-context requirement. See
+`emulator/README.md` for the seam and its limits, `app/README.md` for the app.
 
-**Real-time record** — capturing against the running clock, quantised to the
-step grid — is specified but deliberately not built. It needs the same period
-estimate the sub-step gate does, and that should prove itself on hardware
-first.
+## Not built
 
-## The app
-
-`app/` is the browser app: the patch editor and the emulator, merged. With no
-encoder, no switches and no display, it is not a nicer alternative to a panel
-menu — between it and the console, it is how the module gets configured, so it
-is a shipping deliverable rather than a companion app. It is served from GitHub
-Pages, which is also what satisfies Web MIDI's secure-context requirement: a
-`file://` copy cannot reach a module.
-
-**The module runs in the page, always.** The firmware compiled to WebAssembly
-is two things at once, and that is why the two pages became one:
-
-- it is the **transport** the editor talks to. `Device` talks to a transport,
-  not to Web MIDI, so every edit reaches the module as the SysEx message a
-  cable would have carried, and the validator that accepts or refuses a patch
-  is the firmware's own.
-- it is a **machine that runs**. The page is its main loop, its interval timer
-  and its sync pin, so its jacks, LEDs, MIDI output and sequencer positions are
-  live beside the controls that shape them — the step being played is outlined
-  in the grid you are editing.
-
-That also matters beyond convenience: **Web MIDI does not exist on iOS at all**
-and needs a permission prompt and an OTG cable on Android, so an app that could
-only reach a module over Web MIDI would be unusable on most phones. Running the
-module in the page needs none of it.
-
-It is a client of the protocol and nothing more. Everything it knows about what
-the firmware *has* — the algorithms, their inlets and outlets and domains,
-every parameter's range, default, display kind and enum options, and the
-module's real capacities — is read from the device, so an algorithm added to
-the firmware appears with a working panel and no app change.
-
-Three things keep it honest, and all three are checked in CI:
-
-- **The message layout is generated, not copied.** `app/src/protocol.js` is
-  derived from the firmware headers; `make app` fails if the checked-in copy
-  has drifted. A protocol change breaks both builds at once, which is the
-  reason the app lives in this repository.
-- **Client-side validation uses the same rules** the firmware enforces, so an
-  error surfaces while editing rather than on send. An app that lets you build
-  a patch the module will reject is worse than no app.
-- **It is tested against the real firmware.** The module is compiled to
-  WebAssembly and the app's own transport and codec drive it over the actual
-  SysEx protocol — so "a patch the app accepts is never rejected by the
-  firmware's validator" is a check, not a hope. The patch library, the runtime
-  seam and every example patch are checked the same way.
-
-**Four tabs, and a place to go and listen.** *patch*, *MIDI* and *library* are
-the three things there are to edit and *schema* is what the module can tell
-something else about itself; **play** is the module *running*, and it
-sits at the top of the page next to *connect a module* because those two
-buttons answer the same question — which module am I listening to, the one in
-this page or the one on the cable. Play is the emulator's surface: the LEDs and
-the gate buses, the clock, the eight jacks, an on-screen keyboard, a small synth
-and a drum kit per drum sequencer so the patch can be heard, the MIDI the module
-is sending — and the two views
-that answer a question no lamp can, because their answer only exists over time.
-A **scope** draws every jack and gate bus the patch uses against the last four
-seconds, which is the only way to read a divider, a Euclidean pattern or a
-logic gate; a **piano roll** draws the notes of the last eight seconds with a
-colour for each place a note was seen — played in, sent out, and each note bus
-the patch writes — so the same phrase is visible at every point in the chain
-and a bus carrying something unexpected stands against the one that does not.
-
-**What you hear is a choice, and there can be several.** Audio used to be
-whatever left a MIDI output node, which is nothing at all while a patch is
-being built: a bus only leaves the module once somebody has patched a MIDI out
-to it. *listen* is a list of players now — each one voice pointed either at
-what the module sends or at **a note bus**, read straight off the bus, with its
-own waveform and its own level, so a sequencer on one bus and an arpeggiator on
-another can be told apart by ear.
-
-**A drum sequencer is an instrument rather than a source**, so it is not one of
-those players: every drum sequencer in the patch gets **its own kit and its own
-level** — acoustic, 808, 909 or a drum synth — and is audible because it is in
-the patch rather than because somebody added a player for it. The kits are
-synthesised, not sampled, which is what lets the whole app stay one file that
-opens from a download; the machines they are named after were synthesisers too.
-A `DrumSeqMidi` lane plays the drum its note number means in General MIDI, and
-a `DrumSeqGate` lane — which carries no note number at all — plays the drum the
-firmware would send for that lane, so eight identical beeps become a kit.
-
-**The gate listener says which gate it is listening to**, internal or external:
-any of the module's own **gate buses**, whether or not anything is patched to
-one, or the **jacks**, where that signal leaves the module. A blip per rising
-edge, at its own level, because it is percussion under the notes rather than
-part of them — and it is the only way a clock division or a logic gate is
-audible at all, since those patches send no MIDI.
-
-Both are filled from the module's own sampling, **once per pass** rather than
-by the page polling at paint time. A trigger here is high for one or two
-milliseconds and an animation frame is sixteen, so a view that reads the levels
-when it happens to draw shows a pattern nobody is playing — which is what the
-gate dots and jack lamps used to do.
-
-Buses are the connections: every inlet and outlet is a selector offering only
-the buses of its own domain, under the name the firmware gives it — *advance*
-and *reset* rather than *in 0* and *in 1* — and each one says what else is on
-its bus, because that is what a patch cable would have shown. Dragging one
-sends a single message rather than a full dump. The sequencers get
-purpose-built views — a step grid for the gate and drum sequencers, with each
-lane's own length visible, and a note lane over **scale degrees** for the note
-sequencers, showing the pitch each degree resolves to so changing the root
-visibly moves the pitches without touching the stored pattern.
-
-**A node added is a node connected.** Its required inlets land on a bus
-something already writes — the node you added last, so a chain builds as you
-type — and its first outlet on a bus nothing writes yet. Added unconnected, a
-node with a required inlet is a patch the module refuses, which used to leave
-the app a whole graph ahead of the device and every subsequent incremental edit
-addressing a node that was never taken. The app now tracks that divergence
-explicitly: a patch its own validator refuses is never sent, and the first edit
-that makes it valid sends the whole thing.
-
-**What can be added is a list you can read.** Thirty algorithms in a `<select>`
-is thirty lines of one font, and the only thing the control can say about each
-one is its label — so the label had become the whole description
-(*EuclidianSequencer — 2 in, 1 out*) and still could not say what the algorithm
-*does*, while a phone drew the lot as a full-screen wheel of truncated strings.
-The add list is built instead: **shelved by the category the module reports**,
-one row per algorithm carrying its name, what it costs in connections and the
-firmware's own summary underneath, with a search box that narrows thirty rows
-to the two you meant. It is a listbox rather than a menu of divs — arrows,
-Enter, Escape, `aria-activedescendant` — because a `<select>` gives that away
-for free and a replacement that does not is a downgrade for anyone not using a
-mouse.
-
-**A direction is a setting, not a kind of block.** A jack and a MIDI port were
-each offered twice in that list — *jack in* and *jack out*, *MIDI in* and *MIDI
-out* — so which way a port faced was a decision you made before you had the
-port, and changing your mind meant deleting one and adding its opposite on the
-same bus, found again by hand. A jack is a jack: it is added facing the way
-most patches want it, and **in or out is a toggle in its own config**, beside
-the bus it is on, which the turn carries with it. A gate jack's direction is a
-field the firmware has, so the toggle writes it. A MIDI port's is not — the
-module has four inputs and four outputs and they are different ports — so the
-toggle *moves* the port, taking its cables, its channel and its note bus to the
-first free one on the other side and leaving the one behind unused. Both read
-as the same switch, and the patch says the same thing afterwards either way.
-
-**A modulated parameter is a socket; the rest are not.** A modulation route
-reaches a *parameter*, and a parameter is a different kind of thing from a
-port — it has no domain and no bus, and a node has anywhere from two of them
-to three hundred and thirty-six. Drawing every one on the block would bury the
-signal path under a wall of sockets and say nothing, because a patch is not
-about the parameters nobody has touched. So a parameter that something is
-modulating gets an inlet on the block, drawn with a square dot, and an
-unmodulated one stays in the panel below where it has always been. Dragging a
-control signal onto a block is what turns one into the other: the drag cannot
-finish on a socket that does not exist yet, so it opens a dropdown of that
-block's parameters — every one the module describes, minus any a route already
-owns, since the firmware refuses two routes on one target. *How* it modulates
-— depth, offset or absolute, bipolar, inverted — is edited beside the
-parameter it moves, in the block's own panel, because "what is happening to
-this control" is the question somebody is asking when they look at it. A route
-to the clock has no block to land on and lives in the panel only.
-
-**Patches live in the browser.** A module holds four preset slots in EEPROM and
-the module in the page holds its own in RAM, which a reload empties; neither is
-somewhere to keep work. So the app keeps a library in `localStorage`, and what
-it stores is the patch **image** — the same bytes a `.syx` file carries and a
-slot holds, not an object of the app's own shape that would be a third format
-to keep in step with the firmware. Whatever is being edited is written back on
-every change, so a reload picks up where you left off; anything unsaved is put
-in the library before something replaces it. Twenty-three example patches, each
-exercising one part of the machine, are there to start from — and CI loads
-every one of them into the real firmware, so an example cannot rot.
-
-**A controller plays it.** A MIDI controller plugged into the *computer* is
-routed into the module's own MIDI input on a chosen port and channel, and what
-the module plays can go back out to a real port. Routing it in rather than
-around is what makes **learn work with no module in the room**: an incoming CC
-takes the path `main.cpp` gives it — preset recall, then NRPN, then the binding
-table, then the graph — through the firmware's own control plane.
-
-**Controller bindings are edited, not only learned.** Learn is the fastest way
-to bind a controller you have in front of you and the only way to bind one
-whose CC number you do not know — and it was the only way to bind anything at
-all, so a binding could not be read back, retargeted, narrowed to a range or
-deleted, and could not be made without the hardware present. The MIDI tab lists
-every binding in words, and every field of every slot is editable: CC, channel,
-source ports, target, sub-range, takeover mode, relative encoding, 14-bit
-pairing and pass-through. MIDI routing, the clock, Program Change recall and
-NRPN are there too, all of which the patch has always carried and none of which
-had a control.
-
-**A patch exports as `.syx` and as JSON.** The `.syx` file is the patch
-*image*, which is what a module and a librarian want and what nobody can read;
-the JSON is the same patch in words — named algorithms, jacks numbered from 1,
-sequencers as patterns rather than bytes — and it imports back, so it is a door
-in both directions rather than a one-way export.
-
-**And the format describes itself, so something else can write one.** The
-editor can build any patch this module runs because it asked the module what it
-has; anything else — a language model, a script — gets the JSON above and not
-one of the rules it obeys, and answers with an algorithm this firmware has not
-got or a bus that does not exist. The *schema* tab turns what the device
-reported into a **JSON Schema** of that same JSON: every algorithm by name,
-each with its connections in the firmware's own order, each parameter with its
-range, its enum options and its default, the sequencer sugar, and the module's
-real jack, bus and node counts. Nothing about any algorithm is written in the
-app, so the schema describes the module in front of you — including one running
-firmware the app has never heard of. The page hands it over inside a prompt,
-with a worked example and optionally the patch on screen, and takes the answer
-back in a box that loads it into the editor: an answer that validates is one
-`fromPatchJson` builds and the firmware's own validator then judges, which is
-what makes "it validates" mean anything. CI checks the schema against the real
-firmware both ways round — every example patch passes it, and a patch the
-firmware refuses fails it.
-
-**The layout is built for a phone first.** With the module in the page there is
-no cable to plug in, so a phone is a fully working app and the only one an
-iPhone can have. Every control is finger-sized, every parameter has a number
-field beside its slider — a slider alone cannot hit a value and is hopeless on
-a touch screen — and anything that cannot shrink scrolls inside its own box
-rather than pushing the page sideways.
-
-Browser reach is a real constraint for reaching *hardware*: Chrome, Edge and
-Opera have Web MIDI, Firefox asks permission for it, Safari does not have it.
-A browser without it is not a degraded experience, it is a user who cannot set
-their module up — so the page says plainly what is wrong, **`.syx` export is a
-first-class path** loadable by any standard SysEx librarian, and the module in
-the page works everywhere regardless.
-
-## Still open
-
-**The KeyMech header is undocumented.** `SERIAL_KEYMECH` on `Serial8` with
-boot and reset lines on pins 30 and 31 is declared in `hardware.h` and nothing
-in this repository says what it connects to. If it is an input device it is
-the module's only candidate for panel control, and that changes the whole
-picture above. Still unanswered.
-
-**Control voltage at the jacks.** The CV domain is now a real bus with real
-writers — three modulators and, since `MidiToCV`, a pitch, a velocity and a
-modulation signal that are only waiting for a converter — and real readers,
-since `CvToNote` and `CvToGate`. None of it reaches a pin: `GateInPort` and
-`GateOutPort` are still the only hardware port nodes. A `CvOutPort` writing a
-DAC and a `CvInPort` reading the ADC would make every modulator in this
-document an output and every external voltage a modulation source, with no
-change to the matrix, the patch format or the editor — the scale is already
-twelve bits precisely so that a 12-bit DAC is a lossless rendering of what the
-bus carries. Calibration has a home reserved in `GlobalSettings`. Not built.
-
-**It is worth more than it was, at both ends.** A `CvInPort` used to lead into
-a bus whose only destination was a parameter; an external voltage would have
-reached the modulation matrix and nothing else. It would now reach notes and
-triggers as well, so the input jack is the missing half of a feature rather
-than a feature of its own — and with `MidiToCV` on the other side, the module
-would be a two-way converter rather than a one-way one.
-
-**Launchpad DAW mode over the USB host port** needs no new pins, so it is
-within the hardware surface, and it remains the module's only realistic
-hands-on control surface. Still last in the queue — but it is the eventual
-answer to "no panel controls", not a luxury.
+- **The KeyMech header.** `SERIAL_KEYMECH` with boot and reset lines is
+  declared in `hardware.h` and nothing says what it connects to.
+- **CV at the jacks.** The CV domain has writers and readers but no pins. A
+  `CvOutPort` on the DAC and a `CvInPort` on the ADC would need no change to
+  the matrix, the patch format or the app. Calibration has a home reserved in
+  `GlobalSettings`.
+- **Real-time record** into a note sequencer, and **ratcheting**: both need the
+  same step-duration estimate the sub-step gate uses, which should prove itself
+  on hardware first.
+- **Launchpad DAW mode** over the USB host port — the only realistic hands-on
+  control surface, and it needs no new pins.
+- **microSD presets.** The socket is on dedicated SDIO pins and needs nothing
+  from `hardware.h`, so it can be added without touching the hardware surface.

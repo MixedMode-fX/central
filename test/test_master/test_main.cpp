@@ -31,6 +31,18 @@ static NodeConfig node(uint8_t id, uint8_t in0, uint8_t out0) {
     return c;
 }
 
+// Note-ons minus note-offs on one cable, over everything recorded so far:
+// what the module is still holding down there.
+static int sounding_on(const RecordingMidiOut& midi, uint8_t target) {
+    int held = 0;
+    for (const RecordingMidiOut::Message& m : midi.messages) {
+        if (m.target != target) continue;
+        if (m.type == MIDI_NOTE_ON && m.d2 > 0) held++;
+        else if (m.type == MIDI_NOTE_OFF || m.type == MIDI_NOTE_ON) held--;
+    }
+    return held;
+}
+
 // ---------------------------------------------------------------------------
 // Gate in -> LogicNot -> GateToNote -> MidiOutPort: toggling the fake input
 // produces exactly one MIDI message, with no algorithm touching a pin or a
@@ -423,6 +435,124 @@ static void test_worked_example_with_a_real_clock_divider() {
     TEST_ASSERT_EQUAL(8, din_notes);
 }
 
+// ---------------------------------------------------------------------------
+// Pressing stop silences what the clock was playing. Harmony holds its root
+// until the next chord and Tonnetz its triad until the next transform, so a
+// clock that stops used to leave both sounding for ever - the note-off was
+// owed to an advance edge that never came. The master tells the pool on the
+// pass that sees the transport stop, and the note-offs go out with that
+// pass's own writes, so they reach the transports through step 5 like
+// anything else.
+// ---------------------------------------------------------------------------
+static void test_stopping_the_transport_releases_what_the_clock_was_playing() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
+    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].params[1] = 4;                                  // /4
+    p.nodes[1] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
+    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS;
+    p.nodes[1].out_bus[0] = 0; p.nodes[1].out_bus[1] = NO_BUS;
+    p.nodes[2] = node_config(ALGO_TONNETZ);                    // gate 0 -> note 1
+    p.nodes[2].in_bus[0] = 0; p.nodes[2].in_bus[1] = NO_BUS;
+    p.nodes[2].out_bus[0] = 1;
+    p.n_nodes = 3;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    uint32_t now = 0;
+    master.clock().start();
+    for (uint32_t t = 0; t < 4 * 4 * CLOCK_SUBTICK; t++) {
+        master.clock().advance();
+        master.pass(now);
+        now += 1000;
+    }
+    // Both are sounding: a chord root on one cable, a triad on the other.
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+    TEST_ASSERT_EQUAL(3, sounding_on(midi, mmMIDI_USB_1));
+
+    master.clock().stop();
+    run_passes(master, 4, now);
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_0));
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_1));
+
+    // Stood down, not disabled: the passes that follow do not play again on
+    // their own, and starting the clock plays again.
+    run_passes(master, 200, now);
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_0));
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_1));
+
+    master.clock().start();
+    for (uint32_t t = 0; t < 4 * 4 * CLOCK_SUBTICK; t++) {
+        master.clock().advance();
+        master.pass(now);
+        now += 1000;
+    }
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+    TEST_ASSERT_EQUAL(3, sounding_on(midi, mmMIDI_USB_1));
+}
+
+// A patch advanced from a jack has nothing to do with the transport, so it
+// keeps playing with the clock stopped - the settle a stop starts is over in
+// as many passes as the graph is deep, and nothing is silenced after it.
+static void test_a_jack_clocked_patch_plays_with_the_transport_stopped() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};         // jack 1 -> gate bus 0
+    p.nodes[0] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
+    p.nodes[0].in_bus[0] = 0; p.nodes[0].in_bus[1] = NO_BUS;
+    p.nodes[0].out_bus[0] = 0; p.nodes[0].out_bus[1] = NO_BUS;
+    p.n_nodes = 1;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    uint32_t now = 0;
+    gpio.set_input(0, GPIO_LOW);
+    master.clock().stop();
+    run_passes(master, 20, now);                               // the settle, and past it
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_0));
+
+    gpio.set_input(0, GPIO_HIGH);                              // an edge from the jack
+    run_passes(master, 20, now);
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+}
+
+// A stop is not a panic: a note the graph is only passing on belongs to
+// whoever is holding it, and cutting a key somebody has down is not what the
+// transport asked for. The held note survives the stop and is released by its
+// own note-off, whenever that comes.
+static void test_stopping_the_transport_leaves_a_held_note_alone() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};        // DIN 1 -> note bus 0
+    p.nodes[0] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, +12
+    p.nodes[0].params[0] = 12;
+    p.n_nodes = 1;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 1};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    uint32_t now = 0;
+    master.clock().start();
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_ON, 1, 60, 100});
+    run_passes(master, 4, now);
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+
+    master.clock().stop();
+    run_passes(master, 20, now);
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_OFF, 1, 60, 0});
+    run_passes(master, 4, now);
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_0));
+}
+
 // Chaining is the point: every modifier's output is legal input to every
 // other. Transpose -> arpeggiator -> note priority over three buses, with the
 // arpeggiator advanced by a divider.
@@ -495,6 +625,9 @@ int main() {
     RUN_TEST(test_eight_of_the_same_and_one_of_everything);
     RUN_TEST(test_worked_example_with_a_real_clock_divider);
     RUN_TEST(test_transpose_arpeggiator_priority_chain);
+    RUN_TEST(test_stopping_the_transport_releases_what_the_clock_was_playing);
+    RUN_TEST(test_stopping_the_transport_leaves_a_held_note_alone);
+    RUN_TEST(test_a_jack_clocked_patch_plays_with_the_transport_stopped);
     RUN_TEST(test_zero_heap_allocation_after_setup);
     RUN_TEST(test_thousand_load_unload_cycles_leave_identical_state);
     return UNITY_END();

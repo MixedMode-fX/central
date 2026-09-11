@@ -139,6 +139,10 @@ class NoteSequencerBase : public Node{
 
         void process(BusManager& bus, uint32_t now_us) override;
         void silence(BusManager& bus) override;
+        // `stall` is the safety net for a clock that went away without
+        // saying so; a stop says so, and is answered now rather than in
+        // `stall_periods` steps' time (node/node.h).
+        void transport_stopped(BusManager& bus) override { silence(bus); }
         // The whole parameter space (#20): the 16-byte header and every step
         // byte. A sounding note is released from the ledger at the pitch it
         // was sent at, so root, scale, length and the pattern itself can all

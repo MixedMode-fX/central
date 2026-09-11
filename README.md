@@ -118,6 +118,13 @@ period and each edge re-phases the count **forward only**, so a node never sees
 time reverse. Multiplication from a gate source is refused: it would have to
 extrapolate. Trigger width is wall-clock (`TRIGGER_WIDTH_US`), never ticks.
 
+**Stop releases what the clock was playing.** A node that holds a note until
+its next advance edge implements `Node::transport_stopped()`; the master holds
+the stop against the pool until the gates that were in flight have drained,
+then stops. A note the graph is only passing on belongs to whoever is holding
+it, and a patch advanced from a jack is not the transport's: neither is
+touched.
+
 ## Algorithms
 
 | Domain | Algorithms |

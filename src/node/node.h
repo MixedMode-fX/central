@@ -29,6 +29,33 @@ class Node {
         // notes has nothing to do.
         virtual void silence(BusManager&) {}
 
+        // The transport stopped (#4). **A node that holds a note until its
+        // next advance edge releases it here**, because the edge may never
+        // arrive and a stop is the one moment the module knows that: Harmony
+        // holds its root until the next chord, Tonnetz its triad until the
+        // next transform, and both hang for ever on a clock that stops.
+        //
+        // It is opt-in, and the two halves of that are deliberate. A node
+        // whose notes follow an input it is still being given does nothing -
+        // the input's own note-offs release them, and cutting a key somebody
+        // is holding is not what a transport stop means. Nor does a node
+        // that plays without an advance edge at all: a self-playing Chord is
+        // a drone, and a drone silenced here would never come back, because
+        // there is no start hook to bring it back and it would be wrong to
+        // add one for something the transport was never driving.
+        //
+        // Called inside the pass, after process() and before the swap, so the
+        // note-offs are published and flushed like any other write - and a
+        // node that played on a stale edge this pass is released in the same
+        // pass, with the note-off after the note-on it cancels.
+        //
+        // A stop is not instantaneous in a graph with latency, so the master
+        // calls this for as many passes as the graph is deep (see
+        // MixedModeMaster::settle_stop) and a node has to tolerate being told
+        // more than once. Releasing an empty ledger writes nothing, so an
+        // implementation that is simply `silence(bus)` already does.
+        virtual void transport_stopped(BusManager&) {}
+
         // Set one parameter after construction (#20). `index` is < the
         // descriptor's n_params; `value` has already been range-checked
         // against the ParamDescriptor by MixedModeMaster::set_node_param,

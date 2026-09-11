@@ -140,6 +140,12 @@ format or the editor protocol.
 
 **Closes gap 2.2.** The biggest musical jump of the five.
 
+> **Superseded in part.** The five transition tables argued for here shipped
+> and were later replaced by weights computed from the scale. The argument for
+> *why a walk has to be weighted at all* stands; the argument for weighting it
+> with a table per genre did not survive contact with a key the tables were
+> not written for. See [harmony.md](harmony.md) §6.1.
+
 A weighted random walk over the degrees of the key, one chord per advance
 edge. Not a uniform walk — a **functional** one: a 7&times;7 transition table
 biased the way tonal music actually moves, which is the same first-order
@@ -155,7 +161,7 @@ out 1  cv    degree     optional; the degree over full scale, for the matrix
 
 | param | what it does |
 |---|---|
-| `style` | `pop` (I&nbsp;V&nbsp;vi&nbsp;IV attractors), `modal` (I, bVII, IV; few leading tones), `jazz` (ii&ndash;V&ndash;I chains around the circle of fifths), `walk` (uniform &mdash; the null model), `pedal` (rarely leaves I; for drones) |
+| `style` | `pop`, `modal`, `jazz`, `walk`, `pedal` &mdash; **superseded.** The five tables were replaced by a computed walk; see [harmony.md](harmony.md) and `src/midi/root_motion.h`. The byte is kept legal so an old preset still loads |
 | `phrase` | chords per phrase, 2..16 |
 | `cadence` | how strongly the end of a phrase is pulled to the tonic |
 | `motion` | scales the off-diagonal weights: at 0 it sits on I, at 100 the table is used as written |

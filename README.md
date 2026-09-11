@@ -379,28 +379,57 @@ construction. A node that knows nothing whatever about chord quality produces
 a diatonic progression, because the module decided long ago that an interval
 is a scale step and not a semitone.
 
-**The walk is functional, not uniform.** Tonal music does not move at random
-between degrees: it falls by fifths, it approaches the tonic through the
-dominant, it substitutes vi for I. So each style is a 7×7 table of weights,
-and the five differ in what they think a chord wants to do next:
+**The walk is computed, not tabulated.** Tonal music does not move at random
+between degrees, and the first version of this node said so with five 7×7
+tables of weights named after genres. Tables are honest about what tonal music
+does and dishonest about everything else: they are written for seven degrees,
+so a pentatonic key used five columns tuned for diatonic function and a key
+nobody anticipated got numbers that meant nothing; they say what a genre does
+rather than why; and the only progressions reachable are the ones somebody
+typed. **There is no room in a table for an accident.**
 
-- **pop** — I V vi IV, and the deceptive cadence. Strong dominant pull.
-- **modal** — plagal: I and IV and the degree below the tonic, few leading
-  tones. What a drone wants under it.
-- **jazz** — down a fifth, over and over. ii–V–I falls out of the table rather
-  than being written into it.
-- **walk** — every degree equally. The null model, so what the others are
-  doing can be heard rather than argued about.
-- **pedal** — almost always home, for a patch that should breathe rather than
-  move.
+So the weight of every move is derived from the scale instead
+(`src/midi/root_motion.h`), out of facts that hold in any key — with one
+control over each:
+
+| | |
+|---|---|
+| `fifths` | how far the root moved, and which way round the circle. A root falling a fifth drives tonal music forward; one rising a fifth is the retrograde, and is how a dominant gets approached rather than resolved. At 100 the walk falls by fifths — the circle, and ii–V–I with it — at 1 it rises by them, at 50 it does not care. Measured in **semitones**, so a fifth is a fifth in a key this control has never seen |
+| `smooth` | which theory of motion is in use. At 0 a move is worth what its interval is worth and the fifths lead; at 100 it is worth what the two chords *share* — triads a third apart share two notes, a fifth apart one, a step apart none — and the mediants lead, which is what Romantic harmony sounds like |
+| `leading` | how much the triad carrying the semitone below the tonic is wanted. That note is what an authentic cadence is made of and what modal music must avoid, so one control reads as "how tonal" upward and "how modal" downward — and it is **inert by itself** in a mode that has no leading tone, because there is then no such triad to weight |
+| `spread` | the one that makes accidents. Below 50 the weights sharpen and the walk hardens toward a loop; above 50 they flatten toward every legal move being equally likely; at 50 they are played as computed. Nothing is ever weighted to zero, so the tritone root motion that turns up once in a hundred bars is always available and always in key |
+
+The five old styles are five points in that space and everything between them
+is now reachable, which is where the accidents live. `spread` at 100 is the
+uniform walk, `fifths` at 100 with `spread` low is the circle, `leading` at 1
+is the modal shuttle, `gravity` at 100 is the drone.
+
+**Because the rule measures semitones rather than scale steps, it knows things
+a table would have to be told.** At `fifths` 100 the move it most wants to
+make, from six of the seven degrees of a major key, is the one whose root
+falls a perfect fifth — worked out from twelve bits with nothing naming a
+degree. The seventh is IV, and that exception is the point: a table counting
+scale steps would send IV to vii° like every other row, and the fifth below IV
+is *diminished*, which is exactly why IV–vii° is the weak link in the diatonic
+circle. The same rule finds the fifths of a pentatonic key and declines to
+invent the ones it does not have.
 
 `phrase` and `cadence` are what make it composed rather than drifting: a
 phrase of four with a cadence of 75% resolves to the tonic three times in
 four, which is a period. `loop` is the difference between improvising and
 writing — turn it on and the next `phrase` chords become the piece, repeated
 exactly, until it is turned off again. `gravity` mixes an increasing weight on
-the tonic into whichever style is running, from the style at full strength to
-a drone.
+the tonic into whatever the walk wanted, from the walk at full strength to a
+drone.
+
+**`drift` is what keeps a loop alive.** An accident that happens once is a
+glitch and one that comes back is a decision, so a looping phrase redraws one
+of its chords with this probability and *keeps* the new one. At 0 the loop is
+exact. A few percent is a piece that is recognisably itself and never quite
+the same twice, which is most of what this node is for.
+
+The byte `style` used to occupy is kept, legal and read by nothing: a patch
+that once chose a style should play differently, not fail to load.
 
 **Degrees the key does not have are not reachable.** The walk runs over the
 first seven degrees of the scale, or over all of them when the scale has fewer,

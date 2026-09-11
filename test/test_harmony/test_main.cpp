@@ -32,19 +32,33 @@ static const uint8_t CV_DEGREE = 0;
 // 0 means the descriptor's default everywhere in this module, and 1% over any
 // phrase count anyone would use is the same thing as none. `gravity` needs no
 // such dodge, which is why it is named for the pull - see the header.
-static NodeConfig harmony_config(uint8_t style, uint8_t phrase, uint8_t cadence,
-                                 uint8_t gravity, uint8_t seed){
+// `spread` defaults to 100 here - a flat draw over every legal move - because
+// that is the null model the mechanics tests want: nothing about the walk's
+// opinions should change what a phrase, a cadence, a loop or a reset does.
+static NodeConfig harmony_config(uint8_t phrase, uint8_t cadence,
+                                 uint8_t gravity, uint8_t seed, uint8_t spread = 100){
     NodeConfig c = node_config(ALGO_HARMONY);
     c.in_bus[0] = GATE_ADVANCE;
     c.in_bus[1] = GATE_RESET;
     c.out_bus[0] = NOTE_ROOT;
     c.out_bus[1] = CV_DEGREE;
-    c.params[0] = style;
-    c.params[1] = phrase;
-    c.params[2] = cadence;
-    c.params[3] = gravity;
-    c.params[5] = 48;            // C3
-    c.params[9] = seed;
+    c.params[Harmony::P_PHRASE] = phrase;
+    c.params[Harmony::P_CADENCE] = cadence;
+    c.params[Harmony::P_GRAVITY] = gravity;
+    c.params[Harmony::P_ROOT] = 48;            // C3
+    c.params[Harmony::P_SEED] = seed;
+    c.params[Harmony::P_SPREAD] = spread;
+    return c;
+}
+
+// A node built only to be asked what it would do: the walk's opinions, with
+// none of the phrase machinery in the way.
+static NodeConfig walk_config(uint8_t fifths, uint8_t smooth, uint8_t leading,
+                              uint8_t spread = 50){
+    NodeConfig c = harmony_config(16, 1, 0, 5, spread);
+    c.params[Harmony::P_FIFTHS] = fifths;
+    c.params[Harmony::P_SMOOTH] = smooth;
+    c.params[Harmony::P_LEADING] = leading;
     return c;
 }
 
@@ -84,7 +98,7 @@ static void pulse_reset(Harmony& node, BusManager& bus, uint32_t& now){
 
 static void test_nothing_sounds_until_the_first_advance_and_then_the_tonic() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_POP, 4, 75, 0, 3);
+    NodeConfig c = harmony_config(4, 75, 0, 3);
     Harmony node(c);
     uint32_t now = 0;
 
@@ -99,7 +113,7 @@ static void test_nothing_sounds_until_the_first_advance_and_then_the_tonic() {
 
 static void test_every_root_is_a_degree_of_the_key() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 8, 1, 0, 11);
+    NodeConfig c = harmony_config(8, 1, 0, 11);
     Harmony node(c);
     uint32_t now = 0;
     const uint16_t mask = scale_mask(SCALE_MAJOR);
@@ -115,7 +129,7 @@ static void test_every_root_is_a_degree_of_the_key() {
 
 static void test_full_gravity_never_leaves_the_tonic() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_JAZZ, 8, 1, 100, 5);
+    NodeConfig c = harmony_config(8, 1, 100, 5);
     Harmony node(c);
     uint32_t now = 0;
     for (uint32_t i = 0; i < 200; i++){
@@ -127,7 +141,7 @@ static void test_full_gravity_never_leaves_the_tonic() {
 
 static void test_a_full_cadence_resolves_every_phrase() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_JAZZ, 4, 100, 0, 5);
+    NodeConfig c = harmony_config(4, 100, 0, 5);
     Harmony node(c);
     uint32_t now = 0;
 
@@ -143,7 +157,7 @@ static void test_a_full_cadence_resolves_every_phrase() {
 
 static void test_no_cadence_lets_a_phrase_end_anywhere() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 4, 1, 0, 5);
+    NodeConfig c = harmony_config(4, 1, 0, 5);
     Harmony node(c);
     uint32_t now = 0;
     advance(node, bus, now);
@@ -159,12 +173,168 @@ static void test_no_cadence_lets_a_phrase_end_anywhere() {
     TEST_ASSERT_TRUE_MESSAGE(off_tonic > 20, "cadence 0 still resolved every phrase");
 }
 
-static void test_pedal_stays_home_far_more_than_a_uniform_walk() {
+// The claim the whole rewrite rests on: at `fifths` 100 the move this walk
+// most wants to make, from every degree, is the one whose root falls a
+// perfect fifth - and it worked that out from twelve bits, with no table
+// anywhere naming a degree.
+//
+// **Except from IV**, and that exception is the point. A table that counted
+// scale steps would send IV to vii, because vii is three degrees up like
+// every other row. The fifth from IV down is *diminished*, which is why
+// IV-viiº is the weak link in the diatonic circle, and a rule that measures
+// semitones knows that without being told.
+static void test_the_circle_of_fifths_is_computed_not_written_down() {
+    BusManager bus;
+    NodeConfig c = walk_config(100, 0, 50);
+    Harmony node(c);
+    (void)bus;
+
+    // I->IV, ii->V, iii->vi, V->I, vi->ii, vii->iii: six perfect fifths.
+    static const uint8_t FROM[6] = {0, 1, 2, 4, 5, 6};
+    static const uint8_t WANT[6] = {3, 4, 5, 0, 1, 2};
+    for (uint8_t i = 0; i < 6; i++){
+        TEST_ASSERT_EQUAL_MESSAGE(WANT[i], node.likeliest_from(FROM[i]), "not the falling fifth");
+    }
+    // And from IV it declines to, because there is no perfect fifth below it.
+    TEST_ASSERT_NOT_EQUAL(6, node.likeliest_from(3));
+}
+
+// The same rule, in a key it was never written for. A five-note scale has no
+// table to truncate: the weights are measured in semitones, so the fifths
+// that exist are found and the ones that do not are not invented.
+static void test_the_same_rule_finds_the_fifths_of_a_pentatonic_key() {
+    BusManager bus;
+    NodeConfig c = walk_config(100, 0, 50);
+    Harmony node(c);
+    (void)bus;
+    global_scale::set(SCALE_PENTATONIC_MAJOR, 0);      // C D E G A
+
+    TEST_ASSERT_EQUAL(5, node.usable_degrees());
+    // D->G, E->A, G->C, A->D are all perfect fifths and all found.
+    static const uint8_t FROM[4] = {1, 2, 3, 4};
+    static const uint8_t WANT[4] = {3, 4, 0, 1};
+    for (uint8_t i = 0; i < 4; i++){
+        TEST_ASSERT_EQUAL_MESSAGE(WANT[i], node.likeliest_from(FROM[i]), "not the fifth");
+    }
+    // From C the fifth below is F, which this key does not have, so it is not
+    // pretended into existence.
+    TEST_ASSERT_EQUAL(2, node.likeliest_from(0));      // E, a third away
+}
+
+// One axis, two kinds of music: turn it the other way and the walk rises by
+// fifths instead, which is how a dominant gets approached rather than
+// resolved.
+static void test_fifths_turns_the_walk_the_other_way_round() {
+    BusManager bus;
+    NodeConfig c = walk_config(1, 0, 50);
+    Harmony node(c);
+    (void)bus;
+
+    TEST_ASSERT_EQUAL(4, node.likeliest_from(0));      // I -> V
+    TEST_ASSERT_EQUAL(1, node.likeliest_from(4));      // V -> ii
+    TEST_ASSERT_EQUAL(5, node.likeliest_from(1));      // ii -> vi
+}
+
+// Triads a third apart share two notes and a fifth apart share one, so asking
+// for shared tones is asking for mediant motion - and that is Romantic
+// harmony, reached by turning one knob rather than by selecting a genre.
+static void test_smooth_buys_the_chords_that_share_notes() {
+    BusManager bus;
+    NodeConfig plain = walk_config(100, 0, 50);
+    Harmony indifferent(plain);
+    NodeConfig mediant = walk_config(100, 100, 50);
+    Harmony smooth(mediant);
+    (void)bus;
+
+    TEST_ASSERT_EQUAL(3, indifferent.likeliest_from(0));   // I -> IV, the fifth
+    TEST_ASSERT_EQUAL(2, smooth.likeliest_from(0));        // I -> iii, two shared notes
+}
+
+// The leading tone is what an authentic cadence is made of and what a mode
+// must avoid, so one control reads as "how tonal" upward and "how modal"
+// downward. In a mode that has no leading tone there is nothing for it to
+// weight, and it says so by doing nothing at all.
+static void test_leading_is_a_tonal_control_and_is_inert_without_one() {
+    BusManager bus;
+    (void)bus;
+    uint32_t avoid[Harmony::DEGREES], want[Harmony::DEGREES];
+
+    global_scale::set(SCALE_MAJOR, 0);                  // has a leading tone
+    NodeConfig low = walk_config(50, 0, 1);
+    NodeConfig high = walk_config(50, 0, 100);
+    Harmony modal(low), tonal(high);
+    modal.weigh(0, avoid);
+    tonal.weigh(0, want);
+    // V carries the leading tone in a major key, so the two disagree about it.
+    TEST_ASSERT_TRUE_MESSAGE(want[4] > avoid[4], "leading did not favour the dominant");
+
+    // Mixolydian has a flat seventh and therefore no leading tone at all.
+    global_scale::set(SCALE_MIXOLYDIAN, 0);
+    Harmony modal_mix(low), tonal_mix(high);
+    modal_mix.weigh(0, avoid);
+    tonal_mix.weigh(0, want);
+    for (uint8_t j = 0; j < Harmony::DEGREES; j++){
+        TEST_ASSERT_EQUAL_MESSAGE(avoid[j], want[j], "leading did something in a mode with none");
+    }
+}
+
+// `spread` is the one that makes accidents. Sharpened, the walk hardens onto
+// its favourite move; flattened, every legal move is as likely as any other -
+// and the flat end is exactly the uniform null model this node used to need a
+// named style for.
+static void test_spread_runs_from_a_loop_to_a_uniform_walk() {
+    BusManager bus;
+    uint32_t visits[2][Harmony::DEGREES] = {{0}, {0}};
+    const uint8_t SPREADS[2] = {1, 100};
+
+    for (uint8_t k = 0; k < 2; k++){
+        NodeConfig c = harmony_config(16, 1, 0, 21, SPREADS[k]);
+        c.params[Harmony::P_FIFTHS] = 100;
+        Harmony node(c);
+        uint32_t now = 0;
+        for (uint32_t i = 0; i < 700; i++){
+            advance(node, bus, now);
+            visits[k][node.degree() % Harmony::DEGREES]++;
+        }
+    }
+
+    // Sharpened and falling by fifths, the walk is a cycle: every degree is
+    // visited, and the transitions are the fifths.
+    uint32_t sharp_low = 700, flat_low = 700, flat_high = 0;
+    for (uint8_t j = 0; j < Harmony::DEGREES; j++){
+        if (visits[0][j] < sharp_low) sharp_low = visits[0][j];
+        if (visits[1][j] < flat_low) flat_low = visits[1][j];
+        if (visits[1][j] > flat_high) flat_high = visits[1][j];
+    }
+    // Flat means flat: no degree runs away with it.
+    TEST_ASSERT_TRUE_MESSAGE(flat_high < flat_low * 2, "the flat walk was not flat");
+    (void)sharp_low;
+
+    // And sharpened, the move it makes is overwhelmingly the fifth. Measured
+    // in semitones, because that is what the rule measures.
+    NodeConfig c = harmony_config(16, 1, 0, 31, 1);
+    c.params[Harmony::P_FIFTHS] = 100;
+    Harmony node(c);
+    uint32_t now = 0;
+    advance(node, bus, now);
+    uint32_t fell_a_fifth = 0;
+    uint8_t previous = node.playing();
+    for (uint32_t i = 0; i < 600; i++){
+        advance(node, bus, now);
+        const uint8_t now_note = node.playing();
+        if ((uint8_t)(((int16_t)now_note - (int16_t)previous + 120) % 12) == 5) fell_a_fifth++;
+        previous = now_note;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(fell_a_fifth > 600 / 2, "the fifth fall was not most of it");
+}
+
+// A pull to the tonic, against a walk with no opinion about it.
+static void test_gravity_stays_home_far_more_than_a_flat_walk() {
     BusManager bus;
     uint32_t home[2] = {0, 0};
-    const uint8_t styles[2] = {Harmony::HARM_PEDAL, Harmony::HARM_WALK};
+    const uint8_t pulls[2] = {80, 0};
     for (uint8_t s = 0; s < 2; s++){
-        NodeConfig c = harmony_config(styles[s], 16, 1, 0, 21);
+        NodeConfig c = harmony_config(16, 1, pulls[s], 21);
         Harmony node(c);
         uint32_t now = 0;
         for (uint32_t i = 0; i < 400; i++){
@@ -172,31 +342,48 @@ static void test_pedal_stays_home_far_more_than_a_uniform_walk() {
             if (node.degree() == 0) home[s]++;
         }
     }
-    TEST_ASSERT_TRUE_MESSAGE(home[0] > home[1] * 3, "pedal did not stay home");
+    TEST_ASSERT_TRUE_MESSAGE(home[0] > home[1] * 3, "gravity did not stay home");
 }
 
-static void test_jazz_falls_by_fifths() {
+// An accident that happens once is a glitch and one that comes back is a
+// decision. A loop with no drift is exact, which is what it always was; with
+// drift it changes, and the change *stays* - the new chord replaces the old
+// one in the phrase rather than passing through it.
+static void test_drift_keeps_a_loop_alive() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_JAZZ, 16, 1, 0, 31);
-    Harmony node(c);
-    uint32_t now = 0;
-    advance(node, bus, now);
 
-    // Down a fifth is three degrees up. The claim is not that jazz only ever
-    // does that - it is that the move is what the style is built out of, so a
-    // histogram of every transition should have one obvious peak.
-    uint32_t moves[7] = {0, 0, 0, 0, 0, 0, 0};
-    uint8_t previous = node.degree();
-    for (uint32_t i = 0; i < 600; i++){
-        advance(node, bus, now);
-        const uint8_t d = node.degree();
-        moves[(d + 7u - previous) % 7u]++;
-        previous = d;
+    NodeConfig exact = harmony_config(4, 1, 0, 13);
+    exact.params[Harmony::P_LOOP] = 1;
+    Harmony fixed(exact);
+    uint32_t now = 0;
+    uint8_t first[4];
+    for (uint8_t i = 0; i < 4; i++){ advance(fixed, bus, now); first[i] = fixed.degree(); }
+    for (uint8_t round = 0; round < 6; round++){
+        for (uint8_t i = 0; i < 4; i++){
+            advance(fixed, bus, now);
+            TEST_ASSERT_EQUAL_MESSAGE(first[i], fixed.degree(), "an exact loop drifted");
+        }
     }
-    uint32_t runner_up = 0;
-    for (uint8_t m = 0; m < 7; m++) if (m != 3 && moves[m] > runner_up) runner_up = moves[m];
-    TEST_ASSERT_TRUE_MESSAGE(moves[3] > 600 / 2, "the fifth fall was not most of it");
-    TEST_ASSERT_TRUE_MESSAGE(moves[3] > runner_up * 3, "the fifth fall was not the peak");
+
+    NodeConfig loose = harmony_config(4, 1, 0, 13);
+    loose.params[Harmony::P_LOOP] = 1;
+    loose.params[Harmony::P_DRIFT] = 40;
+    Harmony alive(loose);
+    now = 0;
+    for (uint8_t i = 0; i < 4; i++){ advance(alive, bus, now); first[i] = alive.degree(); }
+
+    uint8_t seen[4] = {0, 0, 0, 0};
+    uint32_t changes = 0;
+    for (uint8_t round = 0; round < 20; round++){
+        for (uint8_t i = 0; i < 4; i++){
+            advance(alive, bus, now);
+            if (alive.degree() != first[i]){ changes++; first[i] = alive.degree(); }
+            seen[i] = alive.degree();
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(changes > 0, "a drifting loop never changed");
+    // Still a loop: the phrase it settled on is the one it keeps playing.
+    for (uint8_t i = 0; i < 4; i++) TEST_ASSERT_EQUAL(first[i], seen[i]);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +396,7 @@ static void test_jazz_falls_by_fifths() {
 // needs to - this is the test that says so out loud.
 static void test_a_triad_on_every_degree_comes_out_the_right_quality() {
     BusManager bus;
-    NodeConfig hc = harmony_config(Harmony::HARM_WALK, 16, 1, 0, 7);
+    NodeConfig hc = harmony_config(16, 1, 0, 7);
     Harmony harmony(hc);
 
     NodeConfig cc = node_config(ALGO_CHORD);
@@ -276,7 +463,7 @@ static void test_a_triad_on_every_degree_comes_out_the_right_quality() {
 
 static void test_loop_keeps_the_first_phrase_and_repeats_it() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 4, 1, 0, 9);
+    NodeConfig c = harmony_config(4, 1, 0, 9);
     c.params[4] = 1;                       // loop
     Harmony node(c);
     uint32_t now = 0;
@@ -306,7 +493,7 @@ static void test_loop_keeps_the_first_phrase_and_repeats_it() {
 
 static void test_switching_loop_on_waits_for_the_top_of_a_phrase() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 4, 1, 0, 17);
+    NodeConfig c = harmony_config(4, 1, 0, 17);
     Harmony node(c);
     uint32_t now = 0;
 
@@ -327,7 +514,7 @@ static void test_switching_loop_on_waits_for_the_top_of_a_phrase() {
 
 static void test_reset_starts_the_phrase_again_on_the_tonic() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 8, 1, 0, 23);
+    NodeConfig c = harmony_config(8, 1, 0, 23);
     Harmony node(c);
     uint32_t now = 0;
 
@@ -347,7 +534,7 @@ static void test_reset_starts_the_phrase_again_on_the_tonic() {
 
 static void test_the_key_moving_transposes_the_progression() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 8, 1, 100, 5);   // pinned to the tonic
+    NodeConfig c = harmony_config(8, 1, 100, 5);   // pinned to the tonic
     Harmony node(c);
     uint32_t now = 0;
 
@@ -372,7 +559,7 @@ static void test_the_key_moving_transposes_the_progression() {
 static void test_a_key_with_five_notes_has_five_chords() {
     BusManager bus;
     global_scale::set(SCALE_PENTATONIC_MINOR, 0);
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 16, 1, 0, 29);
+    NodeConfig c = harmony_config(16, 1, 0, 29);
     Harmony node(c);
     uint32_t now = 0;
     TEST_ASSERT_EQUAL_UINT8(5, node.usable_degrees());
@@ -388,7 +575,7 @@ static void test_a_key_with_five_notes_has_five_chords() {
 
 static void test_the_degree_outlet_moves_with_the_chord() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 16, 1, 0, 33);
+    NodeConfig c = harmony_config(16, 1, 0, 33);
     Harmony node(c);
     uint32_t now = 0;
     for (uint32_t i = 0; i < 60; i++){
@@ -400,7 +587,7 @@ static void test_the_degree_outlet_moves_with_the_chord() {
 
 static void test_a_patch_swap_releases_the_root() {
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_WALK, 4, 1, 100, 5);
+    NodeConfig c = harmony_config(4, 1, 100, 5);
     Harmony node(c);
     uint32_t now = 0;
     advance(node, bus, now);
@@ -413,8 +600,8 @@ static void test_a_patch_swap_releases_the_root() {
 
 static void test_one_seed_is_one_progression() {
     BusManager bus_a, bus_b;
-    NodeConfig a = harmony_config(Harmony::HARM_POP, 8, 50, 0, 44);
-    NodeConfig b = harmony_config(Harmony::HARM_POP, 8, 50, 0, 44);
+    NodeConfig a = harmony_config(8, 50, 0, 44);
+    NodeConfig b = harmony_config(8, 50, 0, 44);
     Harmony one(a), two(b);
     uint32_t now_a = 0, now_b = 0;
     for (uint32_t i = 0; i < 100; i++){
@@ -427,7 +614,7 @@ static void test_one_seed_is_one_progression() {
 static void test_harmony_never_allocates() {
     const size_t before = g_allocations;
     BusManager bus;
-    NodeConfig c = harmony_config(Harmony::HARM_POP, 4, 75, 0, 5);
+    NodeConfig c = harmony_config(4, 75, 0, 5);
     Harmony node(c);
     uint32_t now = 0;
     for (uint32_t i = 0; i < 300; i++) advance(node, bus, now);
@@ -441,8 +628,14 @@ int main(int, char**) {
     RUN_TEST(test_full_gravity_never_leaves_the_tonic);
     RUN_TEST(test_a_full_cadence_resolves_every_phrase);
     RUN_TEST(test_no_cadence_lets_a_phrase_end_anywhere);
-    RUN_TEST(test_pedal_stays_home_far_more_than_a_uniform_walk);
-    RUN_TEST(test_jazz_falls_by_fifths);
+    RUN_TEST(test_the_circle_of_fifths_is_computed_not_written_down);
+    RUN_TEST(test_the_same_rule_finds_the_fifths_of_a_pentatonic_key);
+    RUN_TEST(test_fifths_turns_the_walk_the_other_way_round);
+    RUN_TEST(test_smooth_buys_the_chords_that_share_notes);
+    RUN_TEST(test_leading_is_a_tonal_control_and_is_inert_without_one);
+    RUN_TEST(test_spread_runs_from_a_loop_to_a_uniform_walk);
+    RUN_TEST(test_gravity_stays_home_far_more_than_a_flat_walk);
+    RUN_TEST(test_drift_keeps_a_loop_alive);
     RUN_TEST(test_a_triad_on_every_degree_comes_out_the_right_quality);
     RUN_TEST(test_loop_keeps_the_first_phrase_and_repeats_it);
     RUN_TEST(test_switching_loop_on_waits_for_the_top_of_a_phrase);

@@ -358,7 +358,7 @@ happens to them on the way past" is a true description of all three. A
 `CATEGORY_HARMONY` would split the harmony family across two shelves to gain
 nothing.
 
-### 6.1 `Harmony` — the root-motion generator, and where it differs
+### 6.1 `Harmony` — the root-motion generator
 
 This section proposed a node called `Progression`. `Harmony` was built
 instead, on the same argument and with the same outlet: **a root, not a
@@ -366,27 +366,52 @@ chord**, because duplicating `Chord`'s diatonic voicing would be two places
 to fix a bug in. It has the advance and reset inlets, the phrase counter, the
 cadence probability, a `gravity` control and a degree outlet on the CV bus.
 
-Two things it does differently, and both are worth recording:
+**It shipped with five 7 × 7 tables of weights, one per named style, and they
+have since been replaced by the computation §2 and §3.1 argued for.** The
+reason is the one this document gave and then failed to insist on: a table is
+written for seven degrees, so a pentatonic key used five columns tuned for
+diatonic function and a key nobody anticipated got numbers that meant nothing.
+A table also says what a genre does rather than why, and the only progressions
+reachable are the ones somebody typed — there is no room in it for an
+accident, which for a generative node is the whole point.
 
-**It walks a 7 x 7 table per style rather than a distribution over motion.**
-Five tables — pop, modal, jazz, walk, pedal — where this document proposed one
-weighting of the six possible root motions. A destination table can say things
-a motion table cannot (V goes to vi far more often than iii goes to iv, though
-both are "up a step"), so for a seven-note key it is the more expressive of
-the two, and `jazz` is the fifth-walk written out as one.
+What replaced it is not quite §3.1 either, and the difference is worth
+recording. §3.1 proposed weighting motion in **scale steps**; the shipped rule
+weighs it in **semitones** (`src/midi/root_motion.h`). That is strictly
+better, and the reason is the case §2 got wrong: "down a fifth is three
+degrees up" is true in a major scale and false everywhere else, and even
+inside a major scale it is false once — IV to vii° is three degrees up and a
+*diminished* fifth, which is exactly why it is the weak link in the diatonic
+circle. Measuring the interval gets that for free, and gets a pentatonic key's
+real fifths for free with it. The `k`-cycle table in §2 is a nice piece of
+number theory and the wrong model.
 
-What it gives up is the generalisation in §2: `Harmony::DEGREES` is 7, so a
-key with fewer degrees uses part of the table and one with more never reaches
-past the seventh. That is documented in the node and is the right first
-version. If it is ever worth fixing, the fix is the motion distribution —
-`(degree + k) % n` with weights indexed by *k* is the only formulation that
-survives a scale of a size the tables were not written for.
+Four controls, each one fact about the two chords:
 
-**Its cadence is a probability, not a horizon.** `cadence` is the chance the
-phrase's last chord is the tonic, which is one number and lands where §3.2
-lands most of the time. The distance-table horizon buys the *approach* —
+| | |
+|---|---|
+| `fifths` | how far the root moved and which way round the circle — §3.1's dominant/subdominant axis, as one knob |
+| `smooth` | a crossfade between "what the interval is worth" and "what the two chords share". Not §3.1's bonus on common tones: a fifth outweighs a third three to one, so a bonus can only nudge and a crossfade can actually arrive at Romantic mediant motion |
+| `leading` | §4.2's rule, computed. The triad carrying the semitone below the tonic, weighted up for cadences or down for modality — and inert by itself in a mode that has no leading tone, which is what makes it one control rather than a per-mode table |
+| `spread` | temperature, as §3.1's `gravity` was meant to be before the name was taken. Sharpens toward a loop, flattens toward uniform |
+
+**Its cadence is still a probability, not a horizon.** `cadence` is the chance
+the phrase's last chord is the tonic, which is one number and lands where
+§3.2 lands most of the time. The distance-table horizon buys the *approach* —
 arriving at the tonic through the dominant rather than jumping to it — and
-that is a refinement of a shipped node rather than a missing one.
+that remains a refinement of a shipped node rather than a missing one.
+
+**What §4 still does not have** is the brightness axis (§4.1) and the
+characteristic-tone shuttle (§4.3). `leading` covers the half of modal harmony
+that is about avoiding the cadence; it does not know what a mode's
+characteristic tone *is*, so it cannot favour the chord that carries it. That
+is the one piece of §4 left, and it is now a small one: the helpers are pure
+functions of a mask and would sit beside the ones in `root_motion.h`.
+
+**`drift`** is not in this document at all, and is the most useful thing in
+the node. A loop repeats; a loop that redraws one chord now and then and
+*keeps* it is how an accident becomes a decision. It is five lines and it is
+what `spread` is for in the first place.
 
 ### 6.2 `Voicer` — where the notes actually sit
 

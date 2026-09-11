@@ -306,7 +306,32 @@ firmware this app has never heard of.
 The page hands it over inside a prompt — the rules that are about the machine
 rather than about JSON, a worked example patch, optionally the patch on screen
 as the thing to change — with the answer coming back to a box on the same page
-that loads it into the editor. Which is the point of describing the format the
+that loads it into the editor.
+
+**The schema is written with no whitespace in it, and says each thing once.**
+Neither is a detail: at thirty-odd algorithms the readable version came to
+205 kB, which is more than a small model will read at all, and a prompt that
+does not fit in a context window is not a prompt.
+
+Indentation was more than half of it — two spaces a level and a line per brace,
+laid out for a reader who does not exist, since what a person reads about an
+algorithm is the panel on the patch tab. Repetition was most of the rest, and
+in two kinds. The **conventions** are true of every algorithm — that a null is
+"not connected", that a trailing run of parameters may be left out, that 0
+means a parameter's own default — so they are stated once, on the node schema,
+rather than in a sentence beside every socket and every byte. The
+**vocabulary** repeats because the machine repeats: thirty-six algorithms share
+a time in milliseconds, a MIDI channel, a scale, a step direction, so a
+parameter shape used twice moves into `$defs` and is referred to. What never
+moves is the firmware's *name* for a parameter on an algorithm, because that is
+the part that differs between two uses of one range and the part a reader is
+looking for.
+
+205 kB → 95 kB → **60 kB**, with every constraint still in it. Three tests hold
+the line: the text carries no whitespace, no parameter body is spelled out
+twice, and the schema stays under two kilobytes per algorithm — per algorithm,
+so a firmware that grows does not fail it and one that starts repeating itself
+does. Which is the point of describing the format the
 library tab already reads rather than inventing one for the occasion: an answer
 that validates is an answer the editor can load, and loading it puts it through
 `fromPatchJson` and then the firmware's own validator, which is what decides

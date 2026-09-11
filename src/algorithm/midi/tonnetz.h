@@ -96,6 +96,9 @@ class Tonnetz : public Node{
         explicit Tonnetz(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
+        // The triad is held until the next transform, so a stopped transport
+        // would hold it for ever (node/node.h).
+        void transport_stopped(BusManager& bus) override { silence(bus); }
         bool set_param(uint16_t index, uint8_t value) override;
         uint8_t get_param(uint16_t index) const override;
 

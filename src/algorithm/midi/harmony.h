@@ -168,6 +168,9 @@ class Harmony : public Node{
 
         void process(BusManager& bus, uint32_t now_us) override;
         void silence(BusManager& bus) override;
+        // The chord is held until the next advance, so a stopped transport
+        // would hold it for ever (node/node.h).
+        void transport_stopped(BusManager& bus) override { silence(bus); }
         bool set_param(uint16_t index, uint8_t value) override;
         uint8_t get_param(uint16_t index) const override;
 

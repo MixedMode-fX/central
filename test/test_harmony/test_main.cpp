@@ -641,6 +641,39 @@ static void test_a_patch_swap_releases_the_root() {
     TEST_ASSERT_EQUAL_UINT8(48, bus.note_read(NOTE_ROOT, 0).data1);
 }
 
+// A transport that stops releases the root, and the node stays down until
+// something advances it again. It used to play again on the very next pass:
+// the re-voice that follows the key under a held root treated an empty ledger
+// as a note to re-strike, so nothing could ever tell this node to be quiet.
+static void test_a_transport_stop_releases_the_root_and_stays_quiet() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 100, 5);
+    Harmony node(c);
+    uint32_t now = 0;
+    advance(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(48, node.playing());
+
+    node.transport_stopped(bus);
+    bus.swap();
+    TEST_ASSERT_EQUAL_UINT8(1, bus.note_count(NOTE_ROOT));
+    TEST_ASSERT_TRUE(is_note_off(bus.note_read(NOTE_ROOT, 0)));
+    TEST_ASSERT_EQUAL_UINT8(48, bus.note_read(NOTE_ROOT, 0).data1);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, node.playing());
+
+    // Passes with no advance edge - including the key moving, which is what
+    // the re-voice is for - leave it silent.
+    for (uint8_t i = 0; i < 20; i++){
+        if (i == 10) global_scale::set(SCALE_NATURAL_MINOR, 3);
+        idle(node, bus, now);
+        TEST_ASSERT_EQUAL_UINT8(0xFF, node.playing());
+    }
+
+    // The next advance plays again, in the key it is now in.
+    advance(node, bus, now);
+    TEST_ASSERT_TRUE(node.playing() != 0xFF);
+    TEST_ASSERT_EQUAL_UINT8(node.pitch_of(node.degree()), node.playing());
+}
+
 static void test_one_seed_is_one_progression() {
     BusManager bus_a, bus_b;
     NodeConfig a = harmony_config(8, 50, 0, 44);
@@ -689,6 +722,7 @@ int main(int, char**) {
     RUN_TEST(test_a_key_with_five_notes_has_five_chords);
     RUN_TEST(test_the_degree_outlet_moves_with_the_chord);
     RUN_TEST(test_a_patch_swap_releases_the_root);
+    RUN_TEST(test_a_transport_stop_releases_the_root_and_stays_quiet);
     RUN_TEST(test_one_seed_is_one_progression);
     RUN_TEST(test_harmony_never_allocates);
     return UNITY_END();

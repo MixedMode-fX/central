@@ -54,6 +54,9 @@ class Arpeggiator : public Node{
         explicit Arpeggiator(const NodeConfig& config);
         void process(BusManager& bus, uint32_t now_us) override;
         void silence(BusManager& bus) override;
+        // A legato step is held until the next advance, and a latched chord
+        // has no note-off coming to end it (node/node.h).
+        void transport_stopped(BusManager& bus) override { silence(bus); }
         bool set_param(uint16_t index, uint8_t value) override;
         uint8_t get_param(uint16_t index) const override;
 

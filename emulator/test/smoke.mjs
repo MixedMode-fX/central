@@ -275,6 +275,55 @@ test('an LFO on a control bus moves a parameter, and the divider follows', () =>
   assert.ok(lowest <= 4 && highest >= 250, `the sweep covered ${lowest}..${highest}`);
 });
 
+// The stop button, through the build the app runs. Harmony holds its root
+// until the next chord, so a clock that stops used to leave it sounding for
+// ever - on the cable and on the note bus the piano roll reads, which is where
+// this was seen. Both go quiet, and starting plays again.
+test('stopping the transport releases what the clock was playing', () => {
+  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 4);
+  E.emu_patch_node(1, algo('Harmony'));
+  E.emu_patch_node_in(1, 0, 0); E.emu_patch_node_in(1, 1, NO_BUS);
+  E.emu_patch_node_out(1, 0, 1); E.emu_patch_node_out(1, 1, NO_BUS);
+  E.emu_patch_midi_out(0, USB_0, 0, 1);
+  assert.equal(E.emu_load(), 0);
+
+  // What the note bus carried, the way the app's piano roll drains it: once
+  // per pass, right after emu_pass().
+  let onBus = 0;
+  const ticks = n => {
+    for (let i = 0; i < n; i++) {
+      E.emu_clock_advance(); E.emu_pass(now); now += 300;
+      for (let k = 0; k < E.emu_note_count(1); k++) {
+        const packed = E.emu_note_event(1, k);
+        const type = (packed >>> 24) & 0xff, velocity = packed & 0xff;
+        onBus += (type === NOTE_ON && velocity > 0) ? 1 : -1;
+      }
+    }
+  };
+  const held = () => sent.reduce((n, m) => n + ((m.type === NOTE_ON && m.d2 > 0) ? 1 : -1), 0);
+
+  E.emu_clock_start();
+  ticks(4 * 4 * 24);
+  assert.equal(held(), 1, 'a chord root is sounding');
+  assert.equal(onBus, 1, 'and the note bus says so');
+
+  E.emu_clock_stop();
+  for (let i = 0; i < 200; i++) {
+    E.emu_pass(now); now += 300;
+    for (let k = 0; k < E.emu_note_count(1); k++) {
+      const packed = E.emu_note_event(1, k);
+      const type = (packed >>> 24) & 0xff, velocity = packed & 0xff;
+      onBus += (type === NOTE_ON && velocity > 0) ? 1 : -1;
+    }
+  }
+  assert.equal(held(), 0, 'the stop released it');
+  assert.equal(onBus, 0, 'and the note-off reached the bus, inside a pass');
+
+  E.emu_clock_start();
+  ticks(4 * 4 * 24);
+  assert.equal(held(), 1, 'starting plays again');
+});
+
 test('unload returns every jack to an input', () => {
   E.emu_patch_gate_port(2, GATE_OUT, 1);
   assert.equal(E.emu_load(), 0);

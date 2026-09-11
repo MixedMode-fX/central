@@ -4,7 +4,7 @@
 MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
     gpio(gpio_if), midi(midi_if), clk(), bus(), pool(),
     gate_in(), gate_out(), midi_in(), midi_out(),
-    tick_pending(false), tick_count(0),
+    tick_pending(false), was_running(clk.running()), stop_settle(0), tick_count(0),
     error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0),
     route_error_index(0)
 {}
@@ -141,6 +141,9 @@ void MixedModeMaster::unload(){
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].release();
     bus.reset();
     tick_pending = false;
+    // Nothing of the old patch is in flight any more, so a stop that was
+    // still settling has nothing left to settle against.
+    stop_settle = 0;
 }
 
 void MixedModeMaster::setup(){
@@ -166,11 +169,37 @@ void MixedModeMaster::pass(uint32_t now_us){
             if (pool.descriptor(i)->wants_tick) pool.node(i)->tick(bus, tick_count);
         }
     }
+    // 3b. a transport that stopped. A node holding a note until its next
+    //     advance edge may never see one again, and this is the one moment
+    //     the module knows it (Node::transport_stopped). It runs *after* the
+    //     nodes, so a node that played on a stale edge this pass is released
+    //     in the same pass rather than left sounding, and before the swap, so
+    //     the note-offs go out with this pass's own writes - after the
+    //     note-ons they cancel, which is the order a transport needs them in.
+    const bool running = clk.running();
+    if (!running) settle_stop();
+    was_running = running;
     // 4. publish
     bus.swap();
     // 5. hardware outputs
     for (uint8_t i = 0; i < GPIO_N; i++) gate_out[i].process(bus, now_us);
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, now_us);
+}
+
+// **A stop is not instantaneous in a graph that has latency.** The buses are
+// double-buffered, so a gate a clock source wrote before the stop is not read
+// until the next pass, and one that runs through a logic node or a gate
+// sequencer on the way arrives later still - and the note that last edge
+// plays is exactly the note that would be left hanging. So the stop is held
+// against the pool for as many passes as the graph can be deep, one per node
+// being the worst a chain can manage, and by the end of it whatever was in
+// flight has drained. Nothing is silenced after that: a patch advanced from a
+// jack has nothing to do with the transport and must keep playing.
+void MixedModeMaster::settle_stop(){
+    if (was_running) stop_settle = (uint8_t)(pool.count() + 1u);
+    if (stop_settle == 0) return;
+    stop_settle--;
+    for (uint8_t i = 0; i < pool.count(); i++) pool.node(i)->transport_stopped(bus);
 }
 
 LoadError MixedModeMaster::replace_node(uint8_t index, const NodeConfig& config){

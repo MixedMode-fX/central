@@ -38,6 +38,8 @@ enum LoadError : uint8_t {
 //   1. hardware input nodes sample and write their buses
 //   2. pool nodes process()
 //   3. if a clock tick fired, nodes that want it tick()
+//   3b. while a stop is settling, the pool releases what the clock was
+//       playing (Node::transport_stopped)
 //   4. swap buffers
 //   5. hardware output nodes read their buses and drive the pins/transports
 class MixedModeMaster {
@@ -156,6 +158,9 @@ class MixedModeMaster {
 
     private:
         LoadError validate(const Patch& patch);
+        // Holds a transport stop against the pool until the gates that were
+        // in flight when it stopped have drained.
+        void settle_stop();
 
         IGpio& gpio;
         IMidiOut& midi;
@@ -167,6 +172,10 @@ class MixedModeMaster {
         MidiInPort midi_in[N_MIDI_IN_NODES];
         MidiOutPort midi_out[N_MIDI_OUT_NODES];
         bool tick_pending;
+        // The transport as of the last pass, and the passes left of the
+        // settle a stop starts. See settle_stop().
+        bool was_running;
+        uint8_t stop_settle;
         uint32_t tick_count;
         LoadError error;
         ConfigError node_error;

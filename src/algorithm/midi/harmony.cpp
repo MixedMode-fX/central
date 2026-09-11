@@ -274,14 +274,20 @@ void Harmony::process(BusManager& bus, uint32_t){
 
         strike(bus, deg);
         position = (uint8_t)((position + 1u) % phrase);
-    } else if (started){
+    } else if (sounding.count()){
         // Re-voiced when what it should be playing changes - the key moving
         // under it, or the root or the scale being edited. Chord does exactly
         // this and for the same reason: a held note that cannot follow the
         // key drags the whole patch out of it, and the release still comes
         // from the ledger, so re-voicing cannot strand anything.
+        //
+        // Re-voicing what is sounding, never starting it: this used to strike
+        // whenever the ledger was empty too, which meant a node told to stand
+        // down - the transport stopping (node/node.h) - played again on the
+        // very next pass. Nothing is being re-voiced when nothing is
+        // sounding; the next advance is what plays.
         const uint8_t want = pitch_of(current);
-        if (sounding.count() == 0 || sounding.at(0).note != want) strike(bus, current);
+        if (sounding.at(0).note != want) strike(bus, current);
     }
 
     if (cv_out != NO_BUS){

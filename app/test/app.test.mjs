@@ -692,6 +692,61 @@ await test('the schema is handed over with no whitespace in it', async () => {
             `whitespace is still ${Math.round((1 - text.length / indented.length) * 100)}% of it`);
 });
 
+// Said once.
+//
+// Thirty-six algorithms share a small vocabulary - a time in milliseconds, a
+// MIDI channel, a scale, a step direction - and the conventions of the format
+// ("0 means the default", "a null is not connected") are true of every one of
+// them. Written out at each use, that repetition was two thirds of the schema
+// and told a reader nothing it had not already been told. So: anything that
+// turns up twice lives in `$defs` and is referred to, and the rules that are
+// true everywhere are on the node schema rather than beside every socket.
+await test('the schema says each thing once', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const schema = patchSchema(device);
+
+  // Every reference lands on something. A `$ref` that does not resolve is a
+  // hole in the schema that no patch would ever reveal.
+  const refs = [];
+  const walk = (x) => {
+    if (Array.isArray(x)) return x.forEach(walk);
+    if (!x || typeof x !== 'object') return;
+    if (typeof x.$ref === 'string') refs.push(x.$ref);
+    Object.values(x).forEach(walk);
+  };
+  walk(schema);
+  assert.ok(refs.length > 100, `only ${refs.length} references: nothing is being shared`);
+  for (const ref of new Set(refs)) {
+    const target = ref.replace(/^#\//, '').split('/').reduce((o, key) => o?.[key], schema);
+    assert.ok(target, `${ref} points at nothing`);
+  }
+
+  // No two parameters are described twice. A parameter's *name* is its own and
+  // stays at the use site; everything else about a shape used more than once
+  // is behind a reference.
+  const bodies = new Map();
+  for (const branch of schema.properties.nodes.items.allOf) {
+    for (const entry of branch.then.properties.params?.prefixItems ?? []) {
+      if (entry.$ref) continue;
+      const { title, ...body } = entry;
+      const key = JSON.stringify(body);
+      const before = bodies.get(key);
+      assert.ok(!before, `${branch.if.properties.algo.const} "${title}" spells out what `
+                       + `${before} already did: ${key}`);
+      bodies.set(key, `${branch.if.properties.algo.const} "${title}"`);
+    }
+  }
+
+  // And the size, which is the thing anyone pasting this actually feels. Per
+  // algorithm rather than in total, so a firmware that grows does not fail
+  // this - only one that starts repeating itself again does.
+  const algorithms = device.algorithms.filter(Boolean).length;
+  const text = schemaText(device);
+  assert.ok(text.length < algorithms * 2000,
+            `${Math.round(text.length / algorithms)} bytes per algorithm, over a 2000 budget`);
+});
+
 // The page itself. There is no browser here, so what is checked is that it
 // builds from a device and says the two things a first visit needs: that this
 // is where the prompt is, and - with no module - why there is nothing to copy.

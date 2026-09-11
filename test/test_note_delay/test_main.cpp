@@ -206,8 +206,8 @@ static void test_no_interval_is_transparent_to_a_chromatic_line() {
     }
 }
 
-// A scale step is only defined against a tonic, so a node that names a scale
-// has to name its root too - the same reason NoteQuantise has one. Without it
+// A scale step is only defined against a tonic, so a node out of the key has
+// to name its root too - the same reason NoteQuantise has one. Without it
 // this node would transpose in A minor's interval pattern rooted on C, which
 // is a different key and the wrong canon.
 static void test_a_named_scale_transposes_against_its_own_root() {
@@ -215,6 +215,7 @@ static void test_a_named_scale_transposes_against_its_own_root() {
     NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 2, 1, 100);
     c.params[9] = SCALE_NATURAL_MINOR;
     c.params[10] = 9;                            // A
+    c.params[13] = global_scale::KEY_OWN;        // and its own root, not the key's
     NoteDelay named(c);
 
     // A minor from A3: A B C D E F G. One step above E4 is F4, and two is G4.
@@ -225,6 +226,19 @@ static void test_a_named_scale_transposes_against_its_own_root() {
     // moving changes nothing.
     global_scale::set(SCALE_MAJOR, 0);
     TEST_ASSERT_EQUAL_UINT8(65, named.pitch_for(64, 1));
+
+    // A node that names a scale but not a key of its own is a different
+    // thing: it steps in its own scale, rooted where the module says. The
+    // minor pattern on C is C D D# ..., so one step above D is D#; move the
+    // key to D and the same pattern starts there, where one step above D is
+    // E. The mode is this node's, the key is the module's.
+    NodeConfig m = delay_config(NoteDelay::ND_FREE, 10, 2, 1, 100);
+    m.params[9] = SCALE_NATURAL_MINOR;
+    NoteDelay modal(m);
+    TEST_ASSERT_EQUAL_UINT8(63, modal.pitch_for(62, 1));
+    global_scale::set(SCALE_MAJOR, 2);           // the key moves, and it goes too
+    TEST_ASSERT_EQUAL_UINT8(64, modal.pitch_for(62, 1));
+    global_scale::set(SCALE_MAJOR, 0);
 
     // A node that names no scale follows the key, root and all: in A minor
     // the same note steps the same way, and in C major it does not.

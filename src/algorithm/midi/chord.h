@@ -20,9 +20,9 @@
 // and nothing follows the key.
 //
 // The scale is the module's own (midi/global_scale.h) unless this node names
-// one - the same rule NoteQuantise follows, including the root: following
-// the module's scale means following its key, naming a scale here means this
-// node's root parameter is the key, and a patched root inlet outranks both.
+// one, and the root is the module's own unless the `key` parameter says
+// otherwise - two questions, two parameters, the same rule NoteQuantise
+// follows. A patched root inlet outranks both.
 //
 // A played note the scale does not contain is snapped into it first (the
 // same snap NoteQuantise does), so the chord is in key even when the playing
@@ -88,11 +88,13 @@
 // params[0] count      how many of the intervals below are used (0 -> root only)
 // params[1..6] intervals, signed scale steps from the root
 // params[7] scale id (see ScaleId; 0 follows the module's scale)
-// params[8] root pitch class, when this node names its own scale and no root
+// params[8] root pitch class, when this node names its own key and no root
 //           inlet is patched
 // params[9] octave     where a self-playing chord sits: its root is
 //                      12 x octave + the key's root (0 -> DEFAULT_OCTAVE,
-//                      middle C). Ignored while a note inlet is patched.
+//                      middle C), and when the key names a register of its
+//                      own this is how far from it the chord plays. Ignored
+//                      while a note inlet is patched.
 // params[10] velocity  what a self-playing chord is sounded at. Ignored
 //                      while a note inlet is patched: a played note keeps
 //                      the velocity it was played with.
@@ -100,12 +102,16 @@
 //                      the intervals above.
 // params[12] retrigger re-strike the chord on every root note-on, including
 //                      one that names the note already sounding.
+// params[13] key       follow the module's root, or use this node's own. The
+//                      scale is a separate parameter and a separate question:
+//                      a chord can voice a mode of its own without leaving
+//                      the key (midi/global_scale.h).
 class Chord : public Node{
     public:
         static constexpr uint8_t MAX_INTERVALS = 6;
         static constexpr uint16_t P_SCALE = 7, P_ROOT = 8, P_OCTAVE = 9, P_VELOCITY = 10,
-                                  P_QUALITY = 11, P_RETRIGGER = 12;
-        static constexpr uint8_t N_PARAMS = 13;
+                                  P_QUALITY = 11, P_RETRIGGER = 12, P_KEY = 13;
+        static constexpr uint8_t N_PARAMS = 14;
 
         // Named interval stacks, in scale steps from the root. `custom` is 0
         // so that a preset written before this existed - and any preset that
@@ -154,11 +160,11 @@ class Chord : public Node{
     private:
         // Sounds the root plus every interval, all recorded against `source`
         // so one release takes the whole chord down.
-        void emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t key,
+        void emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t tonic,
                         uint16_t mask, uint8_t velocity_out, uint8_t channel);
         // One pass of a chord with no note inlet: works out what it should be
         // playing and re-voices only if that has moved.
-        void play_free(BusManager& bus, uint16_t mask, uint8_t key);
+        void play_free(BusManager& bus, uint16_t mask, uint8_t tonic);
 
         uint8_t in;
         uint8_t root_in;
@@ -167,6 +173,7 @@ class Chord : public Node{
         uint8_t scale;
         uint8_t root;
         uint8_t octave;
+        uint8_t key;
         uint8_t velocity;
         uint8_t quality;
         bool retrigger;

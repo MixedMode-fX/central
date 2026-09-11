@@ -556,6 +556,49 @@ static void test_the_key_moving_transposes_the_progression() {
     TEST_ASSERT_TRUE_MESSAGE(released_c3, "the old root was left hanging");
 }
 
+// The complaint this parameter exists for: a Harmony set to a mode of its own
+// used to leave the key's root behind with it, so a module in A minor played
+// a progression on C and the only fix was to type the root into every node.
+// Which notes and which of them is home are two questions now.
+static void test_a_scale_of_its_own_still_follows_the_key_root() {
+    BusManager bus;
+    NodeConfig c = harmony_config(8, 1, 100, 5);       // pinned to the tonic
+    c.params[Harmony::P_SCALE] = SCALE_DORIAN;         // its own mode
+    Harmony node(c);
+    uint32_t now = 0;
+
+    global_scale::set(SCALE_NATURAL_MINOR, 9);         // the module is in A minor
+    advance(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(57, node.playing());       // A3: dorian, on the key's root
+
+    // `key` is the opt-out, and the only one.
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_KEY, global_scale::KEY_OWN));
+    idle(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(48, node.playing());       // C3, the node's own root
+}
+
+// One key for the patch, one register per node: the key says where home is
+// and each node's root parameter says how far from it that node plays, so a
+// bass and a lead in the same key are still an octave apart.
+static void test_the_key_register_moves_the_patch_and_the_node_keeps_its_octave() {
+    BusManager bus;
+    NodeConfig c = harmony_config(8, 1, 100, 5);
+    Harmony node(c);                                   // root left at C3, the default
+    uint32_t now = 0;
+
+    global_scale::set(SCALE_NATURAL_MINOR, 9, 2);      // A minor, at octave 2
+    advance(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(33, node.playing());       // A1: where the key sits
+
+    BusManager other;
+    NodeConfig low = harmony_config(8, 1, 100, 5);
+    low.params[Harmony::P_ROOT] = 36;                  // an octave under the default
+    Harmony bass(low);
+    uint32_t then = 0;
+    advance(bass, other, then);
+    TEST_ASSERT_EQUAL_UINT8(21, bass.playing());       // an octave under the key
+}
+
 static void test_a_key_with_five_notes_has_five_chords() {
     BusManager bus;
     global_scale::set(SCALE_PENTATONIC_MINOR, 0);
@@ -641,6 +684,8 @@ int main(int, char**) {
     RUN_TEST(test_switching_loop_on_waits_for_the_top_of_a_phrase);
     RUN_TEST(test_reset_starts_the_phrase_again_on_the_tonic);
     RUN_TEST(test_the_key_moving_transposes_the_progression);
+    RUN_TEST(test_a_scale_of_its_own_still_follows_the_key_root);
+    RUN_TEST(test_the_key_register_moves_the_patch_and_the_node_keeps_its_octave);
     RUN_TEST(test_a_key_with_five_notes_has_five_chords);
     RUN_TEST(test_the_degree_outlet_moves_with_the_chord);
     RUN_TEST(test_a_patch_swap_releases_the_root);

@@ -184,8 +184,20 @@ static void test_a_pattern_keeps_its_anchor_until_the_key_names_a_register() {
     TEST_ASSERT_EQUAL(45, node.active_root());
     TEST_ASSERT_EQUAL(60, node.root_note());           // the stored anchor is untouched
 
-    // A pattern that named its own scale is not moved by the key at all.
+    // A pattern anchored an octave above where the parameter sits by default
+    // keeps that octave: the key says where home is, the pattern says how far
+    // from it this line plays.
+    NodeConfig high = scale_run(4, 0);
+    high.params[NS::P_ROOT] = 72;
+    NoteSequencer above(high);
+    Rig third;
+    expect("+57/100 ", third.edge(above));             // A3, an octave over A2
+    TEST_ASSERT_EQUAL(57, above.active_root());
+
+    // Naming a scale of its own does not take a pattern out of the key any
+    // more; `key` is what does.
     NodeConfig own = scale_run(4, scale_mask(SCALE_MAJOR));
+    own.params[NS::P_KEY] = global_scale::KEY_OWN;
     NoteSequencer fixed(own);
     Rig other;
     expect("+60/100 ", other.edge(fixed));

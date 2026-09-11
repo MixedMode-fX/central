@@ -12,7 +12,7 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"cadence",  0, 100,              75, PARAM_PERCENT, nullptr},
     {"gravity",  0, 100,               0, PARAM_PERCENT, nullptr},
     {"loop",     0, 1,                 0, PARAM_BOOL,    nullptr},
-    {"root",     0, 127,              48, PARAM_PITCH,   nullptr},
+    {"root",     0, 127, Harmony::DEFAULT_ROOT, PARAM_PITCH, nullptr},
     {"scale",    0, SCALE_COUNT - 1,   0, PARAM_ENUM,    PARAM_SCALE_NAMES},
     {"velocity", 1, 127,             100, PARAM_NUMBER,  nullptr},
     {"channel",  1, 16,                1, PARAM_CHANNEL, nullptr},
@@ -24,6 +24,7 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"leading",  1, 100, Harmony::DEFAULT_LEADING, PARAM_PERCENT, nullptr},
     {"spread",   1, 100, Harmony::DEFAULT_SPREAD,  PARAM_PERCENT, nullptr},
     {"drift",    0, 100,                       0, PARAM_PERCENT, nullptr},
+    {"key",      0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Harmony::N_PARAMS, PARAMS}};
 
@@ -50,7 +51,7 @@ Harmony::Harmony(const NodeConfig& config) :
                                      : (uint8_t)75),
     gravity(config.params[P_GRAVITY] > 100 ? (uint8_t)100 : config.params[P_GRAVITY]),
     loop(config.params[P_LOOP] ? 1 : 0),
-    root(config.params[P_ROOT] ? (uint8_t)(config.params[P_ROOT] & 0x7F) : (uint8_t)48),
+    root(config.params[P_ROOT] ? (uint8_t)(config.params[P_ROOT] & 0x7F) : DEFAULT_ROOT),
     scale(config.params[P_SCALE] < SCALE_COUNT ? config.params[P_SCALE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? (uint8_t)(config.params[P_VELOCITY] & 0x7F) : (uint8_t)100),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
@@ -66,6 +67,7 @@ Harmony::Harmony(const NodeConfig& config) :
                                                                    : config.params[P_SPREAD])
                                    : DEFAULT_SPREAD),
     drift(config.params[P_DRIFT] > 100 ? (uint8_t)100 : config.params[P_DRIFT]),
+    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     current(0), position(0), recorded(0), started(false), at_first(true), written(),
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
@@ -86,7 +88,7 @@ uint8_t Harmony::pitch_of(uint8_t deg) const {
     const uint16_t mask = global_scale::resolve_id(scale);
     const uint8_t n = usable_degrees();
     if (deg >= n && n) deg = (uint8_t)(n - 1u);
-    int16_t pitch = (int16_t)global_scale::resolve_tonic(scale, root)
+    int16_t pitch = (int16_t)global_scale::resolve_tonic(key, root, DEFAULT_ROOT)
                   + scale_degree_to_semitone((int16_t)deg, mask);
     while (pitch > 127) pitch -= 12;
     while (pitch < 0) pitch += 12;
@@ -325,6 +327,7 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
         case P_LEADING: if (value > 100) return false; leading = value ? value : DEFAULT_LEADING; return true;
         case P_SPREAD:  if (value > 100) return false; spread = value ? value : DEFAULT_SPREAD; return true;
         case P_DRIFT:   if (value > 100) return false; drift = value; return true;
+        case P_KEY:     if (value >= global_scale::KEY_MODES) return false; key = value; return true;
         default: return false;
     }
 }
@@ -345,6 +348,7 @@ uint8_t Harmony::get_param(uint16_t index) const {
         case P_LEADING: return leading;
         case P_SPREAD:  return spread;
         case P_DRIFT:   return drift;
+        case P_KEY:     return key;
         default: return 0;
     }
 }

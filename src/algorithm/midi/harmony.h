@@ -122,7 +122,10 @@
 // params[1] cadence   percent chance the phrase's last chord is the tonic
 // params[2] gravity   percent pull to the tonic; 100 never leaves it
 // params[3] loop      keep the first phrase and repeat it
-// params[4] root      the pitch degree 0 sits on
+// params[4] root      the pitch degree 0 sits on: the key's root note when
+//                     the key is followed, and then this names the register
+//                     it plays in - an octave below the default is an octave
+//                     below the key (midi/global_scale.h)
 // params[5] scale     0 follows the module's key
 // params[6] velocity
 // params[7] channel
@@ -134,6 +137,7 @@
 //                     toward a uniform walk
 // params[13] drift    percent chance a looping phrase redraws one chord and
 //                     keeps it
+// params[14] key      follow the module's root, or use this node's own
 class Harmony : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -141,8 +145,12 @@ class Harmony : public Node{
         static constexpr uint16_t P_PHRASE = 0, P_CADENCE = 1, P_GRAVITY = 2, P_LOOP = 3,
                                   P_ROOT = 4, P_SCALE = 5, P_VELOCITY = 6, P_CHANNEL = 7,
                                   P_SEED = 8, P_FIFTHS = 9, P_SMOOTH = 10, P_LEADING = 11,
-                                  P_SPREAD = 12, P_DRIFT = 13;
-        static constexpr uint8_t N_PARAMS = 14;
+                                  P_SPREAD = 12, P_DRIFT = 13, P_KEY = 14;
+        static constexpr uint8_t N_PARAMS = 15;
+
+        // The register the `root` parameter names when nothing has moved it,
+        // and so the pitch a followed key's register is measured from.
+        static constexpr uint8_t DEFAULT_ROOT = 48;
 
         static constexpr uint8_t DEGREES = 7;        // functional degrees a triad stack means
         static constexpr uint8_t MAX_PHRASE = 16;
@@ -209,6 +217,7 @@ class Harmony : public Node{
         uint8_t leading;
         uint8_t spread;
         uint8_t drift;
+        uint8_t key;
         uint8_t current;              // the degree being played
         uint8_t position;             // where in the phrase the next chord falls
         uint8_t recorded;             // chords committed to the loop

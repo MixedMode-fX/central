@@ -95,9 +95,10 @@
 // params[7]  chance    percent that each repeat happens at all
 // params[8]  spread    signed percent the gaps grow by, per repeat
 // params[9]  scale     0 follows the module's key
-// params[10] root      pitch class, when this node names its own scale
+// params[10] root      pitch class, when this node names its own key
 // params[11] channel   0 keeps the source's
 // params[12] dry       pass the input through, or emit only the repeats
+// params[13] key       follow the module's root, or use this node's own
 class NoteDelay : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -177,9 +178,10 @@ class NoteDelay : public Node{
         uint8_t chance;
         uint8_t spread;          // as stored, signed
         uint8_t scale;
-        uint8_t root;            // pitch class, when this node names its own scale
+        uint8_t root;            // pitch class, when this node names its own key
         uint8_t channel;
         uint8_t dry;
+        uint8_t key;             // global_scale::KeyFollow
         uint32_t subtick;        // the master clock's count, when synced
         uint32_t drops;
         EdgeIn clear_in;

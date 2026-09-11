@@ -10,9 +10,9 @@ static const char* const MAP_NAMES[CvToNote::CVN_MAPS] = {"degree", "snap"};
 static const char* const MODE_NAMES[CvToNote::CVN_MODES] = {"auto", "track", "trigger"};
 static const char* const POLARITY_NAMES[CvToNote::CVN_POLARITIES] = {"bipolar", "unipolar"};
 
-static const ParamDescriptor PARAMS[9] = {
+static const ParamDescriptor PARAMS[CvToNote::N_PARAMS] = {
     {"map",      CvToNote::CVN_DEGREE,  CvToNote::CVN_MAPS,       CvToNote::CVN_DEGREE,  PARAM_ENUM,   MAP_NAMES},
-    {"root",     0, 127,                48, PARAM_PITCH,   nullptr},
+    {"root",     0, 127, CvToNote::DEFAULT_ROOT, PARAM_PITCH, nullptr},
     {"range",    1, CvToNote::MAX_RANGE, 2, PARAM_NUMBER,  nullptr},
     {"scale",    0, SCALE_COUNT - 1,     0, PARAM_ENUM,    PARAM_SCALE_NAMES},
     {"mode",     CvToNote::CVN_AUTO,    CvToNote::CVN_MODES,      CvToNote::CVN_AUTO,    PARAM_ENUM,   MODE_NAMES},
@@ -20,14 +20,15 @@ static const ParamDescriptor PARAMS[9] = {
     {"gate",     0, 255,                 0, PARAM_MILLIS,  nullptr},
     {"velocity", 1, 127,               100, PARAM_NUMBER,  nullptr},
     {"channel",  1, 16,                  1, PARAM_CHANNEL, nullptr},
+    {"key",      0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 9, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, CvToNote::N_PARAMS, PARAMS}};
 
 static const char* const IN_NAMES[3] = {"cv", "trigger", "velocity"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor CvToNote::descriptor = {
-    ALGO_CV_TO_NOTE, "CvToNote", 3, 1, 1, 9, IN, OUT, sizeof(CvToNote), false,
+    ALGO_CV_TO_NOTE, "CvToNote", 3, 1, 1, CvToNote::N_PARAMS, IN, OUT, sizeof(CvToNote), false,
     construct_node<CvToNote>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "The quantiser: a control signal becomes a melody, in the module's key.",
     CATEGORY_MIDI };
@@ -43,7 +44,7 @@ CvToNote::CvToNote(const NodeConfig& config) :
     velocity_in(config.in_bus[2]),
     out(config.out_bus[0]),
     map(clamp_enum(config.params[0], CVN_MAPS, CVN_DEGREE)),
-    root(config.params[1] ? (uint8_t)(config.params[1] & 0x7F) : (uint8_t)48),
+    root(config.params[1] ? (uint8_t)(config.params[1] & 0x7F) : DEFAULT_ROOT),
     range(config.params[2] ? (config.params[2] > MAX_RANGE ? MAX_RANGE : config.params[2]) : (uint8_t)2),
     scale(config.params[3] < SCALE_COUNT ? config.params[3] : (uint8_t)0),
     mode(clamp_enum(config.params[4], CVN_MODES, CVN_AUTO)),
@@ -51,6 +52,7 @@ CvToNote::CvToNote(const NodeConfig& config) :
     gate_ms(config.params[6]),
     velocity(config.params[7] ? (uint8_t)(config.params[7] & 0x7F) : (uint8_t)100),
     channel(config.params[8] ? config.params[8] : (uint8_t)1),
+    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     trigger(config.in_bus[1]),
     last_pitch(0xFF),
     due_us(0), timed(false),
@@ -64,7 +66,7 @@ uint16_t CvToNote::active_mask() const {
 // The octave is this node's, the pitch class is the key's - see
 // global_scale::resolve_tonic, which Harmony resolves its roots the same way.
 uint8_t CvToNote::active_root() const {
-    return global_scale::resolve_tonic(scale, root);
+    return global_scale::resolve_tonic(key, root, DEFAULT_ROOT);
 }
 
 // The matrix's reading of a signal (control/mod_matrix.cpp), so "bipolar"
@@ -179,6 +181,7 @@ bool CvToNote::set_param(uint16_t index, uint8_t value){
         case 6: gate_ms = value; return true;
         case 7: if (value == 0 || value > 127) return false; velocity = value; return true;
         case 8: if (value == 0 || value > 16) return false; channel = value; return true;
+        case P_KEY: if (value >= global_scale::KEY_MODES) return false; key = value; return true;
         default: return false;
     }
 }
@@ -194,6 +197,7 @@ uint8_t CvToNote::get_param(uint16_t index) const {
         case 6: return gate_ms;
         case 7: return velocity;
         case 8: return channel;
+        case P_KEY: return key;
         default: return 0;
     }
 }

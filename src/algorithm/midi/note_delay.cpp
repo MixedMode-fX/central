@@ -10,7 +10,7 @@ static const Domain OUT[1] = {Domain::Note};
 static const char* const SYNC_NAMES[NoteDelay::ND_SYNCS] = {"clock", "free"};
 static const char* const DRY_NAMES[NoteDelay::ND_DRYS] = {"pass", "mute"};
 
-static const ParamDescriptor PARAMS[13] = {
+static const ParamDescriptor PARAMS[14] = {
     {"sync",     NoteDelay::ND_CLOCK, NoteDelay::ND_SYNCS, NoteDelay::ND_CLOCK, PARAM_ENUM, SYNC_NAMES},
     {"division", DIV_8_BARS,    DIVISIONS, DIV_EIGHTH,    PARAM_ENUM, DIVISION_NAMES},
     {"feel",     FEEL_STRAIGHT, FEELS,     FEEL_STRAIGHT, PARAM_ENUM, FEEL_NAMES},
@@ -24,14 +24,15 @@ static const ParamDescriptor PARAMS[13] = {
     {"root",     0, 11, 0, PARAM_PITCH_CLASS, nullptr},
     {"channel",  0, 16, 0, PARAM_CHANNEL, nullptr},
     {"dry",      NoteDelay::ND_PASS, NoteDelay::ND_DRYS, NoteDelay::ND_PASS, PARAM_ENUM, DRY_NAMES},
+    {"key",      0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 13, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, 14, PARAMS}};
 
 static const char* const IN_NAMES[2] = {"notes in", "clear"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor NoteDelay::descriptor = {
-    ALGO_NOTE_DELAY, "NoteDelay", 2, 1, 1, 13, IN, OUT, sizeof(NoteDelay), true,
+    ALGO_NOTE_DELAY, "NoteDelay", 2, 1, 1, 14, IN, OUT, sizeof(NoteDelay), true,
     construct_node<NoteDelay>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "A delay that is a canon: repeats transposed in the key, and spread off the grid.",
     CATEGORY_MIDI };
@@ -59,6 +60,7 @@ NoteDelay::NoteDelay(const NodeConfig& config) :
     root((uint8_t)(config.params[10] % 12u)),
     channel(config.params[11] > 16 ? (uint8_t)0 : config.params[11]),
     dry(clamp_enum(config.params[12], ND_DRYS, ND_PASS)),
+    key(config.params[13] < global_scale::KEY_MODES ? config.params[13] : (uint8_t)0),
     subtick(0), drops(0),
     clear_in(config.in_bus[1]),
     rng(entropy::seed()),
@@ -121,7 +123,7 @@ uint8_t NoteDelay::pitch_for(uint8_t pitch, uint8_t k) const {
     const int8_t step = as_signed(interval);
     if (step == 0 || k == 0) return pitch;
     const uint16_t mask = global_scale::resolve_id(scale);
-    const uint8_t r = global_scale::resolve_root(scale, root);
+    const uint8_t r = global_scale::resolve_root(key, root);
     const int16_t rel = (int16_t)pitch - (int16_t)r;
     const int16_t degree = semitone_to_scale_degree(rel, mask);
     const int16_t moved = (int16_t)(degree + (int16_t)step * (int16_t)k);
@@ -263,6 +265,7 @@ bool NoteDelay::set_param(uint16_t index, uint8_t value){
         case 10: if (value > 11) return false; root = value; return true;
         case 11: if (value > 16) return false; channel = value; return true;
         case 12: if (value == 0 || value > ND_DRYS) return false; dry = value; return true;
+        case 13: if (value >= global_scale::KEY_MODES) return false; key = value; return true;
         default: return false;
     }
 }
@@ -282,6 +285,7 @@ uint8_t NoteDelay::get_param(uint16_t index) const {
         case 10: return root;
         case 11: return channel;
         case 12: return dry;
+        case 13: return key;
         default: return 0;
     }
 }

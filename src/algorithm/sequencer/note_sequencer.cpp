@@ -28,7 +28,7 @@ const ParamDescriptor NoteSequencerBase::HEADER[16] = {
     {"rest key",   0, 127,                            0,  PARAM_PITCH,   nullptr},
     {"tie key",    0, 127,                            1,  PARAM_PITCH,   nullptr},
     {"rec velocity", 0, 127,                          0,  PARAM_NUMBER,  nullptr},
-    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"key",        0, global_scale::KEY_MODES - 1,    0,  PARAM_ENUM,    PARAM_KEY_NAMES},
     {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
 };
 
@@ -108,6 +108,7 @@ NoteSequencerBase::NoteSequencerBase(const NodeConfig& config, uint8_t voices_pe
     rest_key(config.params[P_REST_KEY]),
     tie_key(config.params[P_TIE_KEY] ? config.params[P_TIE_KEY] : DEFAULT_TIE_KEY),
     rec_velocity(config.params[P_REC_VELOCITY]),
+    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     rec_cursor(0), snap_count(0),
     last_edge_us(0), period(0), have_edge(false), have_period(false),
     engine(), rng(entropy::seed()), sounding(), voice(), steps()
@@ -193,6 +194,10 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
             if (value > 127) return false;
             rec_velocity = value;
             return true;
+        case P_KEY:
+            if (value >= global_scale::KEY_MODES) return false;
+            key = value;
+            return true;
         default:
             break;
     }
@@ -200,7 +205,7 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
         steps[index - STEP_BASE] = value;
         return true;
     }
-    return false;                     // params[11..15] are reserved
+    return false;                     // params[15] is reserved
 }
 
 uint8_t NoteSequencerBase::get_param(uint16_t index) const {
@@ -219,6 +224,7 @@ uint8_t NoteSequencerBase::get_param(uint16_t index) const {
         case P_REST_KEY:   return rest_key;
         case P_TIE_KEY:    return tie_key;
         case P_REC_VELOCITY: return rec_velocity;
+        case P_KEY:        return key;
         default:           break;
     }
     if (index >= STEP_BASE && index < param_count(n_voices)) return steps[index - STEP_BASE];
@@ -238,10 +244,11 @@ uint16_t NoteSequencerBase::active_mask() const {
 
 // A patched root inlet outranks everything, as it does on every node that has
 // one - `root` is then whatever it last wrote. Otherwise the key's root note
-// if it names one, and this sequencer's own anchor if it does not.
+// if it names one and this sequencer follows it, moved by the register this
+// pattern asks for; and this sequencer's own anchor if it does not.
 uint8_t NoteSequencerBase::active_root() const {
     if (root_in != NO_BUS) return root;
-    return global_scale::resolve_anchor(scale_mask, root);
+    return global_scale::resolve_anchor(key, root, DEFAULT_ROOT);
 }
 
 uint8_t NoteSequencerBase::pitch(uint8_t step, uint8_t v) const {

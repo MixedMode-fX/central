@@ -19,7 +19,7 @@ import { el, segmented } from './views.js';
 import { busCount, Domain, domainName } from './validate.js';
 import { describeSupport } from './webmidi.js';
 import {
-  MUSICAL_PORTS, portNames, CLOCK_SOURCES, SWAP_TIMINGS, KEY_SCALES, PITCH_CLASSES,
+  MUSICAL_PORTS, portNames, CLOCK_SOURCES, SWAP_TIMINGS,
   CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS,
   TAKEOVER, RELATIVE, FOURTEEN_BIT, PASS_THROUGH, channelLabel,
 } from './names.js';
@@ -156,6 +156,9 @@ export function routingPanel(app) {
 }
 
 // --- clock, Program Change, NRPN -------------------------------------------
+//
+// The key used to be here too, and is not: it is not a MIDI setting. See
+// src/key.js.
 
 export function globalsPanel(app) {
   if (!app.device?.capabilities) return null;
@@ -195,36 +198,6 @@ export function globalsPanel(app) {
     quantise.append(option);
   }
 
-  // The key: one scale and one root for the whole patch. Every algorithm with
-  // a scale parameter follows it unless it names a scale of its own, which is
-  // what "global" is in those lists.
-  const keyScale = el('select', { onchange: (e) => { g.scale = Number(e.target.value); push(); } });
-  for (const s of KEY_SCALES) {
-    const option = el('option', { value: String(s.value) }, s.label);
-    if (s.value === g.scale) option.selected = true;
-    keyScale.append(option);
-  }
-
-  const keyRoot = el('select', { onchange: (e) => { g.root = Number(e.target.value); push(); } });
-  PITCH_CLASSES.forEach((name, pitchClass) => {
-    const option = el('option', { value: String(pitchClass) }, name);
-    if (pitchClass === (g.root ?? 0)) option.selected = true;
-    keyRoot.append(option);
-  });
-
-  // The register the key sits in. "none" is the default and means what it
-  // always meant: the key names a pitch class, and every node with an
-  // absolute root keeps its own octave (src/midi/global_scale.h).
-  const keyOctave = el('select', { onchange: (e) => { g.rootOctave = Number(e.target.value); push(); } });
-  for (let octave = 0; octave <= 10; octave++) {
-    const label = octave === 0
-      ? 'none'
-      : `${octave} (${PITCH_CLASSES[(g.root ?? 0) % 12]}${octave}, note ${Math.min(127, octave * 12 + (g.root ?? 0))})`;
-    const option = el('option', { value: String(octave) }, label);
-    if (octave === (g.rootOctave ?? 0)) option.selected = true;
-    keyOctave.append(option);
-  }
-
   const nrpnEnabled = el('input', { type: 'checkbox', class: 'switch',
     onchange: (e) => {
       g.nrpnEnabled = e.target.checked ? 1 : 0;
@@ -238,12 +211,7 @@ export function globalsPanel(app) {
     hint ? el('span', { class: 'hint' }, hint) : null);
 
   return el('section', { class: 'panel' },
-    el('h2', {}, 'key'),
-    el('div', { class: 'fields' },
-      field('scale', keyScale, null),
-      field('root', keyRoot, null),
-      field('register', keyOctave, 'where the key sits; "none" leaves every root as it is')),
-    el('h2', { class: 'spaced' }, 'clock and recall'),
+    el('h2', {}, 'clock and recall'),
     el('div', { class: 'fields' },
       field('clock source', source),
       field('tempo', bpm, `${P.CLOCK_MIN_BPM}–${P.CLOCK_MAX_BPM} BPM`),

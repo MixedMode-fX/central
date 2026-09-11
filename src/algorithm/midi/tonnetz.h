@@ -65,19 +65,21 @@
 // params[2] diatonic   refuse a triad the key does not contain
 // params[3] root       the pitch the starting triad is built on. Follows the
 //                      key like every other absolute root here: its pitch
-//                      class always, and its register too when the key names
-//                      one (midi/global_scale.h).
+//                      class, and its register when the key names one - and
+//                      then this parameter names how far from that register
+//                      the triad sits (midi/global_scale.h).
 // params[4] minor      start on a minor triad rather than a major one
 // params[5] scale      0 follows the module's key; only `diatonic` reads it
 // params[6] velocity
 // params[7] channel
 // params[8] seed       0 draws from the entropy pool, anything else is exact
+// params[9] key        follow the module's root, or use this node's own
 class Tonnetz : public Node{
     public:
         static constexpr uint16_t P_CYCLE = 0, P_DEVIATION = 1, P_DIATONIC = 2, P_ROOT = 3,
                                   P_MINOR = 4, P_SCALE = 5, P_VELOCITY = 6, P_CHANNEL = 7,
-                                  P_SEED = 8;
-        static constexpr uint8_t N_PARAMS = 9;
+                                  P_SEED = 8, P_KEY = 9;
+        static constexpr uint8_t N_PARAMS = 10;
         static constexpr uint8_t DEFAULT_ROOT = 48, DEFAULT_VELOCITY = 100;
 
         enum Cycle : uint8_t {
@@ -134,6 +136,7 @@ class Tonnetz : public Node{
         uint8_t velocity;
         uint8_t channel;
         uint8_t seed;
+        uint8_t key;                  // global_scale::KeyFollow
         uint8_t current_root;      // pitch class
         bool current_minor;
         uint8_t step;              // which half of the cycle comes next

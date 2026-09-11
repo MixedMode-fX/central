@@ -90,6 +90,10 @@ inline uint8_t param_effective(const ParamDescriptor& d, uint8_t stored){
 // Shared option-name tables, so two algorithms naming the same enum agree.
 extern const char* const PARAM_DIRECTION_NAMES[5];   // StepEngine::Direction
 extern const char* const PARAM_SCALE_NAMES[15];      // ScaleId
+// global_scale::KeyFollow. Whether a node's root is the key's or its own,
+// which is a separate question from which notes it plays: see
+// midi/global_scale.h.
+extern const char* const PARAM_KEY_NAMES[2];
 // NotePriorityRule (midi/held_notes.h). Options are indexed from the
 // parameter's own minimum, so the one table serves a parameter numbered from
 // zero and one numbered from one.

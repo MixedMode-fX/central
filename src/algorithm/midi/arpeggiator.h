@@ -27,6 +27,12 @@
 // rest, so lifting the latch under your fingers does not cut the notes you
 // are actually holding.
 //
+// A chord played with no key already down starts the figure at its first
+// step, so the first note is the one the mode asks for - the lowest for up,
+// the highest for down - however far through the figure the previous chord
+// got. Adding to a chord already down does not, so a figure running under a
+// growing chord keeps its place.
+//
 // Inlet 0 (note): the held chord. Note-on adds, note-off removes.
 // Inlet 1 (gate): advance. Each rising edge releases the sounding note and
 //                 plays the next one.

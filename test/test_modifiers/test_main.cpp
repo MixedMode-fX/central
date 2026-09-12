@@ -1114,6 +1114,45 @@ static uint8_t note_played(const std::vector<MidiEvent>& out) {
     return played;
 }
 
+// A new chord starts the figure again, even when the old one's note-offs and
+// the new one's note-ons arrive in the same pass - which is exactly how an
+// upstream Chord or sequencer changes chord. Without this the cursor was
+// left wherever the previous chord stopped and the first note of every chord
+// came out of order.
+static void test_arpeggiator_restarts_the_figure_on_a_new_chord() {
+    const uint8_t modes[2] = {Arpeggiator::ARP_UP, Arpeggiator::ARP_DOWN};
+    const uint8_t first[2] = {62, 69};                 // lowest of the new chord, highest
+    for (uint8_t m = 0; m < 2; m++) {
+        BusManager bus;
+        NodeConfig c = node_config(ALGO_ARPEGGIATOR);
+        c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
+        c.params[0] = modes[m];
+        Arpeggiator node(c);
+
+        hold_triad(bus, 0);
+        run_pass(bus, node, 1);
+        // Two steps in, so the cursor is in the middle of the figure.
+        for (uint8_t step = 0; step < 2; step++) {
+            bus.gate_write(0, true);
+            run_pass(bus, node, 1);
+            bus.gate_write(0, false);
+            run_pass(bus, node, 1);
+        }
+
+        bus.note_write(0, off(60));
+        bus.note_write(0, off(64));
+        bus.note_write(0, off(67));
+        bus.note_write(0, on(69, 100));
+        bus.note_write(0, on(62, 100));
+        bus.note_write(0, on(65, 100));
+        run_pass(bus, node, 1);
+        TEST_ASSERT_EQUAL(3, node.held_count());
+
+        bus.gate_write(0, true);
+        TEST_ASSERT_EQUAL(first[m], note_played(run_pass(bus, node, 1)));
+    }
+}
+
 // One edge, one step, with nobody touching the keyboard: the point of hold.
 static void test_arpeggiator_hold_keeps_the_figure_after_the_keys_are_lifted() {
     BusManager bus;
@@ -1761,6 +1800,7 @@ int main() {
     RUN_TEST(test_arpeggiator_one_note_per_edge_in_order);
     RUN_TEST(test_arpeggiator_up_down_does_not_repeat_the_endpoints);
     RUN_TEST(test_arpeggiator_octave_range_and_reset);
+    RUN_TEST(test_arpeggiator_restarts_the_figure_on_a_new_chord);
     RUN_TEST(test_arpeggiator_releases_when_the_chord_is_lifted);
     RUN_TEST(test_arpeggiator_gate_length_releases_early);
     RUN_TEST(test_arpeggiator_hold_keeps_the_figure_after_the_keys_are_lifted);

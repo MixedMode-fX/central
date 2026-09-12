@@ -192,12 +192,20 @@ void Arpeggiator::process(BusManager& bus, uint32_t now_us){
     for (uint8_t i = 0; i < n; i++){
         const MidiEvent e = bus.note_read(held_in, i);
         if (is_note_on(e)){
-            // Latched, and this is the first key of a new chord: the figure
-            // is replaced, not added to.
-            if (hold_now && down_count == 0 && held.count() != 0){
-                held.clear();
-                sounding.release_all(bus, out);
-                playing = HeldNotes::NONE;
+            // The first key of a new chord starts the figure at its first
+            // step. Nothing else resets the cursor when a chord is changed
+            // in one pass - the old chord's note-offs and the new one's
+            // note-ons together, which is how an upstream Chord or sequencer
+            // changes chord - so without this the new chord would carry on
+            // from wherever the old one stopped and its first note would be
+            // whatever step that happened to land on.
+            if (down_count == 0){
+                // Latched: the figure is replaced, not added to.
+                if (hold_now && held.count() != 0){
+                    held.clear();
+                    sounding.release_all(bus, out);
+                    playing = HeldNotes::NONE;
+                }
                 cursor = 0;
                 descending = false;
             }

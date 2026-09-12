@@ -474,6 +474,60 @@
   }
   .note-cell .pitch { font-size: .65rem; color: var(--dim); }
 
+  /* --- the circle of fifths --- */
+  /* A harmony's picture, not a grid: the key's chords where the circle of
+     fifths puts them, and arrows for the moves. It is capped and centred
+     rather than stretched, because a circle two screens wide is no easier to
+     read than one that fits. */
+  .harmony .circle-of-fifths { display: block; width: 100%; max-width: 340px; margin: .2rem auto; }
+  .circle-ring { fill: none; stroke: var(--line); }
+  .circle-label { fill: var(--dim); font-size: 11px; opacity: .5; }
+  /* The twelve positions are always drawn - that is what makes it the circle
+     of fifths and not a ring of seven dots - but the ones the key has are the
+     ones you are reading. */
+  .circle-label.in-key { fill: var(--ink); opacity: 1; font-size: 12px; }
+  .chord-dot circle { fill: var(--raised); stroke: var(--note); stroke-width: 1.5; }
+  .chord-dot text { fill: var(--ink); font-size: 12px; }
+  .chord-dot { cursor: pointer; }
+  /* A chord's quality is in its outline: filled for a major triad, open for a
+     minor one, dashed for a diminished one. The colour stays the note
+     domain's, because that is what this node writes. */
+  .chord-dot.q-maj circle { fill: color-mix(in srgb, var(--note) 28%, var(--raised)); }
+  .chord-dot.q-dim circle { stroke-dasharray: 3 2; }
+  .chord-dot.q-aug circle { stroke-dasharray: 1 2; }
+  /* Pinned, and sounding. The accent means "what is selected or playing"
+     everywhere in this app, and a chord is both kinds of thing. */
+  .chord-dot.focused circle { stroke: var(--accent); stroke-width: 2; }
+  .chord-dot.playing circle { stroke: var(--accent); stroke-width: 3; }
+  .chord-dot.playing text { fill: var(--accent); }
+  .fan path { stroke: var(--dim); fill: none; }
+  /* One marker, every arrow: `context-stroke` paints the head the colour of
+     the line it ends, so the loop's arrows and the walk's do not need two.
+     A browser that has not got it keeps the dim head. */
+  .circle-of-fifths marker path { fill: var(--dim); fill: context-stroke; }
+  .fan path.top { stroke: var(--note); stroke-opacity: 1; }
+  .fan path.loop { stroke: var(--accent); stroke-width: 2; stroke-opacity: .85; }
+  /* The move that closes the loop - the last chord back to the first - is the
+     one the ear hears as coming round, and nothing else on the picture says
+     which of the arrows that is. */
+  .fan path.loop.round { stroke-dasharray: 4 3; }
+  /* The loop's slots: what it wrote down, and where in it the next advance
+     falls. The same shape as a sequencer's steps, because it is the same
+     thing - a pattern with a playhead in it. */
+  .loop-row { display: grid; gap: .2rem; margin-top: .5rem; }
+  /* `chord-slot`, not `slot`: a preset slot in the library is already called
+     that, and two things with one class name is one of them getting the
+     other's styling. */
+  .chord-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(3.5rem, 1fr)); gap: 3px; }
+  .chord-slot {
+    display: grid; gap: 1px; text-align: center; padding: 2px 1px;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 3px;
+  }
+  .chord-slot.empty { border-style: dashed; opacity: .5; }
+  .chord-slot .roman { font-size: .85rem; }
+  .chord-slot .name { font-size: .65rem; color: var(--dim); min-height: .8rem; }
+  .chord-slot.playing { outline: 2px solid var(--accent); outline-offset: 1px; }
+
   /* --- the play tab --- */
   /* A jack is a socket: a lamp, a name, and whatever drives it. Cards rather
      than a table, because on a phone a table of eight jacks is a sideways

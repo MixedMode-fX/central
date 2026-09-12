@@ -217,8 +217,11 @@ is only what a parameter list cannot say.
   invent the ones it has not got), `smooth` (interval distance versus shared
   tones), `leading`, and `spread`, which flattens or sharpens the weights and
   never zeroes one — so an unlikely move is always available and always in key.
-  `phrase` and `cadence` make it periodic, `loop` fixes the next phrase,
-  `gravity` biases the tonic, `drift` redraws one chord of a loop and keeps it.
+  `phrase` and `cadence` make it periodic; `loop` is a **length**, and the next
+  that many chords become the piece, repeated until it is set back to zero —
+  the phrase is how often the music resolves and the loop is how much of it
+  repeats, so the two are set apart. `gravity` biases the tonic, `drift`
+  redraws one chord of a loop and keeps it.
   The walk runs over the first seven degrees, or all of them in a smaller
   scale.
 - **`Automaton`'s lanes are neighbours.** A Wolfram elementary rule,

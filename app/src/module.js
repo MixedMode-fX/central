@@ -523,6 +523,25 @@ export class EmbeddedModule {
   seqPosition(node, lane) { return this.E.emu_seq_position(node, lane); }
   nodeCount() { return this.E.emu_node_count(); }
 
+  // What a Harmony node would play, read from the node itself: where the
+  // key's chords sit, how much the walk wants each move, and the loop it has
+  // written down. `harmonyDegrees` is 0 for every other algorithm, so it is
+  // also the test for whether there is a circle to draw.
+  //
+  // The weights are `Harmony::weigh` - the same function the draw reads - so
+  // the picture is the firmware's opinion and not a second one beside it.
+  // That is why this is here and not arithmetic in the page: a rule the app
+  // reimplemented would be a rule that could drift.
+  harmonyDegrees(node) { return this.E.emu_harmony_degrees(node); }
+  harmonyDegree(node) { return this.E.emu_harmony_degree(node); }
+  harmonyPitch(node, degree) { return this.E.emu_harmony_pitch(node, degree); }
+  harmonyTriad(node, degree) { return this.E.emu_harmony_triad(node, degree); }
+  harmonyWeight(node, from, to) { return this.E.emu_harmony_weight(node, from, to); }
+  harmonyLoopLength(node) { return this.E.emu_harmony_loop_length(node); }
+  harmonyLoopPosition(node) { return this.E.emu_harmony_loop_position(node); }
+  harmonyLoopChord(node, slot) { return this.E.emu_harmony_loop_chord(node, slot); }
+  harmonyPhrasePosition(node) { return this.E.emu_harmony_phrase_position(node); }
+
   version() {
     const memory = new Uint8Array(this.E.memory.buffer);
     let out = '';

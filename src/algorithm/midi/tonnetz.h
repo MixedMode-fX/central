@@ -52,35 +52,62 @@
 // the fifth cycle, which is `Harmony`'s territory arrived at from the other
 // direction.
 //
+// **The triad it starts on is the key's, and is not a setting.** A walk that
+// began on a major triad in a minor key began outside the key it was handed,
+// so the starting quality is read from the scale rather than typed: minor
+// where the key holds the minor third over the starting root and not the
+// major one, major everywhere else - which is the only choice the Tonnetz
+// offers, every triad on it being one or the other. A chromatic key has no
+// degrees to colour a triad with and starts major, exactly as `Chord`'s
+// `triad` does.
+//
+// **The root inlet is how it is played.** A note-on there is what `reset` is
+// with a pitch attached: the walk starts again, from that note - the whole
+// note, register and all - and the key it is measured in stays where it is,
+// so a sequenced root walks through the triads of one key rather than
+// dragging the key behind it. Clock the root with `advance` and this is a
+// chord node, sounding the triad the key puts on each root; clock it slower
+// and the walk runs from each new root, which is the patch this node is for.
+//
+// The scale is the module's own unless this node names one, and the root is
+// the module's own unless `key` says otherwise - two questions, two
+// parameters, the same rule `Chord` follows. A played root outranks both as a
+// pitch and touches neither as a key (midi/global_scale.h).
+//
 // Before the first advance nothing is sounding, and the first advance plays
 // the starting triad. Reset means the same here as in every sequencer: the
 // next advance starts over.
 //
 // Inlet 0 (gate): advance - one transform per rising edge.
 // Inlet 1 (gate, optional): reset - back to the starting triad.
+// Inlet 2 (note, optional): root - note-ons start the walk again, there.
 // Outlet 0 (note): the triad, held until the next one.
 //
 // params[0] cycle      LR / PL / PR / free
 // params[1] deviation  percent chance of a transform the cycle did not name
 // params[2] diatonic   refuse a triad the key does not contain
-// params[3] root       the pitch the starting triad is built on. Follows the
-//                      key like every other absolute root here: its pitch
-//                      class, and its register when the key names one - and
-//                      then this parameter names how far from that register
-//                      the triad sits (midi/global_scale.h).
-// params[4] minor      start on a minor triad rather than a major one
-// params[5] scale      0 follows the module's key; only `diatonic` reads it
+// params[3] key        follow the module's root, or use this node's own. The
+//                      scale is a separate parameter and a separate question:
+//                      a walk can be judged against a mode of its own without
+//                      leaving the key (midi/global_scale.h).
+// params[4] root       the pitch the walk starts on until the root inlet
+//                      plays one. Follows the key like every other absolute
+//                      root here: its pitch class, and its register when the
+//                      key names one - and then this parameter names how far
+//                      from that register the triad sits.
+// params[5] scale      0 follows the module's key
 // params[6] velocity
 // params[7] channel
 // params[8] seed       0 draws from the entropy pool, anything else is exact
-// params[9] key        follow the module's root, or use this node's own
 class Tonnetz : public Node{
     public:
-        static constexpr uint16_t P_CYCLE = 0, P_DEVIATION = 1, P_DIATONIC = 2, P_ROOT = 3,
-                                  P_MINOR = 4, P_SCALE = 5, P_VELOCITY = 6, P_CHANNEL = 7,
-                                  P_SEED = 8, P_KEY = 9;
-        static constexpr uint8_t N_PARAMS = 10;
+        static constexpr uint16_t P_CYCLE = 0, P_DEVIATION = 1, P_DIATONIC = 2, P_KEY = 3,
+                                  P_ROOT = 4, P_SCALE = 5, P_VELOCITY = 6, P_CHANNEL = 7,
+                                  P_SEED = 8;
+        static constexpr uint8_t N_PARAMS = 9;
         static constexpr uint8_t DEFAULT_ROOT = 48, DEFAULT_VELOCITY = 100;
+        // No note: what `played` holds until the root inlet names one.
+        static constexpr uint8_t NO_NOTE = 0xFF;
 
         enum Cycle : uint8_t {
             TONNETZ_LR   = 1,
@@ -112,9 +139,14 @@ class Tonnetz : public Node{
         // One transform applied to a triad, as a pure function: what makes
         // the three definitions testable without a bus.
         static void apply(uint8_t transform, uint8_t& root_pc, bool& minor);
-        // Where the walk starts and which register it sits in, after the
-        // module's key has been resolved into `root`.
+        // Where the walk starts and which register it sits in: the note the
+        // root inlet last played, or the module's key resolved into `root`.
         uint8_t active_root() const;
+        // The pitch class the scale is measured from: the key's own, which a
+        // root inlet moving the walk does not move.
+        uint8_t key_tonic() const;
+        // The quality the key puts on the starting root.
+        bool starts_minor() const;
 
     private:
         // The transform the cycle names next, before `deviation` is rolled.
@@ -129,17 +161,18 @@ class Tonnetz : public Node{
 
         EdgeIn advance_in;
         EdgeIn reset_in;
+        uint8_t root_in;
         uint8_t note_out;
         uint8_t cycle;
         uint8_t deviation;
         bool diatonic;
+        uint8_t key;                  // global_scale::KeyFollow
         uint8_t root;
-        bool minor;
         uint8_t scale;
         uint8_t velocity;
         uint8_t channel;
         uint8_t seed;
-        uint8_t key;                  // global_scale::KeyFollow
+        uint8_t played;            // the root inlet's last note, or NO_NOTE
         uint8_t current_root;      // pitch class
         bool current_minor;
         uint8_t step;              // which half of the cycle comes next

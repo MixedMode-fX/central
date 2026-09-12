@@ -16,7 +16,11 @@ void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
 // Tonnetz: chromatic triads where one voice moves a semitone.
 
 static const uint8_t GATE_ADVANCE = 0, GATE_RESET = 1;
-static const uint8_t NOTE_TRIAD = 0, NOTE_VOICED = 1;
+static const uint8_t NOTE_TRIAD = 0, NOTE_VOICED = 1, NOTE_ROOT = 2;
+
+static MidiEvent on(uint8_t note, uint8_t velocity = 100, uint8_t channel = 1) {
+    return MidiEvent{MIDI_NOTE_ON, channel, note, velocity};
+}
 
 static NodeConfig tonnetz_config(uint8_t cycle, uint8_t deviation = 0, uint8_t seed = 9){
     NodeConfig c = node_config(ALGO_TONNETZ);
@@ -28,6 +32,15 @@ static NodeConfig tonnetz_config(uint8_t cycle, uint8_t deviation = 0, uint8_t s
     c.params[Tonnetz::P_ROOT] = 60;                    // middle C
     c.params[Tonnetz::P_SEED] = seed;
     return c;
+}
+
+// A note-on on the root inlet, in a pass of its own.
+static void play_root(Node& node, BusManager& bus, uint8_t note){
+    bus.gate_write(GATE_ADVANCE, false);
+    bus.note_write(NOTE_ROOT, on(note));
+    bus.swap();
+    node.process(bus, 0);
+    bus.swap();
 }
 
 static void idle(Node& node, BusManager& bus){
@@ -318,6 +331,85 @@ static void test_into_a_voicer_two_of_three_voices_are_held() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The key, and the root it is played from
+// ---------------------------------------------------------------------------
+
+// The starting triad is the one the key holds over that root - which is why
+// there is no parameter for it. A major key starts major, a minor or modal
+// one starts minor, and a chromatic key has no degrees to take a flavour
+// from and starts major.
+static void test_the_first_triad_is_the_one_the_key_holds() {
+    struct Case { uint8_t scale; uint8_t key_root; uint8_t root; bool minor; };
+    static const Case CASES[4] = {
+        {SCALE_MAJOR,         0, 60, false},           // C major
+        {SCALE_NATURAL_MINOR, 9, 57, true},            // A minor
+        {SCALE_DORIAN,        2, 62, true},            // D dorian
+        {SCALE_CHROMATIC,     0, 60, false},           // no degrees to colour it
+    };
+    for (const Case& k : CASES){
+        global_scale::set(k.scale, k.key_root);
+        BusManager bus;
+        NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_LR);
+        c.params[Tonnetz::P_ROOT] = k.root;
+        Tonnetz node(c);
+        advance(node, bus);
+        TEST_ASSERT_EQUAL((uint8_t)(k.root % 12u), node.triad_root());
+        TEST_ASSERT_EQUAL(k.minor, node.triad_is_minor());
+    }
+}
+
+// The root inlet is how it is played: the walk starts on the note that was
+// sent, register and all, and starts again on every one.
+static void test_the_root_inlet_plays_the_walk() {
+    BusManager bus;
+    NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_LR);
+    c.in_bus[2] = NOTE_ROOT;
+    Tonnetz node(c);
+
+    advance(node, bus);                                 // the parameter's root
+    TEST_ASSERT_EQUAL(0, node.triad_root());
+    advance(node, bus);
+    TEST_ASSERT_EQUAL(4, node.triad_root());            // walked to E minor
+
+    play_root(node, bus, 67);                           // G4: start again, there
+    std::vector<uint8_t> played = notes_on(advance(node, bus));
+    TEST_ASSERT_EQUAL(7, node.triad_root());
+    TEST_ASSERT_FALSE(node.triad_is_minor());           // V of C major is major
+    TEST_ASSERT_EQUAL(3, played.size());
+    TEST_ASSERT_EQUAL(67, played[0]);                   // the note that was sent
+    TEST_ASSERT_EQUAL(71, played[1]);
+    TEST_ASSERT_EQUAL(74, played[2]);
+
+    advance(node, bus);                                 // and walks on from it
+    TEST_ASSERT_EQUAL(11, node.triad_root());
+    TEST_ASSERT_TRUE(node.triad_is_minor());
+
+    play_root(node, bus, 62);                           // D3: the ii, so minor
+    advance(node, bus);
+    TEST_ASSERT_EQUAL(2, node.triad_root());
+    TEST_ASSERT_TRUE(node.triad_is_minor());
+}
+
+// A played root moves where the walk starts and not what the key is: with
+// `diatonic` on, every triad is still one of C major's own.
+static void test_a_played_root_does_not_drag_the_key_with_it() {
+    BusManager bus;
+    NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_PL, 50);
+    c.in_bus[2] = NOTE_ROOT;
+    c.params[Tonnetz::P_DIATONIC] = 1;
+    Tonnetz node(c);
+    global_scale::set(SCALE_MAJOR, 0);
+
+    const uint16_t mask = scale_mask(SCALE_MAJOR);
+    play_root(node, bus, 64);                           // E4, the iii
+    for (uint8_t i = 0; i < 24; i++){
+        const std::vector<uint8_t> played = notes_on(advance(node, bus));
+        TEST_ASSERT_EQUAL(3, played.size());
+        for (uint8_t n : played) TEST_ASSERT_TRUE(mask & (uint16_t)(1u << (n % 12u)));
+    }
+}
+
 int main(int, char**){
     UNITY_BEGIN();
     RUN_TEST(test_the_three_transforms_are_what_they_say);
@@ -330,5 +422,8 @@ int main(int, char**){
     RUN_TEST(test_the_triad_stays_in_the_register_it_was_given);
     RUN_TEST(test_tonnetz_hangs_nothing);
     RUN_TEST(test_into_a_voicer_two_of_three_voices_are_held);
+    RUN_TEST(test_the_first_triad_is_the_one_the_key_holds);
+    RUN_TEST(test_the_root_inlet_plays_the_walk);
+    RUN_TEST(test_a_played_root_does_not_drag_the_key_with_it);
     return UNITY_END();
 }

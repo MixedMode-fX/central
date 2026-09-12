@@ -27,11 +27,15 @@
 // rest, so lifting the latch under your fingers does not cut the notes you
 // are actually holding.
 //
-// A chord played with no key already down starts the figure at its first
+// **New chord** is what a chord change does to the cursor. On *restart* a
+// chord played with no key already down starts the figure again at its first
 // step, so the first note is the one the mode asks for - the lowest for up,
 // the highest for down - however far through the figure the previous chord
-// got. Adding to a chord already down does not, so a figure running under a
-// growing chord keeps its place.
+// got. On *run on* the cursor is left where it is and only the reset inlet
+// moves it, so a chord progression plays as one continuous figure rather
+// than as a phrase restarted under every chord. Adding to a chord already
+// down never restarts either way: a figure running under a growing chord
+// keeps its place.
 //
 // Inlet 0 (note): the held chord. Note-on adds, note-off removes.
 // Inlet 1 (gate): advance. Each rising edge releases the sounding note and
@@ -49,6 +53,7 @@
 //                     step, which is what a legato arpeggio wants.
 // params[3] velocity  0 keeps the velocity each note was played with
 // params[4] hold      latch the chord: it keeps playing with no key down
+// params[5] new chord 0 restart the figure, 1 run on from where it was
 class Arpeggiator : public Node{
     public:
         enum Mode : uint8_t {
@@ -97,6 +102,7 @@ class Arpeggiator : public Node{
         uint16_t gate_ms;
         uint8_t fixed_velocity;
         uint8_t hold;                       // the parameter, not the inlet
+        uint8_t run_on;                     // a chord change leaves the cursor
         uint8_t cursor;                     // position in the figure
         uint8_t playing;                    // source key of the sounding note
         uint32_t started_us;

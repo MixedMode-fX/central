@@ -1119,38 +1119,86 @@ static uint8_t note_played(const std::vector<MidiEvent>& out) {
 // upstream Chord or sequencer changes chord. Without this the cursor was
 // left wherever the previous chord stopped and the first note of every chord
 // came out of order.
+//
+// The "new chord" parameter is the other half of it: on "run on" the cursor
+// survives the change on purpose, so the same chord change lands on the step
+// the figure was up to.
 static void test_arpeggiator_restarts_the_figure_on_a_new_chord() {
     const uint8_t modes[2] = {Arpeggiator::ARP_UP, Arpeggiator::ARP_DOWN};
-    const uint8_t first[2] = {62, 69};                 // lowest of the new chord, highest
-    for (uint8_t m = 0; m < 2; m++) {
-        BusManager bus;
-        NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-        c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
-        c.params[0] = modes[m];
-        Arpeggiator node(c);
+    const uint8_t restarted[2] = {62, 69};             // lowest of the new chord, highest
+    const uint8_t ran_on[2] = {69, 62};                // the third step of each figure
+    for (uint8_t run_on = 0; run_on < 2; run_on++) {
+        for (uint8_t m = 0; m < 2; m++) {
+            BusManager bus;
+            NodeConfig c = node_config(ALGO_ARPEGGIATOR);
+            c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
+            c.params[0] = modes[m];
+            c.params[5] = run_on;
+            Arpeggiator node(c);
 
-        hold_triad(bus, 0);
-        run_pass(bus, node, 1);
-        // Two steps in, so the cursor is in the middle of the figure.
-        for (uint8_t step = 0; step < 2; step++) {
+            hold_triad(bus, 0);
+            run_pass(bus, node, 1);
+            // Two steps in, so the cursor is in the middle of the figure.
+            for (uint8_t step = 0; step < 2; step++) {
+                bus.gate_write(0, true);
+                run_pass(bus, node, 1);
+                bus.gate_write(0, false);
+                run_pass(bus, node, 1);
+            }
+
+            bus.note_write(0, off(60));
+            bus.note_write(0, off(64));
+            bus.note_write(0, off(67));
+            bus.note_write(0, on(69, 100));
+            bus.note_write(0, on(62, 100));
+            bus.note_write(0, on(65, 100));
+            run_pass(bus, node, 1);
+            TEST_ASSERT_EQUAL(3, node.held_count());
+
             bus.gate_write(0, true);
-            run_pass(bus, node, 1);
-            bus.gate_write(0, false);
-            run_pass(bus, node, 1);
+            const uint8_t played = note_played(run_pass(bus, node, 1));
+            TEST_ASSERT_EQUAL(run_on ? ran_on[m] : restarted[m], played);
         }
-
-        bus.note_write(0, off(60));
-        bus.note_write(0, off(64));
-        bus.note_write(0, off(67));
-        bus.note_write(0, on(69, 100));
-        bus.note_write(0, on(62, 100));
-        bus.note_write(0, on(65, 100));
-        run_pass(bus, node, 1);
-        TEST_ASSERT_EQUAL(3, node.held_count());
-
-        bus.gate_write(0, true);
-        TEST_ASSERT_EQUAL(first[m], note_played(run_pass(bus, node, 1)));
     }
+}
+
+// Run on carries the cursor across a gap with nothing held at all, not only
+// across a chord changed in one pass: the figure is a loop the chords move
+// under, which is the whole reason for the setting.
+static void test_arpeggiator_run_on_survives_an_empty_keyboard() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_ARPEGGIATOR);
+    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = 1; c.out_bus[0] = 1;
+    c.params[5] = 1;                                   // run on
+    Arpeggiator node(c);
+
+    hold_triad(bus, 0);
+    run_pass(bus, node, 1);
+    bus.gate_write(0, true);
+    TEST_ASSERT_EQUAL(60, note_played(run_pass(bus, node, 1)));
+    bus.gate_write(0, false);
+    run_pass(bus, node, 1);
+
+    bus.note_write(0, off(60));
+    bus.note_write(0, off(64));
+    bus.note_write(0, off(67));
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(0, node.held_count());
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+
+    hold_triad(bus, 0);
+    run_pass(bus, node, 1);
+    bus.gate_write(0, true);
+    TEST_ASSERT_EQUAL(64, note_played(run_pass(bus, node, 1)));   // the second step
+    bus.gate_write(0, false);
+    run_pass(bus, node, 1);
+
+    // The reset inlet still moves it, which is the only thing that does.
+    bus.gate_write(1, true);
+    run_pass(bus, node, 1);
+    bus.gate_write(1, false);
+    bus.gate_write(0, true);
+    TEST_ASSERT_EQUAL(60, note_played(run_pass(bus, node, 1)));
 }
 
 // One edge, one step, with nobody touching the keyboard: the point of hold.
@@ -1801,6 +1849,7 @@ int main() {
     RUN_TEST(test_arpeggiator_up_down_does_not_repeat_the_endpoints);
     RUN_TEST(test_arpeggiator_octave_range_and_reset);
     RUN_TEST(test_arpeggiator_restarts_the_figure_on_a_new_chord);
+    RUN_TEST(test_arpeggiator_run_on_survives_an_empty_keyboard);
     RUN_TEST(test_arpeggiator_releases_when_the_chord_is_lifted);
     RUN_TEST(test_arpeggiator_gate_length_releases_early);
     RUN_TEST(test_arpeggiator_hold_keeps_the_figure_after_the_keys_are_lifted);

@@ -11,7 +11,7 @@ import { GATE_DIRECTIONS } from './names.js';
 import { icon, midiIcon } from './icons.js';
 // The port names live with the patch-shape code, because the canvas needs them
 // too and it must not have to reach through the views to get them.
-import { inletName, outletName, modParamName, planJackDirection } from './graph.js';
+import { inletName, outletName, modParamName, planJackDirection, CC_MAX } from './graph.js';
 export { inletName, outletName };
 
 const el = (tag, attrs = {}, ...children) => {
@@ -42,13 +42,88 @@ export function iconButton({ icon: name, label, text = null, class: klass = '', 
 // The learn button for one parameter: an icon, its meaning in the tooltip and
 // the accessible name, and the bound CC in both so neither a pointer nor a
 // screen reader has to go looking for it.
+//
+// **A press opens a menu, as the CV button beside it does.** The two answer
+// the same question - what moves this when my hands are somewhere else - and
+// only one of them could be answered from here: learn armed the module and
+// waited, so a patch written for a controller in the next room could be given
+// a control signal from this panel and a CC only by being carried to the
+// controller. A CC number is printed on the front of the thing. So the learn
+// is armed by opening the menu when there is a controller to turn, and under
+// it is the number, as a list.
 export function learnButton(app, index, at, name, binding) {
-  const what = binding ? `CC ${binding.cc} is bound to ${name} - learn another` : `learn a controller for ${name}`;
-  return el('button', {
-    type: 'button', class: `ghost learn ${binding ? 'bound' : ''}`,
+  const armed = armedFor(app, index, at);
+  const what = armed ? `waiting for a controller to move ${name}`
+    : binding ? `CC ${binding.cc} moves ${name} - change or remove the binding`
+    : `bind a controller to ${name}`;
+  const button = el('button', {
+    type: 'button', class: ['ghost', 'learn', binding ? 'bound' : '', armed ? 'armed' : ''].filter(Boolean).join(' '),
     title: what, 'aria-label': what,
-    onclick: () => app.learn(index, at),
   }, midiIcon());
+  button.addEventListener('click', () => openCcMenu(app, button, index, at, name, binding));
+  return button;
+}
+
+// Is the module waiting for a controller on *this* parameter? The learn is
+// the module's, not the page's, so one is armed at a time and the page only
+// remembers which control asked for it.
+function armedFor(app, index, at) {
+  const target = app.learnTarget;
+  return Boolean(target && target.nodeIndex === index && target.param === at);
+}
+
+// The CC menu: the learn at the top, the CC numbers below it.
+//
+// **Opening it arms the learn**, rather than offering a row that would.
+// Turning a knob is the gesture the button is named for, and a menu between
+// the knob and the parameter is a menu in the way. When nothing is listening
+// to a controller the arm would be a promise the page cannot keep, so there
+// it is a row instead - the play tab's CC sender finishes a learn just as a
+// knob does - and the list binds a number with no controller at all.
+function openCcMenu(app, anchor, index, at, name, binding) {
+  closeMenu();
+  // Before anything arms: arming re-renders the page, and the button this
+  // menu is placed under goes with it.
+  const box = anchor.getBoundingClientRect();
+  const listening = Boolean(app.controller?.input);
+  if (listening && !app.offline && !armedFor(app, index, at)) app.learn(index, at);
+  const armed = armedFor(app, index, at);
+
+  const head = armed ? `waiting for a controller to move ${name}`
+    : binding ? `${name} is on CC ${binding.cc}`
+    : `bind a controller to ${name}`;
+
+  // What else is already on a CC. Two bindings may share a number - one knob
+  // moving two parameters is a patch, not a mistake - so this is said rather
+  // than refused.
+  const alsoOn = (cc) => app.patch.ccMap.some((m) => m && m.sourceMask && m.cc === cc
+    && !(m.targetKind === P.CcTargetKind.CC_TARGET_NODE && m.targetIndex === index && m.param === at));
+
+  const pick = el('select', {
+    class: 'grow', 'aria-label': `the CC that moves ${name}`,
+    onchange: (e) => { closeMenu(); app.bindParam(index, at, Number(e.target.value)); },
+  }, binding ? null : (() => {
+    const none = el('option', { value: '' }, 'not bound');
+    none.selected = true;
+    return none;
+  })());
+  for (let cc = 0; cc <= CC_MAX; cc++) {
+    const option = el('option', { value: String(cc) }, `CC ${cc}${alsoOn(cc) ? ' · also bound' : ''}`);
+    if (binding?.cc === cc) option.selected = true;
+    pick.append(option);
+  }
+
+  menuUnder(box, 'cc', head,
+    armed
+      ? menuItem('stop waiting', 'cancel the learn', () => app.cancelLearn())
+      : menuItem('turn a knob to bind it', listening ? null : 'no controller yet',
+                 () => app.learn(index, at)),
+    el('div', { class: 'param-menu-field' },
+      el('span', { class: 'param-menu-name' }, 'CC number'), pick),
+    binding
+      ? menuItem('remove the binding', `CC ${binding.cc}`,
+                 () => app.clearMapping(binding.slot), 'danger')
+      : null);
 }
 
 // The CV button beside it: a control signal onto this parameter, from here.
@@ -88,26 +163,36 @@ function openBusMenu(app, anchor, index, at, name, route) {
   }
   buses.sort((a, b) => Number(Boolean(b.writers.length)) - Number(Boolean(a.writers.length)) || a.bus - b.bus);
 
-  const item = (label, hint, onPick, klass = '') => el('button', {
-    type: 'button', class: `param-menu-item ${klass}`, role: 'option',
+  menuUnder(anchor.getBoundingClientRect(), 'cv',
+    route ? `${name} reads CV bus ${route.bus}` : `modulate ${name} from`,
+    buses.map(({ bus, writers }) => menuItem(
+      `CV bus ${bus}`,
+      writers.length ? `from ${writers.join(', ')}` : 'nothing writes it',
+      () => app.routeParam(index, at, bus),
+      route?.bus === bus ? 'chosen' : '')),
+    route ? menuItem('remove the route', null, () => app.clearModRoute(route.slot), 'danger') : null);
+}
+
+// One row of a menu: what it does, what it is on now, and the press.
+function menuItem(label, hint, onPick, klass = '') {
+  return el('button', {
+    type: 'button', class: `param-menu-item ${klass}`.trim(), role: 'option',
     onclick: () => { closeMenu(); onPick(); },
   }, el('span', { class: 'param-menu-name' }, label),
      hint ? el('span', { class: 'param-menu-range' }, hint) : null);
+}
 
-  const box = anchor.getBoundingClientRect();
+// The menu itself, under the control that asked for it. `box` is passed in
+// rather than measured here because a menu that arms something has to know
+// where its button was before the arming re-drew the page.
+function menuUnder(box, klass, head, ...content) {
   const menu = el('div', {
-    class: 'param-menu', id: 'param-menu', role: 'listbox',
+    class: `param-menu ${klass}`, id: 'param-menu', role: 'listbox',
     style: `left:${Math.max(8, Math.min(box.left, (globalThis.innerWidth ?? 9999) - 300))}px; `
          + `top:${box.bottom + 4}px; transform:none`,
   },
-    el('div', { class: 'param-menu-head' }, route ? `${name} reads CV bus ${route.bus}` : `modulate ${name} from`),
-    el('div', { class: 'param-menu-list' },
-      buses.map(({ bus, writers }) => item(
-        `CV bus ${bus}`,
-        writers.length ? `from ${writers.join(', ')}` : 'nothing writes it',
-        () => app.routeParam(index, at, bus),
-        route?.bus === bus ? 'chosen' : '')),
-      route ? item('remove the route', null, () => app.clearModRoute(route.slot), 'danger') : null));
+    el('div', { class: 'param-menu-head' }, head),
+    el('div', { class: 'param-menu-list' }, ...content));
   document.body.append(menu);
   menu.querySelector('.param-menu-item')?.focus();
 
@@ -117,10 +202,13 @@ function openBusMenu(app, anchor, index, at, name, route) {
     closeMenu();
   };
   menu.dismiss = dismiss;
+  // Through `globalThis` rather than `window`, which is the same object in a
+  // browser and is not defined at all where the panels are tested.
   setTimeout(() => {
-    window.addEventListener('pointerdown', dismiss);
-    window.addEventListener('keydown', dismiss);
+    globalThis.addEventListener?.('pointerdown', dismiss);
+    globalThis.addEventListener?.('keydown', dismiss);
   }, 0);
+  return menu;
 }
 
 // One menu at a time, whichever button opened it. Shared with the canvas,
@@ -129,8 +217,8 @@ export function closeMenu() {
   const menu = document.getElementById('param-menu');
   if (!menu) return;
   if (menu.dismiss) {
-    window.removeEventListener('pointerdown', menu.dismiss);
-    window.removeEventListener('keydown', menu.dismiss);
+    globalThis.removeEventListener?.('pointerdown', menu.dismiss);
+    globalThis.removeEventListener?.('keydown', menu.dismiss);
   }
   menu.remove();
 }

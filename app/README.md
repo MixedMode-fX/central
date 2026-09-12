@@ -43,12 +43,15 @@ roll of what it read and wrote — in a panel that folds to its title bar and
 closes with its cross. Parameters are sorted onto the same sections on every
 node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in
 the firmware's order, so a hand that has found *root* on one card finds it in
-the same place on the next. Beside each control are two buttons: **learn** binds
-a controller's CC to it, and **CV** lists the control buses, with what writes
-each, and routes one onto it. Sequencers get purpose-built views — a step grid
-for the gate and drum sequencers, a note lane over scale degrees for the note
-sequencers — and the step being played is outlined in the grid you are
-editing.
+the same place on the next. Beside each control are two buttons, each opening a
+menu: **learn** arms a learn when a controller is listening and lists the CC
+numbers either way, and **CV** lists the control buses, with what writes each,
+and routes one onto it. Under the graph is the **mod matrix**: every binding
+and every route in the patch, and every field of a binding, so one can be
+built with no controller in the room. Sequencers get purpose-built views — a
+step grid for the gate and drum sequencers, a note lane over scale degrees for
+the note sequencers — and the step being played is outlined in the grid you
+are editing.
 
 **play** — the module running: the LEDs and gate buses, the clock, the jacks,
 an on-screen keyboard and CC sender, and two views that answer questions no
@@ -82,9 +85,9 @@ follows it unless its own `scale` names other notes or its own `key` names
 another root; a following node plays in the key's register, moved by the octave
 its own root parameter names.
 
-**MIDI** — the external controller, the controller bindings, routing, the clock
-and Program Change recall. Every field of every binding is editable, so a
-binding can be built with no controller in the room.
+**MIDI** — the external controller, routing, the clock and Program Change
+recall: the room the module is in, none of which a patch travels with. What a
+controller *moves* is in the patch, so it is in the mod matrix.
 
 **library** — where a patch lives: this browser, a file, or the module's preset
 slots.
@@ -133,6 +136,13 @@ signal reaches two places.
 **category the module reports**, each with the firmware's own summary, and a
 search. An algorithm from firmware newer than the app lands under *other*
 rather than disappearing.
+
+**A binding and a route are part of the patch.** Both travel in the patch
+image, both end at the same validated write in the firmware, and both are gone
+when the patch is replaced — so they are read under the graph they act on, not
+beside the cables and the clock, which outlive any patch. A CC is bound from
+the same two places a route is made: the button beside the control, and the
+matrix under the graph.
 
 **A modulated parameter is a socket; the rest are not.** A node has anywhere
 from two to `N_PARAM` parameters, so drawing them all would bury the signal
@@ -226,7 +236,8 @@ app/
     views.js          node and jack cards: parameters, sections, sequencer grids
     icons.js          the icons, one inline SVG each
     key.js            the key: one scale, one root, one register
-    midi.js           routing, bindings, the clock, the external controller
+    midi.js           routing, the clock, the external controller
+    modmatrix.js      the mod matrix: what a CC moves, what a CV bus moves
     perform.js        the play surface, and everything that updates live
     scope.js          the scope and the piano roll
     library.js        the library tab

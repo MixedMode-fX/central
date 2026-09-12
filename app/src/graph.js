@@ -8,7 +8,7 @@
 
 import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
-import { MUSICAL_PORTS } from './names.js';
+import { MUSICAL_PORTS, ALL_MUSICAL } from './names.js';
 
 const key = (domain, bus) => `${domain}:${bus}`;
 
@@ -734,6 +734,64 @@ export function planModulation(blocks, patch, caps, sourceRef, targetBlockId, pa
     said: `${source.block.title} ${source.port.name} → ${pd?.name ?? `param ${param}`}`
         + ` on CV bus ${bus}`,
   };
+}
+
+// The CC numbers a binding may name. 120 and above are channel mode messages
+// - all notes off, local control - not controls, and a 14-bit binding reads
+// CC n+32 as the low half of n.
+export const CC_MAX = 119;
+
+// A free binding slot, by the same rule as a free route: a row with no source
+// port is not a binding (src/control/cc_mapper.h).
+export function freeCcSlot(patch, limit) {
+  const map = patch.ccMap ?? [];
+  const n = Math.min(limit ?? map.length, map.length);
+  for (let i = 0; i < n; i++) if (!map[i] || !map[i].sourceMask) return i;
+  return null;
+}
+
+// A controller's CC onto a parameter, made from the parameter's side: "bind
+// this to CC n", which is what the learn button's menu asks when a number is
+// picked instead of a knob turned. It is the same row a learn writes - the
+// firmware fills in the port and the channel it saw the CC arrive on - so the
+// two ways of making a binding cannot disagree about what a new one is.
+//
+// A parameter already bound changes number in the slot it has, keeping its
+// channel, its ports, its range, its takeover and its polarity: a binding is
+// edited, not replaced. A new one listens on every musical cable and every
+// channel, because a patch built with nothing plugged in cannot know which
+// cable the controller will arrive on, and the mod matrix narrows it once it
+// is there.
+export function planCcBinding(patch, caps, index, param, cc, options = {}) {
+  if (!Number.isInteger(cc) || cc < 0 || cc > CC_MAX) {
+    return { ok: false, why: `CC ${cc} is not a control the module binds` };
+  }
+  const target = patch.nodes[index];
+  if (!target) return { ok: false, why: 'that node is no longer in the patch' };
+  const pd = paramDescriptorOf(options.device, target.algorithmId, param);
+  const name = pd?.name ?? `param ${param}`;
+
+  const existing = (patch.ccMap ?? []).findIndex((m) => m && m.sourceMask
+    && m.targetKind === P.CcTargetKind.CC_TARGET_NODE
+    && m.targetIndex === index && m.param === param);
+  if (existing >= 0) {
+    return { ok: true, writes: [], bindings: [{ slot: existing, mapping: { ...patch.ccMap[existing], cc } }],
+             said: `${name} is on CC ${cc}` };
+  }
+  const slot = freeCcSlot(patch, caps?.ccMappings);
+  if (slot === null) {
+    return { ok: false, why: `every one of the module's ${caps?.ccMappings ?? P.N_CC_MAP} `
+                           + 'controller bindings is in use' };
+  }
+  const mapping = {
+    sourceMask: ALL_MUSICAL, channel: 0, cc,
+    targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: index, param,
+    // The target's full range, taken from the descriptors by the firmware, and
+    // a knob that jumps: a binding that arrived needing to be set up before it
+    // moved anything is a binding nobody made.
+    min: 0, max: 0, flags: 0,
+  };
+  return { ok: true, writes: [], bindings: [{ slot, mapping }], said: `CC ${cc} → ${name}` };
 }
 
 // The same route, made from the parameter's side: "modulate this from CV bus

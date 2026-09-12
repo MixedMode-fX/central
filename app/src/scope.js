@@ -440,7 +440,7 @@ export function nodeRollPanel(app, index) {
   canvas.rollHeight = NODE_ROLL_H;
   const items = sources.map((source) => ({ ...source, key: hiddenKey(source.key) }));
   return el('div', { class: 'grid node-roll' },
-    el('div', { class: 'grid-title' }, 'what it plays'),
+    el('div', { class: 'grid-title' }, 'piano roll'),
     el('div', { class: 'scope-wrap' }, canvas),
     legend(items, app.rollHidden, (key) => { toggleIn(app.rollHidden, key); app.render(); }));
 }

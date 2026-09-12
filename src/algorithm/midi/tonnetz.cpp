@@ -1,9 +1,10 @@
 #include "algorithm/midi/tonnetz.h"
 #include "node/registry.h"
 #include "midi/global_scale.h"
+#include "midi/note_event.h"
 #include "hal/midi_types.h"
 
-static const Domain IN[2] = {Domain::Gate, Domain::Gate};
+static const Domain IN[3] = {Domain::Gate, Domain::Gate, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
 static const char* const CYCLE_NAMES[Tonnetz::TONNETZ_CYCLES] = {"LR", "PL", "PR", "free"};
@@ -16,26 +17,27 @@ static const uint8_t CYCLE_STEP[3][2] = {
     {Tonnetz::TRANSFORM_P, Tonnetz::TRANSFORM_R},   // PR: minor thirds
 };
 
+// The walk, then the key it is judged in - the three key parameters together,
+// because "A minor, following the module" is one decision and not three.
 static const ParamDescriptor PARAMS[Tonnetz::N_PARAMS] = {
     {"cycle",     Tonnetz::TONNETZ_LR, Tonnetz::TONNETZ_CYCLES, Tonnetz::TONNETZ_LR,
                   PARAM_ENUM, CYCLE_NAMES},
     {"deviation", 0, 100, 0, PARAM_PERCENT, nullptr},
     {"diatonic",  0, 1,   0, PARAM_BOOL,    nullptr},
+    {"key",       0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
     {"root",      0, 127, Tonnetz::DEFAULT_ROOT, PARAM_PITCH, nullptr},
-    {"minor",     0, 1,   0, PARAM_BOOL,    nullptr},
     {"scale",     0, SCALE_COUNT - 1, 0, PARAM_ENUM, PARAM_SCALE_NAMES},
     {"velocity",  1, 127, Tonnetz::DEFAULT_VELOCITY, PARAM_NUMBER,  nullptr},
     {"channel",   1, 16,  1, PARAM_CHANNEL, nullptr},
     {"seed",      0, 255, 0, PARAM_NUMBER,  nullptr},
-    {"key",       0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Tonnetz::N_PARAMS, PARAMS}};
 
-static const char* const IN_NAMES[2] = {"advance", "reset"};
+static const char* const IN_NAMES[3] = {"advance", "reset", "root"};
 static const char* const OUT_NAMES[1] = {"triad out"};
 
 const AlgorithmDescriptor Tonnetz::descriptor = {
-    ALGO_TONNETZ, "Tonnetz", 2, 1, 1, Tonnetz::N_PARAMS, IN, OUT, sizeof(Tonnetz), false,
+    ALGO_TONNETZ, "Tonnetz", 3, 1, 1, Tonnetz::N_PARAMS, IN, OUT, sizeof(Tonnetz), false,
     construct_node<Tonnetz>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "Chromatic triads where one voice moves a semitone: the circle of fifths in two dimensions.",
     CATEGORY_MIDI };
@@ -48,17 +50,18 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 Tonnetz::Tonnetz(const NodeConfig& config) :
     advance_in(config.in_bus[0]),
     reset_in(config.in_bus[1]),
+    root_in(config.in_bus[2]),
     note_out(config.out_bus[0]),
     cycle(clamp_enum(config.params[P_CYCLE], TONNETZ_CYCLES, TONNETZ_LR)),
     deviation(config.params[P_DEVIATION] > 100 ? (uint8_t)100 : config.params[P_DEVIATION]),
     diatonic(config.params[P_DIATONIC] != 0),
+    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     root(config.params[P_ROOT] ? config.params[P_ROOT] : DEFAULT_ROOT),
-    minor(config.params[P_MINOR] != 0),
     scale(config.params[P_SCALE]),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
     seed(config.params[P_SEED]),
-    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
+    played(NO_NOTE),
     current_root(0), current_minor(false), step(0), started(false), at_first(true),
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
@@ -75,11 +78,11 @@ bool Tonnetz::set_param(uint16_t index, uint8_t value){
         case P_DIATONIC:
             if (value > 1) return false;
             diatonic = value != 0; return true;
+        case P_KEY:
+            if (value >= global_scale::KEY_MODES) return false;
+            key = value; return true;
         case P_ROOT:
             root = value ? value : DEFAULT_ROOT; return true;
-        case P_MINOR:
-            if (value > 1) return false;
-            minor = value != 0; return true;
         case P_SCALE:
             if (value >= SCALE_COUNT) return false;
             scale = value; return true;
@@ -94,9 +97,6 @@ bool Tonnetz::set_param(uint16_t index, uint8_t value){
             // seed that changed the chord the moment it was typed would make
             // the parameter unusable while the patch is playing.
             seed = value; return true;
-        case P_KEY:
-            if (value >= global_scale::KEY_MODES) return false;
-            key = value; return true;
         default: return false;
     }
 }
@@ -106,13 +106,12 @@ uint8_t Tonnetz::get_param(uint16_t index) const {
         case P_CYCLE:     return cycle;
         case P_DEVIATION: return deviation;
         case P_DIATONIC:  return diatonic ? 1u : 0u;
+        case P_KEY:       return key;
         case P_ROOT:      return root;
-        case P_MINOR:     return minor ? 1u : 0u;
         case P_SCALE:     return scale;
         case P_VELOCITY:  return velocity;
         case P_CHANNEL:   return channel;
         case P_SEED:      return seed;
-        case P_KEY:       return key;
         default: return 0;
     }
 }
@@ -147,12 +146,36 @@ uint8_t Tonnetz::scheduled() const {
 }
 
 uint8_t Tonnetz::active_root() const {
+    // A played root outranks both the key and the parameter, and it is the
+    // whole note: a sequencer sends C3 and the walk starts on C3, register
+    // and all.
+    if (played != NO_NOTE) return played;
     return global_scale::resolve_tonic(key, root, DEFAULT_ROOT);
+}
+
+uint8_t Tonnetz::key_tonic() const {
+    // Not `active_root()`: the walk's starting note says where the walk
+    // starts and the key says what the scale is measured from, so a played
+    // root is deliberately not read here. That is the difference between a
+    // sequenced root walking through the triads of one key and one dragging
+    // the key along behind it.
+    return global_scale::resolve_root(key, root);
+}
+
+bool Tonnetz::starts_minor() const {
+    const uint16_t mask = (uint16_t)(global_scale::resolve_id(scale) & 0x0FFF);
+    // A chromatic key has no degrees to colour a triad with, so it starts
+    // major, exactly as Chord's `triad` does there.
+    if (mask == 0x0FFF) return false;
+    const uint8_t degree = (uint8_t)((active_root() + 12u - key_tonic()) % 12u);
+    const bool has_minor_third = (mask & (uint16_t)(1u << ((degree + 3u) % 12u))) != 0;
+    const bool has_major_third = (mask & (uint16_t)(1u << ((degree + 4u) % 12u))) != 0;
+    return has_minor_third && !has_major_third;
 }
 
 bool Tonnetz::in_key(uint8_t root_pc, bool is_minor) const {
     const uint16_t mask = global_scale::resolve_id(scale);
-    const uint8_t tonic = (uint8_t)(active_root() % 12u);
+    const uint8_t tonic = key_tonic();
     const uint8_t third = is_minor ? 3u : 4u;
     const uint8_t notes[3] = {root_pc,
                               (uint8_t)((root_pc + third) % 12u),
@@ -186,8 +209,8 @@ uint8_t Tonnetz::choose(){
 
 void Tonnetz::strike(BusManager& bus){
     sounding.release_all(bus, note_out);
-    // Root position, in the register the key names or `root` does: the walk
-    // moves the pitch class, and the register stays where it was put.
+    // Root position, in the register the root inlet, the key or `root` names:
+    // the walk moves the pitch class, and the register stays where it was put.
     const uint8_t home = active_root();
     int16_t pitch = (int16_t)current_root;
     while (pitch + 12 <= (int16_t)home + 6) pitch += 12;
@@ -212,12 +235,23 @@ void Tonnetz::restart(){
 }
 
 void Tonnetz::process(BusManager& bus, uint32_t){
+    // The root first, so a root and an edge arriving in the same pass agree:
+    // the advance then plays the triad the key puts on the note just sent.
+    if (root_in != NO_BUS){
+        const uint8_t n = bus.note_count(root_in);
+        for (uint8_t i = 0; i < n; i++){
+            const MidiEvent e = bus.note_read(root_in, i);
+            if (!is_note_on(e)) continue;
+            played = (uint8_t)(e.data1 & 0x7F);
+            restart();
+        }
+    }
     if (reset_in.rising(bus)) restart();
     if (!advance_in.rising(bus)) return;
 
     if (at_first){
         current_root = (uint8_t)(active_root() % 12u);
-        current_minor = minor;
+        current_minor = starts_minor();
         at_first = false;
         strike(bus);
         return;

@@ -243,8 +243,12 @@ is only what a parameter list cannot say.
 - **`Tonnetz` is the other walk.** P, L and R each move one voice by a semitone
   or a tone; alternating two of them traces a cycle — `LR` fifths, `PL` major
   thirds, `PR` minor thirds. `deviation` is the chance of leaving the cycle,
-  `diatonic` refuses triads the key does not hold. It emits root position and
-  leaves the voice leading to `Voicer`.
+  `diatonic` refuses triads the key does not hold. Its `root` inlet plays it
+  the way `Chord`'s does — a note-on starts the walk again on that note,
+  register and all, and moves the key no more than `Chord`'s does — and the
+  triad it starts on is whichever one the key holds there, so the quality is
+  not a setting. It emits root position and leaves the voice leading to
+  `Voicer`.
 - **Logic gates fold over every input in the mask** from the gate's identity
   element, so **XOR over more than two inputs is parity**. Inputs are
   normalised in the HAL (`GATE_INPUT_ACTIVE_LOW`), so an unpatched input reads

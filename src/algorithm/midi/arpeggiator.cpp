@@ -6,20 +6,22 @@ static const Domain IN[4] = {Domain::Note, Domain::Gate, Domain::Gate, Domain::G
 static const Domain OUT[1] = {Domain::Note};
 
 static const char* const MODE_NAMES[5] = {"up", "down", "up-down", "random", "as played"};
-static const ParamDescriptor PARAMS[5] = {
-    {"mode",     0, 4,                       0, PARAM_ENUM,   MODE_NAMES},
-    {"octaves",  1, Arpeggiator::MAX_OCTAVES, 1, PARAM_NUMBER, nullptr},
-    {"gate",     0, 255,                     0, PARAM_MILLIS, nullptr},
-    {"velocity", 0, 127,                     0, PARAM_NUMBER, nullptr},
-    {"hold",     0, 1,                       0, PARAM_BOOL,   nullptr},
+static const char* const CHORD_NAMES[2] = {"restart", "run on"};
+static const ParamDescriptor PARAMS[6] = {
+    {"mode",      0, 4,                       0, PARAM_ENUM,   MODE_NAMES},
+    {"octaves",   1, Arpeggiator::MAX_OCTAVES, 1, PARAM_NUMBER, nullptr},
+    {"gate",      0, 255,                     0, PARAM_MILLIS, nullptr},
+    {"velocity",  0, 127,                     0, PARAM_NUMBER, nullptr},
+    {"hold",      0, 1,                       0, PARAM_BOOL,   nullptr},
+    {"new chord", 0, 1,                       0, PARAM_ENUM,   CHORD_NAMES},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 5, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, 6, PARAMS}};
 
 static const char* const IN_NAMES[4] = {"chord in", "advance", "reset", "hold"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor Arpeggiator::descriptor = {
-    ALGO_ARPEGGIATOR, "Arpeggiator", 4, 2, 1, 5, IN, OUT, sizeof(Arpeggiator), false, construct_node<Arpeggiator>,
+    ALGO_ARPEGGIATOR, "Arpeggiator", 4, 2, 1, 6, IN, OUT, sizeof(Arpeggiator), false, construct_node<Arpeggiator>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
     "Plays a held chord one note per advance edge, over a range of octaves. Hold latches it.",
     CATEGORY_MIDI };
@@ -41,6 +43,7 @@ bool Arpeggiator::set_param(uint16_t index, uint8_t value){
         // parameter and the inlet together, so writing this is the same
         // operation as a footswitch going down.
         case 4: hold = value ? 1u : 0u; return true;
+        case 5: if (value > 1) return false; run_on = value; return true;
         default: return false;
     }
 }
@@ -52,6 +55,7 @@ uint8_t Arpeggiator::get_param(uint16_t index) const {
         case 2: return (uint8_t)(gate_ms > 255 ? 255 : gate_ms);
         case 3: return fixed_velocity;
         case 4: return hold;
+        case 5: return run_on;
         default: return 0;
     }
 }
@@ -67,6 +71,7 @@ Arpeggiator::Arpeggiator(const NodeConfig& config) :
     gate_ms(config.params[2]),
     fixed_velocity(config.params[3]),
     hold(config.params[4] ? 1u : 0u),
+    run_on(config.params[5] ? 1u : 0u),
     cursor(0), playing(HeldNotes::NONE), started_us(0),
     descending(false), last_advance(false), last_reset(false), holding(false),
     down{0, 0, 0, 0}, down_count(0),
@@ -192,14 +197,23 @@ void Arpeggiator::process(BusManager& bus, uint32_t now_us){
     for (uint8_t i = 0; i < n; i++){
         const MidiEvent e = bus.note_read(held_in, i);
         if (is_note_on(e)){
-            // Latched, and this is the first key of a new chord: the figure
-            // is replaced, not added to.
-            if (hold_now && down_count == 0 && held.count() != 0){
-                held.clear();
-                sounding.release_all(bus, out);
-                playing = HeldNotes::NONE;
-                cursor = 0;
-                descending = false;
+            // The first key of a new chord. Nothing else would put the
+            // cursor back: a chord changed in one pass - the old chord's
+            // note-offs and the new one's note-ons together, which is how an
+            // upstream Chord or sequencer changes chord - never leaves the
+            // figure empty, so without this the new chord carries on from
+            // wherever the old one stopped and its first note is whatever
+            // step that happened to land on. Which is what "run on" is: a
+            // cursor that only the reset inlet moves, so a chord change does
+            // not interrupt the pattern of a figure long enough to hear.
+            if (down_count == 0){
+                // Latched: the figure is replaced, not added to.
+                if (hold_now && held.count() != 0){
+                    held.clear();
+                    sounding.release_all(bus, out);
+                    playing = HeldNotes::NONE;
+                }
+                if (!run_on){ cursor = 0; descending = false; }
             }
             set_key(e.data1, true);
             HeldNote evicted = {0, 0, 0};
@@ -225,8 +239,7 @@ void Arpeggiator::process(BusManager& bus, uint32_t now_us){
     if (held.count() == 0){
         release(bus);
         sounding.release_all(bus, out);
-        cursor = 0;
-        descending = false;
+        if (!run_on){ cursor = 0; descending = false; }
         last_advance = bus.gate_read(advance_in);
         return;
     }

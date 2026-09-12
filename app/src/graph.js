@@ -8,6 +8,7 @@
 
 import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
+import { MUSICAL_PORTS } from './names.js';
 
 const key = (domain, bus) => `${domain}:${bus}`;
 
@@ -408,6 +409,60 @@ export function planPortFlip(patch, caps, index, isOut) {
     bus: port.bus,
     said: `MIDI ${wantOut ? 'out' : 'in'} ${free + 1}`
         + `${port.bus === P.NO_BUS ? '' : `, note bus ${port.bus}`}`,
+  };
+}
+
+// **Fanning a port out: the same source, a second destination.** One cable's
+// worth of notes reaching two chains, or one note bus reaching two synths, is
+// a patch the module has always been able to run - a MIDI port is a source
+// mask, a channel and a bus, and nothing stops two of them naming the same bus
+// - but making one meant knowing that a spare port slot was where to go and
+// filling it in by hand until the numbers matched. This is that, as an action
+// on the port being copied.
+//
+// Which half travels is which half is the *source*, and that is the one thing
+// the two directions do not share: an input's source is its cables, so the
+// copy keeps them and takes a note bus nothing else writes; an output's source
+// is its note bus, so the copy keeps that and takes a cable the original is
+// not already playing - never the same one, because two outputs on one bus and
+// one cable is every note sent down it twice.
+export function planPortFanOut(device, patch, caps, index, isOut) {
+  const ports = (isOut ? patch.midiOut : patch.midiIn) ?? [];
+  const port = ports[index];
+  const mask = isOut ? port?.targetMask : port?.sourceMask;
+  if (!port || !mask) return { ok: false, why: 'that port is not in use' };
+  const limit = (isOut ? caps?.midiOut : caps?.midiIn) ?? ports.length;
+  const free = ports.findIndex((other, i) =>
+    i < limit && !(isOut ? other.targetMask : other.sourceMask));
+  if (free < 0) {
+    return { ok: false, why: `every MIDI ${isOut ? 'output' : 'input'} port is already in use` };
+  }
+
+  if (isOut) {
+    if (port.bus === P.NO_BUS) return { ok: false, why: 'that port is on no note bus' };
+    // Every cable the bus already goes down, so the copy lands on one it does
+    // not: a second output doubling the first is not a fan-out, it is a flam.
+    let taken = 0;
+    ports.forEach((other, i) => {
+      if (i < limit && other.targetMask && other.bus === port.bus) taken |= other.targetMask;
+    });
+    const cable = MUSICAL_PORTS.find((p) => (taken & p.value) === 0);
+    if (!cable) return { ok: false, why: 'that note bus already plays every cable' };
+    return {
+      ok: true, index: free, isOut, mask: cable.value, channel: port.channel, bus: port.bus,
+      said: `MIDI out ${free + 1} plays note bus ${port.bus} on ${cable.label} too`,
+    };
+  }
+
+  const written = writtenBuses(device, patch);
+  let bus = -1;
+  for (let b = 0; b < busCount(caps, Domain.Note); b++) {
+    if (!written.has(key(Domain.Note, b))) { bus = b; break; }
+  }
+  if (bus < 0) return { ok: false, why: 'every note bus already has a source' };
+  return {
+    ok: true, index: free, isOut, mask, channel: port.channel, bus,
+    said: `MIDI in ${free + 1} feeds note bus ${bus} from the same cables`,
   };
 }
 

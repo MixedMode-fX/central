@@ -38,7 +38,7 @@ import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '
 import {
   connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
   applyWrite, freeBus, waitingBus, planJackDirection, planPortFlip, applyPortFlip,
-  planModulation, planBusModulation,
+  planPortFanOut, planModulation, planBusModulation,
 } from '../src/graph.js';
 import { catalogue, filterGroups, optionsOf } from '../src/picker.js';
 import { ENDPOINTS } from '../src/canvas.js';
@@ -1403,6 +1403,49 @@ await test('a MIDI port turned round takes its cables, channel and bus with it',
   }
   full.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
   const refused = planPortFlip(full, caps, 0, false);
+  assert.equal(refused.ok, false);
+  assert.match(refused.why, /every MIDI output port/);
+});
+
+// One source, two destinations. The module has always run this - two MIDI
+// outputs naming one note bus is two cables carrying the same music - but the
+// only way to build it was to know that a spare port slot was where to go. The
+// half that travels is the source, and it is a different half each way round.
+await test('a MIDI port fans out to a second destination, never to the same one', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const caps = device.capabilities;
+  const patch = codec.emptyPatch();
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 3, bus: 2 };
+
+  const out = planPortFanOut(device, patch, caps, 0, true);
+  assert.equal(out.ok, true, out.why);
+  assert.equal(out.bus, 2, 'the note bus is the source, so it travels');
+  assert.equal(out.channel, 3);
+  assert.notEqual(out.mask & P.MidiPort.mmMIDI_USB_0, P.MidiPort.mmMIDI_USB_0,
+                  'not the cable it is already playing: that would be every note twice');
+  patch.midiOut[out.index] = { targetMask: out.mask, channel: out.channel, bus: out.bus };
+  assert.deepEqual(validate(device, patch), []);
+  assert.equal(patchBlocks(device, patch).filter((b) => b.kind === 'midiOut').length, 2);
+
+  // An input's source is its cables, so they stay and the bus is the new part:
+  // the same keyboard reaching a second chain.
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, bus: 0 };
+  const into = planPortFanOut(device, patch, caps, 0, false);
+  assert.equal(into.ok, true, into.why);
+  assert.equal(into.mask, P.MidiPort.mmMIDI_SERIAL_1);
+  assert.equal(into.channel, 5);
+  assert.notEqual(into.bus, 0, 'a bus of its own, or it is the first port again');
+  patch.midiIn[into.index] = { sourceMask: into.mask, channel: into.channel, bus: into.bus };
+  assert.deepEqual(validate(device, patch), []);
+  await device.sendPatch(patch, codec.emptyGlobals());     // throws if it is refused
+
+  // And it refuses with a reason rather than writing over a port in use.
+  const full = codec.emptyPatch();
+  for (let i = 0; i < caps.midiOut; i++) {
+    full.midiOut[i] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  }
+  const refused = planPortFanOut(device, full, caps, 0, true);
   assert.equal(refused.ok, false);
   assert.match(refused.why, /every MIDI output port/);
 });

@@ -15,8 +15,9 @@
 // button on a row rather than the whole feature.
 
 import * as P from './protocol.js';
-import { el, segmented } from './views.js';
+import { el, busUsers, iconButton } from './views.js';
 import { busCount, Domain, domainName } from './validate.js';
+import { BlockKind } from './graph.js';
 import { describeSupport } from './webmidi.js';
 import {
   MUSICAL_PORTS, portNames, CLOCK_SOURCES, SWAP_TIMINGS,
@@ -85,74 +86,149 @@ function portToggles(mask, onChange, { label }) {
 
 // --- routing ---------------------------------------------------------------
 
-// The two ways a MIDI port can face, said the way the jacks say it.
-const DIRECTIONS = [
-  { value: 'in', label: 'in', hint: 'a cable plays a note bus' },
-  { value: 'out', label: 'out', hint: 'a note bus plays a cable' },
-];
-
-// One MIDI port, in full: what it accepts or sends, on which channel, and the
-// note bus it copies to or from. The routing panel is a grid of these and the
-// canvas inspector shows the one whose block was clicked, so a port edited
-// from either place is edited by the same code.
-export function routeCard(app, index, isOut) {
+// One MIDI port, in full. The routing panel is a list of these and the canvas
+// inspector shows the one whose block was clicked, so a port edited from
+// either place is edited by the same code.
+//
+// **A port is a source and a destination, and the card says which is which.**
+// The two halves are the same two controls whichever way the port faces - a
+// set of cables with a channel, and a note bus - so a card that only put them
+// in a different order read, on half of the panel, as "these cables receive
+// this bus". They are labelled `from` and `to` instead, and the signal runs
+// down the card in that order: an output is a note bus at the top playing
+// cables at the bottom.
+//
+// **Which way it faces is not a control here.** The panel is two lists under
+// two headings, and telling a port in the "inputs" list that it is an input is
+// a row of chips that says nothing. Turning one round is an action on the port
+// - it moves to the other list, which is where it has gone - and it sits with
+// the other two: fanning the port out, and putting it away.
+export function routeCard(app, index, isOut, { header = true } = {}) {
   const caps = app.device?.capabilities;
   if (!caps) return null;
   const port = (isOut ? app.patch.midiOut : app.patch.midiIn)[index];
   if (!port) return null;
   const what = isOut ? 'MIDI out' : 'MIDI in';
+  const title = `${isOut ? 'out' : 'in'} ${index + 1}`;
   const mask = () => (isOut ? port.targetMask : port.sourceMask);
   const send = () => app.edit(
     () => app.device.setMidiPort(index, isOut, mask(), port.channel, port.bus), what);
 
+  const cables = portToggles(mask(), (chosen) => {
+    if (isOut) port.targetMask = chosen; else port.sourceMask = chosen;
+    send();
+    if (!chosen) app.status = `${what} ${index + 1} is unused`;
+    app.render();
+  }, { label: `${what} ${index + 1} ${isOut ? 'targets' : 'sources'}` });
+
+  const channel = channelSelect(port.channel, (chosen) => {
+    port.channel = chosen;
+    send();
+    app.render();
+  }, isOut ? { omni: 'keep each event\u2019s channel' } : {});
+
+  const bus = busSelect(caps, Domain.Note, port.bus, (chosen) => {
+    port.bus = chosen;
+    send();
+    app.render();
+  }, 'no bus');
+
+  // The `from` and `to` beside them are the only thing naming these two
+  // controls, and a word on the screen is not a label: said here so a screen
+  // reader gets what the eye gets.
+  channel.setAttribute('aria-label', isOut
+    ? `${what} ${index + 1} sends on`
+    : `${what} ${index + 1} accepts`);
+  bus.setAttribute('aria-label', `${what} ${index + 1} note bus`);
+
+  const leg = (label, ...controls) => el('div', { class: 'route-leg' },
+    el('span', { class: 'leg-name' }, label),
+    el('div', { class: 'leg-body' }, ...controls));
+
+  const actions = [
+    iconButton({ icon: 'copy', class: 'ghost',
+                 label: isOut
+                   ? `play this note bus down another cable too`
+                   : `feed another note bus from ${what} ${index + 1}`,
+                 onclick: () => app.fanOutMidiPort(index, isOut) }),
+    iconButton({ icon: 'flip', class: 'ghost',
+                 label: `turn ${what} ${index + 1} round`,
+                 onclick: () => app.flipMidiPort(index, isOut) }),
+    header
+      ? iconButton({ icon: 'trash', class: 'ghost danger',
+                     label: `stop using ${what} ${index + 1}`,
+                     onclick: () => app.removeBlock(
+                       { kind: isOut ? BlockKind.MidiOut : BlockKind.MidiIn, index }) })
+      : null,
+  ];
+
   return el('div', { class: 'route' },
     el('div', { class: 'route-head' },
-      el('h4', {}, `${isOut ? 'out' : 'in'} ${index + 1}`),
-      el('span', { class: 'hint' }, mask()
-        ? (isOut
-          ? `note bus ${port.bus === P.NO_BUS ? '—' : port.bus} → ${portNames(mask()).join(', ')}`
-          : `${portNames(mask()).join(', ')} → note bus ${port.bus === P.NO_BUS ? '—' : port.bus}`)
-        : 'unused')),
-    // Which way the port faces, beside what it faces *at*. The module has
-    // four of each, so this moves the port rather than writing a field
-    // (`App.flipMidiPort`) - but from here it is the setting it looks like.
-    mask()
-      ? el('div', { class: 'route-direction' },
-          el('span', { class: 'field-name' }, 'direction'),
-          segmented(DIRECTIONS, isOut ? 'out' : 'in',
-                    () => app.flipMidiPort(index, isOut),
-                    { label: `${what} ${index + 1} direction` }))
-      : null,
-    portToggles(mask(), (chosen) => {
-      if (isOut) port.targetMask = chosen; else port.sourceMask = chosen;
-      send();
-      app.render();
-    }, { label: `${what} ${index + 1} ${isOut ? 'targets' : 'sources'}` }),
-    el('div', { class: 'route-fields' },
-      channelSelect(port.channel, (channel) => {
-        port.channel = channel;
-        send();
-        app.render();
-      }, isOut ? { omni: 'keep each event\u2019s channel' } : {}),
-      busSelect(caps, Domain.Note, port.bus, (bus) => {
-        port.bus = bus;
-        send();
-        app.render();
-      }, 'no bus')));
+      header ? el('h4', {}, title) : null,
+      el('div', { class: 'route-actions' }, actions)),
+    isOut
+      ? [leg('from', bus), leg('to', cables, channel)]
+      : [leg('from', cables, channel), leg('to', bus)],
+    busLine(app, index, isOut, port));
+}
+
+// The rest of the note bus, in the port's own terms. A MIDI port is one end of
+// a bus and the card shows only that end, so the far end - and, when there is
+// one, the company it keeps at this end - is the one thing it cannot say by
+// showing its own settings.
+//
+// Which is which depends on the direction, and not by the same rule as the
+// card's two legs: an input *writes* the bus, so the other writers are ports
+// doing what it does and the readers are where its notes end up; an output
+// reads it, so it is the other way about. Naming that is what makes a fan-out
+// visible - "shared with MIDI out 2" is the second cable, said where the
+// person who made it is looking.
+function busLine(app, index, isOut, port) {
+  if (port.bus === P.NO_BUS) return el('span', { class: 'wire empty' }, 'on no bus: off');
+  const me = `${isOut ? 'MIDI out' : 'MIDI in'} ${index + 1}`;
+  const { writers, readers } = busUsers(app, Domain.Note, port.bus);
+  const far = (isOut ? writers : readers).filter((who) => who !== me);
+  const beside = (isOut ? readers : writers).filter((who) => who !== me);
+
+  const parts = [];
+  if (far.length) parts.push(`${isOut ? 'from' : 'to'} ${far.join(', ')}`);
+  else parts.push(isOut ? `nothing writes note bus ${port.bus}` : `nothing reads note bus ${port.bus} yet`);
+  if (beside.length) parts.push(`shared with ${beside.join(', ')}`);
+  return el('span', { class: `wire ${far.length ? '' : 'empty'}` }, parts.join(' \u00b7 '));
+}
+
+// The ports a patch is using, and a way to take one more into use.
+//
+// **An unused port is not drawn.** The module has four each way, and eight
+// cards - six of them empty, each with its own eight cables and two selectors
+// - was most of a phone screen spent saying "no". A port is added when it is
+// wanted and goes back to unused when the last cable is turned off, the same
+// way a jack does.
+function routeSide(app, isOut) {
+  const caps = app.device.capabilities;
+  const slots = (isOut ? app.patch.midiOut : app.patch.midiIn).slice(0, isOut ? caps.midiOut : caps.midiIn);
+  const used = slots.map((port, index) => ({ port, index }))
+    .filter(({ port }) => (isOut ? port.targetMask : port.sourceMask));
+
+  return el('div', { class: 'route-side' },
+    el('div', { class: 'route-side-head' },
+      el('h3', {}, isOut ? 'outputs' : 'inputs'),
+      el('span', { class: 'hint' }, `${used.length}/${slots.length}`),
+      used.length < slots.length
+        ? iconButton({ icon: 'plus', class: 'ghost',
+                       label: `add a MIDI ${isOut ? 'output' : 'input'}`,
+                       onclick: () => app.addMidiPort(isOut) })
+        : null),
+    used.length
+      ? used.map(({ index }) => routeCard(app, index, isOut))
+      : el('p', { class: 'hint' }, isOut ? 'nothing is played out' : 'nothing is taken in'));
 }
 
 export function routingPanel(app) {
-  const caps = app.device?.capabilities;
-  if (!caps) return null;
-
-  const ins = app.patch.midiIn.slice(0, caps.midiIn).map((_, i) => routeCard(app, i, false));
-  const outs = app.patch.midiOut.slice(0, caps.midiOut).map((_, i) => routeCard(app, i, true));
-
+  if (!app.device?.capabilities) return null;
   return el('section', { class: 'panel' },
     el('h2', {}, 'MIDI routing'),
-    el('div', { class: 'routes' },
-      el('div', {}, el('h3', {}, 'inputs'), ins),
-      el('div', {}, el('h3', {}, 'outputs'), outs)));
+    el('div', { class: 'routes' }, routeSide(app, false), routeSide(app, true)));
 }
 
 // --- clock, Program Change, NRPN -------------------------------------------

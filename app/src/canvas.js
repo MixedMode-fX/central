@@ -665,7 +665,11 @@ export function canvasInspector(app) {
       nodeRollPanel(app, block.index));
   }
   if (block.kind === BlockKind.Jack) return panel(block.title, { after: [remove] }, jackCard(app, block.index));
-  return panel(block.title, { after: [remove] }, routeCard(app, block.index, block.kind === BlockKind.MidiOut));
+  // The port's own head is left out: the panel's bar already carries its name
+  // and its remove button, and a card drawing them again would put two remove
+  // buttons on one port.
+  return panel(block.title, { after: [remove] },
+               routeCard(app, block.index, block.kind === BlockKind.MidiOut, { header: false }));
 }
 
 const portLabel = (block, at, isOutlet) =>

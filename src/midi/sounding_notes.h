@@ -19,7 +19,7 @@
 // So a modifier does not recompute a release: it looks up what it actually
 // sent. Each record maps the *source* note (what arrived) to the *emitted*
 // note (what was sent) and the channel it went out on. One source may have
-// several records - Chord emits an interval set from one note - so this is a
+// several records - Chord emits a whole chord from one note - so this is a
 // list, not a map.
 //
 // Capacity is a hard limit on what may be emitted: a modifier that cannot

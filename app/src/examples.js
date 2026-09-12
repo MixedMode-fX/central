@@ -61,10 +61,10 @@ export const EXAMPLES = {
     },
   },
   'Chord and transpose': {
-    about: 'DIN 1 → Chord (root, +4, +7) → Transpose +12 → USB 1. Every note-on becomes three, and every note-off releases exactly those three.',
+    about: 'DIN 1 → Chord → Transpose +12 → USB 1. Nothing names a key, so the triad is the plain major one: root, +4, +7. Every note-on becomes three, and every note-off releases exactly those three.',
     patch: {
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
-      nodes: [{ algo: 'Chord', in: [0], out: [1], params: [2, 4, 7] }, { algo: 'Transpose', in: [1], out: [2], params: [12] }],
+      nodes: [{ algo: 'Chord', in: [0], out: [1] }, { algo: 'Transpose', in: [1], out: [2], params: [12] }],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
@@ -89,13 +89,13 @@ export const EXAMPLES = {
     },
   },
   'In key': {
-    about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad (0, 2 and 4 steps of the scale), the arpeggiator holds it, and a sixteenth-note metronome plays it. Press one key and let go: it keeps running. Change the key under \u201ckey\u201d and the whole patch moves.',
+    about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad — the “triad” quality is steps of the scale, so it is minor here — the arpeggiator holds it, and a sixteenth-note metronome plays it. Press one key and let go: it keeps running. Change the key under \u201ckey\u201d and the whole patch moves.',
     patch: {
       globals: { scale: 'minor', root: 9 },
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
-        { algo: 'Chord', in: [0], out: [1], params: [2, 2, 4] },
+        { algo: 'Chord', in: [0], out: [1] },
         { algo: 'Arpeggiator', in: [1, 0], out: [2], params: [0, 2, 60, 0, 1] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
@@ -112,7 +112,7 @@ export const EXAMPLES = {
         { algo: 'GateHold', out: [1], params: [1, 0, 1] },
         { algo: 'AND', in: [0, 1], out: [2] },
         { algo: 'NoteSequencer', in: [3], out: [0], seq: { length: 4, root: 48, steps: [0, 5, 3, 4] } },
-        { algo: 'Chord', in: [null, 0], out: [1], params: [2, 2, 4, 0, 0, 0, 0, 0, 0, 4] },
+        { algo: 'Chord', in: [null, 0], out: [1], params: [1, 0, 0, 0, 0, 0, 4] },
         { algo: 'Arpeggiator', in: [1, 2], out: [2], params: [0, 2, 60, 0] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
@@ -291,7 +291,7 @@ export const EXAMPLES = {
         { algo: 'Metronome', out: [0], seq: { division: '1 bar' } },
         { algo: 'Metronome', out: [1], seq: { division: '1/8' } },
         { algo: 'Harmony', in: [0], out: [0, 0], params: [4, 75, 0, 0, 45, 0, 80, 1, 0, 80, 25, 40, 30, 6] },
-        { algo: 'Chord', in: [null, 0], out: [1], params: [3, 0, 2, 4] },
+        { algo: 'Chord', in: [null, 0], out: [1] },
         { algo: 'Turing', in: [1, 6], out: [2, 1], params: [8, 8, 5, 1, 21, 0, 1] },
         { algo: 'CvToNote', in: [1, 1, null], out: [2], params: [1, 57, 2, 0, 1, 2, 0, 90, 2] },
         { algo: 'NoteDelay', in: [2, null], out: [3], params: [1, 7, 2, 25, 3, 2, 65, 100, 8, 0, 0, 0, 1] },

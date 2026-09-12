@@ -395,15 +395,13 @@ static void test_velocity_curve_shapes_and_passes_offs() {
 // Chord
 // ---------------------------------------------------------------------------
 
-static void test_chord_emits_the_interval_set_and_releases_all_of_it() {
+static void test_chord_emits_every_voice_and_releases_all_of_it() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
-    c.params[0] = 2;
-    c.params[1] = 4;                              // major third
-    c.params[2] = 7;                              // fifth
+    c.in_bus[0] = 0; c.out_bus[0] = 1;            // a triad, the default quality
     Chord node(c);
 
+    global_scale::set(SCALE_CHROMATIC, 0);        // no key: the major triad
     bus.note_write(0, on(60));
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
@@ -616,13 +614,12 @@ static void test_note_quantise_follows_the_module_scale_until_it_names_one() {
     TEST_ASSERT_EQUAL(60, out[0].data1);
 }
 
-// The intervals are scale steps, so one voicing is a triad on every degree.
-static void test_chord_voices_its_intervals_in_the_scale() {
+// A quality is scale steps, so one setting is a triad on every degree.
+static void test_chord_voices_its_quality_in_the_scale() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
     c.in_bus[0] = 0; c.out_bus[0] = 1;
-    c.params[0] = 2;
-    c.params[1] = 2; c.params[2] = 4;                  // a triad, in scale steps
+    c.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord node(c);
 
     global_scale::set(SCALE_MAJOR, 0);                 // C major
@@ -654,16 +651,14 @@ static void test_chord_voices_its_intervals_in_the_scale() {
     TEST_ASSERT_EQUAL(69, out[2].data1);
 }
 
-// Chromatic on the node is the escape hatch: a stack of fixed semitones,
-// whatever key the module is in - and it is what every patch written before
-// the scale existed is doing.
+// Chromatic on the node is the escape hatch: a chord of fixed semitones,
+// whatever key the module is in. A triad of twelve equal steps would be a
+// cluster, so a chromatic scale plays the quality's own shape instead.
 static void test_chord_in_the_chromatic_scale_is_fixed_semitones() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
     c.in_bus[0] = 0; c.out_bus[0] = 1;
-    c.params[0] = 2;
-    c.params[1] = 4; c.params[2] = 7;                  // a major triad in semitones
-    c.params[Chord::P_SCALE] = SCALE_CHROMATIC;
+    c.params[Chord::P_SCALE] = SCALE_CHROMATIC;        // a major triad in semitones
     Chord node(c);
 
     global_scale::set(SCALE_PENTATONIC_MINOR, 3);
@@ -683,9 +678,7 @@ static NodeConfig free_chord(bool with_root_inlet) {
     NodeConfig c = node_config(ALGO_CHORD);
     c.in_bus[0] = NO_BUS;                              // nothing plays it
     if (with_root_inlet) c.in_bus[1] = 0;
-    c.out_bus[0] = 1;
-    c.params[0] = 2;
-    c.params[1] = 2; c.params[2] = 4;                  // a triad, in scale steps
+    c.out_bus[0] = 1;                                  // a triad, the default quality
     return c;
 }
 
@@ -736,8 +729,6 @@ static void test_a_self_playing_chord_takes_its_octave_and_velocity() {
 static void test_chord_quality_names_a_stack_of_scale_steps() {
     BusManager bus;
     NodeConfig c = free_chord(false);
-    c.params[0] = 0;                                   // no typed intervals at all
-    c.params[1] = 0; c.params[2] = 0;
     c.params[Chord::P_QUALITY] = Chord::QUALITY_SEVENTH;
     Chord node(c);
 
@@ -756,7 +747,6 @@ static void test_chord_quality_names_a_stack_of_scale_steps() {
 static void test_chord_quality_takes_its_flavour_from_the_degree() {
     BusManager bus;
     NodeConfig c = free_chord(true);
-    c.params[0] = 0;
     c.params[Chord::P_QUALITY] = Chord::QUALITY_SEVENTH;
     Chord node(c);
 
@@ -772,32 +762,80 @@ static void test_chord_quality_takes_its_flavour_from_the_degree() {
     TEST_ASSERT_EQUAL(77, out[7].data1);               // F natural: G7, not Gmaj7
 }
 
-// A quality does not overwrite the typed intervals, so switching back to
-// `custom` finds the hand-built stack exactly as it was left.
-static void test_chord_quality_leaves_the_typed_intervals_alone() {
-    BusManager bus;
+// One self-playing chord in C major, sounded once, so a voicing and an
+// inversion can be read straight off the notes it emitted.
+static std::vector<MidiEvent> chord_voices(uint8_t quality, uint8_t voicing, uint8_t inversion) {
     NodeConfig c = free_chord(false);
-    c.params[0] = 2;
-    c.params[1] = 3; c.params[2] = 6;                  // a quartal stack, by hand
+    c.params[Chord::P_QUALITY] = quality;
+    c.params[Chord::P_VOICING] = voicing;
+    c.params[Chord::P_INVERSION] = inversion;
     Chord node(c);
+    BusManager bus;
+    return run_pass(bus, node, 1);
+}
 
-    global_scale::set(SCALE_MAJOR, 0);
-    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+// `inversion` moves the lowest voices up an octave, so what is in the bass is
+// a voice of the chord rather than always its root.
+static void test_chord_inversion_moves_the_bass() {
+    global_scale::set(SCALE_MAJOR, 0);                  // C major
+
+    std::vector<MidiEvent> out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_CLOSE, 1);
     TEST_ASSERT_EQUAL(3, out.size());
-    TEST_ASSERT_EQUAL(65, out[1].data1);               // F
-    TEST_ASSERT_EQUAL(71, out[2].data1);               // B: two diatonic fourths
+    TEST_ASSERT_EQUAL(64, out[0].data1);                // E G C: the third in the bass
+    TEST_ASSERT_EQUAL(67, out[1].data1);
+    TEST_ASSERT_EQUAL(72, out[2].data1);
 
-    node.set_param(Chord::P_QUALITY, Chord::QUALITY_TRIAD);
-    out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(6, out.size());
-    TEST_ASSERT_EQUAL(64, out[4].data1);               // E: the named triad
+    out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_CLOSE, 2);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(67, out[0].data1);                // G C E
+    TEST_ASSERT_EQUAL(72, out[1].data1);
+    TEST_ASSERT_EQUAL(76, out[2].data1);
 
-    node.set_param(Chord::P_QUALITY, Chord::QUALITY_CUSTOM);
-    out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(6, out.size());
-    TEST_ASSERT_EQUAL(65, out[4].data1);               // F again, still stored
-    TEST_ASSERT_EQUAL(3, node.get_param(1));
-    TEST_ASSERT_EQUAL(6, node.get_param(2));
+    // More inversions than the chord has voices is the highest one it has.
+    out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_CLOSE, Chord::MAX_INVERSION);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(67, out[0].data1);
+}
+
+// `voicing` is the shape of the stack: the same notes, further apart.
+static void test_chord_voicing_opens_the_stack() {
+    global_scale::set(SCALE_MAJOR, 0);                  // C major
+
+    // Open position: the middle voice up an octave, the bass where it was.
+    std::vector<MidiEvent> out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_OPEN, 0);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);                // C G E
+    TEST_ASSERT_EQUAL(67, out[1].data1);
+    TEST_ASSERT_EQUAL(76, out[2].data1);
+
+    // Drop 2 on a seventh: the second voice from the top, an octave down.
+    out = chord_voices(Chord::QUALITY_SEVENTH, Chord::VOICING_DROP2, 0);
+    TEST_ASSERT_EQUAL(4, out.size());
+    TEST_ASSERT_EQUAL(55, out[0].data1);                // G below the C: G C E B
+    TEST_ASSERT_EQUAL(60, out[1].data1);
+    TEST_ASSERT_EQUAL(64, out[2].data1);
+    TEST_ASSERT_EQUAL(71, out[3].data1);
+
+    // Drop 3 takes the third voice from the top instead.
+    out = chord_voices(Chord::QUALITY_SEVENTH, Chord::VOICING_DROP3, 0);
+    TEST_ASSERT_EQUAL(4, out.size());
+    TEST_ASSERT_EQUAL(52, out[0].data1);                // E below the C: E C G B
+    TEST_ASSERT_EQUAL(60, out[1].data1);
+
+    // Wide puts an octave under every voice, so a triad covers three.
+    out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_WIDE, 0);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);
+    TEST_ASSERT_EQUAL(76, out[1].data1);
+    TEST_ASSERT_EQUAL(91, out[2].data1);
+
+    // The inversion is applied first, so a voicing opens out the inversion
+    // and not the root position it came from.
+    out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_OPEN, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(64, out[0].data1);                // E C G, still on the third
+    TEST_ASSERT_EQUAL(72, out[1].data1);
+    TEST_ASSERT_EQUAL(79, out[2].data1);
 }
 
 // `Harmony` repeats a degree whenever its style or its gravity says so, and a
@@ -926,8 +964,7 @@ static void test_editing_a_self_playing_chord_re_voices_it() {
     NoteBalance balance;
     balance.observe(run_pass(bus, node, 1));
 
-    TEST_ASSERT_TRUE(node.set_param(0, 3));            // a seventh
-    TEST_ASSERT_TRUE(node.set_param(3, 6));
+    TEST_ASSERT_TRUE(node.set_param(Chord::P_QUALITY, Chord::QUALITY_SEVENTH));
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     balance.observe(out);
     TEST_ASSERT_EQUAL(7, out.size());                  // three off, four on
@@ -1824,7 +1861,7 @@ int main() {
     RUN_TEST(test_note_priority_falls_back_on_release);
     RUN_TEST(test_velocity_curves_never_reach_zero);
     RUN_TEST(test_velocity_curve_shapes_and_passes_offs);
-    RUN_TEST(test_chord_emits_the_interval_set_and_releases_all_of_it);
+    RUN_TEST(test_chord_emits_every_voice_and_releases_all_of_it);
     RUN_TEST(test_note_quantise_snaps_and_releases_what_it_sent);
     RUN_TEST(test_note_quantise_takes_its_root_from_a_bus);
     RUN_TEST(test_the_global_scale_is_the_default_and_an_override_wins);
@@ -1832,14 +1869,15 @@ int main() {
     RUN_TEST(test_the_register_resolves_for_both_kinds_of_root);
     RUN_TEST(test_a_self_playing_chord_follows_the_key_register);
     RUN_TEST(test_note_quantise_follows_the_module_scale_until_it_names_one);
-    RUN_TEST(test_chord_voices_its_intervals_in_the_scale);
+    RUN_TEST(test_chord_voices_its_quality_in_the_scale);
     RUN_TEST(test_chord_in_the_chromatic_scale_is_fixed_semitones);
     RUN_TEST(test_a_chord_with_no_note_inlet_plays_itself_and_holds);
     RUN_TEST(test_a_self_playing_chord_takes_its_octave_and_velocity);
     RUN_TEST(test_a_sequenced_root_walks_a_self_playing_chord_through_the_key);
     RUN_TEST(test_chord_quality_names_a_stack_of_scale_steps);
     RUN_TEST(test_chord_quality_takes_its_flavour_from_the_degree);
-    RUN_TEST(test_chord_quality_leaves_the_typed_intervals_alone);
+    RUN_TEST(test_chord_inversion_moves_the_bass);
+    RUN_TEST(test_chord_voicing_opens_the_stack);
     RUN_TEST(test_a_repeated_root_re_strikes_only_when_asked);
     RUN_TEST(test_editing_a_self_playing_chord_re_voices_it);
     RUN_TEST(test_a_self_playing_chord_feeds_an_arpeggiator);

@@ -461,8 +461,14 @@ static void test_note_quantise_scale_moving_under_a_chord_hangs_nothing() {
 static void test_note_quantise_root_moving_under_a_chord_hangs_nothing() {
     modifier_under_held_notes(ALGO_NOTE_QUANTISE, 1, 7, "NoteQuantise root");
 }
+static void test_chord_quality_moving_under_a_chord_hangs_nothing() {
+    modifier_under_held_notes(ALGO_CHORD, Chord::P_QUALITY, Chord::QUALITY_NINTH, "Chord quality");
+}
 static void test_chord_voicing_moving_under_a_chord_hangs_nothing() {
-    modifier_under_held_notes(ALGO_CHORD, 0, 3, "Chord voicing");
+    modifier_under_held_notes(ALGO_CHORD, Chord::P_VOICING, Chord::VOICING_WIDE, "Chord voicing");
+}
+static void test_chord_inversion_moving_under_a_chord_hangs_nothing() {
+    modifier_under_held_notes(ALGO_CHORD, Chord::P_INVERSION, 2, "Chord inversion");
 }
 static void test_velocity_curve_moving_under_a_chord_hangs_nothing() {
     modifier_under_held_notes(ALGO_VELOCITY, 0, 2, "VelocityCurve shape");
@@ -574,7 +580,9 @@ int main() {
     RUN_TEST(test_transpose_offset_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_note_quantise_scale_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_note_quantise_root_moving_under_a_chord_hangs_nothing);
+    RUN_TEST(test_chord_quality_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_chord_voicing_moving_under_a_chord_hangs_nothing);
+    RUN_TEST(test_chord_inversion_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_velocity_curve_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_gate_to_note_releases_the_note_it_sent);
     RUN_TEST(test_note_sequencer_root_moving_hangs_nothing);

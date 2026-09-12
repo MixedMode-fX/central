@@ -6,7 +6,7 @@
 // Scales as 12-bit masks, bit 0 being the root (#10, shared with #13).
 //
 // One representation for the whole module: NoteQuantise snaps arbitrary
-// pitches to it, Chord voices its intervals in it, and the note sequencers
+// pitches to it, Chord voices its chords in it, and the note sequencers
 // pick degrees out of it. A mask is cheap to store in a preset and cheap to
 // test - `mask & (1 << interval)`.
 //

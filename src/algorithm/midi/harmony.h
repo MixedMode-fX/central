@@ -18,8 +18,8 @@
 // chord progression". This is the node that walks it.
 //
 // **It only has to emit a root, and that is the whole trick.** `Chord`'s
-// intervals are steps of the scale, so 0 2 4 is major on I, minor on ii and
-// diminished on vii - the quality of each chord is already correct by
+// qualities are stacks of scale steps, so its `triad` is major on I, minor on
+// ii and diminished on vii - the quality of each chord is already correct by
 // construction. A node that knows nothing whatever about chord quality still
 // produces a diatonic progression, because the module decided years ago that
 // an interval is a scale step and not a semitone.

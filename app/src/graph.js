@@ -680,3 +680,42 @@ export function planModulation(blocks, patch, caps, sourceRef, targetBlockId, pa
         + ` on CV bus ${bus}`,
   };
 }
+
+// The same route, made from the parameter's side: "modulate this from CV bus
+// N", which is what the CV button beside every control asks. A parameter
+// already modulated moves to the new bus in the slot it has, keeping its
+// depth and mode - a route is edited, not replaced - and one that is not
+// takes a free slot with the defaults `planModulation` uses, so the two ways
+// of making a route cannot disagree about what a new one does.
+export function planBusModulation(patch, caps, index, param, bus, options = {}) {
+  if (!caps?.modRoutes) {
+    return { ok: false, why: 'this firmware has no modulation routes' };
+  }
+  if (bus === P.NO_BUS || bus < 0 || bus >= busCount(caps, Domain.CV)) {
+    return { ok: false, why: 'that is not a CV bus' };
+  }
+  const target = patch.nodes[index];
+  if (!target) return { ok: false, why: 'that node is no longer in the patch' };
+  const pd = paramDescriptorOf(options.device, target.algorithmId, param);
+  const name = pd?.name ?? `param ${param}`;
+
+  const existing = (patch.modMap ?? []).findIndex((r) => r && r.bus !== P.NO_BUS
+    && r.targetKind === P.CcTargetKind.CC_TARGET_NODE && r.targetIndex === index && r.param === param);
+  if (existing >= 0) {
+    const route = { ...patch.modMap[existing], bus };
+    return { ok: true, domain: Domain.CV, bus, writes: [], routes: [{ slot: existing, route }],
+             said: `${name} now reads CV bus ${bus}` };
+  }
+  const slot = freeModSlot(patch, caps.modRoutes);
+  if (slot === null) {
+    return { ok: false, why: `every one of the module's ${caps.modRoutes} modulation routes is in use` };
+  }
+  const route = {
+    bus, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: index, param,
+    min: 0, max: 0,
+    depth: options.depth ?? 255,
+    flags: options.flags ?? P.ModFlags.MOD_BIPOLAR | P.ModMode.MOD_OFFSET,
+  };
+  return { ok: true, domain: Domain.CV, bus, writes: [], routes: [{ slot, route }],
+           said: `CV bus ${bus} → ${name}` };
+}

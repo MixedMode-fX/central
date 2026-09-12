@@ -35,20 +35,36 @@ the validator is the firmware's own) and a *machine that runs* (the page is its
 main loop, interval timer and sync pin). That is also what makes the app usable
 on iOS, where Web MIDI does not exist at all.
 
-**patch** — the graph. *blocks* is a canvas: a box per node, jack and MIDI
-port, a socket per port, an arrow wherever two are on the same bus. *list* is a
-card per node with a selector per port. Sequencers get purpose-built views — a
-step grid for the gate and drum sequencers, a note lane over scale degrees for
-the note sequencers — and the step being played is outlined in the grid you are
+**patch** — the graph, as a canvas: a box per node, jack and MIDI port, a
+socket per port, an arrow wherever two are on the same bus, and the bar above
+it is where things are added. Selecting a block opens its **details** below
+the picture — every port as a selector, every parameter as a control, and the
+roll of what it read and wrote — in a panel that folds to its title bar and
+closes with its cross. Parameters are sorted onto the same sections on every
+node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in
+the firmware's order, so a hand that has found *root* on one card finds it in
+the same place on the next. Beside each control are two buttons: **learn** binds
+a controller's CC to it, and **CV** lists the control buses, with what writes
+each, and routes one onto it. Sequencers get purpose-built views — a step grid
+for the gate and drum sequencers, a note lane over scale degrees for the note
+sequencers — and the step being played is outlined in the grid you are
 editing.
 
 **play** — the module running: the LEDs and gate buses, the clock, the jacks,
 an on-screen keyboard and CC sender, and two views that answer questions no
-lamp can. The **scope** draws every jack and gate bus against the last few
-seconds, which is the only way to read a divider or a Euclidean pattern. The
-**piano roll** draws notes with a colour per place they were seen — played in,
-sent out, and each note bus the patch writes — so the same phrase is visible at
-every point in the chain and a disagreement between two of them is the bug.
+lamp can. The **scope** draws every jack, gate bus and CV bus the patch uses
+against the last few seconds, which is the only way to read a divider, a
+Euclidean pattern or an LFO. The **piano roll** draws notes with a shade per
+place they were seen — played in, sent out, and each note bus the patch writes
+— so the same phrase is visible at every point in the chain and a disagreement
+between two of them is the bug. Both have a legend of chips, and pressing a
+chip hides its trace.
+
+**Colour is the domain.** A gate is green, a note is orange and a control
+signal is purple — in an arrow, a socket, a bus chip, a lamp and a trace. Where
+one view has to tell several signals of one domain apart, they are shades of
+that domain's colour (`shade`, in `src/scope.js`), never a borrowed one; the
+blue accent marks what is selected, bound or playing, and nothing else.
 
 *listen* is a list of **players**, each one voice pointed at what the module
 sends or at a **note bus** read straight off the bus, with its own waveform and
@@ -114,7 +130,10 @@ rather than disappearing.
 **A modulated parameter is a socket; the rest are not.** A node has anywhere
 from two to `N_PARAM` parameters, so drawing them all would bury the signal
 path. A parameter something modulates gets an inlet with a square dot;
-dragging a control signal onto a block opens a dropdown of the ones still free.
+dragging a control signal onto a block opens a dropdown of the ones still free,
+and the CV button beside a control makes the same route from the other end.
+Both build the route through `graph.js`, so neither can disagree about what a
+new route does.
 
 **Patches live in the browser**, and what is stored is the patch **image** —
 the same bytes a `.syx` file carries and a slot holds, not a third format to
@@ -146,10 +165,11 @@ or two passes and an animation frame is sixteen milliseconds, so reading at
 paint time shows a pattern nobody is playing. A bus is only read when something
 is listening to it.
 
-**A phone is the first target.** Every control is finger-sized, every numeric
-parameter has a number field beside its slider, sequencer steps wrap onto as
-many rows as they need, and anything that cannot wrap scrolls inside its own
-box. Two non-obvious costs: a grid or flex child is `min-width: auto`, so every
+**A phone is the first target.** Every control is finger-sized, a button that
+acts on something is an icon with its word in the tooltip and the accessible
+name (`src/icons.js`), every numeric parameter has a number field beside its
+slider, sequencer steps wrap onto as many rows as they need, and anything that
+cannot wrap scrolls inside its own box. Two non-obvious costs: a grid or flex child is `min-width: auto`, so every
 box between a 32-step lane and the page needs `min-width: 0` or the lane's
 width propagates out past the screen; and a native range input takes any touch
 that lands on it, so a touch has to claim a slider (drag along it, or press and
@@ -194,9 +214,10 @@ app/
     validate.js       the firmware's own rules, client side
     graph.js          the patch's shape: connections, drags, port direction
     layout.js         where a block sits, and where its sockets are
-    canvas.js         the patch drawn: blocks, arrows, dragging, the inspector
+    canvas.js         the patch drawn: blocks, arrows, dragging, the details panel
     picker.js         the add list, shelved by category
-    views.js          node and jack cards: parameters and sequencer grids
+    views.js          node and jack cards: parameters, sections, sequencer grids
+    icons.js          the icons, one inline SVG each
     key.js            the key: one scale, one root, one register
     midi.js           routing, bindings, the clock, the external controller
     perform.js        the play surface, and everything that updates live

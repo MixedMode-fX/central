@@ -40,15 +40,14 @@ import { Listener } from './audio.js';
 import { drumSources } from './drums.js';
 import { Controller } from './controller.js';
 import { Library, toBase64 } from './storage.js';
-import { el, nodeCard, busUsers, jackCard } from './views.js';
+import { el, busUsers, iconButton } from './views.js';
+import { icon } from './icons.js';
 import {
   connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
-  modParamName, planPortFlip, applyPortFlip,
+  modParamName, planPortFlip, applyPortFlip, planBusModulation,
 } from './graph.js';
 import { forgetNode } from './layout.js';
-import {
-  canvasPanel, canvasInspector, geometry, addBar, busCapacity, ENDPOINTS,
-} from './canvas.js';
+import { canvasPanel, canvasInspector, geometry, ENDPOINTS } from './canvas.js';
 import { keyPanel } from './key.js';
 import { routingPanel, globalsPanel, mappingPanel, modulationPanel,
          controllerPanel } from './midi.js';
@@ -71,16 +70,16 @@ import { schemaTab } from './schema.js';
 // to the tab of the same name sitting right below it. One name for one thing,
 // in one place.
 const TABS = [
-  { key: 'patch', label: 'patch' },
+  { key: 'patch', label: 'patch', icon: 'patch' },
   // The key is one scale, one root and one register for the whole patch, and
   // it is what every node is measured against - not a MIDI setting, and no
   // longer filed under one. See key.js.
-  { key: 'key', label: 'key' },
-  { key: 'midi', label: 'MIDI' },
-  { key: 'library', label: 'library' },
+  { key: 'key', label: 'key', icon: 'key' },
+  { key: 'midi', label: 'MIDI', icon: 'midi' },
+  { key: 'library', label: 'library', icon: 'library' },
   // Not a fourth thing to edit either: the schema tab is where the module says
   // what it can do, in a form something else can read. See schema.js.
-  { key: 'schema', label: 'schema' },
+  { key: 'schema', label: 'schema', icon: 'schema' },
 ];
 
 const AUTOSAVE_MS = 400;
@@ -103,6 +102,11 @@ class App {
     // Where "play" came from, so leaving it goes back rather than guessing.
     this.editingTab = 'patch';
     this.scopeAll = false;
+    // Traces put away for a moment, by pressing their chip in a legend: the
+    // scope's rows and the rolls' sources. A preference about looking, so it
+    // lives here and not in the patch.
+    this.scopeHidden = new Set();
+    this.rollHidden = new Set();
     // The note buses the piano roll is reading. A bus is only read when
     // something asks for it, and what the roll asks for is "every bus this
     // patch writes" - so the roll follows the patch rather than needing to be
@@ -127,19 +131,12 @@ class App {
     // because "change this" is the usual ask and an empty page is the easy
     // one to get back to.
     this.schemaWithPatch = true;
-    // How the patch is being looked at. **Blocks and list are one patch seen
-    // two ways, not two editors**: the canvas draws the buses as arrows, the
-    // list spells them out as selectors, and both write the same patch through
-    // the same messages. The canvas is the default where there is room to draw
-    // one; a phone opens on the list, where a 32-step lane and a slider per
-    // parameter are legible and a 200px block is not, and either can be chosen
-    // at any width - the choice is remembered, because it is a preference
-    // about reading a patch rather than a property of one.
-    this.patchView = this.library.readCanvas().view
-      ?? (globalThis.matchMedia?.('(min-width: 52rem)').matches ? 'blocks' : 'list');
     // The canvas: where it is looked at from, what is selected on it, and the
     // geometry of the last thing drawn - which the drag handlers read, since
-    // they run between renders.
+    // they run between renders. It is the one way of looking at a patch: the
+    // block that is selected gets its card below the picture, and that card
+    // is the whole of the detail the list of cards used to spread down the
+    // page.
     this.canvas = { view: { x: 0, y: 0, k: 1 }, selected: null, fit: true, geom: null };
     // Blocks somebody dragged somewhere, for the patch being edited. A patch
     // with none is laid out from its own shape; see layout.js for why a
@@ -149,8 +146,9 @@ class App {
     // every edit, so anything the DOM remembers by itself - a <details>, the
     // scroll position inside a lane - is lost unless the app remembers it.
     // A binding editor that folded shut the moment you set its CC number was
-    // not usable.
-    this.opened = new Set();
+    // not usable. The details panel under the canvas starts open: it is where
+    // the block just selected is edited, and folding it is the exception.
+    this.opened = new Set(['details']);
     // Where each horizontal scroller - a step lane - had been scrolled to, by
     // the key `views.js` gave it. Same reason, and it bites hardest on a
     // phone: a 32-step lane is several screens wide, so without this a tap on
@@ -507,12 +505,6 @@ class App {
     this.canvasPositions = this.library.layoutFor(this.layoutKey()) ?? {};
   }
 
-  setPatchView(view) {
-    this.patchView = view;
-    this.library.saveView(view);
-    this.render();
-  }
-
   // One port onto one bus - the same edit the inspector's selector makes, and
   // the same single message, whichever end of the patch the port is at. The
   // patch is changed by `applyWrite`, which the tests use too; what is left
@@ -680,6 +672,23 @@ class App {
     return this.patch.ccMap.find((m) => m && m.sourceMask
       && m.targetKind === P.CcTargetKind.CC_TARGET_NODE
       && m.targetIndex === nodeIndex && m.param === param) ?? null;
+  }
+
+  // The modulation route reaching one parameter, with its slot, so the CV
+  // button beside the control can say what it is on and clear it.
+  routeFor(nodeIndex, param) {
+    const slot = (this.patch.modMap ?? []).findIndex((r) => r && r.bus !== P.NO_BUS
+      && r.targetKind === P.CcTargetKind.CC_TARGET_NODE
+      && r.targetIndex === nodeIndex && r.param === param);
+    return slot < 0 ? null : { slot, ...this.patch.modMap[slot] };
+  }
+
+  // A control signal onto a parameter, chosen from the parameter's side: the
+  // CV button's bus menu. The plan is `graph.js`'s and the writing of it is
+  // `applyPlan`'s, exactly as a drag on the canvas is.
+  routeParam(nodeIndex, param, bus) {
+    this.applyPlan(planBusModulation(this.patch, this.device?.capabilities, nodeIndex, param, bus,
+                                     { device: this.device }));
   }
 
   async learn(nodeIndex, param) {
@@ -1039,43 +1048,21 @@ class App {
       this.tab === 'schema' ? schemaTab(this) : null);
   }
 
-  // The patch, drawn or spelled out. Both are the same patch and the same
-  // edits; what differs is what they are good at. **Blocks** answer "what
-  // feeds what", which the bus model otherwise hides in a dozen selectors
-  // reading "gate bus 2", and put the detail of one block below the picture.
-  // **List** shows every block's every control at once, which is what a phone
-  // and a sequencer grid both want.
+  // The patch, drawn. The canvas answers "what feeds what", which the bus
+  // model otherwise hides in a dozen selectors reading "gate bus 2", and the
+  // block that is selected gets the whole of its detail - every parameter, its
+  // sequencer grid, its bus selectors, the roll of what it plays - in the
+  // panel below the picture.
   patchTab() {
-    const blocks = this.patchView === 'blocks' && Boolean(this.device?.capabilities);
-    // Worked out once, before anything is built from it: the bar above the
+    if (!this.device?.capabilities) return el('p', { class: 'hint' }, 'no module');
+    // Worked out once, before anything is built from it: the foot of the
     // canvas counts the free buses, and it has to be counting them in the
     // patch below it rather than in the one drawn before this edit.
-    this.canvas.geom = blocks ? geometry(this) : null;
-    if (!blocks) this.canvas.paths?.clear();
+    this.canvas.geom = geometry(this);
     return el('div', {},
-      this.viewSwitch(),
-      this.device?.capabilities ? this.capacities() : null,
       metersPanel(this),
-      blocks ? canvasPanel(this, this.canvas.geom) : this.jacks(),
-      blocks
-        ? canvasInspector(this)
-        : el('div', { class: 'nodes' }, this.patch.nodes.map((_, i) => nodeCard(this, i))),
-      addBar(this));
-  }
-
-  viewSwitch() {
-    const pick = (view, label) => el('button', {
-      class: `chip ${this.patchView === view ? 'on' : ''}`,
-      'aria-pressed': this.patchView === view ? 'true' : 'false',
-      onclick: () => this.setPatchView(view),
-    }, label);
-    return el('div', { class: 'view-switch' },
-      el('div', { class: 'ports-row' },
-        pick('blocks', 'blocks'),
-        pick('list', 'list')),
-      this.patchView === 'blocks' && this.canvas.geom
-        ? el('span', { class: 'hint' }, busCapacity(this, this.canvas.geom))
-        : null);
+      canvasPanel(this, this.canvas.geom),
+      canvasInspector(this));
   }
 
   keyTab() {
@@ -1100,13 +1087,19 @@ class App {
         el('h1', {}, 'MMMC'),
         el('span', { class: 'patch-name' }, this.current.name, this.current.dirty ? ' •' : '')),
       el('div', { class: 'top-buttons' },
-        el('button', {
+        iconButton({
+          icon: this.tab === 'play' ? 'edit' : 'play',
+          label: this.tab === 'play' ? 'back to editing' : 'play the module',
+          text: this.tab === 'play' ? 'edit' : 'play',
           class: this.tab === 'play' ? 'active' : '',
           'aria-pressed': this.tab === 'play' ? 'true' : 'false',
           onclick: () => this.togglePlay(),
-        }, this.tab === 'play' ? 'edit' : 'play'),
-        el('button', { onclick: () => this.connect() },
-          this.usingModule ? 'connect a module' : 'reconnect')),
+        }),
+        iconButton({
+          icon: 'plug', text: this.usingModule ? 'connect' : 'reconnect',
+          label: this.usingModule ? 'connect a module over MIDI' : 'reconnect the module',
+          onclick: () => this.connect(),
+        })),
       el('p', { class: `status ${this.offline ? 'offline' : 'online'}${this.diverged ? ' warn' : ''}` },
         this.status, el('span', { class: 'hint' }, ` · ${where}`)));
   }
@@ -1126,28 +1119,9 @@ class App {
         class: `tab ${this.tab === t.key ? 'active' : ''}`,
         role: 'tab', 'aria-selected': this.tab === t.key ? 'true' : 'false',
         onclick: () => { this.tab = t.key; this.editingTab = t.key; this.render(); },
-      }, t.label)));
+      }, icon(t.icon), el('span', { class: 'tab-label' }, t.label))));
   }
 
-  // What the module can actually hold, read from it rather than assumed: an
-  // app that lets you build a patch the module will reject is worse than no
-  // app.
-  capacities() {
-    const c = this.device.capabilities;
-    return el('div', { class: 'caps' },
-      `${this.patch.nodes.length}/${c.nodes} nodes · `,
-      `${c.gateBuses} gate, ${c.noteBuses} note, ${c.cvBuses} CV buses`);
-  }
-
-  // Every jack at once, which is what the list view is for: the canvas shows
-  // the ones in use as blocks and puts one card below the picture, and this
-  // shows all eight whether or not anything is patched into them.
-  jacks() {
-    return el('section', { class: 'panel' },
-      el('h2', {}, 'jacks'),
-      el('div', { class: 'jack-cards' },
-        this.patch.gatePorts.map((_, i) => jackCard(this, i))));
-  }
 }
 
 // A patch called "my patch (2)" must not become a file called "my patch (2)"

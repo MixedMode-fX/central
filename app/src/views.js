@@ -8,6 +8,7 @@
 import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
 import { GATE_DIRECTIONS } from './names.js';
+import { icon, midiIcon } from './icons.js';
 // The port names live with the patch-shape code, because the canvas needs them
 // too and it must not have to reach through the views to get them.
 import { inletName, outletName, modParamName, planJackDirection } from './graph.js';
@@ -28,27 +29,14 @@ const el = (tag, attrs = {}, ...children) => {
 };
 export { el };
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const svg = (tag, attrs) => {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
-  return node;
-};
-
-// A five-pin DIN, which is the one glyph a musician already reads as "a
-// controller plugs in here" - so the learn button can be a button-sized
-// square instead of a word wide enough to push the slider off its row. It
-// draws in `currentColor`, so "bound" is a colour on the button and nothing
-// more; the CC number it used to spell out is in the parameter's heading,
-// where it is read rather than pressed.
-export function midiIcon() {
-  const node = svg('svg', { viewBox: '0 0 24 24', class: 'icon', 'aria-hidden': 'true', focusable: 'false' });
-  node.append(svg('circle', { cx: 12, cy: 12, r: 9, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6 }));
-  // The pins on the socket's upper arc, and the keyway below them.
-  for (const [cx, cy] of [[6.2, 12], [7.9, 7.9], [12, 6.2], [16.1, 7.9], [17.8, 12]])
-    node.append(svg('circle', { cx, cy, r: 1.6, fill: 'currentColor' }));
-  node.append(svg('rect', { x: 9.8, y: 14.6, width: 4.4, height: 2.6, rx: 1.3, fill: 'currentColor' }));
-  return node;
+// A button that is an icon. Its word goes in the tooltip and the accessible
+// name, and `text` puts it beside the icon too where there is room for it -
+// the tabs, and the two buttons at the top of the page.
+export function iconButton({ icon: name, label, text = null, class: klass = '', ...attrs }) {
+  return el('button', {
+    type: 'button', class: `icon-btn ${text ? 'with-text' : ''} ${klass}`.trim(),
+    title: label, 'aria-label': label, ...attrs,
+  }, icon(name), text ? el('span', { class: 'btn-text' }, text) : null);
 }
 
 // The learn button for one parameter: an icon, its meaning in the tooltip and
@@ -57,10 +45,94 @@ export function midiIcon() {
 export function learnButton(app, index, at, name, binding) {
   const what = binding ? `CC ${binding.cc} is bound to ${name} - learn another` : `learn a controller for ${name}`;
   return el('button', {
-    class: `ghost learn ${binding ? 'bound' : ''}`,
+    type: 'button', class: `ghost learn ${binding ? 'bound' : ''}`,
     title: what, 'aria-label': what,
     onclick: () => app.learn(index, at),
   }, midiIcon());
+}
+
+// The CV button beside it: a control signal onto this parameter, from here.
+//
+// A route used to be made on the canvas only - drag a control outlet onto a
+// block, pick a parameter from a dropdown - which is the right gesture when
+// the signal is the thing in hand and the wrong one when the parameter is:
+// "modulate *this* from something" started two panels away. So every
+// parameter has the route beside its learn button, and pressing it lists the
+// CV buses with what writes each one. The route it makes is the same route
+// the drag makes (`planBusModulation` and `planModulation` build the same
+// object), and once it exists the row below the parameters edits its depth.
+export function cvButton(app, index, at, name, route) {
+  const what = route
+    ? `${name} is modulated from CV bus ${route.bus} - change or remove the route`
+    : `modulate ${name} from a CV bus`;
+  const button = el('button', {
+    type: 'button', class: `ghost learn cv ${route ? 'bound' : ''}`,
+    title: what, 'aria-label': what,
+  }, icon('cv'));
+  button.addEventListener('click', () => openBusMenu(app, button, index, at, name, route));
+  return button;
+}
+
+// The CV buses, as a menu under the button that asked: the ones something
+// writes first, each saying what, then the rest - a bus nothing writes is a
+// route to silence, which is still occasionally what somebody wants while the
+// source is on its way.
+function openBusMenu(app, anchor, index, at, name, route) {
+  closeMenu();
+  const caps = app.device?.capabilities;
+  if (!caps?.modRoutes) { app.say('this firmware has no modulation routes'); return; }
+  const buses = [];
+  for (let bus = 0; bus < busCount(caps, Domain.CV); bus++) {
+    const { writers } = busUsers(app, Domain.CV, bus);
+    buses.push({ bus, writers });
+  }
+  buses.sort((a, b) => Number(Boolean(b.writers.length)) - Number(Boolean(a.writers.length)) || a.bus - b.bus);
+
+  const item = (label, hint, onPick, klass = '') => el('button', {
+    type: 'button', class: `param-menu-item ${klass}`, role: 'option',
+    onclick: () => { closeMenu(); onPick(); },
+  }, el('span', { class: 'param-menu-name' }, label),
+     hint ? el('span', { class: 'param-menu-range' }, hint) : null);
+
+  const box = anchor.getBoundingClientRect();
+  const menu = el('div', {
+    class: 'param-menu', id: 'param-menu', role: 'listbox',
+    style: `left:${Math.max(8, Math.min(box.left, (globalThis.innerWidth ?? 9999) - 300))}px; `
+         + `top:${box.bottom + 4}px; transform:none`,
+  },
+    el('div', { class: 'param-menu-head' }, route ? `${name} reads CV bus ${route.bus}` : `modulate ${name} from`),
+    el('div', { class: 'param-menu-list' },
+      buses.map(({ bus, writers }) => item(
+        `CV bus ${bus}`,
+        writers.length ? `from ${writers.join(', ')}` : 'nothing writes it',
+        () => app.routeParam(index, at, bus),
+        route?.bus === bus ? 'chosen' : '')),
+      route ? item('remove the route', null, () => app.clearModRoute(route.slot), 'danger') : null));
+  document.body.append(menu);
+  menu.querySelector('.param-menu-item')?.focus();
+
+  const dismiss = (e) => {
+    if (e.type === 'keydown' && e.key !== 'Escape') return;
+    if (e.type === 'pointerdown' && menu.contains(e.target)) return;
+    closeMenu();
+  };
+  menu.dismiss = dismiss;
+  setTimeout(() => {
+    window.addEventListener('pointerdown', dismiss);
+    window.addEventListener('keydown', dismiss);
+  }, 0);
+}
+
+// One menu at a time, whichever button opened it. Shared with the canvas,
+// which opens the same kind of menu to finish a modulation drag.
+export function closeMenu() {
+  const menu = document.getElementById('param-menu');
+  if (!menu) return;
+  if (menu.dismiss) {
+    window.removeEventListener('pointerdown', menu.dismiss);
+    window.removeEventListener('keydown', menu.dismiss);
+  }
+  menu.remove();
 }
 
 // A slider a scrolling finger cannot change.
@@ -243,7 +315,12 @@ function port(app, index, isOutlet, i) {
 // One node: what it reads, what it writes, and the buses they are on. Buses
 // *are* the connections - there is no cable to draw - so each port says what
 // it is for and what else is on its bus.
-export function nodeCard(app, index) {
+//
+// The header is the details panel's when the card is the details panel: the
+// name, the index and the remove button sit in the panel's own bar, beside
+// the buttons that fold it and put it away, and drawing them twice would put
+// two remove buttons on one node.
+export function nodeCard(app, index, { header = true } = {}) {
   const patch = app.patch;
   const node = patch.nodes[index];
   const d = app.device.byId.get(node.algorithmId);
@@ -255,11 +332,15 @@ export function nodeCard(app, index) {
   for (let i = 0; i < d.nOut; i++) outlets.push(port(app, index, true, i));
 
   return el('section', { class: 'node', id: `node-${index}` },
-    el('header', {},
-      el('span', { class: 'node-index' }, index),
-      el('h3', {}, d.name),
-      d.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null,
-      el('button', { class: 'ghost danger', onclick: () => app.removeNode(index) }, 'remove')),
+    header
+      ? el('header', {},
+          el('span', { class: 'node-index' }, index),
+          el('h3', {}, d.name),
+          d.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null,
+          iconButton({ icon: 'trash', label: `remove ${d.name} ${index}`, class: 'ghost danger',
+                       onclick: () => app.removeNode(index) }))
+      : null,
+    d.summary ? el('p', { class: 'hint summary' }, d.summary) : null,
     el('div', { class: 'ports' },
       el('div', { class: 'port-group' },
         el('h4', {}, inlets.length ? 'reads' : 'reads nothing'), inlets),
@@ -428,35 +509,99 @@ function modRow(app, slot, route) {
     el('div', { class: 'param-controls' },
       flag(P.ModFlags.MOD_BIPOLAR, 'bipolar'),
       flag(P.ModFlags.MOD_INVERT, 'invert'),
-      el('button', { class: 'ghost danger', onclick: () => app.clearModRoute(slot) },
-         'unroute')));
+      iconButton({ icon: 'cut', label: `stop modulating ${name}`, class: 'ghost danger',
+                   onclick: () => app.clearModRoute(slot) })));
 }
 
 // A control per parameter, drawn from the descriptor: a range for a number, a
 // list for an enum, a checkbox for a boolean. An editor cannot draw a control
 // for a parameter whose range and meaning it does not know, which is why #20
 // exists.
+//
+// **Grouped by what they do, not by where the firmware put them.** A
+// descriptor lists its parameters in the order the algorithm stores them,
+// which is the order they were written in, and that order says "root, scale,
+// velocity, channel, seed" on one node and "velocity, root, seed, scale" on
+// the next. Every node is asked the same few questions - which notes, when,
+// how loud, how likely, in what manner - so the card asks them in that order
+// on every node, and a hand that has learned where "root" lives on one card
+// finds it in the same place on the rest.
+export const PARAM_SECTIONS = [
+  { key: 'mode', label: 'behaviour' },
+  { key: 'pitch', label: 'pitch' },
+  { key: 'time', label: 'timing' },
+  { key: 'level', label: 'dynamics' },
+  { key: 'chance', label: 'chance' },
+  { key: 'midi', label: 'MIDI' },
+  { key: 'other', label: 'other' },
+];
+
+// Which question a parameter answers, from its kind first - a pitch is a
+// pitch whatever it is called - and then from its name. The words are the
+// ones the firmware's descriptors use; a parameter this table has never met
+// lands under "other" rather than being hidden, and is still a control.
+const SECTION_WORDS = {
+  mode: ['mode', 'direction', 'rule', 'shape', 'priority', 'hold', 'new chord', 'write',
+         'link', 'map', 'cycle', 'sync', 'polarity', 'loop', 'retrigger', 'snap', 'fixed', 'quality',
+         'voicing', 'inversion', 'diatonic', 'cells'],
+  pitch: ['root', 'scale', 'key', 'octave', 'transpose', 'semitone', 'interval', 'degree', 'note',
+          'spread', 'range', 'low', 'high', 'fifths', 'leading', 'bass', 'voices', 'tie key', 'rest key',
+          'base', 'bend', 'pitch'],
+  time: ['length', 'division', 'feel', 'rate', 'gate', 'width', 'delay', 'time', 'phase', 'steps',
+         'pulses', 'rotation', 'repeats', 'phrase', 'decay', 'rise', 'fall', 'stall', 'swing', 'tempo',
+         'bars', 'beat'],
+  level: ['velocity', 'vel ', 'accent', 'curve', 'amount', 'depth', 'offset', 'dry', 'threshold',
+          'hysteresis', 'level', 'smooth', 'slew'],
+  chance: ['probability', 'chance', 'density', 'deviation', 'cadence', 'gravity', 'drift', 'chaos',
+           'revive', 'seed', 'bits', 'edges', 'random'],
+  midi: ['channel', 'controller', 'mod src', 'mod cc', 'source', 'cc'],
+};
+
+export function paramSection(pd) {
+  const name = String(pd.name ?? '').toLowerCase();
+  if (pd.kind === P.ParamKind.PARAM_PITCH || pd.kind === P.ParamKind.PARAM_PITCH_CLASS) return 'pitch';
+  if (pd.kind === P.ParamKind.PARAM_CHANNEL) return 'midi';
+  if (pd.kind === P.ParamKind.PARAM_MILLIS) return 'time';
+  for (const section of PARAM_SECTIONS) {
+    const words = SECTION_WORDS[section.key];
+    if (words?.some((word) => name === word || name.startsWith(word) || name.includes(` ${word}`))) {
+      return section.key;
+    }
+  }
+  if (pd.kind === P.ParamKind.PARAM_PERCENT) return 'chance';
+  return 'other';
+}
+
+// The header parameters of a descriptor, sorted onto the sections above and
+// in the firmware's own order inside each. Tables - a sequencer's steps, a
+// drum machine's lanes - are not here; they get a grid of their own.
+export function paramSections(groups) {
+  const sections = new Map(PARAM_SECTIONS.map((s) => [s.key, { ...s, params: [] }]));
+  for (const group of groups ?? []) {
+    if (!group || group.repeat > 1) continue;
+    for (let f = 0; f < group.nFields; f++) {
+      const pd = group.fields[f];
+      if (!pd || (pd.min === 0 && pd.max === 0)) continue;      // reserved
+      sections.get(paramSection(pd)).params.push({ at: group.first + f, pd });
+    }
+  }
+  return [...sections.values()].filter((s) => s.params.length);
+}
+
 function paramPanel(app, index) {
   const node = app.patch.nodes[index];
   const d = app.device.byId.get(node.algorithmId);
-  const groups = d.params;
-  if (!groups) return el('div', { class: 'params loading' }, 'reading parameters…');
-
-  const controls = [];
-  for (const group of groups) {
-    if (!group) continue;
-    // Tables - a sequencer's steps, a drum machine's lanes - get a grid of
-    // their own below rather than several hundred number fields.
-    if (group.repeat > 1) continue;
-    for (let f = 0; f < group.nFields; f++) {
-      const pd = group.fields[f];
-      const at = group.first + f;
-      if (!pd || (pd.min === 0 && pd.max === 0)) continue;      // reserved
-      controls.push(paramControl(app, index, at, pd));
-    }
-  }
-  if (!controls.length) return null;
-  return el('div', { class: 'params' }, controls);
+  if (!d.params) return el('div', { class: 'params loading' }, 'reading parameters…');
+  const sections = paramSections(d.params);
+  if (!sections.length) return null;
+  // One section needs no heading: the heading says what the section is *as
+  // opposed to* the others, and there are none.
+  const titled = sections.length > 1;
+  return el('div', { class: 'param-sections' }, sections.map((section) =>
+    el('div', { class: `param-section sec-${section.key}` },
+      titled ? el('h4', {}, section.label) : null,
+      el('div', { class: 'params' },
+        section.params.map(({ at, pd }) => paramControl(app, index, at, pd))))));
 }
 
 // What a stored byte means, in the parameter's own terms. Zero means the
@@ -531,13 +676,16 @@ function paramControl(app, index, at, pd) {
   }
 
   const binding = app.bindingFor?.(index, at);
+  const route = app.routeFor?.(index, at);
   return el('div', { class: 'param' },
     el('div', { class: 'param-head' },
       el('span', { class: 'param-name' }, pd.name),
       binding ? el('span', { class: 'param-cc' }, `CC ${binding.cc}`) : null,
+      route ? el('span', { class: 'param-cc dom-CV' }, `CV ${route.bus}`) : null,
       el('span', { class: 'param-value' }, paramText(pd, value))),
     el('div', { class: 'param-controls' }, controls,
-      learnButton(app, index, at, pd.name, binding)));
+      learnButton(app, index, at, pd.name, binding),
+      cvButton(app, index, at, pd.name, route)));
 }
 
 // The generic parameter view is wrong for a sequencer: nobody enters a drum

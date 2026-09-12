@@ -186,22 +186,18 @@ export class Library {
     }
   }
 
-  // How the patch is being *looked at*: blocks or list, and where a block was
-  // dragged to. Not part of a patch - a `.syx` file and the module's own slots
-  // have nowhere to put a coordinate and should not gain one - so this is kept
-  // beside the library rather than in it, keyed per patch, and a patch with
-  // nothing here simply gets the automatic layout.
+  // Where a block was dragged to. Not part of a patch - a `.syx` file and the
+  // module's own slots have nowhere to put a coordinate and should not gain
+  // one - so this is kept beside the library rather than in it, keyed per
+  // patch, and a patch with nothing here simply gets the automatic layout.
   readCanvas() {
-    if (!this.available) return { view: null, layouts: {} };
+    if (!this.available) return { layouts: {} };
     try {
       const raw = this.storage.getItem(CANVAS_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      return {
-        view: parsed?.view ?? null,
-        layouts: parsed && typeof parsed.layouts === 'object' ? parsed.layouts : {},
-      };
+      return { layouts: parsed && typeof parsed.layouts === 'object' ? parsed.layouts : {} };
     } catch {
-      return { view: null, layouts: {} };
+      return { layouts: {} };
     }
   }
 
@@ -210,10 +206,6 @@ export class Library {
     try {
       this.storage.setItem(CANVAS_KEY, JSON.stringify(state));
     } catch { /* a full quota must never break editing */ }
-  }
-
-  saveView(view) {
-    this.writeCanvas({ ...this.readCanvas(), view });
   }
 
   layoutFor(key) {

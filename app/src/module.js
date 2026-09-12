@@ -58,7 +58,10 @@ const MIDI_LOG_MAX = 200;
 // What the scope draws: one column per millisecond of *simulated* time, four
 // seconds of them, with levels OR-accumulated into the column so a pulse
 // shorter than a column still shows. A gate is a 1 ms edge on this machine,
-// and the whole point of a scope is that it does not miss one.
+// and the whole point of a scope is that it does not miss one. A CV bus is a
+// level rather than an edge, so its column holds the last value the pass
+// left there - and every CV bus is traced, because reading eight int16s a
+// pass is cheaper than deciding which ones to read.
 const TRACE_US = 1000;
 const TRACE_LEN = 4000;
 
@@ -105,8 +108,9 @@ export class EmbeddedModule {
       jackIn: new Uint8Array(TRACE_LEN),
       jackOut: new Uint8Array(TRACE_LEN),
       gate: new Uint32Array(TRACE_LEN),
+      cv: Array.from({ length: P.N_CV_BUS }, () => new Int16Array(TRACE_LEN)),
     };
-    this.column = { jackIn: 0, jackOut: 0, gate: 0, until: 0 };
+    this.column = { jackIn: 0, jackOut: 0, gate: 0, cv: new Int16Array(P.N_CV_BUS), until: 0 };
     // Per jack, what the page is driving into it: a held level, a pulse that
     // ends at a simulated time, or a free-running square wave.
     this.jackSources = Array.from({ length: P.GPIO_N }, () => ({ level: 0, pulseUntil: 0, hz: 0 }));
@@ -276,6 +280,8 @@ export class EmbeddedModule {
     const green = E.emu_led(0);
     const red = E.emu_led(1);
     this.levels = { jackIn, jackOut, gate, green, red };
+    const cv = this.column.cv;
+    for (let b = 0; b < P.N_CV_BUS; b++) cv[b] = E.emu_cv(b);
 
     const a = this.activity;
     a.jackIn |= jackIn; a.jackOut |= jackOut; a.gate |= gate;
@@ -306,6 +312,7 @@ export class EmbeddedModule {
       t.jackIn[t.head] = c.jackIn;
       t.jackOut[t.head] = c.jackOut;
       t.gate[t.head] = c.gate;
+      for (let b = 0; b < P.N_CV_BUS; b++) t.cv[b][t.head] = c.cv[b];
       t.head = (t.head + 1) % t.len;
       if (t.filled < t.len) t.filled++;
       t.at = this.now;
@@ -504,6 +511,10 @@ export class EmbeddedModule {
   // Which gate buses are high this pass: the live view of a running patch the
   // module itself has no way to display.
   gateBuses() { return this.E.emu_gate_buses(); }
+
+  // What a CV bus holds this pass, in the bus's own units (`CV_FULL` is full
+  // scale, bipolar signals run negative).
+  cv(bus) { return this.E.emu_cv(bus); }
 
   // Where each loaded sequencer is, by node index in the running patch. This
   // is what puts a playhead on the step grids while they are being edited.

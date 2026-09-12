@@ -41,7 +41,8 @@
      the screen and one that is clipped off the side of it. */
   .nodes > *, .ports > *, .port-group > *, .params > *, .fields > *,
   .jack-cards > *, .routes > *, .slots > *, .saved-list > *, .lane-row > *,
-  .players > *, .row > *, .grid > * { min-width: 0; }
+  .players > *, .row > *, .grid > *, .legend > *, .param-section > *,
+  .canvas-bar > *, .add-row > *, .details-bar > * { min-width: 0; }
   /* Nothing may make the page itself scroll sideways: an overflowing lane
      scrolls in its own box or it is a bug. */
   html, body { max-width: 100%; overflow-x: hidden; }
@@ -84,12 +85,33 @@
     overflow-x: auto; scrollbar-width: none;
   }
   .tabs::-webkit-scrollbar { display: none; }
+  /* A tab is an icon over its word: five of them fit a phone's width that
+     way, and the icon is what the eye lands on once it has read the word
+     once. */
   .tab {
-    flex: 1 0 auto; min-height: var(--tap); padding: 0 .9rem;
+    flex: 1 0 auto; min-height: var(--tap); padding: .25rem .7rem;
+    display: inline-flex; flex-direction: column; align-items: center; gap: .1rem;
     background: none; border: 1px solid transparent; border-radius: var(--radius);
     color: var(--dim); font: inherit; cursor: pointer;
   }
+  .tab .icon { width: 1.3rem; height: 1.3rem; }
+  .tab-label { font-size: .72rem; line-height: 1.2; }
   .tab.active { background: var(--panel); border-color: var(--line); color: var(--ink); }
+  .tab.active .icon { color: var(--accent); }
+
+  /* An icon button: square, the icon in `currentColor`, its word in the
+     tooltip and the accessible name - or beside the icon where `.with-text`
+     says there is room for it. */
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+    width: var(--tap); height: var(--tap); min-height: 0; padding: 0; flex: 0 0 auto;
+  }
+  .icon-btn .icon { width: 1.3rem; height: 1.3rem; display: block; flex: none; }
+  .icon-btn.with-text { width: auto; padding: 0 .8rem 0 .6rem; }
+  .icon-btn.ghost { color: var(--dim); }
+  .icon-btn.ghost:hover { color: var(--ink); }
+  .icon-btn.primary { color: var(--accent); }
+  .top-buttons .icon-btn { flex: 1 1 auto; }
 
   /* --- controls --- */
   button, select, input, textarea { font: inherit; color: var(--ink); }
@@ -292,6 +314,18 @@
   button.learn .icon { width: 1.35rem; height: 1.35rem; display: block; }
   button.learn:hover { color: var(--ink); border-color: var(--accent); }
   .learn.bound { color: var(--accent); border-color: var(--accent); }
+  /* The CV route button is the same square: bound is the CV colour, because
+     what it is bound to is a control signal. */
+  button.learn.cv.bound { color: var(--cv); border-color: var(--cv); }
+  .param-cc.dom-CV { color: var(--cv); }
+  .param-value.dom-CV { color: var(--cv); }
+  .param-menu-item.chosen .param-menu-name { color: var(--cv); }
+  .param-menu-item.danger { color: var(--bad); }
+  /* The sections a card's parameters are sorted into: one question each,
+     in the same order on every node. */
+  .param-sections { display: grid; gap: .9rem; }
+  .param-section h4 { margin-bottom: .45rem; padding-bottom: .2rem; border-bottom: 1px solid var(--line); }
+  .node .summary { margin-bottom: .8rem; }
   /* A modulation route is a different row: its depth slider shares with a
      mode select and a percentage, and there is no width left to share. */
   .mod-route .param-controls .slider { flex: 1 0 100%; }
@@ -369,7 +403,7 @@
   .note-cell.on { border-color: var(--note); }
   .note-cell.beyond { opacity: .35; }
   .note-cell.rest { border-style: dashed; }
-  .note-cell.tie { border-color: var(--accent); }
+  .note-cell.tie { border-color: var(--note); border-style: double; }
   .note-cell input {
     width: 100%; min-height: 1.6rem; background: none; border: none; color: var(--ink);
     font: inherit; font-size: .85rem; text-align: center; padding: 0;
@@ -388,8 +422,9 @@
      patch something into it - but it does not compete with the ones in use. */
   .jack-card.unused { border-style: dashed; }
   .jack-card .port { margin-top: .5rem; }
+  /* A jack carries a gate whichever way it faces, so its lamp is the gate
+     colour; the direction is the word beside it. */
   .led.jack-lamp { background: var(--gate); }
-  .led.jack-lamp.out { background: var(--warn); }
   .led.lit { opacity: 1; }
 
   /* One octave, playable with a thumb. Not a picture of a piano - the black
@@ -414,13 +449,22 @@
     display: block; width: 100%; border: 1px solid var(--line);
     border-radius: var(--radius); background: var(--bg);
   }
-  /* The roll's key. One entry per place a note can be seen - played in, sent
-     out, and each note bus the patch writes - and the swatch takes the colour
-     the canvas draws that source in, handed over as a custom property because
-     a bus's colour is chosen by its number rather than by a class. */
-  .roll-key { font-size: .8rem; color: var(--dim); display: inline-flex; align-items: center; gap: .35rem; }
-  .roll-key::before { content: ''; width: 1.1rem; height: .6rem; border-radius: 2px;
-                      background: var(--key, var(--dim)); }
+  /* A legend: one chip per trace, in the colour the canvas draws it, handed
+     over as a custom property because a bus's shade is chosen by its number
+     rather than by a class. A chip is a button, and a pressed-out chip is a
+     trace put away for the moment. */
+  .legend { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
+  .legend-row .legend { margin-top: 0; flex: 1 1 auto; }
+  .legend-chip {
+    display: inline-flex; align-items: center; gap: .4rem;
+    min-height: 2.1rem; padding: .15rem .6rem; border-radius: 999px;
+    background: var(--raised); border: 1px solid var(--line); color: var(--ink); font-size: .78rem;
+  }
+  .legend-chip::before { content: ''; width: 1rem; height: .55rem; border-radius: 2px;
+                         background: var(--key, var(--dim)); flex: none; }
+  .legend-chip.off { color: var(--dim); text-decoration: line-through; }
+  .legend-chip.off::before { opacity: .25; }
+  .node-roll canvas.roll { margin-bottom: .2rem; }
 
   /* One player per box: the source it listens to, its timbre and its level.
      A box rather than a row, because on a phone the three controls wrap and
@@ -485,14 +529,28 @@
      arrows are drawn by arithmetic rather than by measuring the DOM: a socket
      is at the block's edge, level with the middle of its own row, and that is
      only true if these rules use the same numbers the arithmetic does. */
-  .view-switch { display: flex; gap: .75rem; align-items: center;
-                 flex-wrap: wrap; margin-bottom: .75rem; }
   .canvas-panel { background: var(--panel); border: 1px solid var(--line);
                   border-radius: 10px; padding: .6rem; margin-bottom: 1rem; }
+  /* The bar above the picture: what to add and the button that adds it,
+     then the zoom. On a phone the zoom wraps under the picker. */
   .canvas-bar { display: flex; gap: .5rem; align-items: center;
                 justify-content: space-between; flex-wrap: wrap; margin-bottom: .5rem; }
+  .add-row { display: flex; gap: .5rem; align-items: center; flex: 1 1 16rem; }
   .canvas-zoom { display: flex; gap: .25rem; margin-left: auto; }
-  .canvas-zoom button { min-width: 2.5rem; }
+  .canvas-foot { display: flex; gap: .5rem .9rem; align-items: center; flex-wrap: wrap;
+                 justify-content: space-between; margin-top: .6rem; }
+  .canvas-foot .canvas-legend { margin-top: 0; }
+
+  /* The details panel: one bar, then the card. The bar stays when the body
+     is folded, so a folded panel is a line saying what is selected. */
+  .details-bar { display: flex; gap: .4rem; align-items: center; margin-bottom: .8rem; flex-wrap: wrap; }
+  .details.folded .details-bar { margin-bottom: 0; }
+  .details-title { margin: 0; flex: 1 1 auto; color: var(--ink); font-size: .95rem;
+                   text-transform: none; letter-spacing: 0; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; }
+  .details-close { margin-left: auto; }
+  .details .node { border: none; padding: 0; background: none; }
+  .details .nodes { gap: 0; }
 
   /* A fixed window onto a world that is as big as the patch needs. The pan and
      the zoom are a transform on .canvas-world, so nothing scrolls and the page
@@ -536,10 +594,10 @@
               pointer-events: stroke; cursor: pointer; }
   .wire-cut {
     position: absolute; transform: translate(-50%, -50%);
-    min-height: 1.9rem; width: 1.9rem; padding: 0; line-height: 1;
-    border-radius: 999px; border-color: var(--bad); color: var(--bad);
-    background: var(--panel);
+    height: 2rem; width: 2rem; border-radius: 999px;
+    border-color: var(--bad); color: var(--bad); background: var(--panel);
   }
+  .wire-cut .icon { width: 1.1rem; height: 1.1rem; }
 
   .blk {
     position: absolute; width: var(--blk-w);
@@ -559,8 +617,9 @@
   .blk-title { flex: 1 1 auto; min-width: 0; font-size: .85rem;
                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .blk-clocked { color: var(--accent); font-size: .8rem; }
-  .blk-remove { min-height: 1.75rem; width: 1.75rem; padding: 0; line-height: 1;
+  .blk-remove { height: 1.75rem; width: 1.75rem;
                 background: none; border-color: transparent; color: var(--dim); }
+  .blk-remove .icon { width: .95rem; height: .95rem; }
   .blk-remove:hover { color: var(--bad); border-color: var(--bad); }
 
   .blk-body { display: flex; padding: var(--blk-pad) 0; }
@@ -629,6 +688,8 @@
 
   .canvas-legend { display: flex; gap: .4rem; align-items: center;
                    flex-wrap: wrap; margin-top: .6rem; }
+  .chip.dom-gate, .chip.dom-note, .chip.dom-CV { color: var(--wire);
+    border-color: color-mix(in srgb, var(--wire) 55%, transparent); }
   .canvas-legend .chip { min-height: 1.9rem; font-size: .75rem; color: var(--wire);
                          border-color: color-mix(in srgb, var(--wire) 55%, transparent); }
   .canvas-legend .merge { color: var(--dim); }
@@ -640,7 +701,9 @@
     .top-buttons { justify-content: flex-end; }
     .top-buttons button { flex: 0 0 auto; }
     .status { grid-column: 1 / -1; }
-    .tab { flex: 0 0 auto; }
+    .tab { flex: 0 0 auto; flex-direction: row; gap: .45rem; padding: 0 .9rem; }
+    .tab .icon { width: 1.1rem; height: 1.1rem; }
+    .tab-label { font-size: inherit; }
     .params { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem 1.5rem; }
     .fields { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
     .jack-cards { grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }

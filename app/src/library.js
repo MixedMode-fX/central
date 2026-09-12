@@ -14,7 +14,7 @@
 // Everything here moves a patch between two of those, and the patch never
 // changes shape on the way: it is the image in all three.
 
-import { el } from './views.js';
+import { el, iconButton } from './views.js';
 import { ago } from './storage.js';
 import { EXAMPLES } from './examples.js';
 
@@ -68,9 +68,12 @@ function libraryPanel(app) {
         el('span', { class: 'hint grow' },
           `${entry.nodes} node${entry.nodes === 1 ? '' : 's'} · ${ago(entry.updated)}`
           + `${entry.id === app.current.id ? ' · open' : ''}`),
-        el('button', { class: 'ghost', onclick: () => app.duplicateSaved(entry.id) }, 'duplicate'),
-        el('button', { class: 'ghost', onclick: () => app.exportSaved(entry.id) }, '.syx'),
-        el('button', { class: 'ghost danger', onclick: () => app.deleteSaved(entry.id) }, 'delete')));
+        iconButton({ icon: 'copy', label: `duplicate ${entry.name}`, class: 'ghost',
+                     onclick: () => app.duplicateSaved(entry.id) }),
+        iconButton({ icon: 'download', label: `export ${entry.name} as .syx`, class: 'ghost',
+                     onclick: () => app.exportSaved(entry.id) }),
+        iconButton({ icon: 'trash', label: `delete ${entry.name}`, class: 'ghost danger',
+                     onclick: () => app.deleteSaved(entry.id) })));
   });
 
   return el('section', { class: 'panel' },

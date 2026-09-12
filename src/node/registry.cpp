@@ -28,6 +28,8 @@
 #include "algorithm/midi/voicer.h"
 #include "algorithm/midi/mirror.h"
 #include "algorithm/midi/tonnetz.h"
+#include "algorithm/midi/note_filter.h"
+#include "algorithm/midi/channel.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -71,6 +73,8 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &Voicer::descriptor,
     &Mirror::descriptor,
     &Tonnetz::descriptor,
+    &NoteFilter::descriptor,
+    &Channel::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

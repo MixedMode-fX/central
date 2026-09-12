@@ -143,6 +143,7 @@ touched.
 | Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay` |
 | Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz` |
+| Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
 | Utility | `GateHold` |
 | Modulators | `LFO`, `SampleHold`, `Slew`, `Turing` |
@@ -249,6 +250,23 @@ is only what a parameter list cannot say.
   triad it starts on is whichever one the key holds there, so the quality is
   not a setting. It emits root position and leaves the voice leading to
   `Voicer`.
+- **A note bus is already a splitter, so `NoteFilter` is the split.** A bus
+  fans out to every reader and in from every writer, so three filters on one
+  bus with different ranges are a three-zone keyboard split, and pointing them
+  at one bus rejoins it — which is why the node has one outlet rather than
+  several. Every test is taken on the note-on and the note-off is looked up in
+  the ledger, so a window that closes under a held note still releases it, and
+  a note-off whose note-on was dropped is dropped too. `not channel` inverts
+  the channel test alone: the other clauses each have their own way round
+  already, and inverting all of them would take away "the notes, but not the
+  ones on channel 10".
+- **`Channel`'s `count` is why it is not a relabelling.** A span of one is a
+  fixed channel; wider, the parameters name a span of that many channels
+  wrapping at 16 and each note-on is allocated one of them, which makes four
+  mono synths a polysynth played from one keyboard. Allocation skips a channel
+  this node still has sounding, because a stolen voice beside an idle one is
+  nothing but round-robin showing through. The note-off leaves on the channel
+  its note-on did, so both parameters can move under a held chord.
 - **Logic gates fold over every input in the mask** from the gate's identity
   element, so **XOR over more than two inputs is parity**. Inputs are
   normalised in the HAL (`GATE_INPUT_ACTIVE_LOW`), so an unpatched input reads
@@ -455,11 +473,11 @@ inside a node it is CC or NRPN.**
 | SysEx | arbitrary length | structure, patterns, bulk, enumeration |
 
 ```
-0x0000 .. 0x347F   a node's parameter: node = address / N_PARAM,
+0x0000 .. 0x39BF   a node's parameter: node = address / N_PARAM,
                                        param = address % N_PARAM
-0x3480 .. 0x348F   the master clock (tempo, source, CV PPQN)
-0x3490 .. 0x349F   the transport (start, stop, continue, tap)
-0x34A0 .. 0x3FFF   reserved
+0x39C0 .. 0x39CF   the master clock (tempo, source, CV PPQN)
+0x39D0 .. 0x39DF   the transport (start, stop, continue, tap)
+0x39E0 .. 0x3FFF   reserved
 ```
 
 The bases move when `N_NODE` moves, and the protocol version with them. This

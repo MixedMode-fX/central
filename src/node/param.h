@@ -90,10 +90,12 @@ inline uint8_t param_effective(const ParamDescriptor& d, uint8_t stored){
 // Shared option-name tables, so two algorithms naming the same enum agree.
 extern const char* const PARAM_DIRECTION_NAMES[5];   // StepEngine::Direction
 extern const char* const PARAM_SCALE_NAMES[15];      // ScaleId
-// global_scale::KeyFollow. Whether a node's root is the key's or its own,
-// which is a separate question from which notes it plays: see
-// midi/global_scale.h.
-extern const char* const PARAM_KEY_NAMES[2];
+// The register a node plays in. Index 0 is not an octave but the key's own
+// (midi/global_key.h): a node left alone moves with the key, and one that
+// names an octave stays in it whatever the key does. Octave 0 would be MIDI
+// notes 0..11, which no patch wants, so nothing is given up by spending it
+// on the default.
+extern const char* const PARAM_OCTAVE_NAMES[11];
 // NotePriorityRule (midi/held_notes.h). Options are indexed from the
 // parameter's own minimum, so the one table serves a parameter numbered from
 // zero and one numbered from one.

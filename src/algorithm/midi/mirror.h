@@ -35,12 +35,11 @@
 // the ones that passed straight through instead of two octaves underneath
 // them.
 //
-// The axis is the key's: the module's scale and root unless this node names
-// its own, and a patched root inlet outranks both - the same rule
-// `NoteQuantise` follows, for the same reason. `snap` puts the reflection
-// back in the scale afterwards; it is off by default, because a reflection
-// that stayed in the key would be a transposition, and leaving the key is the
-// point.
+// The axis is the key's (midi/global_key.h), and a patched root inlet
+// outranks it - the same rule `NoteQuantise` follows, for the same reason.
+// `snap` puts the reflection back in the scale afterwards; it is off by
+// default, because a reflection that stayed in the key would be a
+// transposition, and leaving the key is the point.
 //
 // **`amount` is a percentage and cannot be zero**, for the reason
 // `Harmony::cadence` cannot: a stored 0 means the descriptor's default
@@ -58,18 +57,13 @@
 // Outlet 0 (note): the reflection.
 //
 // params[0] mode     negative / inversion
-// params[1] scale    0 follows the module's key
-// params[2] root     the pitch class the axis is built on, when this node
-//                    names its own key and no root inlet is patched
-// params[3] amount   percent of note-ons reflected; the rest pass through
-// params[4] snap     put the reflection back in the scale
-// params[5] seed     0 draws from the entropy pool, anything else is exact
-// params[6] key      follow the module's root, or use this node's own
+// params[1] amount   percent of note-ons reflected; the rest pass through
+// params[2] snap     put the reflection back in the scale
+// params[3] seed     0 draws from the entropy pool, anything else is exact
 class Mirror : public Node{
     public:
-        static constexpr uint16_t P_MODE = 0, P_SCALE = 1, P_ROOT = 2, P_AMOUNT = 3,
-                                  P_SNAP = 4, P_SEED = 5, P_KEY = 6;
-        static constexpr uint8_t N_PARAMS = 7;
+        static constexpr uint16_t P_MODE = 0, P_AMOUNT = 1, P_SNAP = 2, P_SEED = 3;
+        static constexpr uint8_t N_PARAMS = 4;
         static constexpr uint8_t DEFAULT_AMOUNT = 100;
 
         enum Mode : uint8_t {
@@ -99,12 +93,12 @@ class Mirror : public Node{
         uint8_t root_in;
         uint8_t out;
         uint8_t mode;
-        uint8_t scale;
+        // What the axis root inlet last wrote, or NO_ROOT until it has.
+        static constexpr uint8_t NO_ROOT = 0xFF;
         uint8_t root;
         uint8_t amount;
         bool snap;
         uint8_t seed;
-        uint8_t key;                  // global_scale::KeyFollow
         Xorshift32 rng;
         SoundingNotes sounding;
 };

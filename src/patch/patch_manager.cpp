@@ -1,6 +1,6 @@
 #include "patch/patch_manager.h"
 #include "patch/default_patch.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 
 PatchManager::PatchManager(MixedModeMaster& master, PatchStore& patch_store, StatusLeds& status) :
     mm(master), store(patch_store), leds(status),
@@ -15,8 +15,8 @@ void PatchManager::push_globals(){
     mm.clock().set_cv_ppqn(live_globals.cv_ppqn);
     // The key, for every algorithm that did not name a scale of its own.
     // Pushed rather than read from here, because a node's process() sees the
-    // buses and nothing else (midi/global_scale.h).
-    global_scale::set(live_globals.scale, live_globals.root, live_globals.root_octave);
+    // buses and nothing else (midi/global_key.h).
+    global_key::set(live_globals.scale, live_globals.root, live_globals.root_octave);
 }
 
 ApplyError PatchManager::commit(uint32_t now_us){

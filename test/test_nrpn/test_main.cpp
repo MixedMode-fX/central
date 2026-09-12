@@ -19,6 +19,7 @@
 #include "node/registry.h"
 #include "hal/midi_types.h"
 #include "midi/scale.h"
+#include "midi/global_key.h"
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/sequencers.h"
 
@@ -30,8 +31,10 @@ void operator delete[](void* p) noexcept { free(p); }
 void operator delete(void* p, size_t) noexcept { free(p); }
 void operator delete[](void* p, size_t) noexcept { free(p); }
 
-void setUp() {}
-void tearDown() {}
+// Step-record writes degrees of the key, so the key is what the recorded
+// pitches are measured against.
+void setUp() { global_key::set(SCALE_MAJOR, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 // What CC cannot reach (#22): NRPN, addressed pattern data, and step-record.
 
@@ -103,6 +106,16 @@ static Patch euclid_patch() {
 }
 
 // A mono note sequencer with a keyboard on its record inlet.
+// The key step-record measures its degrees against. It travels with the
+// patch, so a test that applies one has to say it there rather than only in
+// setUp: push_globals is what makes the key live.
+static GlobalSettings c_major(){
+    GlobalSettings g = default_globals();
+    g.scale = SCALE_MAJOR;
+    g.root = 0;
+    return g;
+}
+
 static Patch record_patch() {
     Patch p = empty_patch();
     p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};      // jack 1: advance
@@ -116,9 +129,7 @@ static Patch record_patch() {
     p.nodes[0].in_bus[4] = 2;                               // record enable
     p.nodes[0].out_bus[0] = 0;
     p.nodes[0].params[NoteSequencerBase::P_LENGTH] = 4;
-    p.nodes[0].params[NoteSequencerBase::P_ROOT] = 60;
-    p.nodes[0].params[NoteSequencerBase::P_SCALE_LO] = (uint8_t)(scale_mask(SCALE_MAJOR) & 0xFF);
-    p.nodes[0].params[NoteSequencerBase::P_SCALE_HI] = (uint8_t)(scale_mask(SCALE_MAJOR) >> 8);
+    p.nodes[0].params[NoteSequencerBase::P_OCTAVE] = 5;      // C5 is 60
     p.n_nodes = 1;
     p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, 0};
     return p;
@@ -525,7 +536,7 @@ static void play(Rig& rig, uint8_t note, uint32_t& now) {
 
 static void test_step_record_writes_degrees_against_the_root_and_scale() {
     Rig rig;
-    GlobalSettings g = default_globals();
+    GlobalSettings g = c_major();
     TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(record_patch(), g, 0));
     NoteSequencer* seq = static_cast<NoteSequencer*>(rig.master.node(0));
     TEST_ASSERT_TRUE(seq->recording());
@@ -566,7 +577,7 @@ static void test_step_record_writes_degrees_against_the_root_and_scale() {
 // nearest tone in it, and the snap is counted so a user can see it happened.
 static void test_an_out_of_scale_note_snaps_and_is_counted() {
     Rig rig;
-    GlobalSettings g = default_globals();
+    GlobalSettings g = c_major();
     rig.patches.apply(record_patch(), g, 0);
     NoteSequencer* seq = static_cast<NoteSequencer*>(rig.master.node(0));
 
@@ -584,7 +595,7 @@ static void test_an_out_of_scale_note_snaps_and_is_counted() {
 
 static void test_record_enable_gates_recording() {
     Rig rig;
-    GlobalSettings g = default_globals();
+    GlobalSettings g = c_major();
     rig.patches.apply(record_patch(), g, 0);
     NoteSequencer* seq = static_cast<NoteSequencer*>(rig.master.node(0));
 
@@ -604,7 +615,7 @@ static void test_record_enable_gates_recording() {
 
 static void test_the_reserved_keys_write_a_rest_and_a_tie() {
     Rig rig;
-    GlobalSettings g = default_globals();
+    GlobalSettings g = c_major();
     rig.patches.apply(record_patch(), g, 0);
     NoteSequencer* seq = static_cast<NoteSequencer*>(rig.master.node(0));
 
@@ -629,7 +640,7 @@ static void test_reset_returns_the_record_cursor_to_the_first_step() {
     Patch p = record_patch();
     p.gate_ports[2] = GatePortConfig{GATE_PORT_IN, 4};
     p.nodes[0].in_bus[1] = 4;                       // reset from jack 3
-    GlobalSettings g = default_globals();
+    GlobalSettings g = c_major();
     rig.patches.apply(p, g, 0);
     NoteSequencer* seq = static_cast<NoteSequencer*>(rig.master.node(0));
 
@@ -650,7 +661,7 @@ static void test_reset_returns_the_record_cursor_to_the_first_step() {
 // a sounding note.
 static void test_recording_during_playback_hangs_nothing() {
     Rig rig;
-    GlobalSettings g = default_globals();
+    GlobalSettings g = c_major();
     rig.patches.apply(record_patch(), g, 0);
 
     uint32_t now = 0;

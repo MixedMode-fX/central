@@ -10,7 +10,7 @@
 #include "master.h"
 #include "patch/patch_codec.h"
 #include "midi/scale.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "patch/patch_store.h"
 #include "patch/patch_manager.h"
 #include "patch/default_patch.h"
@@ -714,9 +714,9 @@ static void test_console_key_edits_go_through_the_globals() {
     rig.console.execute("key 2 9", 1000);
     TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, rig.patches.globals().scale);
     TEST_ASSERT_EQUAL(9, rig.patches.globals().root);
-    TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, global_scale::id());
-    TEST_ASSERT_EQUAL(9, global_scale::root());
-    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_NATURAL_MINOR), global_scale::resolve_id(SCALE_GLOBAL));
+    TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, global_key::id());
+    TEST_ASSERT_EQUAL(9, global_key::root());
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_NATURAL_MINOR), global_key::mask());
     TEST_ASSERT_TRUE(rig.store.dirty());
 
     // The module cannot be told to follow itself, and nothing changes when it
@@ -724,8 +724,8 @@ static void test_console_key_edits_go_through_the_globals() {
     rig.io.clear();
     rig.console.execute("key 0", 2000);
     TEST_ASSERT_TRUE(rig.io.said("scale is 1..14"));
-    TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, global_scale::id());
-    global_scale::set(SCALE_CHROMATIC, 0);
+    TEST_ASSERT_EQUAL(SCALE_NATURAL_MINOR, global_key::id());
+    global_key::set(SCALE_CHROMATIC, 0);
 }
 
 static void test_console_clock_edits_go_through_the_globals() {

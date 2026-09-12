@@ -8,7 +8,7 @@
 #include "midi/held_notes.h"
 #include "midi/sounding_notes.h"
 #include "midi/scale.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "algorithm/midi/transpose.h"
 #include "algorithm/midi/note_priority.h"
@@ -20,10 +20,10 @@
 #include "algorithm/midi/midi_to_cv.h"
 
 void setUp() {}
-// The module's key is process-wide state (midi/global_scale.h), so every test
+// The module's key is process-wide state (midi/global_key.h), so every test
 // gets it back the way it found it: chromatic, which is what a module with no
 // key set is in.
-void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 // ---------------------------------------------------------------------------
 // Test rig: one pass around a node, exactly as MixedModeMaster runs it.
@@ -401,7 +401,7 @@ static void test_chord_emits_every_voice_and_releases_all_of_it() {
     c.in_bus[0] = 0; c.out_bus[0] = 1;            // a triad, the default quality
     Chord node(c);
 
-    global_scale::set(SCALE_CHROMATIC, 0);        // no key: the major triad
+    global_key::set(SCALE_CHROMATIC, 0);        // no key: the major triad
     bus.note_write(0, on(60));
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
@@ -424,8 +424,7 @@ static void test_note_quantise_snaps_and_releases_what_it_sent() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
     c.in_bus[0] = 0; c.in_bus[1] = NO_BUS; c.out_bus[0] = 1;
-    c.params[0] = SCALE_MAJOR;
-    c.params[1] = 0;                              // C
+    global_key::set(SCALE_MAJOR, 0);              // C major
     NoteQuantise node(c);
 
     bus.note_write(0, on(61));                    // C# -> D
@@ -433,8 +432,7 @@ static void test_note_quantise_snaps_and_releases_what_it_sent() {
     TEST_ASSERT_EQUAL(1, out.size());
     TEST_ASSERT_EQUAL(62, out[0].data1);
 
-    node.set_root(2);                             // the root moves to D
-    node.set_scale(SCALE_PENTATONIC_MINOR);
+    global_key::set(SCALE_PENTATONIC_MINOR, 2);   // the key moves under it
 
     bus.note_write(0, off(61));
     out = run_pass(bus, node, 1);
@@ -447,13 +445,13 @@ static void test_note_quantise_takes_its_root_from_a_bus() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
     c.in_bus[0] = 0; c.in_bus[1] = 2; c.out_bus[0] = 1;
-    c.params[0] = SCALE_MAJOR;
+    global_key::set(SCALE_MAJOR, 0);
     NoteQuantise node(c);
 
     bus.note_write(2, on(62));                    // root D, from the root inlet
     bus.note_write(0, on(60));                    // C is not in D major -> C#
     const std::vector<MidiEvent> out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(2, node.root_note());
+    TEST_ASSERT_EQUAL(2, node.active_root());
     TEST_ASSERT_EQUAL(1, out.size());
     TEST_ASSERT_EQUAL(61, out[0].data1);
 }
@@ -497,121 +495,96 @@ static void test_probability_defaults_to_passing_everything() {
 }
 
 // ---------------------------------------------------------------------------
-// The module's scale (midi/global_scale.h)
+// The module's scale (midi/global_key.h)
 // ---------------------------------------------------------------------------
 
-// An algorithm that named no scale follows the module's; one that named a
-// scale keeps it, and takes its own root with it.
-static void test_the_global_scale_is_the_default_and_an_override_wins() {
-    global_scale::set(SCALE_MAJOR, 2);                 // D major
-    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), global_scale::mask());
-    TEST_ASSERT_EQUAL(2, global_scale::root());
-
-    TEST_ASSERT_TRUE(global_scale::follows(SCALE_GLOBAL));
-    TEST_ASSERT_FALSE(global_scale::follows(SCALE_BLUES));
-    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), global_scale::resolve_id(SCALE_GLOBAL));
-    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_BLUES), global_scale::resolve_id(SCALE_BLUES));
-    TEST_ASSERT_EQUAL(2, global_scale::resolve_root(SCALE_GLOBAL, 7));
-    TEST_ASSERT_EQUAL(7, global_scale::resolve_root(SCALE_BLUES, 7));
+// One key for the module, and no algorithm carries a copy of any part of it.
+static void test_the_key_is_one_setting_for_the_whole_module() {
+    global_key::set(SCALE_MAJOR, 2);                 // D major
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), global_key::mask());
+    TEST_ASSERT_EQUAL(SCALE_MAJOR, global_key::id());
+    TEST_ASSERT_EQUAL(2, global_key::root());
 
     // Chromatic is a scale like any other, and is what the module is in
-    // until a key is set - which is why a patch written before the setting
-    // existed plays what it always did.
-    global_scale::set(SCALE_CHROMATIC, 0);
-    TEST_ASSERT_EQUAL_HEX16(0x0FFF, global_scale::resolve_id(SCALE_GLOBAL));
-    // The global scale cannot follow itself.
-    global_scale::set(SCALE_GLOBAL, 5);
-    TEST_ASSERT_EQUAL(SCALE_CHROMATIC, global_scale::id());
-    TEST_ASSERT_EQUAL_HEX16(0x0FFF, global_scale::mask());
+    // until a key is set.
+    global_key::set(SCALE_CHROMATIC, 0);
+    TEST_ASSERT_EQUAL_HEX16(0x0FFF, global_key::mask());
+    // Zero is an unset byte and not a scale, so it reads as chromatic.
+    global_key::set(SCALE_NONE, 5);
+    TEST_ASSERT_EQUAL(SCALE_CHROMATIC, global_key::id());
+    TEST_ASSERT_EQUAL_HEX16(0x0FFF, global_key::mask());
+    TEST_ASSERT_EQUAL(5, global_key::root());
 }
 
-// A scale and a pitch class say which notes and which is home; they cannot
-// say *where* home is. The register is the third part of the key, it is unset
-// by default, and unset means every node keeps the root it stored - which is
-// what makes a patch written before it existed play what it always did.
-static void test_the_key_can_name_a_register() {
-    global_scale::set(SCALE_NATURAL_MINOR, 9);            // A minor, no register
-    TEST_ASSERT_EQUAL(0, global_scale::octave());
-    TEST_ASSERT_EQUAL(global_scale::NO_ROOT_NOTE, global_scale::root_note());
+// A scale and a pitch class say which notes and which of them is home; they
+// cannot say *where* home is. The register is the third part of the key, and
+// it is what a node that names no octave of its own plays in.
+static void test_the_key_names_a_register() {
+    global_key::set(SCALE_NATURAL_MINOR, 9, 3);         // A minor, at octave 3
+    TEST_ASSERT_EQUAL(3, global_key::octave());
+    TEST_ASSERT_EQUAL(45, global_key::tonic(0));        // 3 x 12 + 9
 
-    global_scale::set(SCALE_NATURAL_MINOR, 9, 3);         // A minor, at octave 3
-    TEST_ASSERT_EQUAL(3, global_scale::octave());
-    TEST_ASSERT_EQUAL(45, global_scale::root_note());  // 3 x 12 + 9
+    // A zeroed byte is the default everywhere in this module, and here that
+    // is the register middle C sits in.
+    global_key::set(SCALE_NATURAL_MINOR, 9, 0);
+    TEST_ASSERT_EQUAL(global_key::DEFAULT_OCTAVE, global_key::octave());
+    TEST_ASSERT_EQUAL(69, global_key::tonic(0));        // 5 x 12 + 9
+
+    // A node that names one plays in it whatever the key's register is.
+    TEST_ASSERT_EQUAL(45, global_key::tonic(3));
+    TEST_ASSERT_EQUAL(21, global_key::tonic(1));
 
     // The top octave cannot hold every pitch class, and a key that silently
     // became a different note would be worse than one an octave lower.
-    global_scale::set(SCALE_NATURAL_MINOR, 11, 10);
-    TEST_ASSERT_EQUAL(119, global_scale::root_note());
+    global_key::set(SCALE_NATURAL_MINOR, 11, 10);
+    TEST_ASSERT_EQUAL(119, global_key::tonic(0));
 
     // Out of range is clamped rather than wrapped.
-    global_scale::set(SCALE_NATURAL_MINOR, 0, 200);
-    TEST_ASSERT_EQUAL(10, global_scale::octave());
+    global_key::set(SCALE_NATURAL_MINOR, 0, 200);
+    TEST_ASSERT_EQUAL(global_key::MAX_OCTAVE, global_key::octave());
 }
 
-// The two resolvers, which is where the register actually reaches a node.
-// Which notes and which of them is home are two questions now: a node that
-// names a scale of its own still plays the key's root, and only its `key`
-// parameter takes it out of the key.
-static void test_the_register_resolves_for_both_kinds_of_root() {
-    // No register: a tonic takes the key's pitch class in its own octave, and
-    // a pattern's anchor is left exactly where it was.
-    global_scale::set(SCALE_NATURAL_MINOR, 9);
-    TEST_ASSERT_EQUAL(57, global_scale::resolve_tonic(global_scale::KEY_FOLLOW, 48, 48));
-    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(global_scale::KEY_FOLLOW, 48, 48));
-
-    // With one, both take it.
-    global_scale::set(SCALE_NATURAL_MINOR, 9, 2);
-    TEST_ASSERT_EQUAL(33, global_scale::resolve_tonic(global_scale::KEY_FOLLOW, 48, 48));
-    TEST_ASSERT_EQUAL(33, global_scale::resolve_anchor(global_scale::KEY_FOLLOW, 48, 48));
-
-    // A node moved off the register its root parameter holds by default keeps
-    // that distance from the key rather than being flattened onto it: one key
-    // for the patch, one octave per node.
-    TEST_ASSERT_EQUAL(21, global_scale::resolve_tonic(global_scale::KEY_FOLLOW, 36, 48));
-    TEST_ASSERT_EQUAL(45, global_scale::resolve_anchor(global_scale::KEY_FOLLOW, 60, 48));
-
-    // `own` is the opt-out, and the only one. Naming a scale is not one.
-    TEST_ASSERT_EQUAL(48, global_scale::resolve_tonic(global_scale::KEY_OWN, 48, 48));
-    TEST_ASSERT_EQUAL(48, global_scale::resolve_anchor(global_scale::KEY_OWN, 48, 48));
-    TEST_ASSERT_EQUAL(7, global_scale::resolve_root(global_scale::KEY_OWN, 7));
-    TEST_ASSERT_EQUAL(9, global_scale::resolve_root(global_scale::KEY_FOLLOW, 7));
-}
-
-static void test_note_quantise_follows_the_module_scale_until_it_names_one() {
+static void test_note_quantise_snaps_into_the_key() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;                 // scale left at 0: the module's
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
     NoteQuantise node(c);
 
-    global_scale::set(SCALE_MAJOR, 2);                 // D major
+    global_key::set(SCALE_MAJOR, 2);                   // D major
     bus.note_write(0, on(60));                         // C is not in it -> C#
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(1, out.size());
     TEST_ASSERT_EQUAL(61, out[0].data1);
     TEST_ASSERT_EQUAL(2, node.active_root());
 
-    // Naming a scale says which notes, and nothing about which of them is
-    // home: the key's root still is. D pentatonic major has no C# to reach,
-    // so C lands on the B below it.
+    // The key moves and the quantiser moves with it: D pentatonic major has
+    // no C# to reach, so C lands on the B below it.
     bus.note_write(0, off(60));
     run_pass(bus, node, 1);
-    node.set_scale(SCALE_PENTATONIC_MAJOR);
+    global_key::set(SCALE_PENTATONIC_MAJOR, 2);
     TEST_ASSERT_EQUAL(2, node.active_root());
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_PENTATONIC_MAJOR), node.active_mask());
     bus.note_write(0, on(60));
     out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(1, out.size());
     TEST_ASSERT_EQUAL(59, out[0].data1);               // B, the nearest tone it has
+}
 
-    // `key` is what leaves the key, and it leaves only the root behind: the
-    // node's own root parameter, C, is what the pentatonic is built on now.
-    bus.note_write(0, off(62));
-    run_pass(bus, node, 1);
-    node.set_key(global_scale::KEY_OWN);
+// A cable outranks the key: the root inlet is the most explicit thing a user
+// can say about where home is.
+static void test_note_quantise_takes_its_root_from_a_cable() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
+    c.in_bus[0] = 0; c.in_bus[1] = 2; c.out_bus[0] = 1;
+    NoteQuantise node(c);
+
+    global_key::set(SCALE_PENTATONIC_MAJOR, 2);        // D pentatonic
+    bus.note_write(2, on(60));                         // ... rooted on C instead
+    bus.note_write(0, on(61));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(0, node.active_root());
-    bus.note_write(0, on(60));
-    out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(1, out.size());
-    TEST_ASSERT_EQUAL(60, out[0].data1);
+    TEST_ASSERT_EQUAL(62, out[0].data1);               // C pentatonic has no C#
 }
 
 // A quality is scale steps, so one setting is a triad on every degree.
@@ -622,7 +595,7 @@ static void test_chord_voices_its_quality_in_the_scale() {
     c.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);                 // C major
+    global_key::set(SCALE_MAJOR, 0);                 // C major
     bus.note_write(0, on(60));                         // C E G
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
@@ -651,17 +624,16 @@ static void test_chord_voices_its_quality_in_the_scale() {
     TEST_ASSERT_EQUAL(69, out[2].data1);
 }
 
-// Chromatic on the node is the escape hatch: a chord of fixed semitones,
-// whatever key the module is in. A triad of twelve equal steps would be a
-// cluster, so a chromatic scale plays the quality's own shape instead.
+// A chromatic key has no degrees to colour a triad with - a triad of twelve
+// equal steps would be a cluster - so each quality plays its own shape in
+// semitones there instead.
 static void test_chord_in_the_chromatic_scale_is_fixed_semitones() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
     c.in_bus[0] = 0; c.out_bus[0] = 1;
-    c.params[Chord::P_SCALE] = SCALE_CHROMATIC;        // a major triad in semitones
     Chord node(c);
 
-    global_scale::set(SCALE_PENTATONIC_MINOR, 3);
+    global_key::set(SCALE_CHROMATIC, 3);
     bus.note_write(0, on(61));
     const std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
@@ -689,7 +661,7 @@ static void test_a_chord_with_no_note_inlet_plays_itself_and_holds() {
     NodeConfig c = free_chord(false);
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);                 // C major
+    global_key::set(SCALE_MAJOR, 0);                 // C major
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
     TEST_ASSERT_EQUAL(60, out[0].data1);               // middle C, the default octave
@@ -714,7 +686,7 @@ static void test_a_self_playing_chord_takes_its_octave_and_velocity() {
     c.params[Chord::P_VELOCITY] = 64;
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     const std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
     TEST_ASSERT_EQUAL(36, out[0].data1);
@@ -732,7 +704,7 @@ static void test_chord_quality_names_a_stack_of_scale_steps() {
     c.params[Chord::P_QUALITY] = Chord::QUALITY_SEVENTH;
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(4, out.size());
     TEST_ASSERT_EQUAL(60, out[0].data1);
@@ -750,7 +722,7 @@ static void test_chord_quality_takes_its_flavour_from_the_degree() {
     c.params[Chord::P_QUALITY] = Chord::QUALITY_SEVENTH;
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     run_pass(bus, node, 1);
 
     bus.note_write(0, on(67));                         // G, the fifth degree
@@ -777,7 +749,7 @@ static std::vector<MidiEvent> chord_voices(uint8_t quality, uint8_t voicing, uin
 // `inversion` moves the lowest voices up an octave, so what is in the bass is
 // a voice of the chord rather than always its root.
 static void test_chord_inversion_moves_the_bass() {
-    global_scale::set(SCALE_MAJOR, 0);                  // C major
+    global_key::set(SCALE_MAJOR, 0);                  // C major
 
     std::vector<MidiEvent> out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_CLOSE, 1);
     TEST_ASSERT_EQUAL(3, out.size());
@@ -799,7 +771,7 @@ static void test_chord_inversion_moves_the_bass() {
 
 // `voicing` is the shape of the stack: the same notes, further apart.
 static void test_chord_voicing_opens_the_stack() {
-    global_scale::set(SCALE_MAJOR, 0);                  // C major
+    global_key::set(SCALE_MAJOR, 0);                  // C major
 
     // Open position: the middle voice up an octave, the bass where it was.
     std::vector<MidiEvent> out = chord_voices(Chord::QUALITY_TRIAD, Chord::VOICING_OPEN, 0);
@@ -847,7 +819,7 @@ static void test_a_repeated_root_re_strikes_only_when_asked() {
     c.params[Chord::P_RETRIGGER] = 1;
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     run_pass(bus, node, 1);
 
     bus.note_write(0, on(62));
@@ -869,20 +841,20 @@ static void test_a_repeated_root_re_strikes_only_when_asked() {
     TEST_ASSERT_EQUAL(0, node.sounding_count());
 }
 
-// A self-playing chord sits in its own octave until the key names one, and
-// then it sits where the module says home is. The root inlet still outranks
-// both, because a cable is the most explicit thing a user can say.
+// A self-playing chord sits in the key's register until it names one of its
+// own. The root inlet outranks both, because a cable is the most explicit
+// thing a user can say.
 static void test_a_self_playing_chord_follows_the_key_register() {
     BusManager bus;
     NodeConfig c = free_chord(true);
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);                 // C major, no register
+    global_key::set(SCALE_MAJOR, 0);                 // C major, default register
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
-    TEST_ASSERT_EQUAL(60, out[0].data1);               // its own octave, middle C
+    TEST_ASSERT_EQUAL(60, out[0].data1);               // middle C
 
-    global_scale::set(SCALE_MAJOR, 0, 3);              // and now the key has one
+    global_key::set(SCALE_MAJOR, 0, 3);              // and now the key moves
     out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(6, out.size());
     for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(out[i]));
@@ -896,26 +868,18 @@ static void test_a_self_playing_chord_follows_the_key_register() {
     TEST_ASSERT_EQUAL(6, out.size());
     TEST_ASSERT_EQUAL(67, out[3].data1);
 
-    // An octave below the one it sits in by default is an octave below the
-    // key, not a chord flattened onto it.
+    // A chord that names a register of its own stays in it whatever the key
+    // does: one key for the patch, one octave per node.
     NodeConfig lower = free_chord(false);
-    lower.params[Chord::P_OCTAVE] = Chord::DEFAULT_OCTAVE - 1;
+    lower.params[Chord::P_OCTAVE] = 2;
     Chord below(lower);
     BusManager third;
     out = run_pass(third, below, 1);
     TEST_ASSERT_EQUAL(3, out.size());
-    TEST_ASSERT_EQUAL(24, out[0].data1);               // C1, an octave under C2
-
-    // And a chord told to keep its own key is not moved at all.
-    NodeConfig own = free_chord(false);
-    own.params[Chord::P_SCALE] = SCALE_MAJOR;
-    own.params[Chord::P_ROOT] = 0;
-    own.params[Chord::P_KEY] = global_scale::KEY_OWN;
-    Chord fixed(own);
-    BusManager other;
-    out = run_pass(other, fixed, 1);
-    TEST_ASSERT_EQUAL(3, out.size());
-    TEST_ASSERT_EQUAL(60, out[0].data1);
+    TEST_ASSERT_EQUAL(24, out[0].data1);               // C1: 2 x 12
+    global_key::set(SCALE_MAJOR, 0, 7);
+    out = run_pass(third, below, 1);
+    TEST_ASSERT_EQUAL(0, out.size());                  // nothing moved
 }
 
 // A sequencer on the root inlet is what plays a self-playing chord: the whole
@@ -927,7 +891,7 @@ static void test_a_sequenced_root_walks_a_self_playing_chord_through_the_key() {
     NodeConfig c = free_chord(true);
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     run_pass(bus, node, 1);                            // the tonic triad first
 
     bus.note_write(0, on(62));                         // D, from a sequencer
@@ -962,7 +926,7 @@ static void test_stopping_the_transport_releases_a_sequenced_chord() {
     NodeConfig c = free_chord(true);
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     bus.note_write(0, on(62));
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
@@ -1004,7 +968,7 @@ static void test_stopping_the_transport_leaves_a_drone_alone() {
     NodeConfig c = free_chord(false);
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     TEST_ASSERT_EQUAL(3, run_pass(bus, node, 1).size());
 
     for (uint8_t i = 0; i < 8; i++) {
@@ -1022,7 +986,7 @@ static void test_stopping_the_transport_leaves_a_played_chord_alone() {
     c.in_bus[0] = 0; c.in_bus[1] = 1; c.out_bus[0] = 2;
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     bus.note_write(0, on(60));
     TEST_ASSERT_EQUAL(3, run_pass(bus, node, 2).size());
 
@@ -1044,7 +1008,7 @@ static void test_editing_a_self_playing_chord_re_voices_it() {
     NodeConfig c = free_chord(false);
     Chord node(c);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     NoteBalance balance;
     balance.observe(run_pass(bus, node, 1));
 
@@ -1056,7 +1020,7 @@ static void test_editing_a_self_playing_chord_re_voices_it() {
     TEST_ASSERT_EQUAL(4, balance.total());
 
     // And the key moving under it moves the chord, with nothing left behind.
-    global_scale::set(SCALE_NATURAL_MINOR, 0);
+    global_key::set(SCALE_NATURAL_MINOR, 0);
     out = run_pass(bus, node, 1);
     balance.observe(out);
     TEST_ASSERT_EQUAL(8, out.size());
@@ -1086,7 +1050,7 @@ static void test_a_self_playing_chord_feeds_an_arpeggiator() {
     ac.out_bus[0] = 2;
     Arpeggiator arp(ac);
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     std::vector<uint8_t> played;
     // One swap a pass, as the master runs it: the nodes read what was written
     // last time and write what the next pass will read.
@@ -1948,11 +1912,11 @@ int main() {
     RUN_TEST(test_chord_emits_every_voice_and_releases_all_of_it);
     RUN_TEST(test_note_quantise_snaps_and_releases_what_it_sent);
     RUN_TEST(test_note_quantise_takes_its_root_from_a_bus);
-    RUN_TEST(test_the_global_scale_is_the_default_and_an_override_wins);
-    RUN_TEST(test_the_key_can_name_a_register);
-    RUN_TEST(test_the_register_resolves_for_both_kinds_of_root);
+    RUN_TEST(test_the_key_is_one_setting_for_the_whole_module);
+    RUN_TEST(test_the_key_names_a_register);
     RUN_TEST(test_a_self_playing_chord_follows_the_key_register);
-    RUN_TEST(test_note_quantise_follows_the_module_scale_until_it_names_one);
+    RUN_TEST(test_note_quantise_snaps_into_the_key);
+    RUN_TEST(test_note_quantise_takes_its_root_from_a_cable);
     RUN_TEST(test_chord_voices_its_quality_in_the_scale);
     RUN_TEST(test_chord_in_the_chromatic_scale_is_fixed_semitones);
     RUN_TEST(test_a_chord_with_no_note_inlet_plays_itself_and_holds);

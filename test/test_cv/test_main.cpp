@@ -5,7 +5,7 @@
 #include "bus/bus_manager.h"
 #include "node/patch.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "hal/midi_types.h"
 #include "algorithm/midi/cv_to_note.h"
@@ -20,8 +20,10 @@ void operator delete[](void* p) noexcept { free(p); }
 void operator delete(void* p, size_t) noexcept { free(p); }
 void operator delete[](void* p, size_t) noexcept { free(p); }
 
-void setUp() { global_scale::set(SCALE_CHROMATIC, 0); }
-void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
+// C major unless a test says otherwise: the scale a CvToNote plays is the
+// key's, so it is set here rather than on the node.
+void setUp() { global_key::set(SCALE_MAJOR, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 // The two doors between the CV bus and the music (#30, #31). Before these the
 // CV domain was closed: three modulators wrote it, the modulation matrix and
@@ -37,18 +39,18 @@ static const uint8_t NOTE_OUT = 0;
 // CvToNote
 // ---------------------------------------------------------------------------
 
-static NodeConfig cvn_config(uint8_t map, uint8_t root, uint8_t range,
-                             uint8_t scale, uint8_t mode, bool with_trigger){
+// `octave` 0 is the key's own register; the scale is the key's, always.
+static NodeConfig cvn_config(uint8_t map, uint8_t octave, uint8_t range,
+                             uint8_t mode, bool with_trigger){
     NodeConfig c = node_config(ALGO_CV_TO_NOTE);
     c.in_bus[0] = CV_SIGNAL;
     if (with_trigger) c.in_bus[1] = GATE_TRIG;
     c.out_bus[0] = NOTE_OUT;
     c.params[0] = map;
-    c.params[1] = root;
+    c.params[1] = octave;
     c.params[2] = range;
-    c.params[3] = scale;
-    c.params[4] = mode;
-    c.params[5] = CvToNote::CVN_UNIPOLAR;
+    c.params[3] = mode;
+    c.params[4] = CvToNote::CVN_UNIPOLAR;
     return c;
 }
 
@@ -75,7 +77,7 @@ static uint8_t collect(BusManager& bus, uint8_t* notes, uint8_t* offs){
 static void test_degree_mapping_spreads_the_range_over_the_scale_evenly() {
     BusManager bus;
     // C major from C3, two octaves: fourteen degrees across full scale.
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 2, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 2,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
 
@@ -93,7 +95,7 @@ static void test_degree_mapping_spreads_the_range_over_the_scale_evenly() {
 
 static void test_snap_mapping_keeps_the_shape_of_a_melody() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_SNAP, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_SNAP, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
 
@@ -110,7 +112,7 @@ static void test_snap_mapping_keeps_the_shape_of_a_melody() {
 
 static void test_a_trigger_plays_and_releases_the_previous_note() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
     uint8_t on[8], off[8];
@@ -141,7 +143,7 @@ static void test_a_trigger_plays_and_releases_the_previous_note() {
 
 static void test_a_trigger_at_the_same_pitch_still_retriggers() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
     uint8_t on[8];
@@ -156,7 +158,7 @@ static void test_a_trigger_at_the_same_pitch_still_retriggers() {
 
 static void test_tracking_plays_one_note_per_pitch_not_per_pass() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRACK, false);
     CvToNote node(c);
     uint8_t on[8];
@@ -178,9 +180,9 @@ static void test_tracking_plays_one_note_per_pitch_not_per_pass() {
 
 static void test_a_timed_gate_releases_on_time_and_does_not_restrike() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRACK, false);
-    c.params[6] = 20;                              // 20 ms
+    c.params[5] = 20;                              // 20 ms
     CvToNote node(c);
     uint8_t on[8];
 
@@ -206,37 +208,37 @@ static void test_a_timed_gate_releases_on_time_and_does_not_restrike() {
 
 static void test_the_key_moves_the_tonic_and_keeps_the_octave() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, 0 /* follow the key */,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
 
-    global_scale::set(SCALE_NATURAL_MINOR, 9);     // A minor
-    // The tonic is the key's pitch class inside the octave `root` named: A3,
-    // not A2 and not C3.
+    global_key::set(SCALE_NATURAL_MINOR, 9);     // A minor
+    // The tonic is the key's pitch class in the register this node names:
+    // A3, not A2 and not C3.
     TEST_ASSERT_EQUAL_UINT8(57, node.active_root());
     TEST_ASSERT_EQUAL_UINT8(57, node.pitch_for(0));
     TEST_ASSERT_EQUAL_UINT8(59, node.pitch_for((int16_t)(CV_FULL / 7 + 10)));  // B3
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     TEST_ASSERT_EQUAL_UINT8(48, node.active_root());
     TEST_ASSERT_EQUAL_UINT8(50, node.pitch_for((int16_t)(CV_FULL / 7 + 10)));  // D3
 }
 
 static void test_the_key_changing_under_a_note_cannot_strand_it() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, 0,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
     uint8_t on[8], off[8];
 
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     cvn_pass(node, bus, 0, true, 1000);
     TEST_ASSERT_EQUAL_UINT8(1, collect(bus, on, nullptr));
     TEST_ASSERT_EQUAL_UINT8(48, on[0]);
 
     // The whole key moves while C3 is sounding. The release comes from the
     // ledger, so it is C3 and not the tonic of the new key.
-    global_scale::set(SCALE_NATURAL_MINOR, 9);
+    global_key::set(SCALE_NATURAL_MINOR, 9);
     cvn_pass(node, bus, 0, false, 2000);
     cvn_pass(node, bus, 0, true, 3000);
     uint8_t n_off = 0;
@@ -252,7 +254,7 @@ static void test_the_key_changing_under_a_note_cannot_strand_it() {
 
 static void test_a_patch_swap_releases_what_is_sounding() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
     uint8_t on[8], off[8];
@@ -269,7 +271,7 @@ static void test_a_patch_swap_releases_what_is_sounding() {
 
 static void test_a_velocity_inlet_outranks_the_parameter() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
     c.in_bus[2] = CV_VELOCITY;
     c.params[7] = 100;
@@ -288,7 +290,8 @@ static void test_a_level_off_the_end_of_the_keyboard_is_a_rest() {
     BusManager bus;
     // Eight octaves of chromatic travel from note 120: the top of the range
     // is far past 127.
-    NodeConfig c = cvn_config(CvToNote::CVN_SNAP, 120, 8, SCALE_CHROMATIC,
+    global_key::set(SCALE_CHROMATIC, 0);
+    NodeConfig c = cvn_config(CvToNote::CVN_SNAP, 10, 8,
                               CvToNote::CVN_TRIGGER, true);
     CvToNote node(c);
     uint8_t on[8];
@@ -301,9 +304,9 @@ static void test_a_level_off_the_end_of_the_keyboard_is_a_rest() {
 
 static void test_bipolar_is_how_the_matrix_reads_a_signal() {
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 1, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
-    c.params[5] = CvToNote::CVN_BIPOLAR;
+    c.params[4] = CvToNote::CVN_BIPOLAR;
     CvToNote node(c);
 
     // A bipolar signal uses the whole range: the bottom rail is the tonic and
@@ -408,7 +411,8 @@ static void test_an_lfo_alone_becomes_a_melody_and_a_rhythm() {
     NodeConfig gc = cvg_config(50, 5, CvToGate::CVG_TRIGGER);
     CvToGate comparator(gc);
 
-    NodeConfig nc = cvn_config(CvToNote::CVN_DEGREE, 48, 2, SCALE_PENTATONIC_MINOR,
+    global_key::set(SCALE_PENTATONIC_MINOR, 0);
+    NodeConfig nc = cvn_config(CvToNote::CVN_DEGREE, 4, 2,
                                CvToNote::CVN_TRIGGER, true);
     nc.in_bus[1] = GATE_OUT;                 // the comparator plays the quantiser
     CvToNote quantiser(nc);
@@ -444,7 +448,7 @@ static void test_an_lfo_alone_becomes_a_melody_and_a_rhythm() {
 static void test_the_cv_bridge_never_allocates() {
     const size_t before = g_allocations;
     BusManager bus;
-    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 48, 2, SCALE_MAJOR,
+    NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 2,
                               CvToNote::CVN_TRACK, false);
     CvToNote node(c);
     NodeConfig gc = cvg_config(50, 5, CvToGate::CVG_TRIGGER);

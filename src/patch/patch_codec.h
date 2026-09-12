@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include "config.h"
 #include "node/patch.h"
-#include "midi/scale.h"
+#include "midi/global_key.h"
 
 // One serialisation of a Patch, used by EEPROM storage (#7) and by the SysEx
 // protocol (#11). Written once so the two cannot drift, and so a patch that
@@ -31,12 +31,14 @@
 // misread. A decoder refuses a version it does not know rather than reading
 // garbage into a live patch.
 // Version 3 appended the modulation routes after the controller bindings.
-// A version 2 image is still decoded - it simply has no routes - because the
-// only difference is a block at the tail, and refusing a stored patch that
-// this firmware can read perfectly well would cost a user their preset for
-// nothing.
-#define PATCH_FORMAT_VERSION 3
-#define PATCH_FORMAT_MIN_VERSION 2
+// Version 4 took the `scale`, `key` and `root` parameters off every algorithm
+// that had them, leaving one key for the whole patch (midi/global_key.h).
+// Nothing moved in the layout, but the parameter *numbers* of eight
+// algorithms did, so an older image would decode into the wrong bytes -
+// which is exactly what a format version is for. Version 3 and below are
+// refused rather than misread.
+#define PATCH_FORMAT_VERSION 4
+#define PATCH_FORMAT_MIN_VERSION 4
 
 // "MMMC", big-endian, at the head of every stored or transmitted image.
 #define PATCH_MAGIC 0x4D4D4D43u
@@ -73,19 +75,15 @@ struct GlobalSettings {
     uint8_t nrpn_enabled;
     uint8_t nrpn_channel;      // 1..16, 0 = omni
     uint8_t nrpn_source_mask;  // MidiPort bits; 0 = any
-    // The key the module is in (midi/global_scale.h). Every algorithm with a
-    // scale follows this one unless it names its own, so it is patch state
-    // and not a node's: two of the reserved bytes rather than a new field at
-    // the end, so the format version does not have to move for it.
-    uint8_t scale;             // ScaleId; SCALE_GLOBAL / 0 reads as chromatic
+    // The key the module is in (midi/global_key.h). There is no second copy
+    // of it: no algorithm carries a scale or a root, so this is the whole of
+    // it, and it is patch state rather than a node's.
+    uint8_t scale;             // ScaleId; SCALE_NONE / 0 reads as chromatic
     uint8_t root;              // pitch class, 0..11
-    // The register the key sits in: 0 means the key names none, 1..10 the
-    // octave. A pitch class cannot say which octave to play in, so until this
-    // existed every node with an absolute root had to be moved by hand and
-    // the note sequencers could not follow the key at all. Another reserved
-    // byte, so the format version still does not have to move - and zero
-    // being "no register" is what keeps every patch written before it playing
-    // the notes it always did.
+    // The register the key sits in, 1..global_key::MAX_OCTAVE. A node that
+    // names no octave of its own plays in this one, so it is what moves a
+    // whole patch up or down. Zero reads as global_key::DEFAULT_OCTAVE, the
+    // module's rule that a stored zero is the default.
     uint8_t root_octave;
     uint8_t reserved[18];      // #8's calibration lands here
 };
@@ -104,7 +102,7 @@ inline GlobalSettings default_globals(){
     g.nrpn_source_mask = 0;
     g.scale = SCALE_CHROMATIC;          // no key until a user sets one
     g.root = 0;
-    g.root_octave = 0;                  // and no register until one is asked for
+    g.root_octave = global_key::DEFAULT_OCTAVE;
     return g;
 }
 

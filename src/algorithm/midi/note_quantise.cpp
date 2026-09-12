@@ -1,69 +1,37 @@
 #include "algorithm/midi/note_quantise.h"
 #include "node/registry.h"
 #include "midi/note_event.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 
 static const Domain IN[2] = {Domain::Note, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
-
-static const ParamDescriptor PARAMS[3] = {
-    {"scale", 0, SCALE_COUNT - 1, 0, PARAM_ENUM,        PARAM_SCALE_NAMES},
-    {"root",  0, 11,              0, PARAM_PITCH_CLASS, nullptr},
-    {"key",   0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
-};
-static const ParamGroup GROUPS[1] = {{0, 1, 3, PARAMS}};
-
-static_assert(SCALE_COUNT == 15, "PARAM_SCALE_NAMES lists one name per ScaleId");
 
 static const char* const IN_NAMES[2] = {"notes in", "root"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor NoteQuantise::descriptor = {
-    ALGO_NOTE_QUANTISE, "Note Quantise", 2, 1, 1, 3, IN, OUT, sizeof(NoteQuantise), false,
-    construct_node<NoteQuantise>, GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Snaps every note to the module's scale, or to one of its own. The root inlet moves it.",
-    CATEGORY_MIDI };
-
-// Root and scale can both move under a sounding note: the release is taken
-// from the ledger, so it is the pitch that was actually sent and never a
-// re-quantised one.
-bool NoteQuantise::set_param(uint16_t index, uint8_t value){
-    switch (index){
-        case 0: if (value >= SCALE_COUNT) return false; scale = value; return true;
-        case 1: set_root(value); return true;
-        case 2: if (value >= global_scale::KEY_MODES) return false; key = value; return true;
-        default: return false;
-    }
-}
-
-uint8_t NoteQuantise::get_param(uint16_t index) const {
-    switch (index){
-        case 0: return scale;
-        case 1: return root;
-        case 2: return key;
-        default: return 0;
-    }
-}
+    ALGO_NOTE_QUANTISE, "Note Quantise", 2, 1, 1, 0, IN, OUT, sizeof(NoteQuantise), false,
+    construct_node<NoteQuantise>, nullptr, 0, IN_NAMES, OUT_NAMES,
+    "Snaps every note into the key the module is in. The root inlet moves it.",
+    CATEGORY_MIDI,
+    true };   // reads_key: every pitch it plays comes from the key
 
 NoteQuantise::NoteQuantise(const NodeConfig& config) :
     in(config.in_bus[0]),
     root_in(config.in_bus[1]),
     out(config.out_bus[0]),
-    scale(config.params[0]),
-    root((uint8_t)(config.params[1] % 12u)),
-    key(config.params[2] < global_scale::KEY_MODES ? config.params[2] : (uint8_t)0),
+    root(NO_ROOT),
     sounding()
 {}
 
 uint16_t NoteQuantise::active_mask() const {
-    return global_scale::resolve_id(scale);
+    return global_key::mask();
 }
 
 // A patched root inlet wins outright - `root` is what it last wrote. With no
-// cable, the key's root unless this node names one of its own.
+// cable, the key's.
 uint8_t NoteQuantise::active_root() const {
-    if (root_in != NO_BUS) return root;
-    return global_scale::resolve_root(key, root);
+    return root != NO_ROOT ? root : global_key::root();
 }
 
 void NoteQuantise::process(BusManager& bus, uint32_t){

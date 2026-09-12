@@ -1,5 +1,6 @@
 #include "control/cc_mapper.h"
 #include "node/registry.h"
+#include "midi/global_key.h"
 #include "hal/midi_types.h"
 
 CcMapper::CcMapper(PatchManager& manager, MixedModeMaster& master) :
@@ -47,6 +48,15 @@ bool CcMapper::target_range(uint8_t target_kind, uint8_t target_index, uint16_t 
             // Momentary: there is no range to sweep, only a threshold.
             lo = 0; hi = 1;
             return param < CC_TRANSPORT_TARGETS;
+        case CC_TARGET_KEY:
+            switch (param){
+                case CC_KEY_ROOT:   lo = 0; hi = 11; return true;
+                // From the first real scale: SCALE_NONE is an unset byte and
+                // not somewhere a knob should be able to land.
+                case CC_KEY_SCALE:  lo = SCALE_MAJOR; hi = SCALE_COUNT - 1; return true;
+                case CC_KEY_OCTAVE: lo = 1; hi = global_key::MAX_OCTAVE; return true;
+                default: return false;
+            }
         default:
             return false;
     }
@@ -347,6 +357,19 @@ bool CcMapper::write_control(uint8_t kind, uint8_t index, uint16_t param,
             return true;
         }
 
+        case CC_TARGET_KEY: {
+            GlobalSettings g = patches.globals();
+            switch (param){
+                case CC_KEY_ROOT:   g.root = (uint8_t)value; break;
+                case CC_KEY_SCALE:  g.scale = (uint8_t)value; break;
+                case CC_KEY_OCTAVE: g.root_octave = (uint8_t)value; break;
+                default: refuse_count++; return false;
+            }
+            patches.set_globals(g, now_us, !transient);
+            write_count++;
+            return true;
+        }
+
         case CC_TARGET_TRANSPORT:
             switch (param){
                 case CC_TRANSPORT_START:    mm.clock().start(); break;
@@ -383,6 +406,17 @@ bool CcMapper::read_control(uint8_t kind, uint8_t index, uint16_t param, uint16_
             if (param >= CC_TRANSPORT_TARGETS) return false;
             value_out = mm.clock().running() ? 1u : 0u;
             return true;
+        // The key that is *playing*, which is not always the key the patch
+        // was saved with: a Key node moves the live one from a note bus and
+        // leaves the settings alone, exactly as a modulator does with a
+        // parameter (midi/global_key.h).
+        case CC_TARGET_KEY:
+            switch (param){
+                case CC_KEY_ROOT:   value_out = global_key::root(); return true;
+                case CC_KEY_SCALE:  value_out = global_key::id(); return true;
+                case CC_KEY_OCTAVE: value_out = global_key::octave(); return true;
+                default: return false;
+            }
         default:
             return false;
     }

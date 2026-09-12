@@ -13,31 +13,20 @@
 // The general-purpose complement to degree-based sequencing: it tames a
 // random source, an arpeggio spread over a wide chord, or a CV input, where
 // the pitch that arrives is arbitrary rather than a degree that was chosen.
-// The scale mask is the same 12-bit representation the note sequencers use,
-// so a scale is defined once for the whole module (midi/scale.h).
 //
-// The scale is the module's own (midi/global_scale.h) unless this node names
-// one, which is what an unset `scale` parameter means everywhere. Following
-// the module means following its root as well - a scale without a root is
-// not a key - and naming a scale here means this node's own root is used
-// instead. A patched root inlet outranks both, because a cable is the most
-// explicit thing a user can say.
+// It has no parameters at all: what it snaps to is the key the module is in
+// (midi/global_key.h), and the only thing left to say about it is where the
+// root comes from - which is a cable, not a setting. A patched root inlet
+// outranks the key, because a cable is the most explicit thing a user can
+// say; last note-on wins, so one keyboard transposes a whole patch.
 //
-// The root can come from a note bus, last note-on wins, so one keyboard can
-// transpose a whole patch. Changing the root or the scale under a sounding
-// note is the failure this class of algorithm is prone to: the release is
-// taken from the ledger, so it is the pitch that was actually sent, never a
-// re-quantised one - and the same is true when the *module's* key changes
-// under it.
+// Changing the root or the scale under a sounding note is the failure this
+// class of algorithm is prone to: the release is taken from the ledger, so it
+// is the pitch that was actually sent, never a re-quantised one - and the
+// same is true when the key itself moves under it.
 //
 // Inlet 0 (note): the notes to quantise.
 // Inlet 1 (note, optional): the root. Note-ons set it; nothing else is read.
-// params[0] scale id (see ScaleId; 0 follows the module's scale)
-// params[1] root pitch class, when this node names its own key and no root
-//           inlet is patched
-// params[2] key: follow the module's root, or use this node's own. Separate
-//           from the scale, so a quantiser can snap to a mode of its own
-//           without leaving the key (midi/global_scale.h).
 class NoteQuantise : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -45,18 +34,8 @@ class NoteQuantise : public Node{
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
 
-        bool set_param(uint16_t index, uint8_t value) override;
-        uint8_t get_param(uint16_t index) const override;
-
-        // The typed spellings of set_param, kept because they read better in
-        // a test - and what proves a root or scale change cannot strand a
-        // sounding note.
-        void set_scale(uint8_t id){ scale = id; }
-        void set_root(uint8_t pitch_class){ root = (uint8_t)(pitch_class % 12u); }
-        void set_key(uint8_t follow){ key = follow; }
-        uint8_t root_note() const { return root; }
-        // The scale and root actually played, after the module's own have
-        // been resolved into them.
+        // The scale and root actually played: the key's, unless a cable has
+        // said otherwise.
         uint16_t active_mask() const;
         uint8_t active_root() const;
 
@@ -64,9 +43,11 @@ class NoteQuantise : public Node{
         uint8_t in;
         uint8_t root_in;
         uint8_t out;
-        uint8_t scale;
+        // What the root inlet last wrote, or NO_ROOT until it has: a cable
+        // that has not played anything yet has not said anything, so the key
+        // is still what the node is in.
+        static constexpr uint8_t NO_ROOT = 0xFF;
         uint8_t root;
-        uint8_t key;
         SoundingNotes sounding;
 };
 

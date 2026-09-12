@@ -2,7 +2,7 @@
 #include "node/registry.h"
 #include "midi/note_event.h"
 #include "midi/scale.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 
 // advance, reset, root, record, record-enable (#22).
 static const Domain IN[5] = {Domain::Gate, Domain::Gate, Domain::Note, Domain::Note, Domain::Gate};
@@ -17,9 +17,7 @@ const ParamDescriptor NoteSequencerBase::HEADER[16] = {
     {"length",     1, MAX_SEQUENCE_LEN,               8,  PARAM_NUMBER,  nullptr},
     {"direction",  0, StepEngine::SEQ_DIRECTIONS - 1, 0,  PARAM_ENUM,    PARAM_DIRECTION_NAMES},
     {"gate",       0, 100,                            0,  PARAM_PERCENT, nullptr},
-    {"scale low",  0, 255,                            0,  PARAM_BITFIELD, nullptr},
-    {"scale high", 0, 15,                             0,  PARAM_BITFIELD, nullptr},
-    {"root",       0, 127,                            60, PARAM_PITCH,   nullptr},
+    {"octave",     0, global_key::MAX_OCTAVE,         0,  PARAM_ENUM,    PARAM_OCTAVE_NAMES},
     {"vel scale",  1, 255,                            100, PARAM_PERCENT, nullptr},
     {"vel offset", 0, 255,                            0,  PARAM_SIGNED,  nullptr},
     {"channel",    1, 16,                             1,  PARAM_CHANNEL, nullptr},
@@ -28,7 +26,11 @@ const ParamDescriptor NoteSequencerBase::HEADER[16] = {
     {"rest key",   0, 127,                            0,  PARAM_PITCH,   nullptr},
     {"tie key",    0, 127,                            1,  PARAM_PITCH,   nullptr},
     {"rec velocity", 0, 127,                          0,  PARAM_NUMBER,  nullptr},
-    {"key",        0, global_scale::KEY_MODES - 1,    0,  PARAM_ENUM,    PARAM_KEY_NAMES},
+    // The header is sixteen bytes whatever it uses, so the steps keep their
+    // parameter numbers - which an NRPN address and a pattern message name.
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
     {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
 };
 
@@ -77,14 +79,16 @@ const AlgorithmDescriptor NoteSequencer::descriptor = {
     IN, OUT, sizeof(NoteSequencer), false, construct_node<NoteSequencer>,
     MONO_GROUPS, 2, NOTE_IN_NAMES, NOTE_OUT_NAMES,
     "A melody in scale degrees, so the root and scale move the pitches, not the pattern.",
-    CATEGORY_SEQUENCER };
+    CATEGORY_SEQUENCER,
+    true };   // reads_key: every pitch it plays comes from the key
 
 const AlgorithmDescriptor PolySequencer::descriptor = {
     ALGO_POLY_SEQ, "PolySequencer", 5, 1, 1, NoteSequencerBase::param_count(NOTE_SEQ_VOICES),
     IN, OUT, sizeof(PolySequencer), false, construct_node<PolySequencer>,
     POLY_GROUPS, 2, NOTE_IN_NAMES, NOTE_OUT_NAMES,
     "The note sequencer with several voices a step: chords in scale degrees.",
-    CATEGORY_SEQUENCER };
+    CATEGORY_SEQUENCER,
+    true };   // reads_key: every pitch it plays comes from the key
 
 static_assert(NoteSequencerBase::param_count(NOTE_SEQ_VOICES) <= N_PARAM, "PolySequencer's steps do not fit N_PARAM");
 
@@ -97,8 +101,8 @@ NoteSequencerBase::NoteSequencerBase(const NodeConfig& config, uint8_t voices_pe
     rec_enable_bus(config.in_bus[4]),
     out(config.out_bus[0]),
     n_voices(voices_per_step == 0 ? 1 : (voices_per_step > MAX_VOICES ? MAX_VOICES : voices_per_step)),
-    scale_mask((uint16_t)(config.params[P_SCALE_LO] | ((uint16_t)(config.params[P_SCALE_HI] & 0x0F) << 8))),
-    root(config.params[P_ROOT] ? (uint8_t)(config.params[P_ROOT] & 0x7F) : DEFAULT_ROOT),
+    octave(config.params[P_OCTAVE] <= global_key::MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
+    root(NO_PITCH),
     gate_pct(config.params[P_GATE] > 100 ? 100 : config.params[P_GATE]),
     vel_scale(config.params[P_VEL_SCALE] ? config.params[P_VEL_SCALE] : 100),
     vel_offset((int8_t)config.params[P_VEL_OFFSET]),
@@ -108,7 +112,6 @@ NoteSequencerBase::NoteSequencerBase(const NodeConfig& config, uint8_t voices_pe
     rest_key(config.params[P_REST_KEY]),
     tie_key(config.params[P_TIE_KEY] ? config.params[P_TIE_KEY] : DEFAULT_TIE_KEY),
     rec_velocity(config.params[P_REC_VELOCITY]),
-    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     rec_cursor(0), snap_count(0),
     last_edge_us(0), period(0), have_edge(false), have_period(false),
     engine(), rng(entropy::seed()), sounding(), voice(), steps()
@@ -157,17 +160,11 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
             if (value > 100) return false;
             gate_pct = value;
             return true;
-        case P_SCALE_LO:
-            scale_mask = (uint16_t)((scale_mask & 0x0F00u) | value);
-            return true;
-        case P_SCALE_HI:
-            if (value > 0x0F) return false;
-            scale_mask = (uint16_t)((scale_mask & 0x00FFu) | ((uint16_t)value << 8));
-            return true;
-        case P_ROOT:
+        case P_OCTAVE:
             // Sounding notes are released from the ledger at the pitch they
-            // were sent at, so the root can move under a held note.
-            root = value ? (uint8_t)(value & 0x7F) : DEFAULT_ROOT;
+            // were sent at, so the register can move under a held note.
+            if (value > global_key::MAX_OCTAVE) return false;
+            octave = value;
             return true;
         case P_VEL_SCALE:  vel_scale = value ? value : 100; return true;
         case P_VEL_OFFSET: vel_offset = (int8_t)value; return true;
@@ -194,10 +191,6 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
             if (value > 127) return false;
             rec_velocity = value;
             return true;
-        case P_KEY:
-            if (value >= global_scale::KEY_MODES) return false;
-            key = value;
-            return true;
         default:
             break;
     }
@@ -205,7 +198,7 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
         steps[index - STEP_BASE] = value;
         return true;
     }
-    return false;                     // params[15] is reserved
+    return false;                     // params[12..15] are reserved
 }
 
 uint8_t NoteSequencerBase::get_param(uint16_t index) const {
@@ -213,9 +206,7 @@ uint8_t NoteSequencerBase::get_param(uint16_t index) const {
         case P_LENGTH:     return engine.length();
         case P_DIRECTION:  return engine.direction();
         case P_GATE:       return gate_pct;
-        case P_SCALE_LO:   return (uint8_t)(scale_mask & 0xFFu);
-        case P_SCALE_HI:   return (uint8_t)((scale_mask >> 8) & 0x0Fu);
-        case P_ROOT:       return root;
+        case P_OCTAVE:     return octave;
         case P_VEL_SCALE:  return vel_scale;
         case P_VEL_OFFSET: return (uint8_t)vel_offset;
         case P_CHANNEL:    return channel;
@@ -224,7 +215,6 @@ uint8_t NoteSequencerBase::get_param(uint16_t index) const {
         case P_REST_KEY:   return rest_key;
         case P_TIE_KEY:    return tie_key;
         case P_REC_VELOCITY: return rec_velocity;
-        case P_KEY:        return key;
         default:           break;
     }
     if (index >= STEP_BASE && index < param_count(n_voices)) return steps[index - STEP_BASE];
@@ -239,16 +229,14 @@ void NoteSequencerBase::set_step(uint8_t step, uint8_t v, int8_t deg, uint8_t ve
 }
 
 uint16_t NoteSequencerBase::active_mask() const {
-    return global_scale::resolve(scale_mask);
+    return global_key::mask();
 }
 
 // A patched root inlet outranks everything, as it does on every node that has
-// one - `root` is then whatever it last wrote. Otherwise the key's root note
-// if it names one and this sequencer follows it, moved by the register this
-// pattern asks for; and this sequencer's own anchor if it does not.
+// one - `root` is then whatever it last wrote. Otherwise the key's root, in
+// the register this pattern names.
 uint8_t NoteSequencerBase::active_root() const {
-    if (root_in != NO_BUS) return root;
-    return global_scale::resolve_anchor(key, root, DEFAULT_ROOT);
+    return root != NO_PITCH ? root : global_key::tonic(octave);
 }
 
 uint8_t NoteSequencerBase::pitch(uint8_t step, uint8_t v) const {

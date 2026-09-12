@@ -1,6 +1,6 @@
 #include "algorithm/midi/tonnetz.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "hal/midi_types.h"
 
@@ -17,16 +17,14 @@ static const uint8_t CYCLE_STEP[3][2] = {
     {Tonnetz::TRANSFORM_P, Tonnetz::TRANSFORM_R},   // PR: minor thirds
 };
 
-// The walk, then the key it is judged in - the three key parameters together,
-// because "A minor, following the module" is one decision and not three.
+// The walk, then where it sits. Which notes it is judged against is the key
+// the module is in, and not a setting here.
 static const ParamDescriptor PARAMS[Tonnetz::N_PARAMS] = {
     {"cycle",     Tonnetz::TONNETZ_LR, Tonnetz::TONNETZ_CYCLES, Tonnetz::TONNETZ_LR,
                   PARAM_ENUM, CYCLE_NAMES},
     {"deviation", 0, 100, 0, PARAM_PERCENT, nullptr},
     {"diatonic",  0, 1,   0, PARAM_BOOL,    nullptr},
-    {"key",       0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
-    {"root",      0, 127, Tonnetz::DEFAULT_ROOT, PARAM_PITCH, nullptr},
-    {"scale",     0, SCALE_COUNT - 1, 0, PARAM_ENUM, PARAM_SCALE_NAMES},
+    {"octave",    0, global_key::MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"velocity",  1, 127, Tonnetz::DEFAULT_VELOCITY, PARAM_NUMBER,  nullptr},
     {"channel",   1, 16,  1, PARAM_CHANNEL, nullptr},
     {"seed",      0, 255, 0, PARAM_NUMBER,  nullptr},
@@ -40,7 +38,8 @@ const AlgorithmDescriptor Tonnetz::descriptor = {
     ALGO_TONNETZ, "Tonnetz", 3, 1, 1, Tonnetz::N_PARAMS, IN, OUT, sizeof(Tonnetz), false,
     construct_node<Tonnetz>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "Chromatic triads where one voice moves a semitone: the circle of fifths in two dimensions.",
-    CATEGORY_MIDI };
+    CATEGORY_MIDI,
+    true };   // reads_key: every pitch it plays comes from the key
 
 static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
     if (stored == 0 || stored > max_value) return fallback;
@@ -55,9 +54,7 @@ Tonnetz::Tonnetz(const NodeConfig& config) :
     cycle(clamp_enum(config.params[P_CYCLE], TONNETZ_CYCLES, TONNETZ_LR)),
     deviation(config.params[P_DEVIATION] > 100 ? (uint8_t)100 : config.params[P_DEVIATION]),
     diatonic(config.params[P_DIATONIC] != 0),
-    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
-    root(config.params[P_ROOT] ? config.params[P_ROOT] : DEFAULT_ROOT),
-    scale(config.params[P_SCALE]),
+    octave(config.params[P_OCTAVE] <= global_key::MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
     seed(config.params[P_SEED]),
@@ -78,14 +75,9 @@ bool Tonnetz::set_param(uint16_t index, uint8_t value){
         case P_DIATONIC:
             if (value > 1) return false;
             diatonic = value != 0; return true;
-        case P_KEY:
-            if (value >= global_scale::KEY_MODES) return false;
-            key = value; return true;
-        case P_ROOT:
-            root = value ? value : DEFAULT_ROOT; return true;
-        case P_SCALE:
-            if (value >= SCALE_COUNT) return false;
-            scale = value; return true;
+        case P_OCTAVE:
+            if (value > global_key::MAX_OCTAVE) return false;
+            octave = value; return true;
         case P_VELOCITY:
             if (value > 127) return false;
             velocity = value ? value : DEFAULT_VELOCITY; return true;
@@ -106,9 +98,7 @@ uint8_t Tonnetz::get_param(uint16_t index) const {
         case P_CYCLE:     return cycle;
         case P_DEVIATION: return deviation;
         case P_DIATONIC:  return diatonic ? 1u : 0u;
-        case P_KEY:       return key;
-        case P_ROOT:      return root;
-        case P_SCALE:     return scale;
+        case P_OCTAVE:    return octave;
         case P_VELOCITY:  return velocity;
         case P_CHANNEL:   return channel;
         case P_SEED:      return seed;
@@ -150,7 +140,7 @@ uint8_t Tonnetz::active_root() const {
     // whole note: a sequencer sends C3 and the walk starts on C3, register
     // and all.
     if (played != NO_NOTE) return played;
-    return global_scale::resolve_tonic(key, root, DEFAULT_ROOT);
+    return global_key::tonic(octave);
 }
 
 uint8_t Tonnetz::key_tonic() const {
@@ -159,11 +149,11 @@ uint8_t Tonnetz::key_tonic() const {
     // root is deliberately not read here. That is the difference between a
     // sequenced root walking through the triads of one key and one dragging
     // the key along behind it.
-    return global_scale::resolve_root(key, root);
+    return global_key::root();
 }
 
 bool Tonnetz::starts_minor() const {
-    const uint16_t mask = (uint16_t)(global_scale::resolve_id(scale) & 0x0FFF);
+    const uint16_t mask = (uint16_t)(global_key::mask() & 0x0FFF);
     // A chromatic key has no degrees to colour a triad with, so it starts
     // major, exactly as Chord's `triad` does there.
     if (mask == 0x0FFF) return false;
@@ -174,7 +164,7 @@ bool Tonnetz::starts_minor() const {
 }
 
 bool Tonnetz::in_key(uint8_t root_pc, bool is_minor) const {
-    const uint16_t mask = global_scale::resolve_id(scale);
+    const uint16_t mask = global_key::mask();
     const uint8_t tonic = key_tonic();
     const uint8_t third = is_minor ? 3u : 4u;
     const uint8_t notes[3] = {root_pc,

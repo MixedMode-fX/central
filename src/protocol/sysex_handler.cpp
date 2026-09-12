@@ -255,7 +255,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             g.pc_channel = args[5];
             g.pc_source_mask = args[6];
             g.pc_quantise = args[7];
-            // The key (midi/global_scale.h), appended: a host that predates
+            // The key (midi/global_key.h), appended: a host that predates
             // it sends eight arguments and leaves the module in the key it
             // is already in, rather than being told its message is short.
             if (n >= 10){
@@ -267,7 +267,8 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             // sends ten arguments and leaves the register alone.
             if (n >= 11) g.root_octave = args[10];
             if (g.clock_source > MasterClock::CLOCK_MIDI || g.pc_quantise > SWAP_NEXT_BAR
-                || g.scale >= SCALE_COUNT || g.root > 11 || g.root_octave > 10){
+                || g.scale >= SCALE_COUNT || g.root > 11
+                || g.root_octave > global_key::MAX_OCTAVE){
                 nak(source, SYSEX_ERR_BAD_ARGUMENT);
                 return;
             }
@@ -563,6 +564,10 @@ void SysexHandler::reply_algorithms(uint8_t source){
         // it always did, and one that does not shows thirty algorithms in six
         // short lists rather than as one undivided wall.
         put((uint8_t)d->category);
+        // And whether the patch may hold more than one of it, so an editor
+        // can grey the second one out rather than offer a patch the module
+        // will refuse (MixedModeMaster::validate).
+        put(d->singleton ? 1 : 0);
         send_reply(source);
     }
 }

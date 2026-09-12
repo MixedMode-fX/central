@@ -36,12 +36,17 @@ struct MidiOutConfig {
 // The master clock is not a node - tempo, source and transport live on
 // MasterClock, outside Patch::nodes[] - so a target space of "node index plus
 // parameter index" could not reach the one thing a knob is most obviously
-// for. Hence a kind.
+// for. Hence a kind. The key is the second thing of that shape: it is one
+// setting for the whole patch (midi/global_key.h) and no algorithm carries a
+// copy, so there is no node parameter to bind to and it needs a kind of its
+// own. Giving it one is what makes the key reachable by a knob, by an NRPN
+// and by a modulation route without a Key node in the patch at all.
 enum CcTargetKind : uint8_t {
     CC_TARGET_NODE      = 0,   // target_index is a node, param a parameter
     CC_TARGET_CLOCK     = 1,   // param selects tempo / source / cv ppqn
     CC_TARGET_TRANSPORT = 2,   // param selects start / stop / continue / tap
     CC_TARGET_PORT      = 3,   // reserved: a MidiInPort / MidiOutPort field
+    CC_TARGET_KEY       = 4,   // param selects root / scale / octave
     CC_TARGET_KINDS,
 };
 
@@ -51,6 +56,17 @@ enum CcClockTarget : uint8_t {
     CC_CLOCK_SOURCE = 1,
     CC_CLOCK_PPQN   = 2,
     CC_CLOCK_TARGETS,
+};
+
+// What a CC_TARGET_KEY mapping's `param` selects: the three fields of the
+// key, each swept over its own range (midi/global_key.h). `scale` starts at
+// SCALE_MAJOR rather than at zero, because zero is not a scale, and `octave`
+// at 1, because the key's register is where a node that names none plays.
+enum CcKeyTarget : uint8_t {
+    CC_KEY_ROOT   = 0,
+    CC_KEY_SCALE  = 1,
+    CC_KEY_OCTAVE = 2,
+    CC_KEY_TARGETS,
 };
 
 // What a CC_TARGET_TRANSPORT mapping's `param` selects. These are momentary:

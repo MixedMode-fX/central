@@ -29,6 +29,7 @@ enum LoadError : uint8_t {
     LOAD_GATE_PORT_BUS_OUT_OF_RANGE,
     LOAD_MIDI_PORT_BUS_OUT_OF_RANGE,
     LOAD_NODE_INVALID,         // see last_node_error() / last_node_index()
+    LOAD_DUPLICATE_SINGLETON,  // two nodes of an algorithm there may only be one of
     LOAD_CC_MAPPING_INVALID,   // see last_mapping_index() (#21)
     LOAD_MOD_ROUTE_INVALID,    // see last_route_index()
 };

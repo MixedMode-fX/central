@@ -14,6 +14,8 @@ export const CV_FULL = 4096;
 export const DRUM_SEQ_LANES = 8;
 export const EEPROM_BYTES = 4284;
 export const GPIO_N = 8;
+export const KEY_DEFAULT_OCTAVE = 5;
+export const KEY_MAX_OCTAVE = 10;
 export const MASTER_PPQN = 24;
 export const MAX_IN = 5;
 export const MAX_OUT = 8;
@@ -31,9 +33,10 @@ export const N_PARAM = 336;
 export const NO_BUS = 255;
 export const NOTE_SEQ_VOICES = 4;
 export const NRPN_CLOCK_BASE = 14784;
-export const NRPN_RESERVED_BASE = 14816;
+export const NRPN_KEY_BASE = 14816;
+export const NRPN_RESERVED_BASE = 14832;
 export const NRPN_TRANSPORT_BASE = 14800;
-export const PATCH_FORMAT_VERSION = 3;
+export const PATCH_FORMAT_VERSION = 4;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
 export const PATCH_SLOTS = 4;
@@ -48,7 +51,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 5;
+export const SYSEX_PROTOCOL_VERSION = 6;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 320;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -136,7 +139,8 @@ export const CcTargetKind = Object.freeze({
   CC_TARGET_CLOCK: 1,
   CC_TARGET_TRANSPORT: 2,
   CC_TARGET_PORT: 3,
-  CC_TARGET_KINDS: 4,
+  CC_TARGET_KEY: 4,
+  CC_TARGET_KINDS: 5,
 });
 
 export const CcClockTarget = Object.freeze({
@@ -152,6 +156,13 @@ export const CcTransportTarget = Object.freeze({
   CC_TRANSPORT_CONTINUE: 2,
   CC_TRANSPORT_TAP: 3,
   CC_TRANSPORT_TARGETS: 4,
+});
+
+export const CcKeyTarget = Object.freeze({
+  CC_KEY_ROOT: 0,
+  CC_KEY_SCALE: 1,
+  CC_KEY_OCTAVE: 2,
+  CC_KEY_TARGETS: 3,
 });
 
 export const CcFlags = Object.freeze({
@@ -250,6 +261,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_TONNETZ: 39,
   ALGO_NOTE_FILTER: 40,
   ALGO_CHANNEL: 41,
+  ALGO_KEY: 42,
 });
 
 export const AlgorithmCategory = Object.freeze({
@@ -263,7 +275,7 @@ export const AlgorithmCategory = Object.freeze({
 });
 
 export const ScaleId = Object.freeze({
-  SCALE_GLOBAL: 0,
+  SCALE_NONE: 0,
   SCALE_MAJOR: 1,
   SCALE_NATURAL_MINOR: 2,
   SCALE_HARMONIC_MINOR: 3,
@@ -282,7 +294,7 @@ export const ScaleId = Object.freeze({
 });
 
 export const ScaleMask = Object.freeze({
-  SCALE_GLOBAL: 0,
+  SCALE_NONE: 0,
   SCALE_MAJOR: 2741,
   SCALE_NATURAL_MINOR: 1453,
   SCALE_HARMONIC_MINOR: 2477,

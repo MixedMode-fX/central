@@ -177,8 +177,8 @@ test('note sequencer: degrees in C major, re-rooted from a key mid-note', () => 
   E.emu_patch_midi_in(0, SERIAL_1, 0, 0);                 // DIN 1 -> note bus 0: the root
   E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 6);
   E.emu_patch_node(1, NOTE_SEQ); E.emu_patch_node_in(1, 0, 0); E.emu_patch_node_in(1, 2, 0); E.emu_patch_node_out(1, 0, 1);
-  const MAJOR = E.emu_scale_mask(1);
-  E.emu_patch_node_param(1, 0, 4); E.emu_patch_node_param(1, 3, MAJOR & 0xFF); E.emu_patch_node_param(1, 4, MAJOR >> 8); E.emu_patch_node_param(1, 5, 60);
+  E.emu_patch_key(1, 0, 5);                               // C major, middle C
+  E.emu_patch_node_param(1, 0, 4);                        // length; the octave follows the key
   for (let st = 0; st < 4; st++) { E.emu_patch_node_param(1, 16 + st * 4, st); E.emu_patch_node_param(1, 16 + st * 4 + 1, 100); E.emu_patch_node_param(1, 16 + st * 4 + 2, 1); }
   E.emu_patch_midi_out(0, USB_0, 0, 1);
   assert.equal(E.emu_load(), 0);

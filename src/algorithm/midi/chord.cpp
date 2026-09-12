@@ -52,7 +52,7 @@ static const ParamDescriptor PARAMS[Chord::N_PARAMS] = {
                                         PARAM_ENUM,        QUALITY_NAMES},
     {"voicing",   0, Chord::VOICING_COUNT - 1, Chord::VOICING_CLOSE, PARAM_ENUM, VOICING_NAMES},
     {"inversion", 0, Chord::MAX_INVERSION,     0,          PARAM_ENUM,        INVERSION_NAMES},
-    {"octave",    0, global_key::MAX_OCTAVE, 0,           PARAM_ENUM,        PARAM_OCTAVE_NAMES},
+    {"octave",    0, KEY_MAX_OCTAVE, 0,           PARAM_ENUM,        PARAM_OCTAVE_NAMES},
     {"velocity",  1, 127,               Chord::DEFAULT_VELOCITY, PARAM_NUMBER, nullptr},
     {"retrigger", 0, 1,                 0,                       PARAM_BOOL,   nullptr},
 };
@@ -100,7 +100,7 @@ bool Chord::set_param(uint16_t index, uint8_t value){
             inversion = value;
             break;
         case P_OCTAVE:
-            if (value > global_key::MAX_OCTAVE) return false;
+            if (value > KEY_MAX_OCTAVE) return false;
             octave = value;
             break;
         case P_VELOCITY:
@@ -140,7 +140,7 @@ Chord::Chord(const NodeConfig& config) :
     voicing(config.params[P_VOICING] < VOICING_COUNT ? config.params[P_VOICING] : (uint8_t)VOICING_CLOSE),
     inversion(config.params[P_INVERSION] <= MAX_INVERSION ? config.params[P_INVERSION] : (uint8_t)0),
     root(NO_NOTE),
-    octave(config.params[P_OCTAVE] <= global_key::MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
+    octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     retrigger(config.params[P_RETRIGGER] != 0),
     free_note(NO_NOTE), voiced(NO_NOTE), free_channel(1), voiced_mask(0), dirty(false),

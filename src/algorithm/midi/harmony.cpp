@@ -12,7 +12,7 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"cadence",  0, 100,              75, PARAM_PERCENT, nullptr},
     {"gravity",  0, 100,               0, PARAM_PERCENT, nullptr},
     {"loop",     0, 1,                 0, PARAM_BOOL,    nullptr},
-    {"octave",   0, global_key::MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
+    {"octave",   0, KEY_MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"velocity", 1, 127,             100, PARAM_NUMBER,  nullptr},
     {"channel",  1, 16,                1, PARAM_CHANNEL, nullptr},
     {"seed",     0, 255,               0, PARAM_NUMBER,  nullptr},
@@ -50,7 +50,7 @@ Harmony::Harmony(const NodeConfig& config) :
                                      : (uint8_t)75),
     gravity(config.params[P_GRAVITY] > 100 ? (uint8_t)100 : config.params[P_GRAVITY]),
     loop(config.params[P_LOOP] ? 1 : 0),
-    octave(config.params[P_OCTAVE] <= global_key::MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
+    octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? (uint8_t)(config.params[P_VELOCITY] & 0x7F) : (uint8_t)100),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
     seed(config.params[P_SEED]),
@@ -317,7 +317,7 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
             loop = value;
             recorded = 0;          // on: record the next phrase. off: walk again.
             return true;
-        case P_OCTAVE: if (value > global_key::MAX_OCTAVE) return false; octave = value; return true;
+        case P_OCTAVE: if (value > KEY_MAX_OCTAVE) return false; octave = value; return true;
         case P_VELOCITY: if (value == 0 || value > 127) return false; velocity = value; return true;
         case P_CHANNEL: if (value == 0 || value > 16) return false; channel = value; return true;
         case P_SEED: seed = value; return true;

@@ -23,7 +23,7 @@
 
 import * as P from './protocol.js';
 import * as codec from './codec.js';
-import { MIDI_PORTS, portNames, scaleMaskOf, scaleIdOf, scaleName, STEP_DIRECTIONS,
+import { MIDI_PORTS, portNames, scaleIdOf, scaleName, DEFAULT_KEY_OCTAVE, STEP_DIRECTIONS,
          METRONOME_DIVISIONS, METRONOME_FEELS } from './names.js';
 import { modParamName } from './graph.js';
 
@@ -74,11 +74,6 @@ export const SEQ_FAMILY = Object.freeze({
   EuclidianSequencer: 'gate',
   RandomSequencer: 'gate',
 });
-
-// A sequencer's scale, as the 12-bit mask the firmware stores. Omitted - or
-// named "global" - is an empty mask, and an empty mask is the firmware's
-// "follow the module's key" (src/midi/global_scale.h).
-const scaleOf = (v) => (v === undefined ? 0 : (typeof v === 'number' ? v & 0xfff : scaleMaskOf(v)));
 
 function directionOf(v) {
   if (v === undefined) return 0;
@@ -143,11 +138,11 @@ export function packSeq(name, seq, params) {
     const stride = voices * 2 + 2;
     header();
     u8(2, seq.gate ?? 0);
-    const mask = scaleOf(seq.scale);
-    u8(3, mask & 0xff); u8(4, mask >> 8);
-    u8(5, seq.root ?? 0); u8(6, seq.velScale ?? 0); u8(7, seq.velOffset ?? 0);
-    u8(8, seq.channel ?? 0); u8(9, seq.accent ?? 0); u8(10, seq.stall ?? 0);
-    u8(14, seq.key ?? 0);
+    // The register this pattern plays in; 0, the default, is the key's own
+    // (src/midi/global_key.h). Which notes and which of them is home are the
+    // key's, and a pattern says neither.
+    u8(3, seq.octave ?? 0); u8(4, seq.velScale ?? 0); u8(5, seq.velOffset ?? 0);
+    u8(6, seq.channel ?? 0); u8(7, seq.accent ?? 0); u8(8, seq.stall ?? 0);
     const steps = seq.steps ?? [];
     if (steps.length > P.MAX_SEQUENCE_LEN) throw new Error(`${name}: at most ${P.MAX_SEQUENCE_LEN} steps`);
     if (seq.length === undefined) u8(0, steps.length);
@@ -248,8 +243,8 @@ export function toPatchJson(patch, globals, device) {
     return entry;
   });
 
-  // The key travels by name, like a sequencer's scale does: a file that says
-  // "minor" survives a scale being appended to the firmware's list.
+  // The key travels by name rather than by id: a file that says "minor"
+  // survives a scale being appended to the firmware's list.
   json.globals = { ...globals, scale: scaleName(globals.scale || P.ScaleId.SCALE_CHROMATIC) };
   const bindings = [];
   patch.ccMap.forEach((m, slot) => {
@@ -289,9 +284,10 @@ export function fromPatchJson(json, device) {
   const globals = { ...codec.emptyGlobals(), ...(json.globals ?? {}) };
   globals.scale = scaleIdOf(globals.scale ?? P.ScaleId.SCALE_CHROMATIC) || P.ScaleId.SCALE_CHROMATIC;
   globals.root = Number(globals.root ?? 0) % 12;
-  // The register the key sits in: 0, or absent, means it names none and every
-  // node with an absolute root keeps the one it stored.
-  globals.rootOctave = Math.min(10, Math.max(0, Number(globals.rootOctave ?? globals.octave ?? 0)));
+  // The register the key sits in, and so the one every node that names no
+  // octave of its own plays in. Absent means the module's default.
+  globals.rootOctave = Math.min(10, Math.max(0, Number(globals.rootOctave ?? globals.octave ?? 0)))
+                    || DEFAULT_KEY_OCTAVE;
 
   for (const g of json.gate_ports ?? []) {
     const jack = Number(g.port) - 1;

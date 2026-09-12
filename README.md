@@ -142,7 +142,7 @@ touched.
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
 | Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay` |
-| Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz` |
+| Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz`, `Key` |
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
 | Utility | `GateHold` |
@@ -164,10 +164,11 @@ is only what a parameter list cannot say.
   (`src/algorithm/sequencer/step_engine.h`), so a gate and a note sequencer at
   the same length and direction visit steps identically.
 - **Note sequencers store a scale degree, never an absolute note.** Pitch is
-  `root + degree_to_semitone(degree, scale)`, so moving the root transposes in
-  key and changing the scale re-reads the pattern as an interval shape. The
-  root comes from the root inlet when patched (last note-on wins), from a
-  parameter otherwise. Length is counted in advance edges and is exact; the
+  `root + degree_to_semitone(degree, scale)`, and both come from the key
+  (`src/midi/global_key.h`): moving the key transposes the pattern and changing
+  its scale re-reads it as an interval shape. All a sequencer says for itself
+  is the register it plays in. The root comes from the root inlet when patched,
+  last note-on wins. Length is counted in advance edges and is exact; the
   sub-step `gate` percentage extrapolates from the last two advances and is
   therefore wrong after a tempo change. Ratcheting and real-time record need
   the same estimate and are deliberately not built.
@@ -229,9 +230,8 @@ is only what a parameter list cannot say.
   percentage longer (or shorter) than the last, which takes the echoes off the
   grid — the one thing a module where every edge descends from one divider
   could not otherwise do. Repeats are transposed by `interval` **scale steps**.
-  Each pending echo carries the pitch it will be released with, so the scale,
-  the interval and the key can all move underneath it, and `dry` copies are
-  owned too.
+  Each pending echo carries the pitch it will be released with, so the key and
+  the interval can move underneath it, and `dry` copies are owned too.
 - **`Voicer`'s ledger is keyed on the note it emitted**, not the note that
   caused it, because it emits a function of the whole held chord rather than of
   one note. Common-tone retention is then the *absence* of code: a shared note
@@ -246,7 +246,7 @@ is only what a parameter list cannot say.
   thirds, `PR` minor thirds. `deviation` is the chance of leaving the cycle,
   `diatonic` refuses triads the key does not hold. Its `root` inlet plays it
   the way `Chord`'s does — a note-on starts the walk again on that note,
-  register and all, and moves the key no more than `Chord`'s does — and the
+  register and all, and does not move the key — and the
   triad it starts on is whichever one the key holds there, so the quality is
   not a setting. It emits root position and leaves the voice leading to
   `Voicer`.
@@ -295,25 +295,34 @@ rather than adding to it; taking hold off keeps what is still physically held.
 
 ### The key
 
-One scale and one root for the module, in the patch's `GlobalSettings`
-(`src/midi/global_scale.h`). A scale is a 12-bit mask, one bit per semitone
-(`src/midi/scale.h`).
+One scale, one root and one register for the whole module, in the patch's
+`GlobalSettings` (`src/midi/global_key.h`). A scale is a 12-bit mask, one bit
+per semitone (`src/midi/scale.h`).
 
-It is the **default**, and an algorithm overrides it with two parameters that
-answer two questions. `scale` says **which notes**: `ScaleId` 0 is
-`SCALE_GLOBAL`, not a mode, so a parameter left alone follows the key's scale.
-`key` says **whose root** they are measured from: `follow` (0) takes the key's,
-`own` takes the node's own `root` parameter. A node naming a mode of its own
-therefore stays in the key unless it also says `own`. **A patched root inlet
-outranks both.**
+**There is no second copy of it.** No algorithm carries a `scale`, a `key` or a
+`root` parameter: three ways for a node to leave the key it was in turned the
+one decision a musician makes into twenty-four parameters that had to agree,
+and nobody wants a patch in two keys at once. What a node still chooses is the
+register, because a bass line and a lead are the same key two octaves apart —
+one `octave` parameter, where 0 (the default) is the key's own register and
+1..10 names one outright. So one setting moves the whole patch and a part that
+has been placed keeps its place. **A patched root inlet outranks all of it.**
 
-`root_octave` is the third part of the key: zero means the key names no
-register and each node keeps the octave it stored; set it and every following
-node plays from that absolute note, moved by the octave its own root parameter
-names — so one setting moves the patch and a bass an octave below its default
-stays an octave below the key. Set the key from the console
-(`key <scale> <root> <oct>`), over `SYSEX_SET_GLOBALS`, or on the app's key
-page. The module is chromatic until a key is set.
+Set the key from the console (`key <scale> <root> <oct>`), over
+`SYSEX_SET_GLOBALS`, on the app's key page — or from inside the patch:
+
+- **`CC_TARGET_KEY`** makes the key a target for a controller, an NRPN address
+  and a modulation route, through the same applier every other control-plane
+  write goes through, with no node in the patch at all.
+- **`Key`** is a node whose note inlet moves the key's root: a Harmony walking
+  the degrees of one key is a progression, and a sequencer moving the key under
+  it every eight bars is a piece with sections. It holds no key of its own and
+  writes only the key that is *playing*, so a preset saved mid-phrase records
+  the key the patch was written in — the rule a modulated parameter follows.
+  One per patch, because the key has one value; it runs before every node that
+  plays in the key, so a change is heard by the notes of the same pass.
+
+The module is chromatic on C until a key is set.
 
 `Chord` is three questions and one parameter for each: `quality` names a stack
 of **scale steps**, so one setting is a diatonic triad — or seventh, or ninth —
@@ -430,7 +439,10 @@ SysEx use. Deliberately **not** a node: a parameter has no domain, no fan-in
 rule and no per-pass value.
 
 A target has a kind: `node` (index plus parameter), `clock` (tempo, source, CV
-PPQN) and `transport` (start, stop, continue, tap tempo). `port` is reserved.
+PPQN), `transport` (start, stop, continue, tap tempo) and `key` (root, scale,
+register). `port` is reserved. The last is a kind rather than somebody's
+parameter because the key is one setting for the whole patch and no node
+carries a copy of it.
 
 - **14-bit**, as CC *n* MSB and CC *n*+32 LSB, because tempo does not fit in
   seven bits. A lone MSB is applied rather than stalling.
@@ -477,7 +489,8 @@ inside a node it is CC or NRPN.**
                                        param = address % N_PARAM
 0x39C0 .. 0x39CF   the master clock (tempo, source, CV PPQN)
 0x39D0 .. 0x39DF   the transport (start, stop, continue, tap)
-0x39E0 .. 0x3FFF   reserved
+0x39E0 .. 0x39EF   the key (root, scale, register)
+0x39F0 .. 0x3FFF   reserved
 ```
 
 The bases move when `N_NODE` moves, and the protocol version with them. This

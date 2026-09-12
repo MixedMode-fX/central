@@ -80,9 +80,9 @@ struct GlobalSettings {
     // it, and it is patch state rather than a node's.
     uint8_t scale;             // ScaleId; SCALE_NONE / 0 reads as chromatic
     uint8_t root;              // pitch class, 0..11
-    // The register the key sits in, 1..global_key::MAX_OCTAVE. A node that
+    // The register the key sits in, 1..KEY_MAX_OCTAVE. A node that
     // names no octave of its own plays in this one, so it is what moves a
-    // whole patch up or down. Zero reads as global_key::DEFAULT_OCTAVE, the
+    // whole patch up or down. Zero reads as KEY_DEFAULT_OCTAVE, the
     // module's rule that a stored zero is the default.
     uint8_t root_octave;
     uint8_t reserved[18];      // #8's calibration lands here
@@ -102,7 +102,7 @@ inline GlobalSettings default_globals(){
     g.nrpn_source_mask = 0;
     g.scale = SCALE_CHROMATIC;          // no key until a user sets one
     g.root = 0;
-    g.root_octave = global_key::DEFAULT_OCTAVE;
+    g.root_octave = KEY_DEFAULT_OCTAVE;
     return g;
 }
 

@@ -19,6 +19,7 @@
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/drum_sequencer.h"
 #include "midi/scale.h"
+#include "midi/global_key.h"
 #include "patch/patch_manager.h"
 #include "patch/patch_store.h"
 #include "patch/default_patch.h"
@@ -80,10 +81,9 @@ EMU_EXPORT uint32_t emu_const_max_sequence_len(){ return MAX_SEQUENCE_LEN; }
 EMU_EXPORT uint32_t emu_const_note_seq_voices(){ return NOTE_SEQ_VOICES; }
 EMU_EXPORT uint32_t emu_const_drum_seq_lanes(){ return DRUM_SEQ_LANES; }
 EMU_EXPORT uint32_t emu_const_node_slot_size(){ return NODE_SLOT_SIZE; }
-// The scales (midi/scale.h), as the 12-bit masks the sequencers and
-// NoteQuantise store, so the page resolves a scale name to the firmware's
-// mask. SCALE_GLOBAL is in the list and its mask is zero: that is what the
-// firmware reads as "follow the module's scale".
+// The scales (midi/scale.h), as the 12-bit masks the firmware plays, so the
+// page can draw a key without a second copy of the table. SCALE_NONE is in
+// the list and its mask is zero: it is an unset byte, not a scale.
 EMU_EXPORT uint32_t emu_scale_count(){ return SCALE_COUNT; }
 EMU_EXPORT uint32_t emu_scale_mask(uint32_t id){ return id < SCALE_COUNT ? scale_mask((uint8_t)id) : 0; }
 
@@ -152,6 +152,17 @@ EMU_EXPORT void emu_patch_mod_route(uint32_t slot, uint32_t bus, uint32_t target
     }
     patch.mod_map[slot] = r;
 }
+// The key the module is in (midi/global_key.h). It is not a node, so it is
+// set here beside the patch and applied by emu_load() with it.
+EMU_EXPORT void emu_patch_key(uint32_t scale, uint32_t root, uint32_t octave){
+    globals.scale = (uint8_t)scale;
+    globals.root = (uint8_t)root;
+    globals.root_octave = (uint8_t)octave;
+}
+EMU_EXPORT uint32_t emu_key_scale(){ return global_key::id(); }
+EMU_EXPORT uint32_t emu_key_root(){ return global_key::root(); }
+EMU_EXPORT uint32_t emu_key_octave(){ return global_key::octave(); }
+
 EMU_EXPORT void emu_patch_n_nodes(uint32_t n){ patch.n_nodes = (uint8_t)(n > N_NODE ? N_NODE : n); }
 
 // Loads the patch under construction. Returns LoadError; on success the
@@ -293,7 +304,8 @@ EMU_EXPORT uint32_t emu_seq_cell(uint32_t i, uint32_t lane, uint32_t step){
     }
 }
 // Note sequencers: the pitch a cell resolves to now (0xFF if silent or out
-// of range), its degree, the step's length|flags byte, the current root.
+// of range), its degree, the step's length|flags byte, and the root and scale
+// it is playing - both of which come from the key (src/midi/global_key.h).
 EMU_EXPORT uint32_t emu_seq_pitch(uint32_t i, uint32_t lane, uint32_t step){
     Node* n;
     return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->pitch((uint8_t)step, (uint8_t)lane) : 0xFF;
@@ -308,11 +320,11 @@ EMU_EXPORT uint32_t emu_seq_flags(uint32_t i, uint32_t step){
 }
 EMU_EXPORT uint32_t emu_seq_root(uint32_t i){
     Node* n;
-    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->root_note() : 0;
+    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->active_root() : 0;
 }
 EMU_EXPORT uint32_t emu_seq_scale(uint32_t i){
     Node* n;
-    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->scale() : 0;
+    return seq_kind(i, n) == SEQ_NOTE ? static_cast<NoteSequencerBase*>(n)->active_mask() : 0;
 }
 // Per-step (gate, note) or per-lane (drum) probability, percent.
 EMU_EXPORT uint32_t emu_seq_probability(uint32_t i, uint32_t lane, uint32_t step){

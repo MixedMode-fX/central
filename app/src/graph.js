@@ -8,7 +8,7 @@
 
 import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
-import { MUSICAL_PORTS, ALL_MUSICAL } from './names.js';
+import { MUSICAL_PORTS, ALL_MUSICAL, KEY_TARGETS } from './names.js';
 
 const key = (domain, bus) => `${domain}:${bus}`;
 
@@ -173,6 +173,10 @@ function modInlets(device, patch, index, firstRow) {
 export function modParamName(device, patch, route) {
   if (route.targetKind === P.CcTargetKind.CC_TARGET_CLOCK) {
     return ['tempo', 'clock source', 'sync ppqn'][route.param] ?? `clock ${route.param}`;
+  }
+  // The key is not a node's, so there is no descriptor to ask.
+  if (route.targetKind === P.CcTargetKind.CC_TARGET_KEY) {
+    return KEY_TARGETS.find((t) => t.value === route.param)?.label ?? `key ${route.param}`;
   }
   const node = patch.nodes[route.targetIndex];
   const pd = node ? paramDescriptorOf(device, node.algorithmId, route.param) : null;

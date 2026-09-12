@@ -5,7 +5,7 @@
 namespace {
     uint8_t current_id = SCALE_CHROMATIC;
     uint8_t current_root = 0;
-    uint8_t current_octave = global_key::DEFAULT_OCTAVE;
+    uint8_t current_octave = KEY_DEFAULT_OCTAVE;
     uint16_t current_mask = 0x0FFF;
 }
 
@@ -18,8 +18,8 @@ void global_key::set(uint8_t scale_id, uint8_t root_pitch_class, uint8_t registe
 void global_key::set_octave(uint8_t register_octave){
     // Zero is a preset byte nobody set, and the module's rule is that such a
     // byte means the default (node/param.h).
-    current_octave = register_octave == 0 ? DEFAULT_OCTAVE
-                   : (register_octave > MAX_OCTAVE ? MAX_OCTAVE : register_octave);
+    current_octave = register_octave == 0 ? KEY_DEFAULT_OCTAVE
+                   : (register_octave > KEY_MAX_OCTAVE ? KEY_MAX_OCTAVE : register_octave);
 }
 
 void global_key::set_scale(uint8_t scale_id){
@@ -41,7 +41,7 @@ uint16_t global_key::mask(){ return current_mask; }
 
 uint8_t global_key::tonic(uint8_t node_octave){
     const uint8_t octave_used = node_octave == 0 ? current_octave
-                              : (node_octave > MAX_OCTAVE ? MAX_OCTAVE : node_octave);
+                              : (node_octave > KEY_MAX_OCTAVE ? KEY_MAX_OCTAVE : node_octave);
     int16_t note = (int16_t)octave_used * 12 + (int16_t)current_root;
     // The top octave cannot hold every pitch class, and a key that silently
     // became a different note would be worse than one an octave lower.

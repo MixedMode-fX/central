@@ -328,7 +328,7 @@ static void test_the_key_reads_back_and_ranges_like_any_other_target() {
     TEST_ASSERT_TRUE(rig.cc.target_range(CC_TARGET_KEY, 0, CC_KEY_SCALE, lo, hi));
     TEST_ASSERT_EQUAL(SCALE_MAJOR, lo); TEST_ASSERT_EQUAL(SCALE_COUNT - 1, hi);
     TEST_ASSERT_TRUE(rig.cc.target_range(CC_TARGET_KEY, 0, CC_KEY_OCTAVE, lo, hi));
-    TEST_ASSERT_EQUAL(1, lo); TEST_ASSERT_EQUAL(global_key::MAX_OCTAVE, hi);
+    TEST_ASSERT_EQUAL(1, lo); TEST_ASSERT_EQUAL(KEY_MAX_OCTAVE, hi);
     TEST_ASSERT_FALSE(rig.cc.target_range(CC_TARGET_KEY, 0, CC_KEY_TARGETS, lo, hi));
 }
 

@@ -73,6 +73,7 @@ const codecH = read('src/patch/patch_codec.h');
 const storeH = read('src/patch/patch_store.h');
 const nrpnH = read('src/control/nrpn.h');
 const midiH = read('src/hal/midi_types.h');
+const keyH = read('src/midi/global_key.h');
 
 const constants = {
   ...defines(sysexH, [
@@ -93,7 +94,8 @@ const constants = {
   ...defines(codecH, ['PATCH_FORMAT_VERSION']),
   ...defines(read('src/bus/domain.h'), ['CV_BITS', 'CV_FULL']),
   ...defines(storeH, ['EEPROM_BYTES', 'PATCH_SLOTS']),
-  ...defines(nrpnH, ['NRPN_CLOCK_BASE', 'NRPN_TRANSPORT_BASE', 'NRPN_RESERVED_BASE']),
+  ...defines(nrpnH, ['NRPN_CLOCK_BASE', 'NRPN_TRANSPORT_BASE', 'NRPN_KEY_BASE', 'NRPN_RESERVED_BASE']),
+  ...defines(keyH, ['KEY_DEFAULT_OCTAVE', 'KEY_MAX_OCTAVE']),
 };
 
 // PATCH_MAGIC and PATCH_SLOT_BYTES are expressions, not plain numbers.
@@ -134,6 +136,7 @@ const enums = {
   CcTargetKind: enumeration(read('src/node/patch.h'), 'CcTargetKind'),
   CcClockTarget: enumeration(read('src/node/patch.h'), 'CcClockTarget'),
   CcTransportTarget: enumeration(read('src/node/patch.h'), 'CcTransportTarget'),
+  CcKeyTarget: enumeration(read('src/node/patch.h'), 'CcKeyTarget'),
   CcFlags: enumeration(read('src/node/patch.h'), 'CcFlags'),
   ModMode: enumeration(read('src/node/patch.h'), 'ModMode'),
   ModFlags: enumeration(read('src/node/patch.h'), 'ModFlags'),

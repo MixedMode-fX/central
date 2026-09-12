@@ -80,10 +80,10 @@ downloadable file. The gate listener blips per rising edge on a chosen gate bus
 or jack, which is the only way a clock division or a logic gate is audible at
 all.
 
-**key** — one scale, one root and one register for the whole patch. Every node
-follows it unless its own `scale` names other notes or its own `key` names
-another root; a following node plays in the key's register, moved by the octave
-its own root parameter names.
+**key** — one scale, one root and one register for the whole patch, drawn on a
+keyboard: the notes of the key are lit, its root is ringed, and pressing a key
+moves the root. Nothing in the patch names a scale or a root of its own; a node
+says only which register it plays in, and its default is the key's.
 
 **MIDI** — the external controller, routing, the clock and Program Change
 recall: the room the module is in, none of which a patch travels with. What a
@@ -235,7 +235,7 @@ app/
     picker.js         the add list, shelved by category
     views.js          node and jack cards: parameters, sections, sequencer grids
     icons.js          the icons, one inline SVG each
-    key.js            the key: one scale, one root, one register
+    key.js            the key: one scale, one root, one register, on a keyboard
     midi.js           routing, the clock, the external controller
     modmatrix.js      the mod matrix: what a CC moves, what a CV bus moves
     perform.js        the play surface, and everything that updates live

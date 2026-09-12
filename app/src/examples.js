@@ -111,8 +111,8 @@ export const EXAMPLES = {
         { algo: 'Metronome', out: [3], seq: { division: '1 bar' } },
         { algo: 'GateHold', out: [1], params: [1, 0, 1] },
         { algo: 'AND', in: [0, 1], out: [2] },
-        { algo: 'NoteSequencer', in: [3], out: [0], seq: { length: 4, root: 48, steps: [0, 5, 3, 4] } },
-        { algo: 'Chord', in: [null, 0], out: [1], params: [1, 0, 0, 0, 0, 0, 4] },
+        { algo: 'NoteSequencer', in: [3], out: [0], seq: { length: 4, octave: 4, steps: [0, 5, 3, 4] } },
+        { algo: 'Chord', in: [null, 0], out: [1], params: [1, 0, 0, 4] },
         { algo: 'Arpeggiator', in: [1, 2], out: [2], params: [0, 2, 60, 0] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
@@ -150,11 +150,12 @@ export const EXAMPLES = {
   'Note sequencer': {
     about: 'Degrees, not notes: an 8-step line in C minor at a sixteenth, with a rest, an accent, a two-step note and a tie. Enable audio under play, then play a key: the root inlet re-pitches the running line and the note lane on the patch tab, without changing the stored degrees.',
     patch: {
+      globals: { scale: 'minor', root: 0 },
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
-        { algo: 'NoteSequencer', in: [0, null, 0], out: [1], seq: { scale: 'minor', root: 48, channel: 1,
+        { algo: 'NoteSequencer', in: [0, null, 0], out: [1], seq: { octave: 4, channel: 1,
             steps: [0, { deg: 0, accent: true }, '-', 3, { deg: 5, len: 2 }, '-', { deg: 4, vel: 80 }, '='] } },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
@@ -163,10 +164,11 @@ export const EXAMPLES = {
   'Poly sequencer': {
     about: 'One step per beat, up to four degrees a step in C major, each voice with its own velocity. The 60 % gate is an estimate from the measured step period, so the first chord after a tempo change is the wrong length, on purpose. Change the scale to "dorian" in the JSON under library → files and load it back: same pattern, different colour.',
     patch: {
+      globals: { scale: 'major', root: 0 },
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/4' } },
-        { algo: 'PolySequencer', in: [0], out: [1], seq: { scale: 'major', root: 60, gate: 60,
+        { algo: 'PolySequencer', in: [0], out: [1], seq: { octave: 5, gate: 60,
             steps: [{ deg: [0, 2, 4, 7] }, { deg: [3, 5, 7], vel: [90, 70, 70] }, { deg: [4, 6, 8, 11], vel: [100, 80, 80, 60] }, { deg: [3, 5, 7, 9], len: 1, accent: true }] } },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
@@ -254,13 +256,14 @@ export const EXAMPLES = {
   'Sample and hold': {
     about: 'The oldest modular utility there is. SampleHold takes one reading of its own noise on every trigger and holds it steady between triggers; a modulation route turns that held level into the transposition a sequence is played at, so the melody moves in whole steps rather than sliding. Slew is patched between them \u2014 set its rise and fall above zero under play to hear the steps become glides.',
     patch: {
+      globals: { scale: 'minor', root: 0 },
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/4' } },
         { algo: 'Metronome', out: [1], seq: { division: '1/16' } },
         { algo: 'SampleHold', in: [0], out: [0], params: [3, 1, 5] },
         { algo: 'Slew', in: [0], out: [1] },
-        { algo: 'NoteSequencer', in: [1], out: [0], seq: { length: 8, root: 60, scale: 'minor', steps: [0, 2, 4, 2, 5, 4, 2, 0] } },
+        { algo: 'NoteSequencer', in: [1], out: [0], seq: { length: 8, octave: 5, steps: [0, 2, 4, 2, 5, 4, 2, 0] } },
         { algo: 'Transpose', in: [0], out: [1] },
       ],
       mod_map: [{ slot: 0, bus: 1, targetKind: 0, targetIndex: 5, param: 0,
@@ -290,11 +293,11 @@ export const EXAMPLES = {
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1 bar' } },
         { algo: 'Metronome', out: [1], seq: { division: '1/8' } },
-        { algo: 'Harmony', in: [0], out: [0, 0], params: [4, 75, 0, 0, 45, 0, 80, 1, 0, 80, 25, 40, 30, 6] },
+        { algo: 'Harmony', in: [0], out: [0, 0], params: [4, 75, 0, 0, 3, 80, 1, 0, 80, 25, 40, 30, 6] },
         { algo: 'Chord', in: [null, 0], out: [1] },
         { algo: 'Turing', in: [1, 6], out: [2, 1], params: [8, 8, 5, 1, 21, 0, 1] },
-        { algo: 'CvToNote', in: [1, 1, null], out: [2], params: [1, 57, 2, 0, 1, 2, 0, 90, 2] },
-        { algo: 'NoteDelay', in: [2, null], out: [3], params: [1, 7, 2, 25, 3, 2, 65, 100, 8, 0, 0, 0, 1] },
+        { algo: 'CvToNote', in: [1, 1, null], out: [2], params: [1, 4, 2, 1, 2, 0, 90, 2] },
+        { algo: 'NoteDelay', in: [2, null], out: [3], params: [1, 7, 2, 25, 3, 2, 65, 100, 8, 0, 1] },
         { algo: 'Automaton', in: [2, null], out: [3, 4, 5, null, null, null, null, null], params: [110, 129, 1, 2, 8, 100, 0] },
         { algo: 'LFO', out: [2], params: [1, 2, 0, 3, 1, 255, 0, 0, 2] },
         { algo: 'CvToGate', in: [2], out: [6], params: [90, 10, 2, 2, 0, 0] },

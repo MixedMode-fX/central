@@ -52,7 +52,7 @@ const DETAILED_PARAMS = 48;
 
 // The example the prompt carries. A worked example is worth more than any
 // amount of prose about the format, and this one is a sequencer: degrees, a
-// rest, an accent, a tie, a scale by name and a jack patched to hear it.
+// rest, an accent, a tie, the key by name and a jack patched to hear it.
 export const WORKED_EXAMPLE = 'Note sequencer';
 
 // --- the schema -------------------------------------------------------------
@@ -320,15 +320,12 @@ function noteSeqSchema(d, param) {
       length: param(0, { title: 'length', description: 'steps in the pattern; 0 takes it from "steps"' }),
       direction: directionSchema,
       gate: param(2, { title: 'gate' }),
-      scale: { type: 'string', enum: SCALES.map((s) => s.label),
-               description: 'the scale this sequencer’s degrees are read in; "global" follows the module’s own' },
-      root: param(5, { title: 'root' }),
-      key: param(14, { title: 'key' }),
-      velScale: param(6, { title: 'velocity scale' }),
-      velOffset: param(7, { title: 'velocity offset' }),
-      channel: param(8, { title: 'channel' }),
-      accent: param(9, { title: 'accent' }),
-      stall: param(10, { title: 'stall' }),
+      octave: param(3, { title: 'octave' }),
+      velScale: param(4, { title: 'velocity scale' }),
+      velOffset: param(5, { title: 'velocity offset' }),
+      channel: param(6, { title: 'channel' }),
+      accent: param(7, { title: 'accent' }),
+      stall: param(8, { title: 'stall' }),
       steps: { type: 'array', maxItems: P.MAX_SEQUENCE_LEN, items: step },
     },
   };
@@ -446,13 +443,13 @@ function globalsSchema() {
                      description: namedValues(CLOCK_SOURCES) },
       cvPpqn: { type: 'integer', minimum: 1, maximum: 96,
                 description: 'pulses per quarter note expected on the sync jack, when the clock source is CV' },
-      scale: { type: 'string', enum: SCALES.filter((s) => s.label !== 'global').map((s) => s.label),
-               description: 'the scale every algorithm follows unless it names one of its own' },
+      scale: { type: 'string', enum: SCALES.map((s) => s.label),
+               description: 'the scale every algorithm plays; no node carries one of its own' },
       root: { type: 'integer', minimum: 0, maximum: 11,
               description: `the key’s root: 0 = ${PITCH_CLASSES[0]} … 11 = ${PITCH_CLASSES[11]}` },
-      rootOctave: { type: 'integer', minimum: 0, maximum: 10,
-                    description: 'the register the key sits in; 0 names none, and then every node keeps '
-                               + 'the octave it stored' },
+      rootOctave: { type: 'integer', minimum: 1, maximum: P.KEY_MAX_OCTAVE,
+                    description: 'the register the key sits in, and so the one every node that names '
+                               + 'no octave of its own plays in' },
       pcEnabled: { type: 'integer', minimum: 0, maximum: 1,
                    description: 'recall a preset slot on Program Change' },
       pcChannel: { $ref: '#/$defs/channel' },

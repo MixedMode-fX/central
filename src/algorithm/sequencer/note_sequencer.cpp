@@ -17,7 +17,7 @@ const ParamDescriptor NoteSequencerBase::HEADER[16] = {
     {"length",     1, MAX_SEQUENCE_LEN,               8,  PARAM_NUMBER,  nullptr},
     {"direction",  0, StepEngine::SEQ_DIRECTIONS - 1, 0,  PARAM_ENUM,    PARAM_DIRECTION_NAMES},
     {"gate",       0, 100,                            0,  PARAM_PERCENT, nullptr},
-    {"octave",     0, global_key::MAX_OCTAVE,         0,  PARAM_ENUM,    PARAM_OCTAVE_NAMES},
+    {"octave",     0, KEY_MAX_OCTAVE,         0,  PARAM_ENUM,    PARAM_OCTAVE_NAMES},
     {"vel scale",  1, 255,                            100, PARAM_PERCENT, nullptr},
     {"vel offset", 0, 255,                            0,  PARAM_SIGNED,  nullptr},
     {"channel",    1, 16,                             1,  PARAM_CHANNEL, nullptr},
@@ -101,7 +101,7 @@ NoteSequencerBase::NoteSequencerBase(const NodeConfig& config, uint8_t voices_pe
     rec_enable_bus(config.in_bus[4]),
     out(config.out_bus[0]),
     n_voices(voices_per_step == 0 ? 1 : (voices_per_step > MAX_VOICES ? MAX_VOICES : voices_per_step)),
-    octave(config.params[P_OCTAVE] <= global_key::MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
+    octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     root(NO_PITCH),
     gate_pct(config.params[P_GATE] > 100 ? 100 : config.params[P_GATE]),
     vel_scale(config.params[P_VEL_SCALE] ? config.params[P_VEL_SCALE] : 100),
@@ -163,7 +163,7 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
         case P_OCTAVE:
             // Sounding notes are released from the ledger at the pitch they
             // were sent at, so the register can move under a held note.
-            if (value > global_key::MAX_OCTAVE) return false;
+            if (value > KEY_MAX_OCTAVE) return false;
             octave = value;
             return true;
         case P_VEL_SCALE:  vel_scale = value ? value : 100; return true;

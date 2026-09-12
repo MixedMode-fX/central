@@ -527,7 +527,7 @@ static void test_the_key_names_a_register() {
     // A zeroed byte is the default everywhere in this module, and here that
     // is the register middle C sits in.
     global_key::set(SCALE_NATURAL_MINOR, 9, 0);
-    TEST_ASSERT_EQUAL(global_key::DEFAULT_OCTAVE, global_key::octave());
+    TEST_ASSERT_EQUAL(KEY_DEFAULT_OCTAVE, global_key::octave());
     TEST_ASSERT_EQUAL(69, global_key::tonic(0));        // 5 x 12 + 9
 
     // A node that names one plays in it whatever the key's register is.
@@ -541,7 +541,7 @@ static void test_the_key_names_a_register() {
 
     // Out of range is clamped rather than wrapped.
     global_key::set(SCALE_NATURAL_MINOR, 0, 200);
-    TEST_ASSERT_EQUAL(global_key::MAX_OCTAVE, global_key::octave());
+    TEST_ASSERT_EQUAL(KEY_MAX_OCTAVE, global_key::octave());
 }
 
 static void test_note_quantise_snaps_into_the_key() {

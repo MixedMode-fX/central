@@ -54,7 +54,7 @@ bool CcMapper::target_range(uint8_t target_kind, uint8_t target_index, uint16_t 
                 // From the first real scale: SCALE_NONE is an unset byte and
                 // not somewhere a knob should be able to land.
                 case CC_KEY_SCALE:  lo = SCALE_MAJOR; hi = SCALE_COUNT - 1; return true;
-                case CC_KEY_OCTAVE: lo = 1; hi = global_key::MAX_OCTAVE; return true;
+                case CC_KEY_OCTAVE: lo = 1; hi = KEY_MAX_OCTAVE; return true;
                 default: return false;
             }
         default:

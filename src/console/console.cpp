@@ -231,7 +231,7 @@ void Console::cmd_key(uint8_t n, uint32_t now_us){
         // (midi/global_key.h).
         if (n >= 4){
             const uint32_t octave = arg_uint(3, ok);
-            if (!ok || octave == 0 || octave > global_key::MAX_OCTAVE){
+            if (!ok || octave == 0 || octave > KEY_MAX_OCTAVE){
                 put_line("key: octave is 1..10");
                 return;
             }

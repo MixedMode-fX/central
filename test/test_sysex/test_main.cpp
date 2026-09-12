@@ -908,7 +908,7 @@ static void test_the_key_travels_with_the_globals() {
 
     // The register rides one further along, for the same reason and with the
     // same rule: ten arguments leave it alone, eleven set it.
-    TEST_ASSERT_EQUAL(global_key::DEFAULT_OCTAVE, rig.patches.globals().root_octave);
+    TEST_ASSERT_EQUAL(KEY_DEFAULT_OCTAVE, rig.patches.globals().root_octave);
     TEST_ASSERT_EQUAL(67, global_key::tonic(0));             // 5 x 12 + 7
     rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
                                  (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),

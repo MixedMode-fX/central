@@ -24,7 +24,7 @@ static const ParamDescriptor PARAMS[Tonnetz::N_PARAMS] = {
                   PARAM_ENUM, CYCLE_NAMES},
     {"deviation", 0, 100, 0, PARAM_PERCENT, nullptr},
     {"diatonic",  0, 1,   0, PARAM_BOOL,    nullptr},
-    {"octave",    0, global_key::MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
+    {"octave",    0, KEY_MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"velocity",  1, 127, Tonnetz::DEFAULT_VELOCITY, PARAM_NUMBER,  nullptr},
     {"channel",   1, 16,  1, PARAM_CHANNEL, nullptr},
     {"seed",      0, 255, 0, PARAM_NUMBER,  nullptr},
@@ -54,7 +54,7 @@ Tonnetz::Tonnetz(const NodeConfig& config) :
     cycle(clamp_enum(config.params[P_CYCLE], TONNETZ_CYCLES, TONNETZ_LR)),
     deviation(config.params[P_DEVIATION] > 100 ? (uint8_t)100 : config.params[P_DEVIATION]),
     diatonic(config.params[P_DIATONIC] != 0),
-    octave(config.params[P_OCTAVE] <= global_key::MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
+    octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
     seed(config.params[P_SEED]),
@@ -76,7 +76,7 @@ bool Tonnetz::set_param(uint16_t index, uint8_t value){
             if (value > 1) return false;
             diatonic = value != 0; return true;
         case P_OCTAVE:
-            if (value > global_key::MAX_OCTAVE) return false;
+            if (value > KEY_MAX_OCTAVE) return false;
             octave = value; return true;
         case P_VELOCITY:
             if (value > 127) return false;

@@ -268,7 +268,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             if (n >= 11) g.root_octave = args[10];
             if (g.clock_source > MasterClock::CLOCK_MIDI || g.pc_quantise > SWAP_NEXT_BAR
                 || g.scale >= SCALE_COUNT || g.root > 11
-                || g.root_octave > global_key::MAX_OCTAVE){
+                || g.root_octave > KEY_MAX_OCTAVE){
                 nak(source, SYSEX_ERR_BAD_ARGUMENT);
                 return;
             }

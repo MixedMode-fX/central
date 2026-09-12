@@ -12,7 +12,7 @@ static const char* const POLARITY_NAMES[CvToNote::CVN_POLARITIES] = {"bipolar", 
 
 static const ParamDescriptor PARAMS[CvToNote::N_PARAMS] = {
     {"map",      CvToNote::CVN_DEGREE,  CvToNote::CVN_MAPS,       CvToNote::CVN_DEGREE,  PARAM_ENUM,   MAP_NAMES},
-    {"octave",   0, global_key::MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
+    {"octave",   0, KEY_MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"range",    1, CvToNote::MAX_RANGE, 2, PARAM_NUMBER,  nullptr},
     {"mode",     CvToNote::CVN_AUTO,    CvToNote::CVN_MODES,      CvToNote::CVN_AUTO,    PARAM_ENUM,   MODE_NAMES},
     {"polarity", CvToNote::CVN_BIPOLAR, CvToNote::CVN_POLARITIES, CvToNote::CVN_BIPOLAR, PARAM_ENUM,   POLARITY_NAMES},
@@ -43,7 +43,7 @@ CvToNote::CvToNote(const NodeConfig& config) :
     velocity_in(config.in_bus[2]),
     out(config.out_bus[0]),
     map(clamp_enum(config.params[0], CVN_MAPS, CVN_DEGREE)),
-    octave(config.params[1] <= global_key::MAX_OCTAVE ? config.params[1] : (uint8_t)0),
+    octave(config.params[1] <= KEY_MAX_OCTAVE ? config.params[1] : (uint8_t)0),
     range(config.params[2] ? (config.params[2] > MAX_RANGE ? MAX_RANGE : config.params[2]) : (uint8_t)2),
     mode(clamp_enum(config.params[3], CVN_MODES, CVN_AUTO)),
     polarity(clamp_enum(config.params[4], CVN_POLARITIES, CVN_BIPOLAR)),
@@ -170,7 +170,7 @@ void CvToNote::silence(BusManager& bus){
 bool CvToNote::set_param(uint16_t index, uint8_t value){
     switch (index){
         case 0: if (value == 0 || value > CVN_MAPS) return false; map = value; return true;
-        case 1: if (value > global_key::MAX_OCTAVE) return false; octave = value; return true;
+        case 1: if (value > KEY_MAX_OCTAVE) return false; octave = value; return true;
         case 2: if (value == 0 || value > MAX_RANGE) return false; range = value; return true;
         case 3: if (value == 0 || value > CVN_MODES) return false; mode = value; return true;
         case 4: if (value == 0 || value > CVN_POLARITIES) return false; polarity = value; return true;

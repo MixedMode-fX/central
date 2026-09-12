@@ -348,6 +348,36 @@
      mode select and a percentage, and there is no width left to share. */
   .mod-route .param-controls .slider { flex: 1 0 100%; }
 
+  /* --- the key's keyboard --- */
+  /* Two octaves from C, with the notes of the key lit and its root ringed:
+     the one place in the app where a scale is a shape rather than a word. The
+     black keys are positioned against the row rather than laid out in it,
+     because that is the only way a piano's geometry comes out right. */
+  .keyboard {
+    position: relative; display: flex; height: 7.5rem;
+    margin: .2rem 0 .5rem; touch-action: manipulation;
+  }
+  .kb-key {
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 0 0 .3rem; font-size: .72rem; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--line); cursor: pointer; min-height: 0; min-width: 0;
+  }
+  .kb-white {
+    flex: 1 1 0; background: var(--raised); color: var(--dim);
+    border-radius: 0 0 5px 5px;
+  }
+  .kb-black {
+    position: absolute; top: 0; height: 62%; width: 4.5%; z-index: 1;
+    transform: translateX(-50%);
+    background: var(--bg); color: var(--dim); border-radius: 0 0 4px 4px;
+  }
+  .kb-key.in { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .kb-black.in { filter: brightness(.72); }
+  /* Inside the key rather than around it, so the ring does not widen a black
+     key over the white one beside it. */
+  .kb-key.root { outline: 2px solid var(--note); outline-offset: -2px; }
+  .kb-notes { margin: 0 0 .8rem; }
+
   .fields { display: grid; gap: .7rem; margin-bottom: .8rem; }
   .field { display: grid; gap: .3rem; min-width: 0; }
   .field-name { color: var(--dim); font-size: .85rem; }

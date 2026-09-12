@@ -36,9 +36,10 @@
 // lists them in, so a key change is heard by the notes of the same pass
 // rather than a pass later (node/node.h, node/schedule.h).
 //
-// Inlet 0 (note, optional): the key's root. A note-on sets it; nothing else
-//         is read, and a note-off never moves the key - a key is a place the
-//         music is, not a note somebody is holding.
+// Inlet 0 (note): the key's root. A note-on sets it; nothing else is read,
+//         and a note-off never moves the key - a key is a place the music is,
+//         not a note somebody is holding. It is required: a Key node with
+//         nothing patched to it moves nothing at all.
 //
 // params[0] channel  1..16, or 0 for any. A note bus carries channels, so a
 //                    progression on one channel can move the key while the

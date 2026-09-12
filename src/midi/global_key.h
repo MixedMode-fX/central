@@ -39,14 +39,14 @@
 //
 // Chromatic on C until a user sets a key, which is what a zeroed preset byte
 // already gave.
-namespace global_key {
-    // The register a zeroed `octave` parameter, and a zeroed preset byte,
-    // land on: 5 * 12 is 60, so the key's root note is middle C by default.
-    static constexpr uint8_t DEFAULT_OCTAVE = 5;
-    // The highest octave whose root can be a note at all: 10 * 12 is 120, and
-    // above that a pitch class of 8 or more has nowhere to sit.
-    static constexpr uint8_t MAX_OCTAVE = 10;
+// The register a zeroed `octave` parameter, and a zeroed preset byte, land
+// on: 5 * 12 is 60, so the key's root note is middle C by default.
+#define KEY_DEFAULT_OCTAVE 5
+// The highest octave whose root can be a note at all: 10 * 12 is 120, and
+// above that a pitch class of 8 or more has nowhere to sit.
+#define KEY_MAX_OCTAVE 10
 
+namespace global_key {
     // From the patch's GlobalSettings. A zero scale byte, a root past B and
     // a zero octave are all read as the default rather than refused, because
     // this is also what an all-zero preset means.
@@ -61,7 +61,7 @@ namespace global_key {
     uint8_t id();       // the ScaleId, never SCALE_NONE
     uint8_t root();     // pitch class, 0..11
     uint16_t mask();    // the 12-bit mask, never 0
-    uint8_t octave();   // the key's register, 1..MAX_OCTAVE
+    uint8_t octave();   // the key's register, 1..KEY_MAX_OCTAVE
 
     // **The tonic a node plays from, as a pitch rather than a pitch class.**
     //
@@ -72,9 +72,9 @@ namespace global_key {
     // measured from - needs that.
     //
     // `node_octave` is the node's own `octave` parameter: 0 for the key's
-    // register, 1..MAX_OCTAVE for one of its own. Folded rather than clipped,
-    // so a tonic past the top of the keyboard is the same pitch class an
-    // octave down instead of a different note.
+    // register, 1..KEY_MAX_OCTAVE for one of its own. Folded rather than
+    // clipped, so a tonic past the top of the keyboard is the same pitch
+    // class an octave down instead of a different note.
     uint8_t tonic(uint8_t node_octave);
 }
 

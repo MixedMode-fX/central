@@ -16,11 +16,12 @@ static const ParamGroup GROUPS[1] = {{0, 1, Key::N_PARAMS, PARAMS}};
 
 static const char* const IN_NAMES[1] = {"root"};
 
-// No outlets: what it writes is the key, which is not a bus. min_in is 0,
-// because a Key node with nothing patched to it is a patch that has not been
-// wired up yet rather than one that is wrong.
+// No outlets: what it writes is the key, which is not a bus. The inlet is
+// required, because a Key node with nothing patched to it moves nothing, and
+// a module in the patch that silently does nothing is worse than a patch the
+// validator refuses.
 const AlgorithmDescriptor Key::descriptor = {
-    ALGO_KEY, "Key", 1, 0, 0, Key::N_PARAMS, IN, nullptr, sizeof(Key), false,
+    ALGO_KEY, "Key", 1, 1, 0, Key::N_PARAMS, IN, nullptr, sizeof(Key), false,
     construct_node<Key>, GROUPS, 1, IN_NAMES, nullptr,
     "The key, in the patch: a note bus moves the root every node plays in.",
     CATEGORY_MIDI,
@@ -61,7 +62,6 @@ uint8_t Key::get_param(uint16_t index) const {
 // where the last note left it, so a sequencer that moves it once a phrase
 // does not have to hold a note for the rest of the phrase.
 void Key::process(BusManager& bus, uint32_t){
-    if (root_in == NO_BUS) return;
     const uint8_t n = bus.note_count(root_in);
     for (uint8_t i = 0; i < n; i++){
         const MidiEvent e = bus.note_read(root_in, i);

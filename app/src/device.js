@@ -166,6 +166,7 @@ export class Device extends EventTarget {
         outName: [],
         summary: null,
         category: P.AlgorithmCategory.CATEGORY_NONE,
+        singleton: false,
         name: '',
         params: null,                          // filled in lazily by readParams
       };
@@ -195,6 +196,11 @@ export class Device extends EventTarget {
       // what the picker files under "other" - the algorithm is still
       // offered, which is the point of appending rather than splicing.
       if (at < end) descriptor.category = reply[at++];
+      // Whether the patch may hold more than one of it, appended last for the
+      // same reason. Only the key is one so far (src/algorithm/midi/key.h),
+      // and a module that predates the byte says nothing, which reads as
+      // "as many as you like" - the behaviour every algorithm had.
+      if (at < end) descriptor.singleton = reply[at++] !== 0;
       this.algorithms[index] = descriptor;
       this.byId.set(descriptor.id, descriptor);
     }

@@ -42,6 +42,12 @@ export const MIDI_PORTS = labelled(P.MidiPort, {
 // would leave reflashing as the only way back.
 export const MUSICAL_PORTS = MIDI_PORTS.filter((p) => p.value !== P.MIDI_CONTROL_PORT);
 
+// Every cable but the control port: what a binding made with no controller in
+// the room listens on, because a patch cannot know which one it will arrive
+// on. The control cable is never in it - a mapping that could take the
+// protocol away from the app is a mapping that could lock the module out.
+export const ALL_MUSICAL = MUSICAL_PORTS.reduce((mask, p) => mask | p.value, 0);
+
 export function portNames(mask) {
   const found = MIDI_PORTS.filter((p) => (mask & p.value) !== 0).map((p) => p.label);
   return found.length ? found : [];

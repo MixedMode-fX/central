@@ -327,6 +327,11 @@
   button.learn .icon { width: 1.35rem; height: 1.35rem; display: block; }
   button.learn:hover { color: var(--ink); border-color: var(--accent); }
   .learn.bound { color: var(--accent); border-color: var(--accent); }
+  /* An armed learn is the one thing on the card that is *waiting*. It says so
+     in the accent, and where motion is welcome it also breathes: nothing else
+     on the page does, so there is nothing to confuse it with. */
+  .learn.armed { color: var(--accent); border-color: var(--accent);
+                 background: color-mix(in srgb, var(--accent) 18%, transparent); }
   /* The CV route button is the same square: bound is the CV colour, because
      what it is bound to is a control signal. */
   button.learn.cv.bound { color: var(--cv); border-color: var(--cv); }
@@ -380,6 +385,10 @@
   table.bindings td { padding: .45rem .5rem .45rem 0; border-bottom: 1px solid var(--line);
                       vertical-align: top; }
   .bindings-detail { margin-top: .8rem; }
+  /* The two halves of the mod matrix, one panel: a knob's CC and a control
+     signal, read one under the other. */
+  .matrix-half + .matrix-half { margin-top: 1.1rem; padding-top: .9rem;
+                                border-top: 1px solid var(--line); }
   details > summary { cursor: pointer; min-height: var(--tap); display: flex;
                       align-items: center; gap: .5rem; color: var(--dim); }
   .binding { border: 1px solid var(--line); border-radius: var(--radius);
@@ -710,6 +719,16 @@
     background: color-mix(in srgb, var(--cv) 22%, transparent); outline: none;
   }
   .param-menu-range { flex: none; font-size: .68rem; color: var(--dim); }
+  /* A row of the menu that is a control rather than a choice: the CC number,
+     which is 120 of them and a list nobody should scroll. */
+  .param-menu-field { display: flex; gap: .6rem; align-items: center; padding: .45rem .6rem;
+                      border-top: 1px solid var(--line); }
+  .param-menu-field select { flex: 1 1 auto; min-width: 0; }
+  /* The CC menu is the accent's, as the CV menu is the CV colour's: what a
+     menu binds to is the colour it highlights in. */
+  .param-menu.cc .param-menu-item:hover, .param-menu.cc .param-menu-item:focus {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
 
   .canvas-legend { display: flex; gap: .4rem; align-items: center;
                    flex-wrap: wrap; margin-top: .6rem; }
@@ -767,6 +786,8 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     .tab, button, .chip { transition: border-color .12s ease, background .12s ease, color .12s ease; }
+    .learn.armed { animation: waiting 1.1s ease-in-out infinite; }
+    @keyframes waiting { 50% { opacity: .4; } }
   }
 </style>
 

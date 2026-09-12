@@ -40,17 +40,17 @@ import { Listener } from './audio.js';
 import { drumSources } from './drums.js';
 import { Controller } from './controller.js';
 import { Library, toBase64 } from './storage.js';
-import { el, busUsers, iconButton } from './views.js';
+import { el, busUsers, iconButton, closeMenu } from './views.js';
 import { icon } from './icons.js';
 import {
   connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
-  modParamName, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation,
+  modParamName, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation, planCcBinding,
 } from './graph.js';
 import { forgetNode } from './layout.js';
 import { canvasPanel, canvasInspector, geometry, ENDPOINTS } from './canvas.js';
 import { keyPanel } from './key.js';
-import { routingPanel, globalsPanel, mappingPanel, modulationPanel,
-         controllerPanel } from './midi.js';
+import { routingPanel, globalsPanel, controllerPanel } from './midi.js';
+import { modMatrixPanel, describeTarget } from './modmatrix.js';
 import { toPatchJsonText, fromPatchJson } from './patchjson.js';
 import { libraryTab } from './library.js';
 import { EXAMPLES } from './examples.js';
@@ -83,6 +83,13 @@ const TABS = [
 ];
 
 const AUTOSAVE_MS = 400;
+
+// A cleared binding, on the wire: the module has a fixed table, so a slot is
+// emptied rather than removed.
+const EMPTY_MAPPING = {
+  sourceMask: 0, channel: 0, cc: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE,
+  targetIndex: 0, param: 0, min: 0, max: 0, flags: 0,
+};
 
 class App {
   constructor() {
@@ -347,6 +354,9 @@ class App {
         ? `bound CC ${bound.cc} to slot ${detail}`
         : `bound a controller to slot ${detail}`;
       this.learnTarget = null;
+      // The menu that armed it is showing "waiting for a controller", and the
+      // wait is over.
+      closeMenu();
     } else {
       this.pendingError = `the module reported error ${P.SysexErrorName[detail] ?? detail}`;
     }
@@ -543,6 +553,7 @@ class App {
     // source has not reached yet is a route that does nothing until the next
     // edit.
     for (const { slot, route } of plan.routes ?? []) this.writeModRoute(slot, route);
+    for (const { slot, mapping } of plan.bindings ?? []) this.writeCcMap(slot, mapping);
     for (const write of plan.writes) this.writePort(write);
     this.status = plan.said;
     this.render();
@@ -555,6 +566,14 @@ class App {
     this.patch.modMap ??= Array.from({ length: P.N_MOD_ROUTE }, () => null);
     this.patch.modMap[slot] = route;
     this.edit(() => this.device.setModRoute(slot, route), 'modulation route');
+  }
+
+  // One controller binding, written to the patch and sent as the one message
+  // that carries it. A row with no source port is not a binding, which is how
+  // one is cleared (src/control/cc_mapper.h).
+  writeCcMap(slot, mapping) {
+    this.patch.ccMap[slot] = mapping;
+    this.edit(() => this.device.setCcMap(slot, mapping ?? EMPTY_MAPPING), 'binding');
   }
 
   // "add", for anything that can be on the canvas: an algorithm by its id, or
@@ -696,10 +715,13 @@ class App {
 
   // --- controller bindings -------------------------------------------------
 
+  // The binding reaching one parameter, with its slot, so the learn button
+  // beside the control can say what it is on, change it and clear it.
   bindingFor(nodeIndex, param) {
-    return this.patch.ccMap.find((m) => m && m.sourceMask
+    const slot = this.patch.ccMap.findIndex((m) => m && m.sourceMask
       && m.targetKind === P.CcTargetKind.CC_TARGET_NODE
-      && m.targetIndex === nodeIndex && m.param === param) ?? null;
+      && m.targetIndex === nodeIndex && m.param === param);
+    return slot < 0 ? null : { slot, ...this.patch.ccMap[slot] };
   }
 
   // The modulation route reaching one parameter, with its slot, so the CV
@@ -717,6 +739,20 @@ class App {
   routeParam(nodeIndex, param, bus) {
     this.applyPlan(planBusModulation(this.patch, this.device?.capabilities, nodeIndex, param, bus,
                                      { device: this.device }));
+  }
+
+  // A CC onto a parameter, named rather than turned: the binding a learn would
+  // have made, with the number given instead of seen. That is the half the app
+  // was missing - a controller in the next room has its CC numbers written on
+  // the front of it and no way to send one - and it is the same table, the
+  // same slot and the same message either way. The plan is `graph.js`'s, as
+  // the CV button's route is, so the learn and the list cannot disagree about
+  // what a new binding is.
+  bindParam(nodeIndex, param, cc) {
+    // A number was chosen, so the module has nothing left to wait for.
+    if (this.learnTarget) this.cancelLearn();
+    this.applyPlan(planCcBinding(this.patch, this.device?.capabilities, nodeIndex, param, cc,
+                                 { device: this.device }));
   }
 
   async learn(nodeIndex, param) {
@@ -743,6 +779,7 @@ class App {
 
   cancelLearn() {
     this.learnTarget = null;
+    closeMenu();
     this.status = 'learn cancelled';
     this.edit(() => this.device.cancelLearn(), 'learn');
     this.render();
@@ -757,10 +794,9 @@ class App {
   }
 
   clearMapping(slot) {
-    const empty = { sourceMask: 0, channel: 0, cc: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE,
-                    targetIndex: 0, param: 0, min: 0, max: 0, flags: 0 };
-    this.patch.ccMap[slot] = null;
-    this.edit(() => this.device.setCcMap(slot, empty), 'binding');
+    const name = this.patch.ccMap[slot] ? describeTarget(this, this.patch.ccMap[slot]) : null;
+    this.writeCcMap(slot, null);
+    this.status = name ? `${name} is not bound any more` : `binding ${slot} is clear`;
     this.render();
   }
 
@@ -1090,7 +1126,10 @@ class App {
     return el('div', {},
       metersPanel(this),
       canvasPanel(this, this.canvas.geom),
-      canvasInspector(this));
+      canvasInspector(this),
+      // A binding and a route are part of the patch, so they are read under
+      // the graph they act on rather than filed with the cables.
+      modMatrixPanel(this));
   }
 
   keyTab() {
@@ -1102,8 +1141,7 @@ class App {
     if (!this.device?.capabilities) {
       return el('p', { class: 'hint' }, 'no module');
     }
-    return el('div', {}, controllerPanel(this), mappingPanel(this), modulationPanel(this),
-                         routingPanel(this), globalsPanel(this));
+    return el('div', {}, controllerPanel(this), routingPanel(this), globalsPanel(this));
   }
 
   header() {

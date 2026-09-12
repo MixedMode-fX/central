@@ -26,11 +26,13 @@ import * as codec from '../src/codec.js';
 import { Library, toBase64, fromBase64, ago } from '../src/storage.js';
 import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/patchjson.js';
 import { validate } from '../src/validate.js';
-import { SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS } from '../src/names.js';
+import {
+  SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS, ALL_MUSICAL,
+} from '../src/names.js';
 import { EXAMPLES } from '../src/examples.js';
 import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/schema.js';
 import { EmbeddedModule } from '../src/module.js';
-import { slider, paramSections, paramSection, PARAM_SECTIONS } from '../src/views.js';
+import { slider, learnButton, paramSections, paramSection, PARAM_SECTIONS } from '../src/views.js';
 import { shade, nodeRollSources, scopeRows } from '../src/scope.js';
 import { ICON_NAMES } from '../src/icons.js';
 import { Listener, gateHits } from '../src/audio.js';
@@ -38,7 +40,7 @@ import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '
 import {
   connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
   applyWrite, freeBus, waitingBus, planJackDirection, planPortFlip, applyPortFlip,
-  planPortFanOut, planModulation, planBusModulation,
+  planPortFanOut, planModulation, planBusModulation, planCcBinding, CC_MAX,
 } from '../src/graph.js';
 import { catalogue, filterGroups, optionsOf } from '../src/picker.js';
 import { ENDPOINTS } from '../src/canvas.js';
@@ -388,6 +390,135 @@ await test('a bound CC moves a parameter and is consumed', async () => {
   assert.equal(E.emu_last_error(), 0);
 });
 
+// --- binding a CC without turning it ----------------------------------------
+//
+// Learn was the whole of the CC side: arm the module, turn a knob. A patch
+// written for a controller in the next room could be given a control signal
+// from the CV button beside any parameter and a CC only by carrying the patch
+// to the controller - and a CC number is printed on the front of the thing.
+// So a number can be named, and it makes the binding a learn would have made.
+await test('a CC binds by its number, with no controller in the room', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const descriptor = device.algorithms.find((a) => a.nParams > 0 && a.minIn === 0);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(descriptor.id));
+  const caps = device.capabilities;
+
+  const made = planCcBinding(patch, caps, 0, 0, 74, { device });
+  assert.ok(made.ok, made.why);
+  const [{ slot, mapping }] = made.bindings;
+  assert.equal(slot, 0, 'the first free slot');
+  assert.equal(mapping.cc, 74);
+  assert.equal(mapping.channel, 0, 'a binding nobody has played is omni');
+  assert.equal(mapping.sourceMask, ALL_MUSICAL, 'it cannot know which cable the knob arrives on');
+  assert.equal(mapping.sourceMask & P.MIDI_CONTROL_PORT, 0, 'never the control cable');
+  assert.equal(mapping.targetIndex, 0);
+  assert.equal(mapping.param, 0);
+
+  // Changing the number is an edit of the binding, not a second one: whatever
+  // has been narrowed about it stays narrowed.
+  patch.ccMap[slot] = { ...mapping, channel: 3, min: 10, max: 40, flags: 1 };
+  const again = planCcBinding(patch, caps, 0, 0, 30, { device });
+  assert.ok(again.ok, again.why);
+  assert.equal(again.bindings[0].slot, slot, 'a bound parameter keeps its slot');
+  assert.deepEqual(again.bindings[0].mapping,
+                   { ...patch.ccMap[slot], cc: 30 },
+                   'changing the number forgot the rest of the binding');
+
+  // What is not a control is refused here rather than by the module: 120 and
+  // above are channel mode messages.
+  assert.equal(planCcBinding(patch, caps, 0, 0, CC_MAX + 1, { device }).ok, false);
+  assert.equal(planCcBinding(patch, caps, 9, 0, 1, { device }).ok, false, 'no such node');
+
+  // A full table says so, and says what the module holds.
+  const full = codec.emptyPatch();
+  full.nodes.push(codec.emptyNode(descriptor.id));
+  // Bound to another parameter, every one of them: a table with a row for
+  // *this* one is an edit, not a table that is full.
+  for (let i = 0; i < caps.ccMappings; i++) full.ccMap[i] = { ...mapping, cc: i, param: 1 };
+  const refused = planCcBinding(full, caps, 0, 0, 1, { device });
+  assert.equal(refused.ok, false);
+  assert.match(refused.why, /in use/);
+});
+
+// And the binding it plans is one the module honours - on any musical cable,
+// which is the point of the mask it starts with.
+await test('a binding made by name is one the module plays', async () => {
+  const { module, E } = await instantiate();
+  const device = await connected(module);
+  const descriptor = device.algorithms.find((a) => a.nParams > 0 && a.minIn === 0);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(descriptor.id));
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  const plan = planCcBinding(patch, device.capabilities, 0, 0, 74, { device });
+  const { slot, mapping } = plan.bindings[0];
+  await device.setCcMap(slot, mapping);
+
+  // Not the cable a learn would have caught it on - there was no learn.
+  const port = P.MidiPort.mmMIDI_DIN_0 ?? P.MidiPort.mmMIDI_USB_1;
+  assert.equal(module.deliverMidi(port, 0xb0, 7, 74, 100), null,
+               'a bound CC never reaches the graph');
+  module.advance(5000);
+  assert.ok(await device.getParam(0, 0) > 0, 'the parameter did not move');
+  assert.equal(E.emu_last_error(), 0);
+});
+
+// The button itself: pressing it opens the menu, and what is in the menu is
+// what can be done from where the user is standing.
+await test('the learn button opens a menu that arms and binds', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const descriptor = device.algorithms.find((a) => a.nParams > 0 && a.minIn === 0);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(descriptor.id));
+
+  const calls = [];
+  const app = {
+    patch, device, offline: false, learnTarget: null, controller: null,
+    learn: (index, param) => { calls.push(['learn', index, param]); app.learnTarget = { nodeIndex: index, param }; },
+    cancelLearn: () => { calls.push(['cancel']); app.learnTarget = null; },
+    bindParam: (index, param, cc) => calls.push(['bind', index, param, cc]),
+    clearMapping: (slot) => calls.push(['clear', slot]),
+    render: () => {},
+  };
+
+  withDom(() => {
+    // Nothing listening to a controller: the learn is a row to press, not an
+    // arm, and the numbers are there to be picked.
+    const button = learnButton(app, 0, 0, 'depth', null);
+    button.fire('click');
+    assert.deepEqual(calls, [], 'a learn was armed with nothing to turn it');
+    const menu = document.getElementById('param-menu');
+    assert.ok(menu, 'the button opened nothing');
+    const said = words(menu);
+    assert.match(said, /bind a controller to depth/);
+    assert.match(said, /turn a knob/, 'learn is still one press away');
+    assert.match(said, /no controller yet/, 'the row does not say why it is a press and not a wait');
+
+    const pick = find(menu, (kid) => kid.tag === 'select');
+    assert.ok(pick, 'the menu has no list of CC numbers');
+    assert.equal(pick.children.length, CC_MAX + 2, 'every control, and "not bound"');
+    pick.fire('change', { target: { value: '74' } });
+    assert.deepEqual(calls.at(-1), ['bind', 0, 0, 74]);
+    assert.equal(document.getElementById('param-menu'), null, 'the menu stayed open over the page');
+
+    // A controller is listening: opening the menu is the arming, because
+    // turning a knob is what the button is called.
+    calls.length = 0;
+    app.controller = { input: { name: 'a keyboard' } };
+    learnButton(app, 0, 0, 'depth', null).fire('click');
+    assert.deepEqual(calls, [['learn', 0, 0]], 'the press did not arm the learn');
+    assert.match(words(document.getElementById('param-menu')), /waiting for a controller/);
+
+    // And the button says so where the parameter is, not only in the menu.
+    assert.match(learnButton(app, 0, 0, 'depth', null).className, /armed/);
+    assert.ok(!learnButton(app, 0, 1, 'rate', null).className.includes('armed'),
+              'one learn is armed at a time, and it is not every button');
+  });
+});
+
 await test('what the module plays reaches whoever is listening', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
@@ -467,7 +598,7 @@ await test('the note values and directions name the firmware\'s own options', as
 // the canvas carries it. It is still in the patch, and a route in the patch
 // that appears nowhere is a route nobody can find or remove.
 await test('a route with no block to land on is still listed', async () => {
-  const { modulationPanel, describeTarget } = await import('../src/midi.js');
+  const { routeTable, describeTarget } = await import('../src/modmatrix.js');
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -477,7 +608,7 @@ await test('a route with no block to land on is still listed', async () => {
   };
   const app = { patch, device };
   assert.match(describeTarget(app, patch.modMap[0]), /clock/);
-  assert.ok(withDom(() => modulationPanel(app)),
+  assert.ok(withDom(() => routeTable(app)),
             'a clock route has nowhere to be drawn, so the table is where it lives');
 });
 
@@ -910,7 +1041,6 @@ await test('the schema tab builds, and says so when there is no module', async (
   const { schemaTab } = await import('../src/schema.js');
   const { module } = await instantiate();
   const device = await connected(module);
-  const words = (node) => [node?.text ?? '', ...(node?.children ?? []).map(words)].flat().join(' ');
 
   const empty = withDom(() => schemaTab({ device: null }));
   assert.match(words(empty), /none is attached/, 'a page with no module has to say why it is empty');
@@ -1851,25 +1981,43 @@ await test('what is being listened to survives a reload', async () => {
 // events at it. views.js touches nothing else, and a fake this small is
 // honest: the sequences fired at it come from a real browser.
 function fakeDocument() {
-  return {
+  const make = (tag) => {
+    const listeners = new Map();
+    return {
+      // Children are kept rather than dropped, so a test can read the words
+      // a panel put on the page. Nothing here lays anything out.
+      tag, nodeType: 1, className: '', attrs: {}, value: '', children: [],
+      setAttribute(key, value) { this.attrs[key] = String(value); if (key === 'value') this.value = String(value); },
+      addEventListener(type, fn) {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(fn);
+      },
+      append(...kids) { this.children.push(...kids); },
+      fire(type, event = {}) { for (const fn of listeners.get(type) ?? []) fn({ type, ...event }); },
+      // Enough of an element for a menu to be opened under it and taken away
+      // again: it is anchored on a rectangle, it focuses its first row, and
+      // it is found by its id when the next one opens.
+      getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 0, right: 0 }),
+      querySelector: () => null,
+      contains: () => false,
+      focus() {},
+      remove() {
+        const where = document.body.children.indexOf(this);
+        if (where >= 0) document.body.children.splice(where, 1);
+      },
+    };
+  };
+  const body = make('body');
+  const document = {
     // `el()` wraps a bare string child in a text node.
     createTextNode(text) { return { nodeType: 3, text: String(text) }; },
-    createElement(tag) {
-      const listeners = new Map();
-      return {
-        // Children are kept rather than dropped, so a test can read the words
-        // a panel put on the page. Nothing here lays anything out.
-        tag, nodeType: 1, className: '', attrs: {}, value: '', children: [],
-        setAttribute(key, value) { this.attrs[key] = String(value); if (key === 'value') this.value = String(value); },
-        addEventListener(type, fn) {
-          if (!listeners.has(type)) listeners.set(type, []);
-          listeners.get(type).push(fn);
-        },
-        append(...kids) { this.children.push(...kids); },
-        fire(type, event = {}) { for (const fn of listeners.get(type) ?? []) fn({ type, ...event }); },
-      };
-    },
+    createElement: make,
+    // The icons are SVG, built through the namespace: same element here.
+    createElementNS: (_ns, tag) => make(tag),
+    body,
+    getElementById(id) { return body.children.find((kid) => kid.attrs?.id === id) ?? null; },
   };
+  return document;
 }
 
 // Enough of Web Audio to build a drum with. Every node records when it was
@@ -1961,6 +2109,22 @@ async function listening() {
   } finally {
     globalThis.AudioContext = had;
   }
+}
+
+// Everything a panel wrote, as one string: what a user would read off it.
+function words(node) {
+  return [node?.text ?? '', ...(node?.children ?? []).map(words)].flat().join(' ');
+}
+
+// The first element in a panel that answers a question - "is there a select in
+// here" - without the test having to know how deep it was nested.
+function find(node, matches) {
+  for (const kid of node?.children ?? []) {
+    if (kid.nodeType === 1 && matches(kid)) return kid;
+    const deeper = find(kid, matches);
+    if (deeper) return deeper;
+  }
+  return null;
 }
 
 // views.js reads `document` when it builds something, not when it loads, so

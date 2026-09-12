@@ -67,7 +67,7 @@ namespace root_motion {
 
     // The triad on a degree, as a set of pitch classes. Stacked in scale
     // steps, so its quality is the key's business and not this header's -
-    // the same rule Chord's intervals follow.
+    // the same rule Chord's qualities follow.
     inline uint16_t triad(const Degrees& d, uint8_t degree){
         if (d.n == 0) return 0;
         uint16_t set = 0;

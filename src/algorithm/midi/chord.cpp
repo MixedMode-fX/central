@@ -6,44 +6,59 @@
 static const Domain IN[2] = {Domain::Note, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
-// The named stacks, in scale steps from the root. The root itself is emitted
-// by emit_chord and is not listed, which is why every one of these starts at
-// the second voice.
-struct QualityStack { uint8_t count; int8_t step[Chord::MAX_INTERVALS]; };
-static const QualityStack QUALITY[Chord::QUALITY_COUNT - 1] = {
-    {2, {2, 4}},          // triad
-    {3, {2, 4, 6}},       // 7th
-    {4, {2, 4, 6, 8}},    // 9th
-    {3, {2, 4, 5}},       // 6th
-    {2, {1, 4}},          // sus2
-    {2, {3, 4}},          // sus4
-    {2, {3, 6}},          // quartal
-    {2, {2, 6}},          // shell: the root, the third and the seventh
-    {1, {4}},             // fifth
+// The named stacks. The root itself is emitted by emit_chord and is not
+// listed, which is why every one of these starts at the second voice.
+//
+// `step` is the stack in scale steps, which is what makes a quality diatonic:
+// the same two steps are a major triad on one degree of the key and a minor
+// triad on the next. `semitone` is the same chord written out, and is what a
+// chromatic key plays, because twelve steps of twelve notes have no degree to
+// take a flavour from - a triad of them would be three adjacent semitones.
+struct QualityStack {
+    uint8_t count;
+    int8_t step[Chord::MAX_STEPS];
+    int8_t semitone[Chord::MAX_STEPS];
+};
+static const QualityStack QUALITY[Chord::QUALITY_COUNT - Chord::QUALITY_TRIAD] = {
+    {2, {2, 4},       {4, 7}},          // triad
+    {3, {2, 4, 6},    {4, 7, 10}},      // 7th
+    {4, {2, 4, 6, 8}, {4, 7, 10, 14}},  // 9th
+    {3, {2, 4, 5},    {4, 7, 9}},       // 6th
+    {2, {1, 4},       {2, 7}},          // sus2
+    {2, {3, 4},       {5, 7}},          // sus4
+    {2, {3, 6},       {5, 10}},         // quartal
+    {2, {2, 6},       {4, 10}},         // shell: the root, the third and the seventh
+    {1, {4},          {7}},             // fifth
 };
 
-static_assert(sizeof(QUALITY) / sizeof(QUALITY[0]) == Chord::QUALITY_COUNT - 1,
-              "one interval stack per named quality, and none for `custom`");
+static_assert(sizeof(QUALITY) / sizeof(QUALITY[0]) == Chord::QUALITY_COUNT - Chord::QUALITY_TRIAD,
+              "one interval stack per named quality");
 
-static const char* const QUALITY_NAMES[Chord::QUALITY_COUNT] = {
-    "custom", "triad", "7th", "9th", "6th", "sus2", "sus4", "quartal", "shell", "fifth",
+// Indexed from the parameter's own minimum, which is QUALITY_TRIAD.
+static const char* const QUALITY_NAMES[Chord::QUALITY_COUNT - Chord::QUALITY_TRIAD] = {
+    "triad", "7th", "9th", "6th", "sus2", "sus4", "quartal", "shell", "fifth",
+};
+static const char* const VOICING_NAMES[Chord::VOICING_COUNT] = {
+    "close", "open", "drop 2", "drop 3", "wide",
+};
+static const char* const INVERSION_NAMES[Chord::MAX_INVERSION + 1] = {
+    "root pos", "1st", "2nd", "3rd",
 };
 
+// What the chord is, then where it sits, then the key it is in - the three
+// key parameters together, because "A minor, following the module" is one
+// decision and not three.
 static const ParamDescriptor PARAMS[Chord::N_PARAMS] = {
-    {"voices",     0, Chord::MAX_INTERVALS, 0, PARAM_NUMBER, nullptr},
-    {"interval 1", 0, 255, 0, PARAM_SIGNED, nullptr},
-    {"interval 2", 0, 255, 0, PARAM_SIGNED, nullptr},
-    {"interval 3", 0, 255, 0, PARAM_SIGNED, nullptr},
-    {"interval 4", 0, 255, 0, PARAM_SIGNED, nullptr},
-    {"interval 5", 0, 255, 0, PARAM_SIGNED, nullptr},
-    {"interval 6", 0, 255, 0, PARAM_SIGNED, nullptr},
-    {"scale",      0, SCALE_COUNT - 1, 0, PARAM_ENUM,        PARAM_SCALE_NAMES},
-    {"root",       0, 11,              0, PARAM_PITCH_CLASS, nullptr},
-    {"octave",     0, Chord::MAX_OCTAVE, Chord::DEFAULT_OCTAVE,   PARAM_NUMBER, nullptr},
-    {"velocity",   1, 127,               Chord::DEFAULT_VELOCITY, PARAM_NUMBER, nullptr},
-    {"quality",    0, Chord::QUALITY_COUNT - 1, Chord::QUALITY_CUSTOM, PARAM_ENUM, QUALITY_NAMES},
-    {"retrigger",  0, 1,                 0, PARAM_BOOL, nullptr},
-    {"key",        0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
+    {"quality",   Chord::QUALITY_TRIAD, Chord::QUALITY_COUNT - 1, Chord::QUALITY_TRIAD,
+                                        PARAM_ENUM,        QUALITY_NAMES},
+    {"voicing",   0, Chord::VOICING_COUNT - 1, Chord::VOICING_CLOSE, PARAM_ENUM, VOICING_NAMES},
+    {"inversion", 0, Chord::MAX_INVERSION,     0,          PARAM_ENUM,        INVERSION_NAMES},
+    {"key",       0, global_scale::KEY_MODES - 1, 0,       PARAM_ENUM,        PARAM_KEY_NAMES},
+    {"root",      0, 11,              0,                   PARAM_PITCH_CLASS, nullptr},
+    {"scale",     0, SCALE_COUNT - 1, 0,                   PARAM_ENUM,        PARAM_SCALE_NAMES},
+    {"octave",    0, Chord::MAX_OCTAVE, Chord::DEFAULT_OCTAVE,   PARAM_NUMBER, nullptr},
+    {"velocity",  1, 127,               Chord::DEFAULT_VELOCITY, PARAM_NUMBER, nullptr},
+    {"retrigger", 0, 1,                 0,                       PARAM_BOOL,   nullptr},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Chord::N_PARAMS, PARAMS}};
 
@@ -58,96 +73,98 @@ const AlgorithmDescriptor Chord::descriptor = {
     "A chord from one note - or from none: unpatched it plays and holds its own, in the key.",
     CATEGORY_MIDI };
 
+// Ascending, in place. Never more than MAX_VOICES entries, and the array is
+// nearly sorted every time it is called, which is what insertion sort is for.
+static void sort_voices(int16_t* pitch, uint8_t n){
+    for (uint8_t i = 1; i < n; i++){
+        const int16_t x = pitch[i];
+        uint8_t j = i;
+        while (j > 0 && pitch[j - 1] > x){ pitch[j] = pitch[j - 1]; j--; }
+        pitch[j] = x;
+    }
+}
+
 // The voicing can move under a held chord: every voice already in the air is
 // released from the ledger at the pitch it was emitted at, so re-voicing -
 // or a change of scale, here or on the module - changes what the *next*
 // note-on plays and strands nothing.
 bool Chord::set_param(uint16_t index, uint8_t value){
-    if (index == 0){
-        if (value > MAX_INTERVALS) return false;
-        n_intervals = value;
-        dirty = true;
-        return true;
+    switch (index){
+        case P_QUALITY:
+            if (value < QUALITY_TRIAD || value >= QUALITY_COUNT) return false;
+            quality = value;
+            break;
+        case P_VOICING:
+            if (value >= VOICING_COUNT) return false;
+            voicing = value;
+            break;
+        case P_INVERSION:
+            if (value > MAX_INVERSION) return false;
+            inversion = value;
+            break;
+        case P_KEY:
+            if (value >= global_scale::KEY_MODES) return false;
+            key = value;
+            break;
+        case P_ROOT:
+            root = (uint8_t)(value % 12u);
+            break;
+        case P_SCALE:
+            if (value >= SCALE_COUNT) return false;
+            scale = value;
+            break;
+        case P_OCTAVE:
+            if (value > MAX_OCTAVE) return false;
+            octave = value;
+            break;
+        case P_VELOCITY:
+            if (value > 127) return false;
+            velocity = value ? value : DEFAULT_VELOCITY;
+            break;
+        case P_RETRIGGER:
+            if (value > 1) return false;
+            // Not a re-voice: it says what the *next* root note-on does.
+            retrigger = value != 0;
+            return true;
+        default:
+            return false;
     }
-    if (index >= 1 && index <= MAX_INTERVALS){
-        intervals[index - 1] = (int8_t)value;
-        dirty = true;
-        return true;
-    }
-    if (index == P_SCALE){
-        if (value >= SCALE_COUNT) return false;
-        scale = value;
-        dirty = true;
-        return true;
-    }
-    if (index == P_ROOT){
-        root = (uint8_t)(value % 12u);
-        dirty = true;
-        return true;
-    }
-    if (index == P_OCTAVE){
-        if (value > MAX_OCTAVE) return false;
-        octave = value;
-        dirty = true;
-        return true;
-    }
-    if (index == P_VELOCITY){
-        if (value > 127) return false;
-        velocity = value ? value : DEFAULT_VELOCITY;
-        dirty = true;
-        return true;
-    }
-    if (index == P_QUALITY){
-        if (value >= QUALITY_COUNT) return false;
-        quality = value;
-        dirty = true;
-        return true;
-    }
-    if (index == P_RETRIGGER){
-        if (value > 1) return false;
-        // Not a re-voice: it says what the *next* root note-on does.
-        retrigger = value != 0;
-        return true;
-    }
-    if (index == P_KEY){
-        if (value >= global_scale::KEY_MODES) return false;
-        key = value;
-        dirty = true;
-        return true;
-    }
-    return false;
+    dirty = true;
+    return true;
 }
 
 uint8_t Chord::get_param(uint16_t index) const {
-    if (index == 0) return n_intervals;
-    if (index >= 1 && index <= MAX_INTERVALS) return (uint8_t)intervals[index - 1];
-    if (index == P_SCALE) return scale;
-    if (index == P_ROOT) return root;
-    if (index == P_OCTAVE) return octave;
-    if (index == P_VELOCITY) return velocity;
-    if (index == P_QUALITY) return quality;
-    if (index == P_RETRIGGER) return retrigger ? 1u : 0u;
-    if (index == P_KEY) return key;
-    return 0;
+    switch (index){
+        case P_QUALITY:   return quality;
+        case P_VOICING:   return voicing;
+        case P_INVERSION: return inversion;
+        case P_KEY:       return key;
+        case P_ROOT:      return root;
+        case P_SCALE:     return scale;
+        case P_OCTAVE:    return octave;
+        case P_VELOCITY:  return velocity;
+        case P_RETRIGGER: return retrigger ? 1u : 0u;
+        default:          return 0;
+    }
 }
 
 Chord::Chord(const NodeConfig& config) :
     in(config.in_bus[0]),
     root_in(config.in_bus[1]),
     out(config.out_bus[0]),
-    n_intervals(config.params[0] > MAX_INTERVALS ? MAX_INTERVALS : config.params[0]),
-    scale(config.params[P_SCALE]),
-    root((uint8_t)(config.params[P_ROOT] % 12u)),
-    octave(config.params[P_OCTAVE] ? config.params[P_OCTAVE] : DEFAULT_OCTAVE),
+    quality(config.params[P_QUALITY] >= QUALITY_TRIAD && config.params[P_QUALITY] < QUALITY_COUNT
+            ? config.params[P_QUALITY] : (uint8_t)QUALITY_TRIAD),
+    voicing(config.params[P_VOICING] < VOICING_COUNT ? config.params[P_VOICING] : (uint8_t)VOICING_CLOSE),
+    inversion(config.params[P_INVERSION] <= MAX_INVERSION ? config.params[P_INVERSION] : (uint8_t)0),
     key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
+    root((uint8_t)(config.params[P_ROOT] % 12u)),
+    scale(config.params[P_SCALE]),
+    octave(config.params[P_OCTAVE] ? config.params[P_OCTAVE] : DEFAULT_OCTAVE),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
-    quality(config.params[P_QUALITY] < QUALITY_COUNT ? config.params[P_QUALITY] : (uint8_t)QUALITY_CUSTOM),
     retrigger(config.params[P_RETRIGGER] != 0),
     free_note(NO_NOTE), voiced(NO_NOTE), free_channel(1), voiced_mask(0), dirty(false),
-    intervals(), sounding()
-{
-    for (uint8_t i = 0; i < MAX_INTERVALS; i++) intervals[i] = (int8_t)config.params[i + 1];
-}
+    sounding()
+{}
 
 uint16_t Chord::active_mask() const {
     return global_scale::resolve_id(scale);
@@ -162,33 +179,65 @@ uint8_t Chord::active_root() const {
     return global_scale::resolve_root(key, root);
 }
 
-// A named quality is read from the table; `custom` plays what was typed. The
-// typed intervals are never overwritten by a quality, so switching back to
-// `custom` finds the hand-built stack exactly as it was left.
-const int8_t* Chord::active_intervals(uint8_t& count) const {
-    if (quality == QUALITY_CUSTOM || quality >= QUALITY_COUNT){
-        count = n_intervals;
-        return intervals;
+// The quality's voices over `base`, ascending: every stack rises, and both
+// maps below are monotonic, so nothing here has to sort.
+uint8_t Chord::build(uint8_t base, uint8_t tonic, uint16_t mask, int16_t* pitch) const {
+    const QualityStack& stack = QUALITY[quality - QUALITY_TRIAD];
+    pitch[0] = (int16_t)base;
+    if ((mask & 0x0FFF) == 0x0FFF){
+        // Chromatic: no degrees, so the chord is its own shape in semitones.
+        for (uint8_t v = 0; v < stack.count; v++)
+            pitch[v + 1] = (int16_t)base + (int16_t)stack.semitone[v];
+    } else {
+        const int16_t degree = semitone_to_scale_degree((int16_t)((int16_t)base - (int16_t)tonic), mask);
+        for (uint8_t v = 0; v < stack.count; v++)
+            pitch[v + 1] = (int16_t)tonic
+                         + scale_degree_to_semitone((int16_t)(degree + stack.step[v]), mask);
     }
-    const QualityStack& stack = QUALITY[quality - 1];
-    count = stack.count;
-    return stack.step;
+    return (uint8_t)(stack.count + 1);
+}
+
+// Inversion first: which voice is in the bass is decided before the stack is
+// opened out, so `drop 2` on a first inversion drops the second voice of the
+// inversion rather than of the root position.
+void Chord::shape(int16_t* pitch, uint8_t n) const {
+    const uint8_t inv = inversion < n ? inversion : (uint8_t)(n - 1);
+    for (uint8_t i = 0; i < inv; i++) pitch[i] += 12;
+    sort_voices(pitch, n);
+
+    switch (voicing){
+        case VOICING_OPEN:
+            for (uint8_t v = 1; v < n; v += 2) pitch[v] += 12;
+            break;
+        case VOICING_DROP2:
+            if (n >= 2) pitch[n - 2] -= 12;
+            break;
+        case VOICING_DROP3:
+            // The third from the top, or the second on a chord with no third.
+            if (n >= 3) pitch[n - 3] -= 12;
+            else if (n >= 2) pitch[n - 2] -= 12;
+            break;
+        case VOICING_WIDE:
+            for (uint8_t v = 1; v < n; v++)
+                while (pitch[v] < pitch[v - 1] + 12) pitch[v] += 12;
+            break;
+        default:
+            break;
+    }
+    sort_voices(pitch, n);
 }
 
 // Every voice of one chord, recorded against `source` so that one release
 // takes all of it down at the pitches it was actually sent at.
 void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t tonic,
                        uint16_t mask, uint8_t velocity_out, uint8_t channel){
-    const int16_t degree = semitone_to_scale_degree((int16_t)((int16_t)base - (int16_t)tonic), mask);
-    uint8_t count = 0;
-    const int8_t* steps = active_intervals(count);
-    sounding.emit(bus, out, source, base, velocity_out, channel);
-    for (uint8_t v = 0; v < count; v++){
-        const int16_t note = (int16_t)tonic
-                           + scale_degree_to_semitone((int16_t)(degree + steps[v]), mask);
-        if (note < 0 || note > 127) continue;
-        if (note == base) continue;                                       // no unisons
-        sounding.emit(bus, out, source, (uint8_t)note, velocity_out, channel);
+    int16_t pitch[MAX_VOICES];
+    const uint8_t n = build(base, tonic, mask, pitch);
+    shape(pitch, n);
+    for (uint8_t v = 0; v < n; v++){
+        if (pitch[v] < 0 || pitch[v] > 127) continue;          // off the keyboard
+        if (v > 0 && pitch[v] == pitch[v - 1]) continue;       // no unisons; sorted, so adjacent
+        sounding.emit(bus, out, source, (uint8_t)pitch[v], velocity_out, channel);
     }
 }
 
@@ -262,9 +311,8 @@ void Chord::process(BusManager& bus, uint32_t){
             bus.note_write(out, e);
             continue;
         }
-        // The root voice, in key. In the chromatic scale this is the note
-        // itself and every interval below is a semitone, which is what this
-        // algorithm did before it had a scale.
+        // The root voice, in key: the note itself in a chromatic one, and the
+        // nearest note of the scale in any other.
         emit_chord(bus, e.data1, scale_quantise(e.data1, tonic, mask), tonic, mask, e.data2, e.channel);
     }
 }

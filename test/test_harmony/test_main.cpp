@@ -403,10 +403,7 @@ static void test_a_triad_on_every_degree_comes_out_the_right_quality() {
     cc.in_bus[0] = NO_BUS;                 // nothing played: the chord follows its root inlet
     cc.in_bus[1] = NOTE_ROOT;
     cc.out_bus[0] = NOTE_CHORD;
-    cc.params[0] = 3;                      // three voices
-    cc.params[1] = 0;                      // the root
-    cc.params[2] = 2;                      // a third of the scale
-    cc.params[3] = 4;                      // a fifth of the scale
+    cc.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord chord(cc);
 
     uint32_t now = 0;

@@ -207,7 +207,7 @@ is only what a parameter list cannot say.
   mutates a step at a time. Its pulse and its CV come from **one register**, so
   a rhythm and a melody driven from it change on the same bar. `seed` decides
   what reset means: at zero it shreds, otherwise it returns to that pattern.
-- **`Harmony` only emits a root.** `Chord`'s intervals are scale steps, so the
+- **`Harmony` only emits a root.** `Chord`'s qualities are scale steps, so the
   quality of each degree is already correct. The weight of every move is
   computed from the scale (`src/midi/root_motion.h`) rather than tabulated, out
   of facts that hold in any key: `fifths` (which way round the circle, measured
@@ -293,11 +293,14 @@ stays an octave below the key. Set the key from the console
 (`key <scale> <root> <oct>`), over `SYSEX_SET_GLOBALS`, or on the app's key
 page. The module is chromatic until a key is set.
 
-`Chord`'s intervals are **steps of the scale**, so `0 2 4` is a diatonic triad
-on every degree. `quality` names one of nine such stacks without overwriting
-the typed intervals. With nothing patched to its note inlet `Chord` **plays
-itself**: the tonic triad of its key, held, which makes a chord + metronome +
-arpeggiator a complete patch with no input. A held chord is re-voiced whenever
+`Chord` is three questions and one parameter for each: `quality` names a stack
+of **scale steps**, so one setting is a diatonic triad — or seventh, or ninth —
+on every degree of the key; `inversion` says which voice is in the bass;
+`voicing` says how far apart they sit. A chromatic key has no degrees to colour
+a chord with, so there each quality plays its own shape in semitones instead.
+With nothing patched to its note inlet `Chord` **plays itself**: the tonic
+chord of its key, held, which makes a chord + metronome + arpeggiator a
+complete patch with no input. A held chord is re-voiced whenever
 what it should play changes, releasing from the ledger first. A repeated root
 does not re-strike unless `retrigger` is set.
 

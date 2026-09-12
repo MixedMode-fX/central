@@ -39,10 +39,14 @@ class Node {
         // whose notes follow an input it is still being given does nothing -
         // the input's own note-offs release them, and cutting a key somebody
         // is holding is not what a transport stop means. Nor does a node
-        // that plays without an advance edge at all: a self-playing Chord is
-        // a drone, and a drone silenced here would never come back, because
-        // there is no start hook to bring it back and it would be wrong to
-        // add one for something the transport was never driving.
+        // that plays without an advance edge at all: a Chord with nothing
+        // patched to it is a drone, and a drone silenced here would never
+        // come back, because there is no start hook to bring it back and it
+        // would be wrong to add one for something the transport was never
+        // driving. What decides is the edge, not the node: the same Chord
+        // played by its root inlet is holding a chord until the next root
+        // note-on, so it releases here and that note-on is what brings it
+        // back.
         //
         // Called inside the pass, after process() and before the swap, so the
         // note-offs are published and flushed like any other write - and a

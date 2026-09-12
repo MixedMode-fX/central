@@ -885,6 +885,20 @@ function added(device, patch, algorithmId) {
 
 const idOf = (name, device) => device.algorithms.find((d) => d && d.name === name).id;
 
+// Where an algorithm keeps its channel, found by the name the firmware
+// publishes rather than by a number copied out of a .cpp - so this checks the
+// descriptors the app actually reads.
+function channelParam(device, algorithmId) {
+  const descriptor = device.byId.get(algorithmId);
+  for (const group of descriptor.params ?? []) {
+    if (!group) continue;
+    for (let f = 0; f < group.nFields; f++) {
+      if (group.fields[f]?.name === 'channel') return group.first + f;
+    }
+  }
+  return -1;
+}
+
 // A drag, end to end: plan it from the patch as it is, then write it. This is
 // what `App.applyPlan` does, minus the messages.
 function dragged(device, patch, from, to) {
@@ -1457,6 +1471,68 @@ await test('a drum note is played by its own sequencer, not by the player that c
   // A note that is not a drum still goes where it always went.
   listener.midi({ t: 0, type: 0x90, channel: 1, d1: 60, d2: 100, target: 1 });
   assert.equal(listener.players[0].voices.size, 1, 'the player still plays what is not a drum');
+});
+
+await test('a node set to channel 10 is a drum machine, whatever algorithm it runs', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const id = idOf('GateToNote', device);
+  const node = added(device, patch, id);
+  const at = channelParam(device, id);
+  assert.ok(at >= 0, 'GateToNote names a channel');
+
+  // Left alone it is a voice, not a kit: channel 1, nothing to do with drums.
+  assert.equal(drumSources(device, patch).length, 0);
+
+  node.params[at] = 10;
+  const [source] = drumSources(device, patch);
+  assert.ok(source, 'a Euclidean pattern through a GateToNote on channel 10 is drums');
+  assert.equal(source.key, 'node:0');
+  assert.equal(source.kind, 'note');
+  assert.equal(source.bus, node.outBus[0], 'heard on the bus it writes');
+  assert.equal(source.channel, 10, 'and only the notes on that channel are its own');
+
+  // A drum sequencer is drums because of what it is rather than where it
+  // sends, so it claims its bus whatever channel its lanes are on.
+  added(device, patch, idOf('DrumSeqMidi', device));
+  const sources = drumSources(device, patch);
+  assert.equal(sources.length, 2);
+  assert.equal(sources[1].channel, null, 'a drum sequencer takes the whole bus');
+
+  // An outlet on no bus is nothing to listen to, and a node with no note
+  // outlet at all cannot be one however its channel is set.
+  node.outBus[0] = P.NO_BUS;
+  assert.equal(drumSources(device, patch).length, 1);
+});
+
+await test('a bus that is drums by its channel is drums only on that channel', async () => {
+  const { listener, module } = await listening();
+  listener.setDrumSources([
+    { key: 'node:0', index: 0, label: 'GateToNote 0', kind: 'note', channel: 10, bus: 3, lanes: [] },
+  ]);
+  assert.equal(module.watches.get(3), 1, 'its bus is read without a player on it');
+
+  // Nobody is listening to bus 3 and it is heard anyway - which is the whole
+  // point: an instrument is audible because it is in the patch.
+  listener.noteBus({ t: 0, bus: 3, type: 0x90, channel: 10, d1: 36, d2: 100 });
+  assert.equal(listener.drums.get('node:0').hits, 1);
+  assert.equal(listener.players[0].voices.size, 0, 'no player may sound a drum note');
+  assert.equal(listener.drums.get('other').hits, 0, 'and the catch-all does not play it as well');
+
+  // A bus takes as many writers as somebody patches to it, and a melody
+  // sharing one with a drum is still a melody.
+  const player = listener.addPlayer({ source: 'bus', bus: 3 });
+  listener.noteBus({ t: 0, bus: 3, type: 0x90, channel: 1, d1: 60, d2: 100 });
+  assert.equal(listener.drums.get('node:0').hits, 1, 'a melody on the same bus is not a drum');
+  assert.equal(player.voices.size, 1, 'it goes to the player listening to that bus');
+
+  // The other kind: a drum sequencer's bus is drums on every channel.
+  listener.setDrumSources([
+    { key: 'node:1', index: 1, label: 'DrumSeqMidi 1', kind: 'note', channel: null, bus: 5, lanes: [] },
+  ]);
+  listener.noteBus({ t: 0, bus: 5, type: 0x90, channel: 1, d1: 38, d2: 100 });
+  assert.equal(listener.drums.get('node:1').hits, 1);
 });
 
 await test('a hit already heard on its bus is not heard again off the cable', async () => {

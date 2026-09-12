@@ -22,15 +22,16 @@
 // through a square, each at its own level, because "which of these two is
 // wrong" is a question about hearing them apart.
 //
-// **Drums are not players.** A drum sequencer is an instrument, not a source
+// **Drums are not players.** A drum machine is an instrument, not a source
 // somebody might point a sawtooth at: it plays a kit, and which kit and how
-// loud is a property of *that sequencer* rather than of whoever is listening
-// to it. So every drum sequencer in the patch gets a voice of its own here -
-// its own kit, its own level - and a drum note is played there rather than by
-// the player that carried it, whichever bus or cable it arrived on. Two drum
+// loud is a property of *that instrument* rather than of whoever is listening
+// to it. So every one of them in the patch gets a voice of its own here - its
+// own kit, its own level - and a drum note is played there rather than by the
+// player that carried it, whichever bus or cable it arrived on. Two drum
 // machines in one patch are two instruments, which is what makes "which of
 // these two is the one I can hear" answerable at all. `drums.js` is the voice
-// itself; this file is what points it at the patch.
+// itself, and what it is that counts as a drum machine; this file is what
+// points it at the patch.
 //
 // **The gate listener is the third thing.** A gate carries no note and no
 // velocity, so a clock division, a Euclidean pattern or a logic gate makes no
@@ -46,20 +47,19 @@
 // like one even though the passes that produced it ran in a burst.
 
 import * as P from './protocol.js';
-import { DEFAULT_KIT, KITS, hit as drumHit, kitLabel, pieceOf } from './drums.js';
+import { DEFAULT_KIT, DRUM_CHANNEL, KITS, hit as drumHit, kitLabel, pieceOf } from './drums.js';
 
 const NOTE_OFF = 0x80, NOTE_ON = 0x90, CONTROL_CHANGE = 0xb0, PITCH_BEND = 0xe0;
 const SUSTAIN = 64, ALL_SOUND_OFF = 120, ALL_NOTES_OFF = 123;
-const DRUM_CHANNEL = 10;
 const MAX_VOICES = 24;                 // per player
 const MAX_PLAYERS = 6;
 const MAX_GATE_SOURCES = 8;
 const LATENCY = 0.03;
 
-// The drum voice for anything on channel 10 that no drum sequencer in the
-// patch accounts for: the on-screen keyboard, a controller, a note bus written
-// by something else entirely. It is a kit like any other, so a patch with no
-// drum sequencer in it still gets drums that sound like drums.
+// The drum voice for anything on channel 10 that no node in the patch accounts
+// for: the on-screen keyboard, a controller, MIDI arriving from outside. It is
+// a kit like any other, so a patch with no drum machine in it still gets drums
+// that sound like drums.
 export const OTHER_DRUMS = 'other';
 
 export const WAVES = ['sawtooth', 'square', 'triangle', 'sine'];
@@ -183,7 +183,7 @@ class Player {
   }
 }
 
-// One drum sequencer's instrument: a kit, a level, and its own gain so the
+// One drum machine's instrument: a kit, a level, and its own gain so the
 // level means something against the notes rather than inside them.
 //
 // A voice outlives the patch it was made for. Its key is the node's index -
@@ -293,7 +293,7 @@ export class Listener {
     this.gateSources = [{ id: gateId(), kind: 'jacks', index: 0 }];
     this.players = [];
     // Drum voices by node key, plus the one for everything on channel 10 that
-    // no drum sequencer in the patch explains.
+    // no node in the patch explains.
     this.drums = new Map();
     this.drums.set(OTHER_DRUMS, new DrumVoice(this, {
       key: OTHER_DRUMS, label: 'anything else on channel 10', kind: 'other',
@@ -360,16 +360,16 @@ export class Listener {
 
   player(id) { return this.players.find((p) => p.id === id) ?? null; }
 
-  // --- the drum sequencers -------------------------------------------------
+  // --- the drum machines ---------------------------------------------------
 
-  // The patch's drum sequencers, as `drums.js` read them out of it. Called on
+  // The patch's drum machines, as `drums.js` read them out of it. Called on
   // every render, which is every edit, so a lane dragged onto another bus is
   // heard from that bus on the next pass.
   //
-  // The buses a drum sequencer speaks on are read *by this listener*, not by a
-  // player: a drum sequencer is audible because it is in the patch, the same
-  // way it is visible because it is in the patch. Nobody should have to add a
-  // player to hear whether the kick is on the one.
+  // The buses they speak on are read *by this listener*, not by a player: a
+  // drum machine is audible because it is in the patch, the same way it is
+  // visible because it is in the patch. Nobody should have to add a player to
+  // hear whether the kick is on the one.
   setDrumSources(sources) {
     this.drumSources = sources;
     const wanted = new Set();
@@ -382,7 +382,7 @@ export class Listener {
       if (source.kind === 'note') {
         if (source.bus === P.NO_BUS) continue;
         wanted.add(source.bus);
-        this.noteRoute.set(source.bus, source.key);
+        this.noteRoute.set(source.bus, { key: source.key, channel: source.channel ?? null });
       } else {
         for (const lane of source.lanes) this.gateRoute.set(lane.bus, { key: source.key, piece: lane.piece });
       }
@@ -418,7 +418,7 @@ export class Listener {
   }
 
   // Which MIDI targets carry drums that are already being heard on their bus.
-  // A drum sequencer patched to a MIDI out sends the same hit twice as far as
+  // A drum machine patched to a MIDI out sends the same hit twice as far as
   // this page is concerned - once on the bus it writes, once on the cable -
   // and playing both is a flam nobody programmed.
   setDrumOutMask(mask) { this.drumOutMask = mask | 0; }
@@ -436,7 +436,7 @@ export class Listener {
     return voice;
   }
 
-  // The voices worth showing: the patch's drum sequencers in patch order, and
+  // The voices worth showing: the patch's drum machines in patch order, and
   // the catch-all last. A voice for a node the patch no longer has is kept -
   // its kit is a preference, and patches come back - but it is not listed.
   drumRows() {
@@ -449,25 +449,31 @@ export class Listener {
     return rows;
   }
 
-  // The drum sequencer that wrote this event, if one did. A note bus a drum
-  // sequencer writes is drums whatever channel it is on, because the sequencer
-  // says so - and it is heard whether or not anybody is listening to that bus,
-  // which is the point: a drum sequencer is audible because it is in the
-  // patch.
+  // The drum instrument that wrote this event, if one did. Heard whether or
+  // not anybody is listening to that bus, which is the point: an instrument in
+  // the patch is audible because it is in the patch.
+  //
+  // A note bus a drum *sequencer* writes is drums whatever channel it is on,
+  // because the sequencer says so. A bus that is drums because the node
+  // writing it is set to channel 10 is drums only on that channel: a bus takes
+  // as many writers as somebody patches to it, and a melody sharing one with a
+  // drum is still a melody.
   drumVoiceFor(event) {
     if (event.bus === undefined) return null;
-    const key = this.noteRoute.get(event.bus);
-    return key ? this.drums.get(key) : null;
+    const route = this.noteRoute.get(event.bus);
+    if (!route) return null;
+    if (route.channel !== null && event.channel !== route.channel) return null;
+    return this.drums.get(route.key);
   }
 
-  // A drum that is nobody's sequencer: channel 10, the one convention there
-  // is. This one *is* only heard where somebody is listening - a player on
-  // that bus, or the player on what the module sends - because a note bus is
-  // read for the piano roll as well, and a page that made a noise for every
-  // bus it was drawing would be playing patches nobody asked to hear.
+  // A drum that is nobody's node: channel 10 arriving from outside the patch.
+  // This one *is* only heard where somebody is listening - a player on that
+  // bus, or the player on what the module sends - because a note bus is read
+  // for the piano roll as well, and a page that made a noise for every bus it
+  // was drawing would be playing patches nobody asked to hear.
   //
   // A hit already heard on the bus that produced it is dropped rather than
-  // played twice: a drum sequencer patched to a MIDI out sends the same hit
+  // played twice: a drum machine patched to a MIDI out sends the same hit
   // down the cable, and two of them is a flam nobody programmed.
   otherDrumFor(event) {
     if (event.channel !== DRUM_CHANNEL) return null;

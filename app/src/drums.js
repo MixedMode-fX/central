@@ -40,8 +40,14 @@
 // page's ears, the same as `audio.js` around it.
 
 import * as P from './protocol.js';
+import { Domain } from './validate.js';
 
 // --- what a lane is, and what a note is -------------------------------------
+
+// The channel the world keeps drums on. It is the only convention MIDI has
+// for "this note is a drum rather than a pitch", and the module has no other:
+// a node set to it is a drum machine whatever algorithm it is running.
+export const DRUM_CHANNEL = 10;
 
 // The note a `DrumSeqMidi` lane sends when its note number is left at zero.
 // This mirrors `GM_DEFAULT_NOTE` in `src/algorithm/sequencer/drum_sequencer.cpp`
@@ -387,12 +393,21 @@ export function hit(ctx, destination, { kit = DEFAULT_KIT, piece = 'perc', note 
   if (spec.click) playClick(ctx, destination, spec.click, at, level);
 }
 
-// --- which drum sequencers a patch has --------------------------------------
+// --- which of a patch's nodes are drums --------------------------------------
 
-// The drum sequencers in a patch, each with the buses it speaks on. This is
-// what makes a kit and a level *per drum sequencer* possible at all: two drum
+// The drum instruments in a patch, each with the buses it speaks on. This is
+// what makes a kit and a level *per instrument* possible at all: two drum
 // machines in one patch are two instruments, and "which of these two is the
 // one I can hear" is exactly the question a shared voice cannot answer.
+//
+// Two things count. A **drum sequencer** is drums because of what it is, on
+// every channel it sends: it is a grid of named lanes and nothing else it
+// could be. Anything else is drums because of the **channel** it emits on -
+// a Euclidean pattern through a `GateToNote` set to channel 10 is a drum
+// machine as surely as a `DrumSeqMidi` is, and so is a note sequencer, a
+// delay or a `CvToNote` set there. Both are heard on the bus they write,
+// because they are in the patch, rather than only where somebody has pointed
+// a player.
 //
 // A node's identity is its index, the same identity the canvas uses to
 // remember where a block was dragged to and the same one every addressed
@@ -404,31 +419,58 @@ export function drumSources(device, patch) {
   patch.nodes.forEach((node, index) => {
     const descriptor = device.byId?.get(node.algorithmId);
     if (!descriptor) return;
-    const midi = descriptor.name === 'DrumSeqMidi';
-    if (!midi && descriptor.name !== 'DrumSeqGate') return;
-    const lanes = [];
-    let bus = P.NO_BUS;
-    if (midi) {
-      // One note outlet for every lane: the note number says which drum, so
-      // the lanes are told apart by what they play rather than by where.
-      bus = node.outBus[0] ?? P.NO_BUS;
-    } else {
-      // One gate outlet per lane, and a gate carries no note number - so the
-      // lane *is* the drum, by the firmware's own default note for it.
-      for (let lane = 0; lane < P.DRUM_SEQ_LANES && lane < descriptor.nOut; lane++) {
-        const laneBus = node.outBus[lane] ?? P.NO_BUS;
-        if (laneBus === P.NO_BUS) continue;
-        lanes.push({ lane, bus: laneBus, piece: pieceOf(LANE_NOTES[lane]) });
-      }
-    }
-    sources.push({
-      key: `node:${index}`,
-      index,
-      label: `${descriptor.name} ${index}`,
-      kind: midi ? 'note' : 'gate',
-      bus,
-      lanes,
-    });
+    const source = drumSource(descriptor, node);
+    if (!source) return;
+    sources.push({ key: `node:${index}`, index, label: `${descriptor.name} ${index}`, ...source });
   });
   return sources;
+}
+
+// One node, if it is drums. `channel` is which notes on `bus` belong to this
+// voice: a drum sequencer takes the whole bus, and a node that is drums only
+// because of its channel takes only that channel, because a bus has as many
+// writers as somebody patches to it and a melody sharing one is not
+// percussion.
+function drumSource(descriptor, node) {
+  if (descriptor.name === 'DrumSeqMidi') {
+    // One note outlet for every lane: the note number says which drum, so
+    // the lanes are told apart by what they play rather than by where.
+    return { kind: 'note', channel: null, bus: node.outBus[0] ?? P.NO_BUS, lanes: [] };
+  }
+  if (descriptor.name === 'DrumSeqGate') {
+    // One gate outlet per lane, and a gate carries no note number - so the
+    // lane *is* the drum, by the firmware's own default note for it.
+    const lanes = [];
+    for (let lane = 0; lane < P.DRUM_SEQ_LANES && lane < descriptor.nOut; lane++) {
+      const laneBus = node.outBus[lane] ?? P.NO_BUS;
+      if (laneBus === P.NO_BUS) continue;
+      lanes.push({ lane, bus: laneBus, piece: pieceOf(LANE_NOTES[lane]) });
+    }
+    return { kind: 'gate', channel: null, bus: P.NO_BUS, lanes };
+  }
+  if (channelOf(descriptor, node) !== DRUM_CHANNEL) return null;
+  const out = descriptor.outDomain?.indexOf(Domain.Note) ?? -1;
+  if (out < 0) return null;
+  const bus = node.outBus[out] ?? P.NO_BUS;
+  if (bus === P.NO_BUS) return null;
+  return { kind: 'note', channel: DRUM_CHANNEL, bus, lanes: [] };
+}
+
+// The channel a node emits on, or null if it does not name one. A `channel`
+// parameter is the one place a node says, and a stored zero is the
+// descriptor's default like every other parameter byte (`src/node/param.h`).
+// A repeating group is skipped: a drum sequencer's per-lane channel is a
+// property of the lane rather than of the node, and the node is already drums
+// without it.
+function channelOf(descriptor, node) {
+  for (const group of descriptor.params ?? []) {
+    if (!group || group.repeat > 1) continue;
+    for (let f = 0; f < group.nFields; f++) {
+      const field = group.fields[f];
+      if (field?.kind !== P.ParamKind.PARAM_CHANNEL) continue;
+      const stored = node.params?.[group.first + f] ?? 0;
+      return stored === 0 ? field.def : stored;
+    }
+  }
+  return null;
 }

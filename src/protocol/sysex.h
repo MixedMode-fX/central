@@ -29,7 +29,7 @@
 // Bumped when a message's layout changes in a way an older host would
 // misread. A host that does not know this version is told so and writes
 // nothing, rather than writing garbage into a live patch.
-#define SYSEX_PROTOCOL_VERSION 4
+#define SYSEX_PROTOCOL_VERSION 5
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.

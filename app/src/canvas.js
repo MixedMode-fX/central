@@ -21,9 +21,10 @@
 // for the detail of whichever block is selected.
 
 import * as P from './protocol.js';
-import { el, nodeCard, jackCard } from './views.js';
+import { el, nodeCard, jackCard, iconButton, closeMenu } from './views.js';
 import { Domain, domainName, busCount } from './validate.js';
 import { routeCard } from './midi.js';
+import { nodeRollPanel } from './scope.js';
 import {
   BlockKind, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear, portOf,
   planModulation, modulationChoices, isModPort,
@@ -164,11 +165,11 @@ function blockEl(app, block, position) {
       block.kind === BlockKind.Node ? el('span', { class: 'blk-index' }, block.index) : null,
       el('span', { class: 'blk-title' }, block.title),
       block.clocked ? el('span', { class: 'blk-clocked', title: 'runs from the master clock' }, '◴') : null,
-      el('button', {
-        class: 'blk-remove', title: 'remove this block', 'aria-label': `remove ${block.title}`,
+      iconButton({
+        icon: 'close', class: 'blk-remove', label: `remove ${block.title}`,
         onpointerdown: (e) => e.stopPropagation(),
         onclick: (e) => { e.stopPropagation(); app.removeBlock(block); },
-      }, '×')),
+      })),
     el('div', { class: 'blk-body' },
       el('div', { class: 'blk-col' }, block.inlets.map((p) => socketRow(app, block, p, false))),
       el('div', { class: 'blk-col right' }, block.outlets.map((p) => socketRow(app, block, p, true)))));
@@ -295,7 +296,7 @@ function askForParameter(app, ref, blockId, at) {
     return;
   }
 
-  closeParamMenu();
+  closeMenu();
   const menu = el('div', {
     class: 'param-menu', id: 'param-menu', role: 'listbox',
     style: `left:${at.x}px; top:${at.y}px`,
@@ -304,7 +305,7 @@ function askForParameter(app, ref, blockId, at) {
     el('div', { class: 'param-menu-list' }, choices.map((choice) => el('button', {
       class: 'param-menu-item', role: 'option',
       onclick: () => {
-        closeParamMenu();
+        closeMenu();
         app.applyPlan(planModulation(geometry(app).blocks, app.patch, app.device.capabilities,
                                      ref, blockId, choice.param, { device: app.device }));
       },
@@ -316,7 +317,7 @@ function askForParameter(app, ref, blockId, at) {
   const dismiss = (e) => {
     if (e.type === 'keydown' && e.key !== 'Escape') return;
     if (e.type === 'pointerdown' && menu.contains(e.target)) return;
-    closeParamMenu();
+    closeMenu();
   };
   menu.dismiss = dismiss;
   // Deferred, so the pointerup that opened this does not immediately close it.
@@ -324,16 +325,6 @@ function askForParameter(app, ref, blockId, at) {
     window.addEventListener('pointerdown', dismiss);
     window.addEventListener('keydown', dismiss);
   }, 0);
-}
-
-function closeParamMenu() {
-  const menu = document.getElementById('param-menu');
-  if (!menu) return;
-  if (menu.dismiss) {
-    window.removeEventListener('pointerdown', menu.dismiss);
-    window.removeEventListener('keydown', menu.dismiss);
-  }
-  menu.remove();
 }
 
 function socketUnder(x, y) {
@@ -484,8 +475,8 @@ function arrowLayer(app, geom) {
 
     let cut = null;
     if (selected) {
-      cut = el('button', {
-        class: 'wire-cut', title: 'disconnect', 'aria-label': 'disconnect this arrow',
+      cut = iconButton({
+        icon: 'cut', class: 'wire-cut', label: 'disconnect this arrow',
         onpointerdown: (e) => e.stopPropagation(),
         onclick: (e) => {
           e.stopPropagation();
@@ -493,7 +484,7 @@ function arrowLayer(app, geom) {
           const same = fresh.arrows.find((a) => a.id === arrow.id);
           app.applyPlan(same ? planDisconnect(fresh.blocks, same) : { ok: false, why: 'already gone' });
         },
-      }, '×');
+      });
       cuts.push(cut);
     }
     svg.append(line, hit);
@@ -555,17 +546,31 @@ export function canvasPanel(app, computed = null) {
     style: `--blk-w:${BLOCK_W}px; --blk-head:${HEAD_H}px; `
          + `--blk-row:${ROW_H}px; --blk-pad:${PAD_Y}px`,
   },
+    // The bar above the picture is where a patch grows: what to add, and
+    // the button that adds it, beside the zoom. It used to be a panel at the
+    // foot of the tab, under the detail of whatever was selected, which on a
+    // phone was a screen and a half away from the canvas it added to.
     el('div', { class: 'canvas-bar' },
-      geom.blocks.length ? null : el('span', { class: 'hint' }, 'empty'),
+      addBar(app),
       el('div', { class: 'canvas-zoom' },
-        el('button', { class: 'ghost', title: 'zoom out', 'aria-label': 'zoom out',
-                       onclick: () => zoomFromButton(app, 1 / 1.25) }, '−'),
-        el('button', { class: 'ghost', title: 'zoom in', 'aria-label': 'zoom in',
-                       onclick: () => zoomFromButton(app, 1.25) }, '+'),
-        el('button', { class: 'ghost',
-                       onclick: () => { app.canvas.fit = true; app.render(); } }, 'fit'))),
+        iconButton({ icon: 'zoomOut', label: 'zoom out', class: 'ghost',
+                     onclick: () => zoomFromButton(app, 1 / 1.25) }),
+        iconButton({ icon: 'zoomIn', label: 'zoom in', class: 'ghost',
+                     onclick: () => zoomFromButton(app, 1.25) }),
+        iconButton({ icon: 'fit', label: 'fit the whole patch in the window', class: 'ghost',
+                     onclick: () => { app.canvas.fit = true; app.render(); } }))),
     viewport,
-    busLegend(app, geom));
+    el('div', { class: 'canvas-foot' },
+      geom.blocks.length ? busLegend(app, geom) : el('span', { class: 'hint' }, 'an empty patch'),
+      el('span', { class: 'hint' }, capacityLine(app, geom))));
+}
+
+// What the module can hold and how much of it this patch has taken, read from
+// the device rather than assumed: an app that lets you build a patch the
+// module will reject is worse than no app.
+function capacityLine(app, geom) {
+  const c = app.device.capabilities;
+  return `${app.patch.nodes.length}/${c.nodes} nodes · free buses: ${busCapacity(app, geom)}`;
 }
 
 function zoomFromButton(app, factor) {
@@ -584,7 +589,7 @@ function busLegend(app, geom) {
     const k = `${arrow.domain}:${arrow.bus}`;
     if (!used.has(k)) used.set(k, arrow);
   }
-  if (!used.size) return null;
+  if (!used.size) return el('span', { class: 'hint' }, 'nothing connected yet');
   const chips = [...used.values()]
     .sort((a, b) => a.domain - b.domain || a.bus - b.bus)
     .map((arrow) => el('span', {
@@ -594,51 +599,77 @@ function busLegend(app, geom) {
   return el('div', { class: 'canvas-legend' }, chips);
 }
 
-// --- the inspector ----------------------------------------------------------
+// --- the details panel --------------------------------------------------------
 
 // What was clicked, in full. A node gets the card it always had - every
-// parameter, its sequencer grid, its bus selectors - because the canvas is a
-// way of *seeing* a patch and this is where it is edited in detail.
+// parameter, its sequencer grid, its bus selectors - and under it the roll of
+// what it read and wrote, because the canvas is a way of *seeing* a patch and
+// this is where it is edited in detail.
+//
+// The panel folds. Its bar carries the block's name, its remove button, a
+// chevron that folds the body away and a cross that puts the panel away by
+// deselecting - so on a phone, where the panel is below a canvas that fills
+// the screen, the card can be folded to a bar without losing the selection
+// it belongs to. Whether it is folded is remembered across renders like every
+// other disclosure (`App.opened`).
 export function canvasInspector(app) {
   const selected = app.canvas.selected;
   if (!selected) return null;
+  const open = app.isOpen('details');
+  const bar = (title, { before = [], after = [] }) => el('div', { class: 'details-bar' },
+    iconButton({ icon: open ? 'down' : 'up', class: 'ghost details-fold',
+                 label: open ? 'fold the details away' : 'unfold the details',
+                 'aria-expanded': open ? 'true' : 'false',
+                 onclick: () => { app.setOpen('details', !open); app.render(); } }),
+    ...before,
+    el('h2', { class: 'details-title' }, title),
+    ...after,
+    iconButton({ icon: 'close', class: 'ghost details-close', label: 'close the details',
+                 onclick: () => app.select(null) }));
+  const panel = (title, extra, ...body) => el('section', {
+    class: `panel details ${open ? '' : 'folded'}`,
+  }, bar(title, extra), open ? body : null);
+
   if (selected.kind === 'arrow') {
     const arrow = app.canvas.geom?.arrows.find((a) => a.id === selected.id);
     if (!arrow) return el('p', { class: 'hint' }, 'gone');
     const from = app.canvas.geom.blocks.find((b) => b.id === arrow.from.blockId);
     const to = app.canvas.geom.blocks.find((b) => b.id === arrow.to.blockId);
-    return el('section', { class: 'panel' },
-      el('h2', {}, 'the arrow'),
-      el('p', {}, `${from?.title ?? '?'} → ${to?.title ?? '?'}, `
-                + `on ${domainName(arrow.domain)} bus ${arrow.bus}`),
+    const domain = domainName(arrow.domain);
+    const disconnect = () => {
+      const fresh = geometry(app);
+      const same = fresh.arrows.find((a) => a.id === arrow.id);
+      app.applyPlan(same ? planDisconnect(fresh.blocks, same) : { ok: false, why: 'already gone' });
+    };
+    return panel(`${domain} bus ${arrow.bus}`,
+      { before: [el('span', { class: `chip dom-${domain}` }, domain)],
+        after: [iconButton({ icon: 'cut', label: 'disconnect this arrow', class: 'ghost danger',
+                             onclick: disconnect })] },
+      el('p', {}, `${from?.title ?? '?'} ${from ? portLabel(from, arrow.from.at, true) : ''} → `
+                + `${to?.title ?? '?'} ${to ? portLabel(to, arrow.to.at, false) : ''}`),
       arrow.writers > 1 || arrow.readers > 1
-        ? el('p', { class: 'hint' },
-            `${arrow.writers} writing · ${arrow.readers} reading`)
-        : null,
-      el('button', { class: 'danger', onclick: () => {
-        const fresh = geometry(app);
-        const same = fresh.arrows.find((a) => a.id === arrow.id);
-        app.applyPlan(same ? planDisconnect(fresh.blocks, same) : { ok: false, why: 'already gone' });
-      } }, 'disconnect'));
+        ? el('p', { class: 'hint' }, `${arrow.writers} writing · ${arrow.readers} reading`)
+        : null);
   }
 
   const block = app.canvas.geom?.blocks.find((b) => b.id === selected.id);
   if (!block) return el('p', { class: 'hint' }, 'gone');
-  if (block.kind === BlockKind.Node) return el('div', { class: 'nodes' }, nodeCard(app, block.index));
-  if (block.kind === BlockKind.Jack) return jackPanel(app, block.index);
-  return el('section', { class: 'panel' },
-    el('h2', {}, block.title),
-    routeCard(app, block.index, block.kind === BlockKind.MidiOut));
+  const remove = iconButton({ icon: 'trash', label: `remove ${block.title}`, class: 'ghost danger',
+                              onclick: () => app.removeBlock(block) });
+  if (block.kind === BlockKind.Node) {
+    const d = app.device.byId.get(app.patch.nodes[block.index]?.algorithmId);
+    return panel(block.title,
+      { before: [el('span', { class: 'node-index' }, block.index)],
+        after: [d?.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null, remove] },
+      el('div', { class: 'nodes' }, nodeCard(app, block.index, { header: false })),
+      nodeRollPanel(app, block.index));
+  }
+  if (block.kind === BlockKind.Jack) return panel(block.title, { after: [remove] }, jackCard(app, block.index));
+  return panel(block.title, { after: [remove] }, routeCard(app, block.index, block.kind === BlockKind.MidiOut));
 }
 
-// The jack's own card, in the panel the inspector gives every block. It is the
-// same card the list view puts in its grid: one jack, edited by one piece of
-// code, wherever it is being looked at.
-function jackPanel(app, index) {
-  return el('section', { class: 'panel' },
-    el('h2', {}, `jack ${index + 1}`),
-    jackCard(app, index));
-}
+const portLabel = (block, at, isOutlet) =>
+  (isOutlet ? block.outlets : block.inlets).find((p) => p.at === at)?.name ?? '';
 
 // --- what is live -----------------------------------------------------------
 
@@ -646,7 +677,7 @@ function jackPanel(app, index) {
 // lights when it is. Same sampling the gate dots and the scope use: read at
 // the paint, a trigger is missed about forty-nine times in fifty.
 export function refreshCanvasLive(app, live) {
-  if (app.patchView !== 'blocks' || !app.canvas?.paths?.size) return;
+  if (app.tab !== 'patch' || !app.canvas?.paths?.size) return;
   for (const [, path] of app.canvas.paths) {
     const domain = Number(path.line.getAttribute('data-domain'));
     if (domain !== Domain.Gate) continue;
@@ -687,14 +718,13 @@ export function addBar(app) {
   const groups = catalogue(app.device.algorithms, ENDPOINTS);
   if (!optionFor(groups, app.addPick)) app.addPick = optionsOf(groups)[0]?.value ?? null;
 
-  return el('section', { class: 'panel add' },
-    el('h2', {}, 'add'),
-    el('div', { class: 'row' },
-      el('div', { class: 'grow' }, richSelect({
-        value: app.addPick, groups, label: 'what to add',
-        onPick: (value) => { app.addPick = value; app.render(); },
-      })),
-      el('button', { class: 'primary', onclick: () => app.add(app.addPick) }, 'add')));
+  return el('div', { class: 'add-row' },
+    el('div', { class: 'grow' }, richSelect({
+      value: app.addPick, groups, label: 'what to add',
+      onPick: (value) => { app.addPick = value; app.render(); },
+    })),
+    iconButton({ icon: 'plus', label: 'add it to the patch', class: 'primary',
+                 onclick: () => app.add(app.addPick) }));
 }
 
 // The free buses left, so "add" and a drag both stop being possible for a

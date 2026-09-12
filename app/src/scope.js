@@ -8,7 +8,8 @@
 //     logic gate and a clock are all things whose output is only readable
 //     *over time*. A row of dots blinking at 60 Hz cannot be compared with
 //     another row of dots blinking at 60 Hz; two traces drawn side by side on
-//     one time axis can be read at a glance.
+//     one time axis can be read at a glance. A control signal is the same
+//     question with a level instead of an edge, so the CV buses are traces too.
 //   * **what is it playing?** A log of note ons is a list of numbers. The same
 //     notes on a pitch-against-time grid are a melody, a chord or a mistake,
 //     and which of the three it is takes no reading at all.
@@ -19,21 +20,25 @@
 // whole reason the scope is worth having: an animation frame is sixteen
 // milliseconds and a trigger is one, so a view that polls cannot be trusted
 // about exactly the signals it exists to show.
+//
+// **Colour is the domain, everywhere.** A gate is green, a note is orange and
+// a control signal is purple in the arrows, the sockets, the bus chips and
+// here. Where one view has to tell several signals of one domain apart - eight
+// note buses on one roll - they are shades of that domain's colour, never a
+// borrowed one, so a green trace is a gate wherever it is seen.
 
 import * as P from './protocol.js';
-import { el, noteName } from './views.js';
+import { el, noteName, iconButton } from './views.js';
 import { Domain } from './validate.js';
+import { inletName, outletName } from './graph.js';
 
-const ROW_H = 18;            // one scope trace
+const ROW_H = 18;            // one gate trace
+const CV_ROW_H = 46;         // a control signal needs room to be a curve
 const TRACE_FONT = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
 const ROLL_GUTTER = 30;      // room for a pitch name
 const ROLL_H = 220;
+const NODE_ROLL_H = 150;
 const ROLL_SLOTS = 4;        // most sub-lanes one pitch lane is split into
-// One hue per note bus, fixed rather than generated, so bus 2 is the same
-// colour in every patch and on every reload. They are spaced around the wheel
-// and kept off the blue and orange that already mean "played in" and "sent
-// out".
-const BUS_HUES = ['#7bd88f', '#b78bd8', '#5ecfd8', '#d87ba6', '#c8d87b', '#8b9ad8', '#d8a05e', '#7bd8c6'];
 const MIN_SEMITONES = 13;    // an octave, so a one-note patch is not a full-height bar
 
 // The page's own palette, read from the stylesheet rather than written out
@@ -41,18 +46,16 @@ const MIN_SEMITONES = 13;    // an octave, so a one-note patch is not a full-hei
 // two colours the day one of them is changed. The fallbacks are what the tests
 // see, where there is no stylesheet to read.
 const FALLBACK = {
-  in: '#6ea8fe', out: '#e8c46a', bus: '#7bd88f',
-  noteOut: '#d8a67b', noteIn: '#6ea8fe',
+  gate: '#7bd88f', note: '#d8a67b', cv: '#b78bd8',
   grid: '#2c313d', dim: '#8b93a7', back: '#12141a', panel: '#1b1e26', raised: '#232833',
 };
 const VARIABLE = {
-  in: '--accent', out: '--warn', bus: '--gate',
-  noteOut: '--note', noteIn: '--accent',
+  gate: '--gate', note: '--note', cv: '--cv',
   grid: '--line', dim: '--dim', back: '--bg', panel: '--panel', raised: '--raised',
 };
 let COLOUR = FALLBACK;
 let read = false;
-function palette() {
+export function palette() {
   if (read) return COLOUR;
   read = true;
   const style = globalThis.getComputedStyle?.(document.documentElement);
@@ -66,56 +69,134 @@ function palette() {
   return COLOUR;
 }
 
+// --- shades of a domain -----------------------------------------------------
+
+// The n-th shade of a colour: the same hue nudged and the lightness stepped,
+// far enough apart to tell two traces of one domain from each other and near
+// enough that every one of them still reads as that domain. Fixed rather than
+// generated from the signal, so note bus 2 is the same shade in every patch
+// and on every reload.
+const SHADES = [[0, 0], [24, 9], [-22, -9], [42, 2], [-40, 11], [8, 18], [30, -12], [-14, 16], [54, -4], [-54, 7]];
+
+function hexToHsl(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return { h: h * 360, s, l };
+}
+
+export function shade(base, index) {
+  const hsl = hexToHsl(base);
+  if (!hsl) return base;
+  const [dh, dl] = SHADES[index % SHADES.length];
+  const h = ((hsl.h + dh) % 360 + 360) % 360;
+  const l = Math.max(0.3, Math.min(0.85, hsl.l + dl / 100));
+  return `hsl(${Math.round(h)} ${Math.round(hsl.s * 100)}% ${Math.round(l * 100)}%)`;
+}
+
+// --- the legend ---------------------------------------------------------------
+
+// One chip per trace, in the trace's colour, and pressing one hides it: a
+// legend is a list of what is on the screen, and the fastest way to look at
+// three traces out of nine is to put the other six away for a moment.
+export function legend(items, hidden, onToggle) {
+  return el('div', { class: 'legend', role: 'group', 'aria-label': 'traces' },
+    items.map((item) => el('button', {
+      type: 'button', class: `legend-chip ${hidden.has(item.key) ? 'off' : ''}`,
+      style: `--key:${item.colour}`,
+      'aria-pressed': hidden.has(item.key) ? 'false' : 'true',
+      title: hidden.has(item.key) ? `show ${item.label}` : `hide ${item.label}`,
+      onclick: () => onToggle(item.key),
+    }, item.label)));
+}
+
+function toggleIn(set, key) {
+  if (set.has(key)) set.delete(key); else set.add(key);
+}
+
 // --- the scope --------------------------------------------------------------
 
-// Which gate buses this patch actually touches. Sixteen traces of which
-// thirteen never move is not a view, it is a wall - so the default is the ones
-// the patch is using, and "every bus" is a checkbox for when something is
-// firing that the patch does not admit to.
-function usedGateBuses(app) {
+// Which buses this patch actually touches. Sixteen traces of which thirteen
+// never move is not a view, it is a wall - so the default is the ones the
+// patch is using, and "every bus" is a checkbox for when something is firing
+// that the patch does not admit to.
+function usedBuses(app, domain) {
   const used = new Set();
-  for (const port of app.patch.gatePorts) {
-    if (port.direction !== P.GatePortDirection.GATE_PORT_UNUSED && port.bus !== P.NO_BUS) used.add(port.bus);
+  if (domain === Domain.Gate) {
+    for (const port of app.patch.gatePorts) {
+      if (port.direction !== P.GatePortDirection.GATE_PORT_UNUSED && port.bus !== P.NO_BUS) used.add(port.bus);
+    }
   }
   for (const node of app.patch.nodes) {
     const d = app.device?.byId.get(node.algorithmId);
     if (!d) continue;
     for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
-      if (d.inDomain[i] === Domain.Gate && node.inBus[i] !== P.NO_BUS) used.add(node.inBus[i]);
+      if (d.inDomain[i] === domain && node.inBus[i] !== P.NO_BUS) used.add(node.inBus[i]);
     }
     for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
-      if (d.outDomain[i] === Domain.Gate && node.outBus[i] !== P.NO_BUS) used.add(node.outBus[i]);
+      if (d.outDomain[i] === domain && node.outBus[i] !== P.NO_BUS) used.add(node.outBus[i]);
+    }
+  }
+  if (domain === Domain.CV) {
+    for (const route of app.patch.modMap ?? []) {
+      if (route && route.bus !== P.NO_BUS) used.add(route.bus);
     }
   }
   return used;
 }
 
-function scopeRows(app) {
+export function scopeRows(app) {
   const rows = [];
-  const buses = app.device?.capabilities?.gateBuses ?? P.N_GATE_BUS;
+  const colours = palette();
+  const gateBuses = app.device?.capabilities?.gateBuses ?? P.N_GATE_BUS;
+  const cvBuses = Math.min(P.N_CV_BUS, app.device?.capabilities?.cvBuses ?? P.N_CV_BUS);
   for (let j = 0; j < P.GPIO_N; j++) {
     const direction = app.patch.gatePorts[j]?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
     if (direction === P.GatePortDirection.GATE_PORT_UNUSED && !app.scopeAll) continue;
     const out = direction === P.GatePortDirection.GATE_PORT_OUT;
     const way = direction === P.GatePortDirection.GATE_PORT_UNUSED ? '–' : (out ? 'out' : 'in');
+    // A jack is a gate, whichever way it faces: green, with the direction in
+    // its name and a lighter shade for an output.
     rows.push({
-      kind: out ? 'out' : 'in', bit: j, source: out ? 'jackOut' : 'jackIn',
+      key: `jack${j}`, kind: 'gate', bit: j, source: out ? 'jackOut' : 'jackIn', height: ROW_H,
       label: `jack ${j + 1} ${way}`, short: `J${j + 1}${way[0]}`,
+      colour: out ? shade(colours.gate, 1) : colours.gate,
     });
   }
-  const used = usedGateBuses(app);
-  for (let b = 0; b < buses; b++) {
-    if (!app.scopeAll && !used.has(b)) continue;
-    rows.push({ kind: 'bus', bit: b, source: 'gate', label: `gate ${b}`, short: `b${b}` });
+  const gates = usedBuses(app, Domain.Gate);
+  for (let b = 0; b < gateBuses; b++) {
+    if (!app.scopeAll && !gates.has(b)) continue;
+    rows.push({ key: `gate${b}`, kind: 'gate', bit: b, source: 'gate', height: ROW_H,
+                label: `gate ${b}`, short: `g${b}`, colour: colours.gate });
+  }
+  const cvs = usedBuses(app, Domain.CV);
+  for (let b = 0; b < cvBuses; b++) {
+    if (!app.scopeAll && !cvs.has(b)) continue;
+    rows.push({ key: `cv${b}`, kind: 'cv', bit: b, source: 'cv', height: CV_ROW_H,
+                label: `CV ${b}`, short: `c${b}`, colour: shade(colours.cv, b) });
   }
   return rows;
 }
 
 export function scopePanel(app) {
   const rows = scopeRows(app);
+  app.scopeHidden ??= new Set();
   const canvas = el('canvas', { class: 'scope', id: 'scope',
-                                'aria-label': 'jack and gate bus levels over the last four seconds' });
-  canvas.traceRows = rows;
+                                'aria-label': 'jack, gate bus and CV bus levels over the last four seconds' });
+  canvas.traceRows = rows.filter((row) => !app.scopeHidden.has(row.key));
   const all = el('input', { type: 'checkbox', class: 'switch',
                             onchange: (e) => { app.scopeAll = e.target.checked; app.render(); } });
   all.checked = Boolean(app.scopeAll);
@@ -123,7 +204,10 @@ export function scopePanel(app) {
     el('h2', {}, 'scope'),
     rows.length
       ? el('div', { class: 'scope-wrap' }, canvas)
-      : el('p', { class: 'hint' }, 'no jack, no gate bus'),
+      : el('p', { class: 'hint' }, 'no jack, no gate bus, no CV bus'),
+    rows.length
+      ? legend(rows, app.scopeHidden, (key) => { toggleIn(app.scopeHidden, key); app.render(); })
+      : null,
     el('div', { class: 'row' },
       el('label', { class: 'bool' }, all, el('span', {}, 'every jack and bus'))));
 }
@@ -133,7 +217,7 @@ export function drawScope(app) {
   if (!canvas || !app.module) return;
   const rows = canvas.traceRows ?? [];
   if (!rows.length) return;
-  const height = rows.length * ROW_H + 12;
+  const height = rows.reduce((sum, row) => sum + row.height, 0) + 12;
   const ctx = fit(canvas, height);
   if (!ctx) return;
   const width = canvas.clientWidth;
@@ -175,13 +259,29 @@ export function drawScope(app) {
     ctx.stroke();
   }
 
+  // The axis is *time*, not "however many columns there are": a module that
+  // has been running for a fifth of a second draws a fifth of a second at the
+  // right-hand edge, under the same one-second grid lines, rather than
+  // stretching it across four.
+  const shown = (count / trace.len) * span;
+  const left = Math.floor(span - shown);
+  const columnsAt = (px) => {
+    const at = (px - (span - shown)) / shown;
+    const from = Math.floor(at * count);
+    const to = Math.max(from + 1, Math.floor((at + trace.len / (span * count)) * count));
+    return [from, Math.min(to, count)];
+  };
+
+  let y0 = 4;
   rows.forEach((row, r) => {
-    const y0 = r * ROW_H + 4;
-    const hi = y0 + 3;
-    const lo = y0 + ROW_H - 5;
-    const colour = COLOUR[row.kind] ?? COLOUR.bus;
+    const top = y0;
+    y0 += row.height;
     ctx.fillStyle = COLOUR.dim;
-    ctx.fillText(labels[r], 4, y0 + ROW_H / 2);
+    ctx.fillText(labels[r], 4, top + row.height / 2);
+    if (row.kind === 'cv') { drawCvRow(ctx, trace, row, top, x0, span, left, count, first, columnsAt); return; }
+
+    const hi = top + 3;
+    const lo = top + row.height - 5;
     ctx.strokeStyle = COLOUR.grid;
     ctx.beginPath();
     ctx.moveTo(x0, lo + 0.5);
@@ -194,20 +294,14 @@ export function drawScope(app) {
     // the trace was scaled down.
     const data = trace[row.source];
     const mask = 1 << row.bit;
-    ctx.strokeStyle = colour;
+    ctx.strokeStyle = row.colour;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     let previous = -1;
-    // The axis is *time*, not "however many columns there are": a module that
-    // has been running for a fifth of a second draws a fifth of a second at the
-    // right-hand edge, under the same one-second grid lines, rather than
-    // stretching it across four.
-    for (let px = Math.floor(span - (count / trace.len) * span); px <= span; px++) {
-      const at = (px - (span - (count / trace.len) * span)) / ((count / trace.len) * span);
-      const from = Math.floor(at * count);
-      const to = Math.max(from + 1, Math.floor((at + trace.len / (span * count)) * count));
+    for (let px = left; px <= span; px++) {
+      const [from, to] = columnsAt(px);
       let value = 0;
-      for (let i = from; i < to && i < count; i++) {
+      for (let i = from; i < to; i++) {
         if (data[(first + i) % trace.len] & mask) { value = 1; break; }
       }
       const x = x0 + px;
@@ -221,17 +315,70 @@ export function drawScope(app) {
   });
 }
 
+// A control signal, as a curve. Unipolar signals sit on the bottom of the
+// row and bipolar ones on a centre line: which it is comes from the signal
+// itself, since the bus does not say (`src/bus/domain.h`), and a signal that
+// never goes negative drawn around a centre line would waste half its row.
+function drawCvRow(ctx, trace, row, top, x0, span, left, count, first, columnsAt) {
+  const COLOUR = palette();
+  const data = trace.cv[row.bit];
+  const full = P.CV_FULL;
+  let negative = false;
+  for (let i = 0; i < count; i++) if (data[(first + i) % trace.len] < 0) { negative = true; break; }
+  const hi = top + 4;
+  const lo = top + row.height - 4;
+  const zero = negative ? (hi + lo) / 2 : lo;
+  const scale = negative ? (lo - hi) / full : (lo - hi) / full;
+  const y = (value) => Math.max(hi, Math.min(lo, zero - value * scale));
+
+  ctx.strokeStyle = COLOUR.grid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x0, Math.round(zero) + 0.5);
+  ctx.lineTo(x0 + span, Math.round(zero) + 0.5);
+  ctx.stroke();
+  if (!count) return;
+
+  ctx.strokeStyle = row.colour;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  let started = false;
+  let last = 0;
+  for (let px = left; px <= span; px++) {
+    const [from, to] = columnsAt(px);
+    // The last column behind the pixel: a level, unlike an edge, is what it
+    // was most recently, and a pixel too narrow for a whole cycle of an LFO
+    // is a pixel the eye reads as its envelope anyway.
+    if (to > from) last = data[(first + Math.max(from, to - 1)) % trace.len];
+    const x = x0 + px;
+    if (!started) { ctx.moveTo(x, y(last)); started = true; } else ctx.lineTo(x, y(last));
+  }
+  ctx.stroke();
+  // The value now, at the right-hand end, in the bus's own units.
+  ctx.fillStyle = row.colour;
+  ctx.font = TRACE_FONT;
+  ctx.textAlign = 'right';
+  ctx.fillText(String(last), x0 + span - 2, negative ? hi + 5 : hi + 5);
+  ctx.textAlign = 'left';
+}
+
 // --- the piano roll ---------------------------------------------------------
 
 // What can appear in the roll, in the order it is stacked and listed: what was
 // played in, what the module sent out, and then each note bus the patch writes.
+// Every one is a shade of the note colour - a note is a note wherever it was
+// seen - and a bus keeps its shade in every roll on the page, so the bus a
+// node writes is the same colour under the node as it is on the play tab.
+export const noteBusColour = (bus) => shade(palette().note, bus + 1);
+
 export function rollSources(app) {
+  const colours = palette();
   const sources = [
-    { key: 'in', label: 'played in', colour: 'noteIn' },
-    { key: 'out', label: 'sent out', colour: 'noteOut' },
+    { key: 'in', label: 'played in', colour: shade(colours.note, 9) },
+    { key: 'out', label: 'sent out', colour: colours.note },
   ];
   for (const bus of [...(app.watchedBuses ?? [])].sort((a, b) => a - b)) {
-    sources.push({ key: `bus${bus}`, bus, label: `note bus ${bus}`, colour: BUS_HUES[bus % BUS_HUES.length] });
+    sources.push({ key: `bus${bus}`, bus, label: `note bus ${bus}`, colour: noteBusColour(bus) });
   }
   return sources;
 }
@@ -239,24 +386,74 @@ export function rollSources(app) {
 const sourceKey = (note) => (note.direction === 'bus' ? `bus${note.bus}` : note.direction);
 
 export function rollPanel(app) {
+  app.rollHidden ??= new Set();
   const canvas = el('canvas', { class: 'roll', id: 'roll',
                                 'aria-label': 'the notes of the last eight seconds' });
   const sources = rollSources(app);
-  const colours = palette();
-  const keys = sources.map((source) => el('span', {
-    class: 'roll-key', style: `--key:${colours[source.colour] ?? source.colour}`,
-  }, source.label));
+  canvas.rollSources = sources.filter((source) => !app.rollHidden.has(source.key));
+  canvas.rollHeight = ROLL_H;
   return el('section', { class: 'panel' },
     el('h2', {}, 'piano roll'),
     el('div', { class: 'scope-wrap' }, canvas),
-    el('div', { class: 'row' }, keys,
-      el('button', { class: 'ghost', onclick: () => { app.module.clearNotes(); } }, 'clear')));
+    el('div', { class: 'row legend-row' },
+      legend(sources, app.rollHidden, (key) => { toggleIn(app.rollHidden, key); app.render(); }),
+      iconButton({ icon: 'clear', label: 'clear the roll', class: 'ghost',
+                   onclick: () => { app.module.clearNotes(); } })));
+}
+
+// The roll under one node: what it reads on its note inlets and what it
+// writes on its note outlets, on one time line. An arpeggiator, a chord node
+// or a Tonnetz is a transformation, and the only way to see a transformation
+// is to see both sides of it - the held chord and the figure it became, the
+// walk and the triads it visited. The buses keep the shades they have on the
+// play tab's roll, so the two views agree.
+export function nodeRollSources(app, index) {
+  const node = app.patch.nodes[index];
+  const d = app.device?.byId.get(node?.algorithmId);
+  if (!d) return [];
+  const sources = [];
+  const seen = new Set();
+  const add = (bus, role, name) => {
+    if (bus === P.NO_BUS || seen.has(bus)) return;
+    seen.add(bus);
+    sources.push({ key: `bus${bus}`, bus, role, colour: noteBusColour(bus),
+                   label: `${role === 'in' ? 'reads' : 'writes'} ${name} · bus ${bus}` });
+  };
+  for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
+    if (d.inDomain[i] === Domain.Note) add(node.inBus[i], 'in', inletName(d, i));
+  }
+  for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
+    if (d.outDomain[i] === Domain.Note) add(node.outBus[i], 'out', outletName(d, i));
+  }
+  return sources;
+}
+
+export function nodeRollPanel(app, index) {
+  if (!app.module || !app.usingModule) return null;
+  const sources = nodeRollSources(app, index);
+  if (!sources.length) return null;
+  app.rollHidden ??= new Set();
+  const hiddenKey = (key) => `node:${index}:${key}`;
+  const canvas = el('canvas', { class: 'roll', id: `roll-node-${index}`, 'data-node': String(index),
+                                'aria-label': `the notes this node read and wrote in the last eight seconds` });
+  canvas.rollSources = sources.filter((source) => !app.rollHidden.has(hiddenKey(source.key)));
+  canvas.rollHeight = NODE_ROLL_H;
+  const items = sources.map((source) => ({ ...source, key: hiddenKey(source.key) }));
+  return el('div', { class: 'grid node-roll' },
+    el('div', { class: 'grid-title' }, 'what it plays'),
+    el('div', { class: 'scope-wrap' }, canvas),
+    legend(items, app.rollHidden, (key) => { toggleIn(app.rollHidden, key); app.render(); }));
 }
 
 export function drawRoll(app) {
-  const canvas = document.getElementById('roll');
+  drawRollOn(app, document.getElementById('roll'));
+  for (const canvas of document.querySelectorAll('canvas.roll[data-node]')) drawRollOn(app, canvas);
+}
+
+function drawRollOn(app, canvas) {
   if (!canvas || !app.module) return;
-  const ctx = fit(canvas, ROLL_H);
+  const height = canvas.rollHeight ?? ROLL_H;
+  const ctx = fit(canvas, height);
   if (!ctx) return;
   const width = canvas.clientWidth;
   const COLOUR = palette();
@@ -264,10 +461,12 @@ export function drawRoll(app) {
   const span = module.rollSpan();
   const now = module.now;
   const from = now - span;
-  const notes = module.notes.filter((n) => (n.end ?? now) >= from);
+  const sources = canvas.rollSources ?? [];
+  const byKey = new Map(sources.map((source) => [source.key, source]));
+  const notes = module.notes.filter((n) => (n.end ?? now) >= from && byKey.has(sourceKey(n)));
 
   ctx.fillStyle = COLOUR.back;
-  ctx.fillRect(0, 0, width, ROLL_H);
+  ctx.fillRect(0, 0, width, height);
 
   // The pitch range follows what is playing, rounded out to whole octaves, so
   // a bass line and a hi-hat are not squeezed onto the same two rows - and so a
@@ -280,7 +479,7 @@ export function drawRoll(app) {
   low = Math.max(0, low - 1);
   high = Math.min(127, high + 1);
   const lanes = high - low + 1;
-  const laneH = ROLL_H / lanes;
+  const laneH = height / lanes;
   const y = (pitch) => (high - pitch) * laneH;
   const x = (t) => ROLL_GUTTER + ((t - from) / span) * Math.max(1, width - ROLL_GUTTER);
 
@@ -311,7 +510,7 @@ export function drawRoll(app) {
     const gx = Math.round(x(now - s * 1e6)) + 0.5;
     ctx.beginPath();
     ctx.moveTo(gx, 0);
-    ctx.lineTo(gx, ROLL_H);
+    ctx.lineTo(gx, height);
     ctx.stroke();
   }
 
@@ -319,15 +518,13 @@ export function drawRoll(app) {
   // same note seen in two places is two bars rather than one drawn over the
   // other. Only the sources present get a slot: a roll with one source in it
   // uses the whole lane, as it should.
-  const sources = rollSources(app);
   const present = sources.filter((source) => notes.some((note) => sourceKey(note) === source.key));
   const slots = Math.max(1, Math.min(ROLL_SLOTS, present.length));
   const slotOf = new Map(present.map((source, i) => [source.key, Math.min(i, slots - 1)]));
-  const colourOf = (source) => COLOUR[source.colour] ?? source.colour;
-  const byKey = new Map(sources.map((source) => [source.key, source]));
 
   for (const note of notes) {
     const key = sourceKey(note);
+    const source = byKey.get(key);
     const start = Math.max(from, note.start);
     const end = Math.min(now, note.end ?? now);
     const left = x(start);
@@ -336,8 +533,10 @@ export function drawRoll(app) {
     const slotH = laneH / slots;
     const top = y(note.pitch) + slot * slotH;
     const barH = Math.max(1.5, slotH - Math.min(1.5, slotH / 4));
-    ctx.globalAlpha = note.direction === 'in' ? 0.5 : 0.4 + 0.6 * (note.velocity / 127);
-    ctx.fillStyle = colourOf(byKey.get(key) ?? { colour: 'dim' });
+    // What a node reads is context for what it wrote, so it is drawn fainter.
+    const faint = note.direction === 'in' || source?.role === 'in';
+    ctx.globalAlpha = faint ? 0.45 : 0.4 + 0.6 * (note.velocity / 127);
+    ctx.fillStyle = source?.colour ?? COLOUR.dim;
     ctx.fillRect(left, top, right - left, barH);
     ctx.globalAlpha = 1;
     if (note.end === null) {
@@ -349,12 +548,12 @@ export function drawRoll(app) {
 
   // The playhead, at the right edge: the notes scroll under it.
   ctx.fillStyle = COLOUR.dim;
-  ctx.fillRect(width - 1, 0, 1, ROLL_H);
+  ctx.fillRect(width - 1, 0, 1, height);
 
   if (!notes.length) {
     ctx.fillStyle = COLOUR.dim;
     ctx.font = '12px ui-sans-serif, system-ui, sans-serif';
-    ctx.fillText('nothing playing', ROLL_GUTTER + 8, ROLL_H / 2);
+    ctx.fillText('nothing playing', ROLL_GUTTER + 8, height / 2);
   }
 }
 

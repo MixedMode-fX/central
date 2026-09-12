@@ -30,12 +30,15 @@ import { SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FE
 import { EXAMPLES } from '../src/examples.js';
 import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/schema.js';
 import { EmbeddedModule } from '../src/module.js';
-import { slider } from '../src/views.js';
+import { slider, paramSections, paramSection, PARAM_SECTIONS } from '../src/views.js';
+import { shade, nodeRollSources, scopeRows } from '../src/scope.js';
+import { ICON_NAMES } from '../src/icons.js';
 import { Listener, gateHits } from '../src/audio.js';
 import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/drums.js';
 import {
   connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
   applyWrite, freeBus, waitingBus, planJackDirection, planPortFlip, applyPortFlip,
+  planModulation, planBusModulation,
 } from '../src/graph.js';
 import { catalogue, filterGroups, optionsOf } from '../src/picker.js';
 import { ENDPOINTS } from '../src/canvas.js';
@@ -478,6 +481,159 @@ await test('a route with no block to land on is still listed', async () => {
             'a clock route has nowhere to be drawn, so the table is where it lives');
 });
 
+// --- the details panel ---------------------------------------------------------
+//
+// A node's parameters are sorted onto the same few sections on every card -
+// which notes, when, how loud, how likely - rather than left in the order the
+// firmware stores them. The sorting is arithmetic on the descriptors, so it
+// is checked here against every algorithm the module reports.
+await test('parameters are filed by what they do, on every node', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const named = (name) => device.algorithms.find((d) => d?.name === name);
+  const where = (d, param) => paramSections(d.params)
+    .find((section) => section.params.some((p) => p.pd.name === param))?.key;
+
+  // The same word lands in the same place whichever node it is on.
+  for (const name of ['Chord', 'Tonnetz', 'Harmony']) {
+    const d = named(name);
+    assert.ok(d, `${name} is in this firmware`);
+    assert.equal(where(d, 'root'), 'pitch', `${name}: root`);
+    assert.equal(where(d, 'scale'), 'pitch', `${name}: scale`);
+    assert.equal(where(d, 'velocity'), 'level', `${name}: velocity`);
+  }
+  assert.equal(where(named('Tonnetz'), 'channel'), 'midi');
+  assert.equal(where(named('Tonnetz'), 'seed'), 'chance');
+  assert.equal(where(named('Arpeggiator'), 'mode'), 'mode');
+  assert.equal(where(named('LFO'), 'rate'), 'time');
+  assert.equal(paramSection({ name: 'anything at all', kind: P.ParamKind.PARAM_NUMBER }), 'other',
+               'a word the table has never met is still a control');
+
+  // Nothing is lost in the sorting: every header parameter of every
+  // algorithm is on exactly one section, in the order the sections are
+  // declared, and a table's fields stay out of it.
+  const order = PARAM_SECTIONS.map((s) => s.key);
+  for (const d of device.algorithms) {
+    if (!d) continue;
+    const expected = [];
+    for (const group of d.params) {
+      if (!group || group.repeat > 1) continue;
+      for (let f = 0; f < group.nFields; f++) {
+        const pd = group.fields[f];
+        if (pd && !(pd.min === 0 && pd.max === 0)) expected.push(group.first + f);
+      }
+    }
+    const sections = paramSections(d.params);
+    const seen = sections.flatMap((s) => s.params.map((p) => p.at)).sort((a, b) => a - b);
+    assert.deepEqual(seen, expected, `${d.name}: every parameter once`);
+    const keys = sections.map((s) => order.indexOf(s.key));
+    assert.deepEqual(keys, [...keys].sort((a, b) => a - b), `${d.name}: sections in order`);
+  }
+});
+
+// A route made from the parameter's side - the CV button beside a control -
+// is the route a drag on the canvas makes, and the module takes it.
+await test('a route from the parameter side is the route a drag makes, and moves rather than doubles', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const caps = device.capabilities;
+  const patch = codec.emptyPatch();
+  const lfo = device.algorithms.find((d) => d?.name === 'LFO');
+  const transpose = device.algorithms.find((d) => d?.name === 'Transpose');
+  for (const d of [lfo, transpose]) {
+    const node = codec.emptyNode(d.id);
+    connectNewNode(device, patch, node, d);
+    patch.nodes.push(node);
+  }
+  const semitones = transpose.params[0].fields.findIndex((pd) => pd.name === 'semitones');
+  assert.ok(semitones >= 0, 'Transpose has a semitones parameter');
+  const cvBus = patch.nodes[0].outBus[0];
+  assert.notEqual(cvBus, P.NO_BUS, 'the LFO arrived on a CV bus');
+
+  const fromButton = planBusModulation(patch, caps, 1, semitones, cvBus, { device });
+  assert.ok(fromButton.ok, fromButton.why);
+  const blocks = patchBlocks(device, patch);
+  const fromDrag = planModulation(blocks, patch, caps, { blockId: 'node:0', at: 0, isOutlet: true },
+                                  'node:1', semitones, { device });
+  assert.ok(fromDrag.ok, fromDrag.why);
+  assert.deepEqual(fromButton.routes[0].route, fromDrag.routes[0].route,
+                   'the two gestures build one route');
+
+  patch.modMap[fromButton.routes[0].slot] = fromButton.routes[0].route;
+  await device.sendPatch(patch, codec.emptyGlobals());       // the firmware validates it
+
+  // Pointing the same parameter at another bus edits the route it has.
+  const moved = planBusModulation(patch, caps, 1, semitones, cvBus + 1, { device });
+  assert.ok(moved.ok, moved.why);
+  assert.equal(moved.routes[0].slot, fromButton.routes[0].slot, 'the same slot');
+  assert.equal(moved.routes[0].route.bus, cvBus + 1);
+  assert.match(moved.said, /now reads/);
+
+  // And the answer to "what is not possible" is a sentence, not a throw.
+  assert.equal(planBusModulation(patch, caps, 1, semitones, 99).ok, false);
+  assert.equal(planBusModulation(patch, caps, 7, 0, 0).ok, false);
+});
+
+// A control signal is a level, so the scope keeps its value per column the
+// way it keeps a gate's edge, straight off the bus once a pass.
+await test('a control signal reaches the scope, and the scope lists it', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const lfo = device.algorithms.find((d) => d?.name === 'LFO');
+  const node = codec.emptyNode(lfo.id);
+  connectNewNode(device, patch, node, lfo);
+  patch.nodes.push(node);
+  await device.sendPatch(patch, codec.emptyGlobals());
+  module.advance(1_500_000);
+  const bus = node.outBus[0];
+  const trace = module.trace;
+  let low = Infinity;
+  let high = -Infinity;
+  for (let i = 0; i < trace.filled; i++) {
+    low = Math.min(low, trace.cv[bus][i]);
+    high = Math.max(high, trace.cv[bus][i]);
+  }
+  assert.ok(high > low, `the LFO never moved on the trace (${low}..${high})`);
+  assert.ok(high <= P.CV_FULL && low >= -P.CV_FULL, 'in the bus\'s own units');
+  assert.equal(module.cv(bus), trace.cv[bus][(trace.head + trace.len - 1) % trace.len],
+               'the newest column is what the bus holds now');
+
+  const rows = scopeRows({ patch, device, scopeAll: false });
+  assert.ok(rows.some((row) => row.kind === 'cv' && row.bit === bus), 'the bus the patch writes is a row');
+  assert.ok(!rows.some((row) => row.kind === 'cv' && row.bit === bus + 1), 'and a bus nobody uses is not');
+  assert.ok(rows.every((row) => row.colour), 'every row carries its colour to the legend');
+});
+
+// The roll under a node shows both sides of it, in the shades the buses have
+// everywhere else; and a shade never leaves its domain.
+await test('a node\'s roll lists what it reads and writes, in the domain\'s colour', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 2 };
+  const chord = device.algorithms.find((d) => d?.name === 'Chord');
+  const node = codec.emptyNode(chord.id);
+  connectNewNode(device, patch, node, chord);
+  node.inBus[0] = 2;                     // the chord is optional to patch; here it is patched
+  patch.nodes.push(node);
+  const sources = nodeRollSources({ patch, device }, 0);
+  assert.equal(sources.filter((s) => s.role === 'in').length, 1, 'the held chord, once');
+  assert.equal(sources.filter((s) => s.role === 'out').length, 1, 'the chord it makes, once');
+  assert.ok(sources.every((s) => /^hsl\(/.test(s.colour)), 'a shade of the note colour');
+  assert.deepEqual(nodeRollSources({ patch, device }, 9), [], 'no node, no roll');
+
+  // Shades of green are green: the hue stays within a quarter turn of the
+  // base, so a trace of any gate bus still reads as a gate.
+  const hue = (c) => Number(/hsl\((\d+)/.exec(c)[1]);
+  for (let i = 0; i < 12; i++) {
+    const h = hue(shade('#7bd88f', i));
+    assert.ok(Math.abs(h - 130) < 60, `shade ${i} wandered to hue ${h}`);
+  }
+  assert.equal(shade('not a colour', 1), 'not a colour', 'a colour it cannot read is left alone');
+  assert.ok(ICON_NAMES.includes('cv') && ICON_NAMES.includes('cut'), 'the icons the buttons ask for exist');
+});
+
 // --- the patch format, as a schema -------------------------------------------
 //
 // `schema.js` turns what the device reported into a JSON Schema, so that
@@ -849,7 +1005,7 @@ await test('the built page contains every module, with nothing left to import', 
   const code = bundle('app.js');
   for (const name of ['app.js', 'module.js', 'storage.js', 'perform.js', 'controller.js',
                       'audio.js', 'drums.js', 'library.js', 'scope.js', 'views.js', 'midi.js',
-                      'schema.js', 'protocol.js']) {
+                      'schema.js', 'protocol.js', 'icons.js']) {
     assert.ok(code.includes(`__define('${name}'`), `${name} is not in the build`);
   }
   // Nothing may be left that a browser would try to fetch: the built page is
@@ -1313,11 +1469,8 @@ await test('a block dragged somewhere is remembered beside the patch, not in it'
   library.dropLayout(entry.id);
   assert.equal(library.layoutFor(entry.id), null);
 
-  // A view preference is remembered, and a patch nobody arranged simply gets
-  // the automatic layout.
-  library.saveView('list');
-  assert.equal(library.readCanvas().view, 'list');
-  assert.deepEqual(library.layoutFor('p-new'), { 'node:0': [10, 20] }, 'and the layouts survived it');
+  // A patch nobody arranged simply gets the automatic layout.
+  assert.equal(library.layoutFor('nobody'), null);
 });
 
 await test('removing a node moves the blocks after it with it', async () => {

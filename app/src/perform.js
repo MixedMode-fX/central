@@ -14,7 +14,7 @@
 // job for the notes. Both are in `scope.js`.
 
 import * as P from './protocol.js';
-import { el, noteName, slider, busUsers } from './views.js';
+import { el, noteName, slider, busUsers, iconButton } from './views.js';
 import { portNames, MUSICAL_PORTS, CLOCK_SOURCES } from './names.js';
 import { scopePanel, drawScope, rollPanel, drawRoll } from './scope.js';
 import { WAVES } from './audio.js';
@@ -116,9 +116,10 @@ function transportPanel(app) {
   return el('section', { class: 'panel' },
     el('h2', {}, 'clock'),
     el('div', { class: 'row' },
-      el('button', { onclick: () => module.clockStart() }, 'start'),
-      el('button', { onclick: () => module.clockStop() }, 'stop'),
-      el('button', { class: 'ghost', onclick: () => module.clockResume() }, 'continue')),
+      iconButton({ icon: 'play', label: 'start the clock', text: 'start', onclick: () => module.clockStart() }),
+      iconButton({ icon: 'stop', label: 'stop the clock', text: 'stop', onclick: () => module.clockStop() }),
+      iconButton({ icon: 'resume', label: 'continue from where the clock stopped', text: 'continue',
+                   class: 'ghost', onclick: () => module.clockResume() })),
     el('div', { class: 'row' },
       el('span', { class: 'field-name' }, 'source'), source,
       el('span', { class: 'field-name' }, 'tempo'), bpm),
@@ -288,14 +289,14 @@ function listenPanel(app) {
     el('h4', { class: 'spaced' }, 'players'),
     el('div', { class: 'players' }, listener.players.map((player) => playerRow(app, player))),
     el('div', { class: 'row' },
-      el('button', { class: 'ghost', onclick: () => {
+      iconButton({ icon: 'plus', label: 'add a player', text: 'player', class: 'ghost', onclick: () => {
         // A new player starts on a bus rather than on the output: one of those
         // exists already, and a second copy of it is not what anybody is
         // adding a player for.
         listener.addPlayer({ source: 'bus', bus: firstBusInUse(app), wave: nextWave(listener) });
         app.saveListen();
         app.render();
-      } }, 'add a player'),
+      } }),
       listener.players.length ? null : el('span', { class: 'hint' }, 'no player')),
 
     drumsSection(app),
@@ -339,8 +340,8 @@ function playerRow(app, player) {
 
   return el('div', { class: 'player' },
     el('div', { class: 'row' }, source, wave,
-      el('button', { class: 'ghost danger', 'aria-label': `remove the player on ${player.describe()}`,
-        onclick: () => { listener.removePlayer(player.id); app.saveListen(); app.render(); } }, 'remove')),
+      iconButton({ icon: 'trash', label: `remove the player on ${player.describe()}`, class: 'ghost danger',
+        onclick: () => { listener.removePlayer(player.id); app.saveListen(); app.render(); } })),
     el('div', { class: 'row' },
       el('span', { class: 'field-name' }, 'level'), volume,
       el('span', { class: 'hint', id: `voices-${player.id}` }, '')),
@@ -423,11 +424,11 @@ function gatesSection(app, clicks, clickVolume) {
       el('span', { class: 'field-name' }, 'level'), clickVolume),
     el('div', { class: 'players' }, listener.gateSources.map((source) => gateRow(app, source))),
     el('div', { class: 'row' },
-      el('button', { class: 'ghost', onclick: () => {
+      iconButton({ icon: 'plus', label: 'listen to another gate', text: 'gate', class: 'ghost', onclick: () => {
         listener.addGateSource(nextGateSource(app));
         app.saveListen();
         app.render();
-      } }, 'listen to another gate'),
+      } }),
       listener.gateSources.length ? null : el('span', { class: 'hint' }, 'no gate')));
 }
 
@@ -446,8 +447,8 @@ function gateRow(app, source) {
   }
   return el('div', { class: 'player' },
     el('div', { class: 'row' }, select,
-      el('button', { class: 'ghost danger', 'aria-label': 'stop listening to this gate',
-        onclick: () => { listener.removeGateSource(source.id); app.saveListen(); app.render(); } }, 'remove')),
+      iconButton({ icon: 'trash', label: 'stop listening to this gate', class: 'ghost danger',
+        onclick: () => { listener.removeGateSource(source.id); app.saveListen(); app.render(); } })),
     el('p', { class: 'hint' }, gateHint(app, source)));
 }
 
@@ -558,7 +559,8 @@ function monitorPanel(app) {
     el('h2', {}, 'MIDI out'),
     el('div', { class: 'log-scroll' }, el('div', { class: 'log', id: 'midi-log' })),
     el('div', { class: 'row' },
-      el('button', { class: 'ghost', onclick: () => { app.module.clearMidiLog(); app.refreshLive(); } }, 'clear')));
+      iconButton({ icon: 'clear', label: 'clear the log', text: 'clear', class: 'ghost',
+                   onclick: () => { app.module.clearMidiLog(); app.refreshLive(); } })));
 }
 
 // --- the live bits ----------------------------------------------------------

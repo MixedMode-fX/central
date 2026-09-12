@@ -556,7 +556,7 @@ function nextWave(listener) {
 
 function monitorPanel(app) {
   return el('section', { class: 'panel' },
-    el('h2', {}, 'MIDI out'),
+    el('h2', {}, 'MIDI monitor'),
     el('div', { class: 'log-scroll' }, el('div', { class: 'log', id: 'midi-log' })),
     el('div', { class: 'row' },
       iconButton({ icon: 'clear', label: 'clear the log', text: 'clear', class: 'ghost',

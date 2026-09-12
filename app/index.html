@@ -42,7 +42,8 @@
   .nodes > *, .ports > *, .port-group > *, .params > *, .fields > *,
   .jack-cards > *, .routes > *, .slots > *, .saved-list > *, .lane-row > *,
   .players > *, .row > *, .grid > *, .legend > *, .param-section > *,
-  .canvas-bar > *, .add-row > *, .details-bar > * { min-width: 0; }
+  .canvas-bar > *, .add-row > *, .details-bar > *, .route-side > *,
+  .leg-body > *, .param.inline > * { min-width: 0; }
   /* Nothing may make the page itself scroll sideways: an overflowing lane
      scrolls in its own box or it is a bug. */
   html, body { max-width: 100%; overflow-x: hidden; }
@@ -266,24 +267,36 @@
          border-radius: 4px; padding: 0 .35rem; }
   .node header button { margin-left: auto; }
 
-  .ports { display: grid; gap: .9rem; margin-bottom: .8rem; }
-  .port-group { min-width: 0; display: grid; gap: .5rem; }
+  /* A port is one line: its name, and the bus it is on. The name used to sit
+     on a line of its own above the selector, which cost a card with five ports
+     five lines of nothing but names - and the name is two words, not a
+     paragraph, so it fits beside the control at every width the page supports.
+     What it says about its bus goes under it, in the smaller type of an aside,
+     because it is an observation rather than a setting. */
+  .ports { display: grid; gap: .7rem; margin-bottom: .7rem; }
+  .port-group { min-width: 0; display: grid; gap: .35rem; align-content: start; }
   .port { min-width: 0; padding-left: .55rem; border-left: 3px solid var(--line); }
-  .port-head { display: grid; grid-template-columns: 1fr; gap: .25rem; }
-  .port-name { color: var(--ink); font-size: .9rem; }
+  .port-head { display: grid; grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
+               gap: .5rem; align-items: center; }
+  .port-name { color: var(--ink); font-size: .85rem; overflow-wrap: anywhere; }
   .port-name .required { color: var(--warn); margin-left: .15rem; }
   .port select { width: 100%; }
-  .wire { display: block; color: var(--dim); font-size: .78rem; margin-top: .25rem;
-          overflow-wrap: anywhere; }
+  .wire { display: block; color: var(--dim); font-size: .74rem; line-height: 1.35;
+          margin-top: .1rem; overflow-wrap: anywhere; }
   .wire.empty { color: var(--warn); }
   .bus-gate { border-left-color: var(--gate); }
   .bus-note { border-left-color: var(--note); }
   .bus-CV   { border-left-color: var(--cv); }
 
   /* --- parameters --- */
-  .params { display: grid; gap: .7rem; }
+  .params { display: grid; gap: .5rem; }
   .param { min-width: 0; }
-  .param-head { display: flex; gap: .5rem; align-items: baseline; }
+  /* A choice is one line: the select or the switch says what it is set to, so
+     the name has nothing to share its row with and sits beside the control
+     instead of above it. An amount keeps two lines - see `.param-controls`. */
+  .param.inline { display: grid; grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
+                  gap: .5rem; align-items: center; }
+  .param-head { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
   /* Name at the left, everything the parameter currently *is* at the right. */
   .param-name { color: var(--dim); font-size: .85rem; margin-right: auto; }
   .param-cc { color: var(--accent); font-size: .7rem; letter-spacing: .04em;
@@ -323,9 +336,9 @@
   .param-menu-item.danger { color: var(--bad); }
   /* The sections a card's parameters are sorted into: one question each,
      in the same order on every node. */
-  .param-sections { display: grid; gap: .9rem; }
-  .param-section h4 { margin-bottom: .45rem; padding-bottom: .2rem; border-bottom: 1px solid var(--line); }
-  .node .summary { margin-bottom: .8rem; }
+  .param-sections { display: grid; gap: .7rem; }
+  .param-section h4 { margin-bottom: .35rem; padding-bottom: .2rem; border-bottom: 1px solid var(--line); }
+  .node .summary { margin-bottom: .6rem; font-size: .8rem; }
   /* A modulation route is a different row: its depth slider shares with a
      mode select and a percentage, and there is no width left to share. */
   .mod-route .param-controls .slider { flex: 1 0 100%; }
@@ -336,16 +349,28 @@
   .field select, .field input[type=number] { max-width: 100%; }
   .field:empty { display: none; }
 
+  /* A MIDI port, read down the card in the direction the notes travel: what it
+     is fed by, then what it feeds. The two words carry it - a leg is labelled
+     rather than inferred from its position - so an output's note bus reads as
+     the source it is and not as somewhere the cables are going. */
   .routes { display: grid; gap: 1rem; }
+  .route-side { display: grid; gap: .5rem; align-content: start; }
+  .route-side-head { display: flex; gap: .5rem; align-items: center; }
+  .route-side-head h3 { margin-right: auto; }
   .route { border: 1px solid var(--line); border-radius: var(--radius);
-           padding: .6rem; margin-bottom: .6rem; }
-  .route-head { display: flex; justify-content: space-between; gap: .5rem;
-                flex-wrap: wrap; margin-bottom: .5rem; }
-  .route-head h4 { margin: 0; }
-  .route-fields { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
-  /* Named, because the chips below it are also a row of chips and "in / out"
-     has to read as the port's direction rather than as two more cables. */
-  .route-direction { display: flex; gap: .5rem; align-items: center; margin-bottom: .45rem; }
+           padding: .5rem .6rem; display: grid; gap: .4rem; }
+  .route-head { display: flex; gap: .5rem; align-items: center; }
+  .route-head h4 { margin: 0; margin-right: auto; color: var(--ink); }
+  .route-actions { display: flex; gap: .1rem; margin-left: auto; }
+  .route-leg { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: .5rem; }
+  /* The label sits against the first control of its leg rather than in the
+     middle of a leg that has wrapped onto three rows, so the padding is half
+     a control's height rather than an alignment. */
+  .leg-name { color: var(--dim); font-size: .7rem; text-transform: uppercase;
+              letter-spacing: .08em; padding-top: .9rem; }
+  .leg-body { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }
+  .leg-body > select { flex: 1 1 9rem; max-width: 26rem; }
+  .route .wire { margin-left: 2.9rem; }
 
   /* --- bindings --- */
   .table-scroll, .lane-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; min-width: 0; }
@@ -704,7 +729,11 @@
     .tab { flex: 0 0 auto; flex-direction: row; gap: .45rem; padding: 0 .9rem; }
     .tab .icon { width: 1.1rem; height: 1.1rem; }
     .tab-label { font-size: inherit; }
-    .params { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem 1.5rem; }
+    /* Two parameters to a row only where a row can hold two whole ones: a
+       slider, its number field and the two icon buttons need this much, and a
+       column any narrower wraps the buttons under the slider and makes the
+       card taller than the single column it replaced. */
+    .params { grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: .6rem 1.5rem; }
     .fields { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
     .jack-cards { grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
     .log-line { grid-template-columns: 4rem 5rem 1fr auto; }
@@ -718,9 +747,10 @@
   }
   @media (min-width: 52rem) {
     .canvas-view { height: clamp(24rem, 62vh, 44rem); }
-    .ports { grid-template-columns: 1fr 1fr; gap: 1rem 1.5rem; }
-    .routes { grid-template-columns: 1fr 1fr; }
-    .port-head { grid-template-columns: 8rem 1fr; align-items: center; gap: .5rem; }
+    .ports { grid-template-columns: 1fr 1fr; gap: .8rem 1.5rem; }
+    .routes { grid-template-columns: 1fr 1fr; align-items: start; }
+    .port-head { grid-template-columns: 8rem 1fr; }
+    .param.inline { grid-template-columns: 8rem 1fr; }
     /* Wide enough for the whole pattern on one line, which is how a pattern
        is meant to be read: every lane in one scroller so they stay in step
        with each other, the names beside them rather than above, and stuck to

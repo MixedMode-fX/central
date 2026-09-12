@@ -634,6 +634,15 @@ function paramControl(app, index, at, pd) {
     app.render();
   };
 
+  // An enum or a boolean says what it is set to *in the control* - the option
+  // showing in the select, the word beside the switch - so its row needs no
+  // value beside the name, and without one the name fits on the same line as
+  // the control. That is a third of the height of the card back on every
+  // parameter that is a choice rather than an amount. A number keeps its own
+  // row, because a slider narrowed to make room for a label is a slider that
+  // cannot be set.
+  const inline = pd.kind === P.ParamKind.PARAM_ENUM || pd.kind === P.ParamKind.PARAM_BOOL;
+
   const controls = [];
   if (pd.kind === P.ParamKind.PARAM_ENUM) {
     const select = el('select', { class: 'grow', onchange: (e) => write(Number(e.target.value)) });
@@ -677,12 +686,12 @@ function paramControl(app, index, at, pd) {
 
   const binding = app.bindingFor?.(index, at);
   const route = app.routeFor?.(index, at);
-  return el('div', { class: 'param' },
+  return el('div', { class: `param ${inline ? 'inline' : ''}` },
     el('div', { class: 'param-head' },
       el('span', { class: 'param-name' }, pd.name),
       binding ? el('span', { class: 'param-cc' }, `CC ${binding.cc}`) : null,
       route ? el('span', { class: 'param-cc dom-CV' }, `CV ${route.bus}`) : null,
-      el('span', { class: 'param-value' }, paramText(pd, value))),
+      inline ? null : el('span', { class: 'param-value' }, paramText(pd, value))),
     el('div', { class: 'param-controls' }, controls,
       learnButton(app, index, at, pd.name, binding),
       cvButton(app, index, at, pd.name, route)));

@@ -119,8 +119,15 @@ shape, so that is a whole patch.
 
 **Which way a port faces is one of its settings**, not a kind of block to add.
 A gate jack's direction is a firmware field, so the toggle writes it; a MIDI
-port's is not, so the toggle moves what the port carries to the first free port
-on the other side. Both rules are in `graph.js`.
+port's is not, so turning one round moves what the port carries to the first
+free port on the other side. Both rules are in `graph.js`.
+
+**A MIDI port is a source and a destination**, and the card names which is
+which: an input's source is its cables, an output's is its note bus, and the
+legs are labelled rather than left to be read off their order. Fanning a port
+out keeps the source and takes a free port for a second destination — another
+cable for the same bus, another bus from the same cables — which is how one
+signal reaches two places.
 
 **What can be added is a list you can read** (`picker.js`): rows shelved by the
 **category the module reports**, each with the firmware's own summary, and a

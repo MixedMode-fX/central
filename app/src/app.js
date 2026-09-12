@@ -44,7 +44,7 @@ import { el, busUsers, iconButton } from './views.js';
 import { icon } from './icons.js';
 import {
   connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
-  modParamName, planPortFlip, applyPortFlip, planBusModulation,
+  modParamName, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation,
 } from './graph.js';
 import { forgetNode } from './layout.js';
 import { canvasPanel, canvasInspector, geometry, ENDPOINTS } from './canvas.js';
@@ -590,7 +590,17 @@ class App {
       return;
     }
 
-    const isOut = endpoint.kind === BlockKind.MidiOut;
+    this.addMidiPort(endpoint.kind === BlockKind.MidiOut);
+  }
+
+  // One MIDI port, taken into use. The module has four each way and they are
+  // not the patch's to create, so this claims the first free one: on USB 1,
+  // and on the note bus the patch is waiting for - a bus something already
+  // writes if this is an output, one nothing writes yet if it is an input -
+  // so the port arrives connected the way a node does.
+  addMidiPort(isOut) {
+    const caps = this.device?.capabilities;
+    const blocks = patchBlocks(this.device, this.patch);
     const ports = isOut ? this.patch.midiOut : this.patch.midiIn;
     const limit = (isOut ? caps?.midiOut : caps?.midiIn) ?? ports.length;
     const index = ports.findIndex((port, i) => i < limit && !(isOut ? port.targetMask : port.sourceMask));
@@ -603,12 +613,30 @@ class App {
       ? (writtenBus(blocks, Domain.Note) ?? 0)
       : (waitingBus(blocks, Domain.Note) ?? freeBus(blocks, caps, Domain.Note));
     if (bus === null) { this.pendingError = 'every note bus is already written'; this.render(); return; }
-    const mask = P.MidiPort.mmMIDI_USB_0;
-    ports[index] = { ...ports[index], bus, [isOut ? 'targetMask' : 'sourceMask']: mask };
-    this.canvas.selected = { kind: 'block', id: `${endpoint.kind}:${index}` };
-    this.edit(() => this.device.setMidiPort(index, isOut, mask, ports[index].channel, bus),
+    this.writeMidiPort(index, isOut, P.MidiPort.mmMIDI_USB_0, ports[index].channel, bus,
+                       `MIDI ${isOut ? 'out' : 'in'} ${index + 1} on USB 1, note bus ${bus}`);
+  }
+
+  // The same source, reaching one more destination: a second port carrying
+  // what this one carries, pointed somewhere else. `planPortFanOut` decides
+  // which half travels and which is new; this writes it.
+  fanOutMidiPort(index, isOut) {
+    const plan = planPortFanOut(this.device, this.patch, this.device?.capabilities, index, isOut);
+    if (!plan.ok) { this.pendingError = plan.why; this.render(); return; }
+    this.writeMidiPort(plan.index, isOut, plan.mask, plan.channel, plan.bus, plan.said);
+  }
+
+  // A MIDI port written, sent and selected, which is what every way of taking
+  // one into use ends in.
+  writeMidiPort(index, isOut, mask, channel, bus, said) {
+    const ports = isOut ? this.patch.midiOut : this.patch.midiIn;
+    ports[index] = { ...ports[index], channel, bus, [isOut ? 'targetMask' : 'sourceMask']: mask };
+    this.canvas.selected = {
+      kind: 'block', id: `${isOut ? BlockKind.MidiOut : BlockKind.MidiIn}:${index}`,
+    };
+    this.edit(() => this.device.setMidiPort(index, isOut, mask, channel, bus),
               isOut ? 'MIDI out' : 'MIDI in');
-    this.status = `MIDI ${isOut ? 'out' : 'in'} ${index + 1} on USB 1, note bus ${bus}`;
+    this.status = said;
     this.render();
   }
 

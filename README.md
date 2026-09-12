@@ -15,11 +15,13 @@ names them rather than repeating their values.
 
 ```
 make setup     # install PlatformIO into .venv/ and pre-fetch toolchains
+make checks    # everything fast: the tests, the module, the app. Silence is the pass
 make build     # firmware for the Teensy 4.1
 make test      # native unit tests, no hardware
 make size      # flash and RAM usage
 make upload    # flash an attached Teensy
 make app       # the WebAssembly build and the browser app (clang, lld, node)
+make dev       # serve app/ at http://127.0.0.1:8080/app/
 ```
 
 `make` bootstraps PlatformIO on first use, so a fresh clone needs only

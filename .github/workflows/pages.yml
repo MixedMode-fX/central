@@ -10,9 +10,9 @@ name: Pages
 #
 # Every push to main redeploys. Run it by hand (workflow_dispatch) on any
 # branch to put that branch's build on the site instead, e.g. to try a pull
-# request; the next push to main puts main back. The build itself is the
-# same as the `emulator` job in ci.yml, so a branch that is green there will
-# deploy.
+# request; the next push to main puts main back. The build is `scripts/checks.sh
+# app`, the same script the commit hook and CI run, so a branch that is green
+# there will deploy - and a red one is never published.
 
 on:
   push:
@@ -40,25 +40,19 @@ jobs:
           # build.sh stamps `git describe` into the page like the firmware.
           fetch-depth: 0
 
-      # See ci.yml: a third-party source on the runner image must not be able
-      # to fail this before a package is fetched.
+      # See checks.yml: a third-party source on the runner image must not be
+      # able to fail this before a package is fetched.
       - name: Install clang and lld
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.*
           sudo apt-get update || true
           sudo apt-get install -y clang lld llvm
 
-      - name: Build
-        run: emulator/build.sh
-
-      - name: Smoke test the module
-        run: node emulator/test/smoke.mjs
-
-      - name: Check the app against the firmware
-        run: |
-          node app/tools/generate-protocol.mjs --check
-          node app/test/protocol.test.mjs
-          node app/test/app.test.mjs
+      # Builds emulator/dist and checks it: the module against the test_master
+      # scenarios, the generated protocol against the firmware headers, and the
+      # app's own suites against the module. Silence is the pass.
+      - name: Build and check the app
+        run: bash scripts/checks.sh app
 
       # index.html plus mmmc.wasm: the page fetches the module from next to
       # itself when served and falls back to its embedded copy otherwise.

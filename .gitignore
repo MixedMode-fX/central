@@ -4,3 +4,7 @@
 
 # Emulator build output (emulator/build.sh)
 emulator/dist
+
+# The mobile loop's runtime directory: logs, pids, the prepared
+# marker, the base URL, screenshots. Nothing at the repo root.
+.dev/

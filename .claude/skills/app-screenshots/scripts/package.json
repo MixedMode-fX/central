@@ -1,0 +1,8 @@
+{
+  "name": "app-screenshots",
+  "private": true,
+  "description": "Playwright lives here, beside the skill, so the app's own dependency tree never pulls a browser down.",
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

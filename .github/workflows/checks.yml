@@ -1,0 +1,73 @@
+# The fast gate, shared by every pipeline via workflow_call.
+#
+# The step is `scripts/checks.sh` rather than a second list of commands. That
+# script is what the Claude commit hook runs inside a phone session and what
+# `make checks` runs at a desk, so a green tick here means the same thing it
+# meant in both of those places. One home for the command list is the only
+# reason a branch that was green on a phone is green here too.
+name: Checks (reusable)
+
+on:
+  workflow_call:
+
+jobs:
+  checks:
+    name: Firmware and app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # scripts/version.py and emulator/build.sh both run `git describe`,
+          # which needs tags and history that a shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-native-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-native-
+
+      # The module is the firmware core compiled to WebAssembly with a stock
+      # clang; lld provides wasm-ld and llvm the nm used to check imports.
+      #
+      # The runner image carries third-party apt sources this build does not
+      # use, and one of them serving an index that disagrees with its own
+      # Release file fails `apt-get update` outright - exit 100, before a
+      # single package is fetched, which took this job down with a Chrome
+      # index nothing here has ever wanted. So the source is dropped, a
+      # partial update is tolerated, and the *install* is what decides whether
+      # the indexes were good enough: clang, lld and llvm all come from
+      # Ubuntu's own archive, so a third party cannot make this job red.
+      - name: Install clang and lld
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.*
+          sudo apt-get update || true
+          sudo apt-get install -y clang lld llvm
+
+      # The same provisioning a fresh container gets, by the same name.
+      - name: Install PlatformIO
+        run: scripts/bootstrap.sh
+
+      # Native unit tests, the algorithm purity grep, the WebAssembly build,
+      # the module smoke test, the generated protocol, and the app's own
+      # suites. Silence is the pass.
+      - name: Checks
+        run: bash scripts/checks.sh
+
+      # A single self-contained page: download, open, no server needed. Every
+      # build is downloadable, so a branch can be tried without a release.
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ github.event.pull_request.head.sha || github.sha }}
+          path: emulator/dist/index.html
+          if-no-files-found: error
+          retention-days: 14

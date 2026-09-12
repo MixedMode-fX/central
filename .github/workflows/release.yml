@@ -43,13 +43,15 @@ jobs:
           restore-keys: pio-teensy-
 
       - name: Install PlatformIO
-        run: pip install --upgrade platformio
+        run: scripts/bootstrap.sh
 
-      - name: Run tests
-        run: pio test -e native
+      # The same gate the commit hook and CI run, firmware half. A release is
+      # not the place to discover a second list of checks has drifted.
+      - name: Checks
+        run: bash scripts/checks.sh firmware
 
       - name: Build firmware
-        run: pio run -e teensy41
+        run: make build
 
       - name: Collect artifacts
         run: |

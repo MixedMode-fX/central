@@ -163,7 +163,7 @@ Chord::Chord(const NodeConfig& config) :
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     retrigger(config.params[P_RETRIGGER] != 0),
     free_note(NO_NOTE), voiced(NO_NOTE), free_channel(1), voiced_mask(0), dirty(false),
-    sounding()
+    stopped(false), sounding()
 {}
 
 uint16_t Chord::active_mask() const {
@@ -245,6 +245,11 @@ void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t to
 // playing. The pass costs one comparison once the chord is up - the work only
 // happens when what it should be sounding has actually moved.
 void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t tonic){
+    // Stood down by a stopped transport, and nothing here starts it again:
+    // re-voicing follows what is sounding, and a key or a parameter moving
+    // under a chord that is not sounding has nothing to move. The root
+    // note-on that plays this node is what brings it back.
+    if (stopped) return;
     // The root inlet places it if anything does; otherwise it is the tonic of
     // the key, in the octave this node names - and when the key names a
     // register of its own, `octave` says how far from that register the chord
@@ -287,6 +292,9 @@ void Chord::process(BusManager& bus, uint32_t){
                 free_note = e.data1;
                 free_channel = e.channel ? e.channel : 1u;
                 if (retrigger) dirty = true;
+                // Played again: this is the edge a stop stood the chord
+                // down to wait for.
+                stopped = false;
             } else {
                 root = (uint8_t)(e.data1 % 12u);
             }
@@ -322,4 +330,15 @@ void Chord::silence(BusManager& bus){
     // Nothing is sounding, so a self-playing node voices again on its next
     // pass rather than believing a chord that has been taken down.
     voiced = NO_NOTE;
+}
+
+// A chord played by the root inlet is held until the next root note-on, and
+// on a stopped clock that note-on may never come (node/node.h). A chord
+// played through `note in` is released by the note-offs of whoever is playing
+// it, and one with neither inlet patched is a drone the transport was never
+// driving: both are left exactly as they are.
+void Chord::transport_stopped(BusManager& bus){
+    if (!free_running() || root_in == NO_BUS) return;
+    silence(bus);
+    stopped = true;
 }

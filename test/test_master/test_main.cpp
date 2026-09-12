@@ -559,6 +559,41 @@ static void test_a_jack_clocked_patch_plays_with_the_transport_stopped() {
     TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
 }
 
+// A self-playing Chord played by a root inlet is held until the next root
+// note-on, exactly as Harmony holds its root until the next chord, so a
+// stopped clock used to leave the whole chord sounding for ever.
+static void test_stopping_the_transport_releases_a_root_driven_chord() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
+    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].params[1] = 4;                                  // /4
+    p.nodes[1] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
+    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS;
+    p.nodes[1].out_bus[0] = 0; p.nodes[1].out_bus[1] = NO_BUS;
+    p.nodes[2] = node_config(ALGO_CHORD);                      // note 0 (root) -> note 1
+    p.nodes[2].in_bus[0] = NO_BUS; p.nodes[2].in_bus[1] = 0;
+    p.nodes[2].out_bus[0] = 1;
+    p.n_nodes = 3;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    uint32_t now = 0;
+    master.clock().start();
+    for (uint32_t t = 0; t < 4 * 4 * CLOCK_SUBTICK; t++) {
+        master.clock().advance();
+        master.pass(now);
+        now += 1000;
+    }
+    TEST_ASSERT_EQUAL(3, sounding_on(midi, mmMIDI_USB_1));
+
+    master.clock().stop();
+    run_passes(master, 200, now);
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_1));
+}
+
 // A stop is not a panic: a note the graph is only passing on belongs to
 // whoever is holding it, and cutting a key somebody has down is not what the
 // transport asked for. The held note survives the stop and is released by its
@@ -750,6 +785,7 @@ int main() {
     RUN_TEST(test_transpose_arpeggiator_priority_chain);
     RUN_TEST(test_the_arpeggio_plays_the_chord_the_same_pulse_chose);
     RUN_TEST(test_stopping_the_transport_releases_what_the_clock_was_playing);
+    RUN_TEST(test_stopping_the_transport_releases_a_root_driven_chord);
     RUN_TEST(test_stopping_the_transport_leaves_a_held_note_alone);
     RUN_TEST(test_a_jack_clocked_patch_plays_with_the_transport_stopped);
     RUN_TEST(test_zero_heap_allocation_after_setup);

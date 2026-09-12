@@ -85,6 +85,13 @@
 // while it drones cannot strand a note, and a downstream arpeggiator simply
 // sees the figure change.
 //
+// **A chord played by the root inlet is released when the transport stops.**
+// It is held until the next root note-on, and a stopped clock is the one
+// moment the module knows that note-on may never come (node/node.h) - the
+// same reason Harmony releases its root there. The next root note-on brings
+// it back. A chord with neither inlet patched has no edge to wait for and is
+// not a chord the transport was ever driving, so it drones through the stop.
+//
 // The root inlet is what a self-playing chord is *played* by, so on one it
 // means what `note in` means everywhere else: the whole note rather than only
 // its pitch class - a sequencer sends C3 and the chord moves to C3, octave
@@ -166,6 +173,11 @@ class Chord : public Node{
         explicit Chord(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
+        // A chord the root inlet is playing is held until the next root
+        // note-on, so a stopped transport would hold it for ever. A drone
+        // nothing is playing, and a chord played through `note in`, are left
+        // alone (node/node.h).
+        void transport_stopped(BusManager& bus) override;
         bool set_param(uint16_t index, uint8_t value) override;
         uint8_t get_param(uint16_t index) const override;
 
@@ -210,12 +222,16 @@ class Chord : public Node{
         // Free-running state. `free_note` is the note the root inlet last
         // named (NO_NOTE: derive it from the key and the octave), `voiced`
         // the root actually sounding, `voiced_mask` the scale it was voiced
-        // in, and `dirty` a parameter edit that has to be heard.
+        // in, `dirty` a parameter edit that has to be heard, and `stopped`
+        // a transport stop this node stood down for: nothing sounds again
+        // until the root inlet plays it, so a parameter edit cannot start a
+        // chord the stop took down.
         uint8_t free_note;
         uint8_t voiced;
         uint8_t free_channel;
         uint16_t voiced_mask;
         bool dirty;
+        bool stopped;
         SoundingNotes sounding;
 };
 

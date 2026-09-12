@@ -953,6 +953,90 @@ static void test_a_sequenced_root_walks_a_self_playing_chord_through_the_key() {
     TEST_ASSERT_EQUAL(57, out[5].data1);
 }
 
+// A sequenced chord is held until the next root note-on, and a stopped
+// transport is the one moment the module knows that note-on may never come:
+// pressing stop takes the chord down, nothing brings it back on its own, and
+// the next root note-on does (node/node.h).
+static void test_stopping_the_transport_releases_a_sequenced_chord() {
+    BusManager bus;
+    NodeConfig c = free_chord(true);
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    bus.note_write(0, on(62));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+
+    // Stop: the whole chord comes down, at the pitches it was sent at.
+    bus.swap();
+    node.transport_stopped(bus);
+    bus.swap();
+    TEST_ASSERT_EQUAL(3, bus.note_count(1));
+    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(bus.note_read(1, i)));
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+
+    // Told more than once, as the master's settle tells it, and stood down
+    // after it: neither the settle nor a parameter edit plays it again.
+    for (uint8_t i = 0; i < 8; i++) {
+        out = run_pass(bus, node, 1);
+        TEST_ASSERT_EQUAL(0, out.size());
+        node.transport_stopped(bus);
+    }
+    TEST_ASSERT_TRUE(node.set_param(Chord::P_QUALITY, Chord::QUALITY_SEVENTH));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(0, out.size());
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+
+    // The next root note-on is what plays it again - the edit included.
+    bus.note_write(0, on(62));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(4, out.size());
+    TEST_ASSERT_EQUAL(62, out[0].data1);
+    TEST_ASSERT_EQUAL(4, node.sounding_count());
+}
+
+// A drone is not the transport's to stop. With nothing patched to either
+// inlet there is no advance edge to wait for and no note-on that would ever
+// bring the chord back, so it plays straight through a stop.
+static void test_stopping_the_transport_leaves_a_drone_alone() {
+    BusManager bus;
+    NodeConfig c = free_chord(false);
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL(3, run_pass(bus, node, 1).size());
+
+    for (uint8_t i = 0; i < 8; i++) {
+        node.transport_stopped(bus);
+        TEST_ASSERT_EQUAL(0, run_pass(bus, node, 1).size());
+    }
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+}
+
+// Nor is a chord somebody is playing: the notes on `note in` are held by
+// whoever sent them, and their own note-offs are what release the chord.
+static void test_stopping_the_transport_leaves_a_played_chord_alone() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_CHORD);
+    c.in_bus[0] = 0; c.in_bus[1] = 1; c.out_bus[0] = 2;
+    Chord node(c);
+
+    global_scale::set(SCALE_MAJOR, 0);
+    bus.note_write(0, on(60));
+    TEST_ASSERT_EQUAL(3, run_pass(bus, node, 2).size());
+
+    node.transport_stopped(bus);
+    TEST_ASSERT_EQUAL(0, run_pass(bus, node, 2).size());
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+
+    bus.note_write(0, off(60));
+    const std::vector<MidiEvent> out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(3, out.size());
+    for (const MidiEvent& e : out) TEST_ASSERT_TRUE(is_note_off(e));
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
 // Editing the voicing of a chord that is already droning has to be audible,
 // and cannot strand the notes it replaces.
 static void test_editing_a_self_playing_chord_re_voices_it() {
@@ -1879,6 +1963,9 @@ int main() {
     RUN_TEST(test_chord_inversion_moves_the_bass);
     RUN_TEST(test_chord_voicing_opens_the_stack);
     RUN_TEST(test_a_repeated_root_re_strikes_only_when_asked);
+    RUN_TEST(test_stopping_the_transport_releases_a_sequenced_chord);
+    RUN_TEST(test_stopping_the_transport_leaves_a_drone_alone);
+    RUN_TEST(test_stopping_the_transport_leaves_a_played_chord_alone);
     RUN_TEST(test_editing_a_self_playing_chord_re_voices_it);
     RUN_TEST(test_a_self_playing_chord_feeds_an_arpeggiator);
     RUN_TEST(test_probability_pairs_every_note_it_passes);

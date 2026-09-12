@@ -349,10 +349,11 @@ function playerRow(app, player) {
 
 // --- drums -------------------------------------------------------------------
 
-// A drum sequencer is an instrument, not a source somebody might point a
-// sawtooth at, so it is not in the players list: it is here, with a kit and a
-// level of its own, and it is audible because it is in the patch rather than
-// because somebody added a player for it.
+// A drum machine - a drum sequencer, or anything else the patch has set to
+// channel 10 - is an instrument, not a source somebody might point a sawtooth
+// at, so it is not in the players list: it is here, with a kit and a level of
+// its own, and it is audible because it is in the patch rather than because
+// somebody added a player for it.
 function drumsSection(app) {
   const rows = app.listener.drumRows();
   return el('div', {},
@@ -398,7 +399,11 @@ function drumHint(app, source) {
   if (source.kind === 'note') {
     if (source.bus === P.NO_BUS) return 'on no bus';
     const { readers } = busUsers(app, Domain.Note, source.bus);
-    return `note bus ${source.bus}${readers.length ? ` \u00b7 to ${readers.join(', ')}` : ''}`;
+    // A node that is drums because of its channel shares its bus with whatever
+    // else writes there, so the hint has to say which notes are this voice's.
+    const where = source.channel
+      ? `ch ${source.channel} on note bus ${source.bus}` : `note bus ${source.bus}`;
+    return `${where}${readers.length ? ` \u00b7 to ${readers.join(', ')}` : ''}`;
   }
   if (!source.lanes.length) return 'on no bus';
   return source.lanes

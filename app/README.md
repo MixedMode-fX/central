@@ -54,11 +54,12 @@ every point in the chain and a disagreement between two of them is the bug.
 sends or at a **note bus** read straight off the bus, with its own waveform and
 level. A bus only leaves the module once a MIDI out is patched to it, so
 listening to buses is what makes a patch audible while it is being built.
-Drum sequencers are not players: each gets **its own kit and level** and is
-audible because it is in the patch. Kits are synthesised, not sampled, so the
-whole app stays one downloadable file. The gate listener blips per rising edge
-on a chosen gate bus or jack, which is the only way a clock division or a logic
-gate is audible at all.
+Drum machines are not players: a drum sequencer, and any node the patch has set
+to **channel 10**, gets **its own kit and level** and is audible because it is
+in the patch. Kits are synthesised, not sampled, so the whole app stays one
+downloadable file. The gate listener blips per rising edge on a chosen gate bus
+or jack, which is the only way a clock division or a logic gate is audible at
+all.
 
 **key** — one scale, one root and one register for the whole patch. Every node
 follows it unless its own `scale` names other notes or its own `key` names
@@ -206,7 +207,8 @@ app/
     examples.js       the example patches
     controller.js     a MIDI controller plugged into this computer
     audio.js          the players, the drum voices and the gate listener
-    drums.js          the drum kits, and which drum a lane or a note means
+    drums.js          the drum kits, which nodes are drums, and which drum a
+                      lane or a note means
     webmidi.js        Web MIDI: support, discovery, the hardware transport
     names.js          the words for what the protocol carries as numbers
     patchjson.js      the patch as readable JSON, both ways

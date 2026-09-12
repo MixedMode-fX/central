@@ -1,7 +1,7 @@
 #include "algorithm/midi/chord.h"
 #include "node/registry.h"
 #include "midi/note_event.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 
 static const Domain IN[2] = {Domain::Note, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
@@ -45,18 +45,14 @@ static const char* const INVERSION_NAMES[Chord::MAX_INVERSION + 1] = {
     "root pos", "1st", "2nd", "3rd",
 };
 
-// What the chord is, then where it sits, then the key it is in - the three
-// key parameters together, because "A minor, following the module" is one
-// decision and not three.
+// What the chord is, then where it sits. Which notes it may use is not here
+// and not a chord's decision: it is the key the module is in.
 static const ParamDescriptor PARAMS[Chord::N_PARAMS] = {
     {"quality",   Chord::QUALITY_TRIAD, Chord::QUALITY_COUNT - 1, Chord::QUALITY_TRIAD,
                                         PARAM_ENUM,        QUALITY_NAMES},
     {"voicing",   0, Chord::VOICING_COUNT - 1, Chord::VOICING_CLOSE, PARAM_ENUM, VOICING_NAMES},
     {"inversion", 0, Chord::MAX_INVERSION,     0,          PARAM_ENUM,        INVERSION_NAMES},
-    {"key",       0, global_scale::KEY_MODES - 1, 0,       PARAM_ENUM,        PARAM_KEY_NAMES},
-    {"root",      0, 11,              0,                   PARAM_PITCH_CLASS, nullptr},
-    {"scale",     0, SCALE_COUNT - 1, 0,                   PARAM_ENUM,        PARAM_SCALE_NAMES},
-    {"octave",    0, Chord::MAX_OCTAVE, Chord::DEFAULT_OCTAVE,   PARAM_NUMBER, nullptr},
+    {"octave",    0, KEY_MAX_OCTAVE, 0,           PARAM_ENUM,        PARAM_OCTAVE_NAMES},
     {"velocity",  1, 127,               Chord::DEFAULT_VELOCITY, PARAM_NUMBER, nullptr},
     {"retrigger", 0, 1,                 0,                       PARAM_BOOL,   nullptr},
 };
@@ -71,7 +67,8 @@ const AlgorithmDescriptor Chord::descriptor = {
     ALGO_CHORD, "Chord", 2, 0, 1, Chord::N_PARAMS, IN, OUT, sizeof(Chord), false, construct_node<Chord>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
     "A chord from one note - or from none: unpatched it plays and holds its own, in the key.",
-    CATEGORY_MIDI };
+    CATEGORY_MIDI,
+    true };   // reads_key: every pitch it plays comes from the key
 
 // Ascending, in place. Never more than MAX_VOICES entries, and the array is
 // nearly sorted every time it is called, which is what insertion sort is for.
@@ -102,19 +99,8 @@ bool Chord::set_param(uint16_t index, uint8_t value){
             if (value > MAX_INVERSION) return false;
             inversion = value;
             break;
-        case P_KEY:
-            if (value >= global_scale::KEY_MODES) return false;
-            key = value;
-            break;
-        case P_ROOT:
-            root = (uint8_t)(value % 12u);
-            break;
-        case P_SCALE:
-            if (value >= SCALE_COUNT) return false;
-            scale = value;
-            break;
         case P_OCTAVE:
-            if (value > MAX_OCTAVE) return false;
+            if (value > KEY_MAX_OCTAVE) return false;
             octave = value;
             break;
         case P_VELOCITY:
@@ -138,9 +124,6 @@ uint8_t Chord::get_param(uint16_t index) const {
         case P_QUALITY:   return quality;
         case P_VOICING:   return voicing;
         case P_INVERSION: return inversion;
-        case P_KEY:       return key;
-        case P_ROOT:      return root;
-        case P_SCALE:     return scale;
         case P_OCTAVE:    return octave;
         case P_VELOCITY:  return velocity;
         case P_RETRIGGER: return retrigger ? 1u : 0u;
@@ -156,10 +139,8 @@ Chord::Chord(const NodeConfig& config) :
             ? config.params[P_QUALITY] : (uint8_t)QUALITY_TRIAD),
     voicing(config.params[P_VOICING] < VOICING_COUNT ? config.params[P_VOICING] : (uint8_t)VOICING_CLOSE),
     inversion(config.params[P_INVERSION] <= MAX_INVERSION ? config.params[P_INVERSION] : (uint8_t)0),
-    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
-    root((uint8_t)(config.params[P_ROOT] % 12u)),
-    scale(config.params[P_SCALE]),
-    octave(config.params[P_OCTAVE] ? config.params[P_OCTAVE] : DEFAULT_OCTAVE),
+    root(NO_NOTE),
+    octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
     retrigger(config.params[P_RETRIGGER] != 0),
     free_note(NO_NOTE), voiced(NO_NOTE), free_channel(1), voiced_mask(0), dirty(false),
@@ -167,7 +148,7 @@ Chord::Chord(const NodeConfig& config) :
 {}
 
 uint16_t Chord::active_mask() const {
-    return global_scale::resolve_id(scale);
+    return global_key::mask();
 }
 
 uint8_t Chord::active_root() const {
@@ -175,8 +156,8 @@ uint8_t Chord::active_root() const {
     // where it is the thing playing the chord and names the note instead, so
     // the chords a sequencer walks through stay in one key rather than
     // dragging the key along with them.
-    if (root_in != NO_BUS && in != NO_BUS) return root;
-    return global_scale::resolve_root(key, root);
+    if (root != NO_NOTE && in != NO_BUS) return root;
+    return global_key::root();
 }
 
 // The quality's voices over `base`, ascending: every stack rises, and both
@@ -250,18 +231,12 @@ void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t tonic){
     // under a chord that is not sounding has nothing to move. The root
     // note-on that plays this node is what brings it back.
     if (stopped) return;
-    // The root inlet places it if anything does; otherwise it is the tonic of
-    // the key, in the octave this node names - and when the key names a
-    // register of its own, `octave` says how far from that register the chord
-    // sits, so one key moves every voice and each still keeps its place
-    // (midi/global_scale.h). The root inlet outranks both.
-    const uint8_t own = (uint8_t)(((int16_t)tonic + (int16_t)octave * 12) > 127
-                                  ? 127 : ((int16_t)tonic + (int16_t)octave * 12));
-    int16_t wanted = (free_note != NO_NOTE)
-        ? (int16_t)free_note
-        : (int16_t)global_scale::resolve_anchor(key, own, (uint8_t)(DEFAULT_OCTAVE * 12));
-    while (wanted > 127) wanted -= 12;               // dropped an octave, never wrapped
-    const uint8_t base = scale_quantise((uint8_t)wanted, tonic, mask);
+    // The root inlet places it if anything does; otherwise it is the key's
+    // root, in the register this node names - and `octave` 0, the default, is
+    // the key's own register, so one key setting moves every voice and a
+    // chord that has been placed keeps its place (midi/global_key.h).
+    const uint8_t wanted = (free_note != NO_NOTE) ? free_note : global_key::tonic(octave);
+    const uint8_t base = scale_quantise(wanted, tonic, mask);
 
     if (!dirty && base == voiced && mask == voiced_mask) return;
     // Re-voicing is a release and a new chord, both from the ledger, so

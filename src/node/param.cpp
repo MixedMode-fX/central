@@ -7,19 +7,17 @@ const char* const PARAM_DIRECTION_NAMES[5] = {
     "forward", "reverse", "pingpong", "random", "brownian",
 };
 
-// Index 0 is not a scale but a reference to the module's own (see
-// midi/scale.h): it is what an algorithm carries until a user names a scale
-// on it, which is why it reads as "global" rather than as a mode.
+// Index 0 is not a scale but an unset byte (see midi/scale.h), which is why
+// it reads as "none" rather than as a mode.
 const char* const PARAM_SCALE_NAMES[15] = {
-    "global", "major", "minor", "harmonic minor", "melodic minor",
+    "none", "major", "minor", "harmonic minor", "melodic minor",
     "pentatonic major", "pentatonic minor", "blues", "dorian", "phrygian",
     "lydian", "mixolydian", "locrian", "whole tone", "chromatic",
 };
 
-// global_scale::KeyFollow, in the enum's order. "follow" is zero because a
-// node should be in the module's key until somebody says otherwise.
-const char* const PARAM_KEY_NAMES[2] = {
-    "follow", "own",
+// Index 0 is the key's register rather than an octave: see param.h.
+const char* const PARAM_OCTAVE_NAMES[11] = {
+    "key", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
 };
 
 // NotePriorityRule, in the enum's order. Both algorithms that offer a

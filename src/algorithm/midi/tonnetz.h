@@ -69,10 +69,9 @@
 // chord node, sounding the triad the key puts on each root; clock it slower
 // and the walk runs from each new root, which is the patch this node is for.
 //
-// The scale is the module's own unless this node names one, and the root is
-// the module's own unless `key` says otherwise - two questions, two
-// parameters, the same rule `Chord` follows. A played root outranks both as a
-// pitch and touches neither as a key (midi/global_scale.h).
+// The scale and the root are the key's (midi/global_key.h); this node only
+// says which register it starts in. A played root outranks that as a pitch
+// and does not touch the key.
 //
 // Before the first advance nothing is sounding, and the first advance plays
 // the starting triad. Reset means the same here as in every sequencer: the
@@ -86,26 +85,18 @@
 // params[0] cycle      LR / PL / PR / free
 // params[1] deviation  percent chance of a transform the cycle did not name
 // params[2] diatonic   refuse a triad the key does not contain
-// params[3] key        follow the module's root, or use this node's own. The
-//                      scale is a separate parameter and a separate question:
-//                      a walk can be judged against a mode of its own without
-//                      leaving the key (midi/global_scale.h).
-// params[4] root       the pitch the walk starts on until the root inlet
-//                      plays one. Follows the key like every other absolute
-//                      root here: its pitch class, and its register when the
-//                      key names one - and then this parameter names how far
-//                      from that register the triad sits.
-// params[5] scale      0 follows the module's key
-// params[6] velocity
-// params[7] channel
-// params[8] seed       0 draws from the entropy pool, anything else is exact
+// params[3] octave     the register the walk starts in until the root inlet
+//                      plays a note; 0, the default, is the key's own
+// params[4] velocity
+// params[5] channel
+// params[6] seed       0 draws from the entropy pool, anything else is exact
 class Tonnetz : public Node{
     public:
-        static constexpr uint16_t P_CYCLE = 0, P_DEVIATION = 1, P_DIATONIC = 2, P_KEY = 3,
-                                  P_ROOT = 4, P_SCALE = 5, P_VELOCITY = 6, P_CHANNEL = 7,
-                                  P_SEED = 8;
-        static constexpr uint8_t N_PARAMS = 9;
-        static constexpr uint8_t DEFAULT_ROOT = 48, DEFAULT_VELOCITY = 100;
+        static constexpr uint16_t P_CYCLE = 0, P_DEVIATION = 1, P_DIATONIC = 2,
+                                  P_OCTAVE = 3, P_VELOCITY = 4, P_CHANNEL = 5,
+                                  P_SEED = 6;
+        static constexpr uint8_t N_PARAMS = 7;
+        static constexpr uint8_t DEFAULT_VELOCITY = 100;
         // No note: what `played` holds until the root inlet names one.
         static constexpr uint8_t NO_NOTE = 0xFF;
 
@@ -140,7 +131,7 @@ class Tonnetz : public Node{
         // the three definitions testable without a bus.
         static void apply(uint8_t transform, uint8_t& root_pc, bool& minor);
         // Where the walk starts and which register it sits in: the note the
-        // root inlet last played, or the module's key resolved into `root`.
+        // root inlet last played, or the key's root in this node's register.
         uint8_t active_root() const;
         // The pitch class the scale is measured from: the key's own, which a
         // root inlet moving the walk does not move.
@@ -166,9 +157,7 @@ class Tonnetz : public Node{
         uint8_t cycle;
         uint8_t deviation;
         bool diatonic;
-        uint8_t key;                  // global_scale::KeyFollow
-        uint8_t root;
-        uint8_t scale;
+        uint8_t octave;
         uint8_t velocity;
         uint8_t channel;
         uint8_t seed;

@@ -16,7 +16,7 @@ import * as P from './protocol.js';
 import { el } from './views.js';
 import { channelSelect, portToggles } from './midi.js';
 import {
-  ALL_MUSICAL, portNames, CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS,
+  ALL_MUSICAL, portNames, CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS, KEY_TARGETS,
   TAKEOVER, RELATIVE, FOURTEEN_BIT, PASS_THROUGH, channelLabel,
 } from './names.js';
 
@@ -60,6 +60,13 @@ export function describeMapping(app, m) {
   return { from, to: describeTarget(app, m), range: describeRange(app, m) };
 }
 
+// The fields of every target that is not a node parameter, by kind.
+const FIELDS_OF = {
+  [P.CcTargetKind.CC_TARGET_CLOCK]: CLOCK_TARGETS,
+  [P.CcTargetKind.CC_TARGET_TRANSPORT]: TRANSPORT_TARGETS,
+  [P.CcTargetKind.CC_TARGET_KEY]: KEY_TARGETS,
+};
+
 // Shared by a controller binding and a modulation route: they reach the same
 // target space, so "what does this move" has to read the same for both.
 export function describeTarget(app, m) {
@@ -75,6 +82,10 @@ export function describeTarget(app, m) {
       return `clock · ${CLOCK_TARGETS.find((t) => t.value === m.param)?.label ?? m.param}`;
     case P.CcTargetKind.CC_TARGET_TRANSPORT:
       return `transport · ${TRANSPORT_TARGETS.find((t) => t.value === m.param)?.label ?? m.param}`;
+    // The key is one setting for the whole patch and no node carries a copy,
+    // so it is a kind of its own rather than somebody's parameter.
+    case P.CcTargetKind.CC_TARGET_KEY:
+      return `key · ${KEY_TARGETS.find((t) => t.value === m.param)?.label ?? m.param}`;
     default:
       return 'a target kind this firmware does not have';
   }
@@ -230,9 +241,12 @@ function mappingEditor(app, slot, existing) {
       }
     }
     targetFields.push(nodePick, paramPick);
-  } else if (m.targetKind === P.CcTargetKind.CC_TARGET_CLOCK
-          || m.targetKind === P.CcTargetKind.CC_TARGET_TRANSPORT) {
-    const list = m.targetKind === P.CcTargetKind.CC_TARGET_CLOCK ? CLOCK_TARGETS : TRANSPORT_TARGETS;
+  } else {
+    // Everything that is not a node is one short list of fields: the clock,
+    // the transport and the key each have three or four, named in names.js.
+    // A kind with no fields - the reserved port one - offers nothing, which
+    // is the honest thing for a target that does not exist yet.
+    const list = FIELDS_OF[m.targetKind] ?? [];
     const pick = el('select', { onchange: (e) => { m.param = Number(e.target.value); push(); } });
     for (const t of list) {
       const option = el('option', { value: String(t.value) }, t.label);

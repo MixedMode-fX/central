@@ -4,14 +4,14 @@
 #include "bus/bus_manager.h"
 #include "node/patch.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "hal/midi_types.h"
 #include "algorithm/midi/voicer.h"
 #include "algorithm/midi/chord.h"
 
 void setUp() {}
-void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 // Voicer: where a chord's notes sit, and what moves when it changes.
 
@@ -331,7 +331,7 @@ static void test_voicer_hangs_nothing() {
 // in between.
 static void test_a_chord_walked_by_a_root_is_voice_led() {
     BusManager bus;
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
 
     NodeConfig cc = node_config(ALGO_CHORD);
     cc.in_bus[0] = NO_BUS;                 // plays itself

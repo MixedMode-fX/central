@@ -816,21 +816,19 @@ static void test_routes_round_trip_through_the_codec() {
     TEST_ASSERT_EQUAL_UINT8(NO_BUS, back.mod_map[1].bus);
 }
 
-static void test_a_patch_written_before_modulation_still_decodes() {
-    // A version 2 image: this format with no route block at the tail. Built by
-    // encoding, then re-stamping the version and trimming the trailing zero
-    // route count, so it is the bytes an older firmware really wrote.
+// The key stopped being a per-node parameter, so eight algorithms' parameter
+// numbers moved and an older image would decode into the wrong bytes. A
+// format version is what that is for: the image is refused rather than
+// misread, and the running patch is untouched.
+static void test_a_patch_from_an_older_format_is_refused() {
     Patch p = modulation_patch();
     static uint8_t image[2048];
     size_t written = 0;
     TEST_ASSERT_EQUAL(CODEC_OK,
         patch_codec::encode(p, default_globals(), image, sizeof image, written));
 
-    // Drop the route-count byte and the CRC, restamp as version 2, re-CRC.
-    const size_t payload = (size_t)(image[6] | ((size_t)image[7] << 8)) - 1u;
-    image[4] = 2;
-    image[6] = (uint8_t)(payload & 0xFF);
-    image[7] = (uint8_t)(payload >> 8);
+    image[4] = PATCH_FORMAT_MIN_VERSION - 1;
+    const size_t payload = (size_t)(image[6] | ((size_t)image[7] << 8));
     const size_t crc_at = 8 + payload;
     const uint16_t crc = patch_codec::crc16(image, crc_at);
     image[crc_at] = (uint8_t)(crc & 0xFF);
@@ -838,9 +836,8 @@ static void test_a_patch_written_before_modulation_still_decodes() {
 
     Patch back = empty_patch();
     GlobalSettings g = default_globals();
-    TEST_ASSERT_EQUAL(CODEC_OK, patch_codec::decode(image, crc_at + 2, back, g));
-    TEST_ASSERT_EQUAL_UINT8(2, back.n_nodes);
-    TEST_ASSERT_EQUAL_UINT8(NO_BUS, back.mod_map[0].bus);
+    TEST_ASSERT_EQUAL(CODEC_BAD_VERSION, patch_codec::decode(image, crc_at + 2, back, g));
+    TEST_ASSERT_EQUAL_UINT8(0, back.n_nodes);
 }
 
 // A modulator writes every pass for as long as the patch runs. If those
@@ -989,7 +986,7 @@ int main() {
     RUN_TEST(test_a_route_can_drive_the_tempo);
     RUN_TEST(test_editing_a_route_forgets_the_centre_it_was_holding);
     RUN_TEST(test_routes_round_trip_through_the_codec);
-    RUN_TEST(test_a_patch_written_before_modulation_still_decodes);
+    RUN_TEST(test_a_patch_from_an_older_format_is_refused);
     RUN_TEST(test_a_running_modulator_does_not_wear_out_the_eeprom);
     RUN_TEST(test_the_patch_image_keeps_the_set_point_not_the_modulation);
     RUN_TEST(test_quantising_keeps_a_bipolar_signal_bipolar);

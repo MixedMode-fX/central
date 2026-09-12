@@ -154,6 +154,26 @@ struct AlgorithmDescriptor {
     // registry reply after the strings for the same reason they were
     // appended after the name.
     AlgorithmCategory category;
+
+    // **The key is a fourth signal the scheduler has to order**, and it is
+    // not a bus (midi/global_key.h). A node that plays a note reads the key
+    // during its process(); the Key node writes it from a note bus during
+    // its own. Run them in patch order and a key change is heard a pass
+    // late, which is the bar-behind bug node/schedule.h was written to
+    // prevent, so the scheduler treats these two flags exactly as it treats
+    // a bus a node writes and another reads. A patch where the key's own
+    // source reads the key - a Harmony playing the Key node's inlet - is a
+    // genuine loop, and costs the one pass a loop always costs.
+    //
+    // They have defaults because every other descriptor in the table leaves
+    // them alone, and a flag that had to be repeated forty times to say
+    // "no" would be forty chances to say it wrong.
+    bool reads_key = false;
+    bool writes_key = false;
+    // At most one of these may be in a patch. The key has one value, so two
+    // nodes driving it would be two writers racing over it - the same reason
+    // two modulation routes may not share a target (node/patch.h).
+    bool singleton = false;
 };
 
 // Placement-new factory used by every descriptor. Slot overflow is a compile

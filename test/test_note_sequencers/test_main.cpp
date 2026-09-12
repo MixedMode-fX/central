@@ -10,15 +10,16 @@
 #include "node/registry.h"
 #include "master.h"
 #include "midi/scale.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/sequencers.h"
 
-void setUp() {}
-// The module's key is process-wide (midi/global_scale.h): every test gets it
-// back the way it found it.
-void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
+// The module's key is process-wide (midi/global_key.h): every test gets it
+// back the way it found it. C major in the key's default register, so the
+// pitches below are the ones a pattern of degrees has always produced.
+void setUp() { global_key::set(SCALE_MAJOR, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 typedef NoteSequencerBase NS;
 
@@ -78,14 +79,14 @@ static void expect(const char* expected, const std::vector<MidiEvent>& events) {
     TEST_ASSERT_EQUAL_STRING(expected, describe(events).c_str());
 }
 
-static NodeConfig seq_config(uint8_t id, uint8_t length, uint16_t scale = scale_mask(SCALE_MAJOR), uint8_t root = 60) {
+// `octave` 0 is the key's own register, which is what a pattern nobody has
+// placed plays in.
+static NodeConfig seq_config(uint8_t id, uint8_t length, uint8_t octave = 0) {
     NodeConfig c = node_config(id);
     c.in_bus[0] = ADVANCE;
     c.out_bus[0] = OUT;
     c.params[NS::P_LENGTH] = length;
-    c.params[NS::P_SCALE_LO] = (uint8_t)(scale & 0xFF);
-    c.params[NS::P_SCALE_HI] = (uint8_t)(scale >> 8);
-    c.params[NS::P_ROOT] = root;
+    c.params[NS::P_OCTAVE] = octave;
     return c;
 }
 
@@ -99,8 +100,8 @@ static void set_step(NodeConfig& c, uint8_t voices, uint8_t step, uint8_t voice,
 }
 
 // A scale run, one degree per step at velocity 100.
-static NodeConfig scale_run(uint8_t length, uint16_t scale = scale_mask(SCALE_MAJOR), uint8_t root = 60) {
-    NodeConfig c = seq_config(ALGO_NOTE_SEQ, length, scale, root);
+static NodeConfig scale_run(uint8_t length, uint8_t octave = 0) {
+    NodeConfig c = seq_config(ALGO_NOTE_SEQ, length, octave);
     for (uint8_t i = 0; i < length; i++) set_step(c, 1, i, 0, (int8_t)i, 100);
     return c;
 }
@@ -157,67 +158,56 @@ static void test_root_change_releases_what_was_sent_and_transposes_the_rest() {
     Rig rig;
     expect("+60/100 ", rig.edge(node));
     expect("-60/0 +62/100 ", rig.edge(node));
-    node.set_root(67);                                          // G, while 62 sounds
+    global_key::set(SCALE_MAJOR, 7);                            // G, while 62 sounds
     expect("-62/0 +71/100 ", rig.edge(node));                   // degree 2 of G major, not 69
     expect("-71/0 +72/100 ", rig.edge(node));
-    node.set_root(48);
+    global_key::set(SCALE_MAJOR, 0, 4);                         // and down a register
     expect("-72/0 +48/100 ", rig.edge(node));
 }
 
 // The same, with the root arriving on a note bus: playing a key transposes
 // the running sequence, and only note-ons count.
-// A sequencer's root names an octave and a pitch class cannot, which is why
-// it used to be the exception to the key's root half. A key with a register
-// can name one, so the exception is now only for the case that still cannot:
-// with no register the pattern keeps its anchor exactly as it always has.
-static void test_a_pattern_keeps_its_anchor_until_the_key_names_a_register() {
-    NodeConfig c = scale_run(4, 0);                    // no scale of its own: follows
-    NoteSequencer node(c);
+// A pattern of degrees has to be measured from a pitch, and the key names
+// one: its root, in the register the key sits in. All a sequencer says for
+// itself is which register - and 0, the default, is the key's, so one key
+// setting moves every sequencer in the patch.
+static void test_a_pattern_plays_in_the_keys_register() {
+    NoteSequencer node(scale_run(4));
     Rig rig;
 
-    global_scale::set(SCALE_MAJOR, 9);                 // A major, and no register
-    expect("+60/100 ", rig.edge(node));                // still C4, as it always was
-    TEST_ASSERT_EQUAL(60, node.active_root());
-
-    global_scale::set(SCALE_MAJOR, 9, 3);              // now the key has one: A2
-    expect("-60/0 +47/100 ", rig.edge(node));          // step 1: degree 1 of A2
+    global_key::set(SCALE_MAJOR, 9, 3);                // A major, in octave 2
+    expect("+45/100 ", rig.edge(node));                // 3 x 12 + 9
     TEST_ASSERT_EQUAL(45, node.active_root());
-    TEST_ASSERT_EQUAL(60, node.root_note());           // the stored anchor is untouched
 
-    // A pattern anchored an octave above where the parameter sits by default
-    // keeps that octave: the key says where home is, the pattern says how far
-    // from it this line plays.
-    NodeConfig high = scale_run(4, 0);
-    high.params[NS::P_ROOT] = 72;
-    NoteSequencer above(high);
+    global_key::set(SCALE_MAJOR, 9, 5);                // the key moves up two
+    expect("-45/0 +71/100 ", rig.edge(node));          // step 1: degree 1 of A4
+    TEST_ASSERT_EQUAL(69, node.active_root());
+
+    // A pattern that names a register of its own stays in it whatever the
+    // key does: that is how a bass line and a lead share one key.
+    NoteSequencer bass(scale_run(4, 3));
     Rig third;
-    expect("+57/100 ", third.edge(above));             // A3, an octave over A2
-    TEST_ASSERT_EQUAL(57, above.active_root());
-
-    // Naming a scale of its own does not take a pattern out of the key any
-    // more; `key` is what does.
-    NodeConfig own = scale_run(4, scale_mask(SCALE_MAJOR));
-    own.params[NS::P_KEY] = global_scale::KEY_OWN;
-    NoteSequencer fixed(own);
-    Rig other;
-    expect("+60/100 ", other.edge(fixed));
-    TEST_ASSERT_EQUAL(60, fixed.active_root());
+    expect("+45/100 ", third.edge(bass));              // A2, whatever the key's register
+    TEST_ASSERT_EQUAL(45, bass.active_root());
+    global_key::set(SCALE_MAJOR, 9, 7);
+    TEST_ASSERT_EQUAL(45, bass.active_root());
 }
 
 // A cable is the most explicit thing a user can say, so a patched root inlet
 // outranks the key's register as it outranks everything else.
 static void test_the_root_inlet_outranks_the_key_register() {
-    NodeConfig c = scale_run(4, 0);
+    NodeConfig c = scale_run(4);
     c.in_bus[2] = ROOT_BUS;
     NoteSequencer node(c);
     Rig rig;
 
-    global_scale::set(SCALE_MAJOR, 9, 3);
-    expect("+60/100 ", rig.edge(node));                // the inlet is patched: its own
-    TEST_ASSERT_EQUAL(60, node.active_root());
-
+    global_key::set(SCALE_MAJOR, 9, 3);
+    // Nothing has been played yet, so the anchor is still the key's root
+    // pitch class where the node was constructed.
     rig.bus.note_write(ROOT_BUS, MidiEvent{MIDI_NOTE_ON, 1, 55, 90});
-    expect("-60/0 +57/100 ", rig.edge(node));          // step 1: degree 1 of G
+    expect("+55/100 ", rig.edge(node));
+    TEST_ASSERT_EQUAL(55, node.active_root());
+    expect("-55/0 +57/100 ", rig.edge(node));          // step 1: degree 1 of G
     TEST_ASSERT_EQUAL(55, node.active_root());
 }
 
@@ -231,7 +221,7 @@ static void test_root_inlet_last_note_on_wins() {
     rig.bus.note_write(ROOT_BUS, MidiEvent{MIDI_NOTE_ON, 1, 57, 90});
     rig.bus.note_write(ROOT_BUS, MidiEvent{MIDI_NOTE_OFF, 1, 55, 0});    // ignored
     expect("-60/0 +59/100 ", rig.edge(node));                             // degree 1 of A
-    TEST_ASSERT_EQUAL(57, node.root_note());
+    TEST_ASSERT_EQUAL(57, node.active_root());
 }
 
 // A scale change under a sounding note releases the pitch that was sent.
@@ -241,44 +231,37 @@ static void test_scale_change_releases_what_was_sent() {
     expect("+60/100 ", rig.edge(node));
     expect("-60/0 +62/100 ", rig.edge(node));
     expect("-62/0 +64/100 ", rig.edge(node));                   // E in major
-    node.set_scale_mask(scale_mask(SCALE_NATURAL_MINOR));
+    global_key::set(SCALE_NATURAL_MINOR, 0);
     expect("-64/0 +65/100 ", rig.edge(node));                   // released 64, not 63
     expect("-65/0 +60/100 ", rig.edge(node));
     expect("-60/0 +62/100 ", rig.edge(node));
     expect("-62/0 +63/100 ", rig.edge(node));                   // Eb now
 }
 
-// A pattern that named no scale plays the module's, so one key change moves
-// every sequencer in the patch. The root is the sequencer's own: it is an
-// absolute pitch, naming the octave the pattern starts in, and a pitch class
-// cannot say that.
-static void test_a_sequence_with_no_scale_of_its_own_follows_the_module() {
-    NodeConfig c = scale_run(4, 0, 60);                         // no scale named
-    NoteSequencer node(c);
+// Every pattern plays the key's scale, so one key change moves every
+// sequencer in the patch and gives the same pattern a different character.
+static void test_every_sequence_follows_the_key() {
+    NoteSequencer node(scale_run(4));
     Rig rig;
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), node.active_mask());
     expect("+60/100 ", rig.edge(node));
     expect("-60/0 +62/100 ", rig.edge(node));
     expect("-62/0 +64/100 ", rig.edge(node));                   // E: major
 
-    // Changing the module's key changes the character and releases what was
-    // actually sent, exactly as this node's own scale parameter does.
-    global_scale::set(SCALE_NATURAL_MINOR, 0);
+    // Changing the key changes the character and releases what was actually
+    // sent, never a re-derived pitch.
+    global_key::set(SCALE_NATURAL_MINOR, 0);
+    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_NATURAL_MINOR), node.active_mask());
     expect("-64/0 +65/100 ", rig.edge(node));
     expect("-65/0 +60/100 ", rig.edge(node));
     expect("-60/0 +62/100 ", rig.edge(node));
     expect("-62/0 +63/100 ", rig.edge(node));                   // Eb now
-
-    // And a pattern that names a scale keeps it whatever the module is in.
-    node.set_scale_mask(scale_mask(SCALE_MAJOR));
-    TEST_ASSERT_EQUAL_HEX16(scale_mask(SCALE_MAJOR), node.active_mask());
-    expect("-63/0 +65/100 ", rig.edge(node));
 }
 
 // A pitch that leaves 0..127 is skipped, never wrapped, and owes nothing.
 static void test_out_of_range_pitch_is_skipped() {
-    NodeConfig c = scale_run(2, scale_mask(SCALE_MAJOR), 120);
+    NodeConfig c = scale_run(2, 10);                            // octave 10: C at 120
     set_step(c, 1, 1, 0, 7, 100);                               // 120 + 12 = 132
     NoteSequencer node(c);
     Rig rig;
@@ -472,7 +455,7 @@ static void test_poly_step_emits_four_voices_and_releases_all_of_them() {
     TEST_ASSERT_EQUAL(4, node.sounding_count());
     expect("-60/0 -64/0 -67/0 -72/0 +62/100 ", rig.edge(node));
     TEST_ASSERT_EQUAL(1, node.sounding_count());
-    node.set_root(65);                                          // F, under the D
+    global_key::set(SCALE_MAJOR, 5);                            // F, under the D
     expect("-62/0 +65/100 +69/90 +72/80 +77/70 ", rig.edge(node));
 }
 
@@ -554,12 +537,12 @@ static void assert_no_hanging_notes(uint8_t voices, uint32_t seed) {
     T node(c);
     Rig rig;
     NoteBalance balance;
-    const uint16_t scales[4] = {scale_mask(SCALE_MAJOR), scale_mask(SCALE_PENTATONIC_MINOR), scale_mask(SCALE_BLUES), 0};
+    const uint8_t scale_ids[4] = {SCALE_MAJOR, SCALE_PENTATONIC_MINOR, SCALE_BLUES, SCALE_CHROMATIC};
     for (uint16_t i = 0; i < 2000; i++) {
         // Something changes under the sounding notes on most edges.
         switch (script.below(8)) {
-            case 0: node.set_root((uint8_t)(36 + script.below(60))); break;
-            case 1: node.set_scale_mask(scales[script.below(4)]); break;
+            case 0: global_key::set_root((uint8_t)script.below(12)); break;
+            case 1: global_key::set_scale(scale_ids[script.below(4)]); break;
             case 2: node.set_length((uint8_t)(1 + script.below(MAX_SEQUENCE_LEN))); break;
             case 3: node.set_step(script.below(MAX_SEQUENCE_LEN), script.below(voices), (int8_t)(script.below(30) - 10), script.below(128)); break;
             case 4: rig.bus.note_write(ROOT_BUS, MidiEvent{MIDI_NOTE_ON, 1, (uint8_t)(40 + script.below(40)), 100}); break;
@@ -663,10 +646,10 @@ int main() {
     RUN_TEST(test_mono_sequence_emits_the_expected_pitches_twice_over);
     RUN_TEST(test_root_change_releases_what_was_sent_and_transposes_the_rest);
     RUN_TEST(test_root_inlet_last_note_on_wins);
-    RUN_TEST(test_a_pattern_keeps_its_anchor_until_the_key_names_a_register);
+    RUN_TEST(test_a_pattern_plays_in_the_keys_register);
     RUN_TEST(test_the_root_inlet_outranks_the_key_register);
     RUN_TEST(test_scale_change_releases_what_was_sent);
-    RUN_TEST(test_a_sequence_with_no_scale_of_its_own_follows_the_module);
+    RUN_TEST(test_every_sequence_follows_the_key);
     RUN_TEST(test_out_of_range_pitch_is_skipped);
     RUN_TEST(test_velocity_per_step_with_scale_offset_and_accent);
     RUN_TEST(test_rest_plays_nothing_and_releases_on_time);

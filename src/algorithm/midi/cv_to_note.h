@@ -45,15 +45,12 @@
 //           when the signal is a melody somebody meant, because snapping
 //           preserves its shape.
 //
-// **The root names a pitch, and the key names a pitch class.** `root` is an
-// absolute note, because only an absolute note can say which octave the
-// melody starts in - the same reason the note sequencers keep a root of their
-// own. What follows the module's key is the *pitch class*: with no register
-// set the tonic played is the key's root inside the octave `root` names, so a
-// patch set to C3 in A minor plays from A3; with one, `root` names the
-// register instead, an octave below the default being an octave below the key
-// (midi/global_scale.h). The `key` parameter is what opts out of all of it;
-// naming a scale changes only which notes are played.
+// **The bottom of the range is the key's root**, and `octave` is the only
+// thing this node says about it: which register the melody starts in. Left at
+// its default it is the key's own, so setting the module to A minor moves the
+// range with it; naming an octave keeps this melody where it is whatever the
+// key does, which is how a bass line and a lead share one key
+// (midi/global_key.h).
 //
 // **How the level is read** is the modulation matrix's rule, not a new one:
 // bipolar adds half of full scale, so a signal centred on zero uses the whole
@@ -67,15 +64,14 @@
 // Outlet 0 (note): the melody.
 //
 // params[0] map        degree / snap
-// params[1] root       the pitch the bottom of the range sits on
+// params[1] octave     the register the bottom of the range sits in; 0, the
+//                      default, is the key's own
 // params[2] range      octaves of travel across full scale
-// params[3] scale      0 follows the module's key
-// params[4] mode       auto / track / trigger
-// params[5] polarity   how the level is read
-// params[6] gate       note length in ms; 0 holds until the pitch changes
-// params[7] velocity   used when the velocity inlet is unpatched
-// params[8] channel
-// params[9] key        follow the module's root, or use this node's own
+// params[3] mode       auto / track / trigger
+// params[4] polarity   how the level is read
+// params[5] gate       note length in ms; 0 holds until the pitch changes
+// params[6] velocity   used when the velocity inlet is unpatched
+// params[7] channel
 //
 // The ledger owns the release, so every one of those nine can move under a
 // sounding note - the key changing under it included - and the note-off still
@@ -105,11 +101,7 @@ class CvToNote : public Node{
         };
 
         static constexpr uint8_t MAX_RANGE = 8;
-        // What `root` holds when nothing has moved it, and so the pitch a
-        // followed key's register is measured from.
-        static constexpr uint8_t DEFAULT_ROOT = 48;
-        static constexpr uint16_t P_KEY = 9;
-        static constexpr uint8_t N_PARAMS = 10;
+        static constexpr uint8_t N_PARAMS = 8;
 
         explicit CvToNote(const NodeConfig& config);
 
@@ -124,7 +116,8 @@ class CvToNote : public Node{
         // The pitch a level would produce now, without emitting it. 0xFF when
         // the level maps outside 0..127.
         uint8_t pitch_for(int16_t cv) const;
-        // The scale and tonic actually played, after the key is resolved.
+        // The scale and tonic actually played: the key's, in this node's
+        // register.
         uint16_t active_mask() const;
         uint8_t active_root() const;
 
@@ -139,15 +132,13 @@ class CvToNote : public Node{
         uint8_t velocity_in;
         uint8_t out;
         uint8_t map;
-        uint8_t root;
+        uint8_t octave;
         uint8_t range;
-        uint8_t scale;
         uint8_t mode;
         uint8_t polarity;
         uint8_t gate_ms;
         uint8_t velocity;
         uint8_t channel;
-        uint8_t key;
         EdgeIn trigger;
         uint8_t last_pitch;      // what tracking last struck; 0xFF for nothing
         uint32_t due_us;         // when a timed note is released

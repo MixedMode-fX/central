@@ -14,7 +14,8 @@
 // **Three questions make a chord, and there is one parameter for each.**
 // `quality` says what it is, `inversion` says which voice is in the bass, and
 // `voicing` says how far apart they sit. Everything else on the node is about
-// the key it is in or about the chord it plays when nobody is playing it.
+// the chord it plays when nobody is playing it. Which notes it may use is not
+// a question a chord answers: it is the key the module is in.
 //
 // **A quality is a stack of scale steps, so the key decides how it sounds.**
 // `triad` is steps 2 and 4 above the root: major on the first degree of a
@@ -48,11 +49,8 @@
 // A voice pushed off either end of the keyboard is dropped rather than
 // folded, and two voices landing on the same pitch sound once.
 //
-// The scale is the module's own (midi/global_scale.h) unless this node names
-// one, and the root is the module's own unless the `key` parameter says
-// otherwise - two questions, two parameters, the same rule NoteQuantise
-// follows, and the three of them sit together in the parameter list because
-// they are one setting to a musician. A patched root inlet outranks both.
+// The scale and the root are the key's (midi/global_key.h), and a patched
+// root inlet outranks them - the same rule NoteQuantise follows.
 //
 // A played note the scale does not contain is snapped into it first (the
 // same snap NoteQuantise does), so the chord is in key even when the playing
@@ -62,8 +60,8 @@
 // **With nothing patched to `note in` the chord plays itself.** A voicer that
 // needs a keyboard is a voicer that cannot start a patch, and "set the notes
 // and let it run" is what a module with no keys attached is for: unpatched,
-// the node sounds its chord once - the tonic of whatever key it is in, at
-// `octave` - and holds it, indefinitely, with no clock and no player. That
+// the node sounds its chord once - the root of whatever key it is in, in the
+// register `octave` names - and holds it, indefinitely, with no clock and no player. That
 // is exactly the shape an arpeggiator downstream wants, because an
 // arpeggiator arpeggiates held notes and does not care whose fingers are
 // holding them.
@@ -109,31 +107,22 @@
 // params[0] quality   which stack of scale steps to voice
 // params[1] voicing   how far apart the voices sit
 // params[2] inversion how many of the lowest voices go up an octave
-// params[3] key       follow the module's root, or use this node's own. The
-//                     scale is a separate parameter and a separate question:
-//                     a chord can voice a mode of its own without leaving
-//                     the key (midi/global_scale.h).
-// params[4] root      root pitch class, when this node names its own key and
-//                     no root inlet is patched
-// params[5] scale     scale id (see ScaleId; 0 follows the module's scale)
-// params[6] octave    where a self-playing chord sits: its root is
-//                     12 x octave + the key's root (0 -> DEFAULT_OCTAVE,
-//                     middle C), and when the key names a register of its
-//                     own this is how far from it the chord plays. Ignored
-//                     while a note inlet is patched.
-// params[7] velocity  what a self-playing chord is sounded at. Ignored
+// params[3] octave    where a self-playing chord sits: its root is
+//                     12 x octave + the key's root, and 0 is the key's own
+//                     register, so a chord left alone moves with the key.
+//                     Ignored while a note inlet is patched.
+// params[4] velocity  what a self-playing chord is sounded at. Ignored
 //                     while a note inlet is patched: a played note keeps
 //                     the velocity it was played with.
-// params[8] retrigger re-strike the chord on every root note-on, including
+// params[5] retrigger re-strike the chord on every root note-on, including
 //                     one that names the note already sounding.
 class Chord : public Node{
     public:
         // A ninth is the widest named stack: four steps over the root.
         static constexpr uint8_t MAX_STEPS = 4, MAX_VOICES = MAX_STEPS + 1;
         static constexpr uint16_t P_QUALITY = 0, P_VOICING = 1, P_INVERSION = 2,
-                                  P_KEY = 3, P_ROOT = 4, P_SCALE = 5,
-                                  P_OCTAVE = 6, P_VELOCITY = 7, P_RETRIGGER = 8;
-        static constexpr uint8_t N_PARAMS = 9;
+                                  P_OCTAVE = 3, P_VELOCITY = 4, P_RETRIGGER = 5;
+        static constexpr uint8_t N_PARAMS = 6;
 
         // Numbered from 1, so that a stored zero is the default triad the way
         // a stored zero is the default everywhere else in this module
@@ -162,9 +151,8 @@ class Chord : public Node{
         // A chord of MAX_VOICES has MAX_VOICES - 1 inversions; the parameter
         // stops at the third, which is every inversion a seventh has.
         static constexpr uint8_t MAX_INVERSION = 3;
-        // Middle C is 12 x 5: the octave a chord nobody has placed should
-        // sound in, and the velocity a note nobody played should sound at.
-        static constexpr uint8_t DEFAULT_OCTAVE = 5, MAX_OCTAVE = 10, DEFAULT_VELOCITY = 100;
+        // The velocity a note nobody played should sound at.
+        static constexpr uint8_t DEFAULT_VELOCITY = 100;
         // No note: what `free_note` holds until the root inlet names one, and
         // what `voiced` holds while nothing is sounding.
         static constexpr uint8_t NO_NOTE = 0xFF;
@@ -187,8 +175,8 @@ class Chord : public Node{
         // The root a self-playing chord is sounding, or NO_NOTE.
         uint8_t voiced_note() const { return voiced; }
         uint32_t refused() const { return sounding.refused(); }
-        // The scale and root actually played, after the module's own have
-        // been resolved into them.
+        // The scale and root actually played: the key's, unless the root
+        // inlet has said otherwise.
         uint16_t active_mask() const;
         uint8_t active_root() const;
 
@@ -213,9 +201,9 @@ class Chord : public Node{
         uint8_t quality;
         uint8_t voicing;
         uint8_t inversion;
-        uint8_t key;
+        // The pitch class the root inlet last wrote, or NO_NOTE until it
+        // has: an unplayed cable has said nothing, so the key still stands.
         uint8_t root;
-        uint8_t scale;
         uint8_t octave;
         uint8_t velocity;
         bool retrigger;

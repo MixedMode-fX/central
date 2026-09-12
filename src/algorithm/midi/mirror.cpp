@@ -1,7 +1,7 @@
 #include "algorithm/midi/mirror.h"
 #include "node/registry.h"
 #include "midi/note_event.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 
 static const Domain IN[2] = {Domain::Note, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
@@ -11,12 +11,9 @@ static const char* const MODE_NAMES[Mirror::MIRROR_MODES] = {"negative", "invers
 static const ParamDescriptor PARAMS[Mirror::N_PARAMS] = {
     {"mode",   Mirror::MIRROR_NEGATIVE, Mirror::MIRROR_MODES, Mirror::MIRROR_NEGATIVE,
                PARAM_ENUM, MODE_NAMES},
-    {"scale",  0, SCALE_COUNT - 1, 0, PARAM_ENUM,        PARAM_SCALE_NAMES},
-    {"root",   0, 11,              0, PARAM_PITCH_CLASS, nullptr},
     {"amount", 1, 100, Mirror::DEFAULT_AMOUNT, PARAM_PERCENT, nullptr},
     {"snap",   0, 1,   0, PARAM_BOOL,   nullptr},
     {"seed",   0, 255, 0, PARAM_NUMBER, nullptr},
-    {"key",    0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Mirror::N_PARAMS, PARAMS}};
 
@@ -27,7 +24,8 @@ const AlgorithmDescriptor Mirror::descriptor = {
     ALGO_MIRROR, "Mirror", 2, 1, 1, Mirror::N_PARAMS, IN, OUT, sizeof(Mirror), false,
     construct_node<Mirror>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "Negative harmony: reflects every note about the key's axis, so a progression plays its shadow.",
-    CATEGORY_MIDI };
+    CATEGORY_MIDI,
+    true };   // reads_key: every pitch it plays comes from the key
 
 static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
     if (stored == 0 || stored > max_value) return fallback;
@@ -39,14 +37,12 @@ Mirror::Mirror(const NodeConfig& config) :
     root_in(config.in_bus[1]),
     out(config.out_bus[0]),
     mode(clamp_enum(config.params[P_MODE], MIRROR_MODES, MIRROR_NEGATIVE)),
-    scale(config.params[P_SCALE]),
-    root((uint8_t)(config.params[P_ROOT] % 12u)),
+    root(NO_ROOT),
     amount(config.params[P_AMOUNT] ? (config.params[P_AMOUNT] > 100 ? (uint8_t)100
                                                                     : config.params[P_AMOUNT])
                                    : DEFAULT_AMOUNT),
     snap(config.params[P_SNAP] != 0),
     seed(config.params[P_SEED]),
-    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     // Seeded from entropy when `seed` is zero and from the byte otherwise, so
     // a patch can be exactly reproducible or never the same twice.
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
@@ -55,17 +51,12 @@ Mirror::Mirror(const NodeConfig& config) :
 
 // Nothing here can strand a note: the release is taken from the ledger, so it
 // is the pitch that was actually sent and never a re-reflected one. That is
-// what lets the axis, the mode and the scale all move under a sounding note.
+// what lets the axis, the mode and the key all move under a sounding note.
 bool Mirror::set_param(uint16_t index, uint8_t value){
     switch (index){
         case P_MODE:
             if (value == 0 || value > MIRROR_MODES) return false;
             mode = value; return true;
-        case P_SCALE:
-            if (value >= SCALE_COUNT) return false;
-            scale = value; return true;
-        case P_ROOT:
-            root = (uint8_t)(value % 12u); return true;
         case P_AMOUNT:
             if (value > 100) return false;
             amount = value ? value : DEFAULT_AMOUNT; return true;
@@ -78,9 +69,6 @@ bool Mirror::set_param(uint16_t index, uint8_t value){
             seed = value;
             rng.reseed(value ? (uint32_t)(value * 2654435761u) : entropy::seed());
             return true;
-        case P_KEY:
-            if (value >= global_scale::KEY_MODES) return false;
-            key = value; return true;
         default: return false;
     }
 }
@@ -88,25 +76,21 @@ bool Mirror::set_param(uint16_t index, uint8_t value){
 uint8_t Mirror::get_param(uint16_t index) const {
     switch (index){
         case P_MODE:   return mode;
-        case P_SCALE:  return scale;
-        case P_ROOT:   return root;
         case P_AMOUNT: return amount;
         case P_SNAP:   return snap ? 1u : 0u;
         case P_SEED:   return seed;
-        case P_KEY:    return key;
         default: return 0;
     }
 }
 
 uint16_t Mirror::active_mask() const {
-    return global_scale::resolve_id(scale);
+    return global_key::mask();
 }
 
 // A patched root inlet wins outright - `root` is what it last wrote. With no
-// cable, the key's root unless this node names one of its own.
+// cable, the key's.
 uint8_t Mirror::active_root() const {
-    if (root_in != NO_BUS) return root;
-    return global_scale::resolve_root(key, root);
+    return root != NO_ROOT ? root : global_key::root();
 }
 
 uint8_t Mirror::reflect(uint8_t note) const {
@@ -124,7 +108,7 @@ uint8_t Mirror::reflect(uint8_t note) const {
     while (pitch + 12 <= (int16_t)note + 6) pitch += 12;
     while (pitch > (int16_t)note + 6) pitch -= 12;
     if (pitch < 0 || pitch > 127) return 0xFF;
-    if (snap) return scale_quantise((uint8_t)pitch, key, active_mask());
+    if (snap) return scale_quantise((uint8_t)pitch, tonic, active_mask());
     return (uint8_t)pitch;
 }
 

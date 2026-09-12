@@ -40,12 +40,19 @@ const SEARCH_AT = 10;
 // whose category this app does not know - a module running newer firmware -
 // lands under "other" rather than disappearing, which is the reason the
 // category is appended to the registry record rather than spliced into it.
-export function catalogue(algorithms, endpoints = []) {
+//
+// `inPatch` is the algorithm ids the patch already holds. An algorithm the
+// module says there may only be one of - the Key node, because the key has one
+// value - is left off the list once it is in the patch, rather than offered
+// and then refused by the validator on the way out.
+export function catalogue(algorithms, endpoints = [], inPatch = []) {
   const shelves = new Map(ALGORITHM_CATEGORIES.map((c) => [c.value, []]));
   const other = shelves.get(P.AlgorithmCategory.CATEGORY_NONE);
+  const held = new Set(inPatch);
 
   for (const d of algorithms ?? []) {
     if (!d) continue;
+    if (d.singleton && held.has(d.id)) continue;
     const shelf = shelves.get(d.category) ?? other;
     shelf.push({
       value: String(d.id),

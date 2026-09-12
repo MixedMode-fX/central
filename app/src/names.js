@@ -61,11 +61,11 @@ export const portMaskOf = (names) => MIDI_PORTS
 // midi/scale.h (P.ScaleMask), so only the words are here - and `labelled`
 // fails the moment the firmware gains or renames one.
 //
-// "global" is not a scale but a reference to the module's own (its mask is
-// zero, which is what the firmware reads as "follow the key"), and it is what
-// an algorithm carries until someone names a scale on it.
+// Id 0 is not a scale but an unset byte, so it is left out of the list a key
+// is chosen from - and there is no other list, because the key is the only
+// place a scale is named (src/midi/global_key.h).
 export const SCALES = labelled(P.ScaleId, {
-  SCALE_GLOBAL: 'global',
+  SCALE_NONE: '',
   SCALE_MAJOR: 'major',
   SCALE_NATURAL_MINOR: 'minor',
   SCALE_HARMONIC_MINOR: 'harmonic minor',
@@ -83,15 +83,20 @@ export const SCALES = labelled(P.ScaleId, {
   SCALE_COUNT: '',
 }, 'ScaleId').filter((s) => s.label);
 
-// The scales a *key* can be in: every one except the reference to itself.
-export const KEY_SCALES = SCALES.filter((s) => s.value !== P.ScaleId.SCALE_GLOBAL);
+// The scales a key can be in: kept as its own name because that is what the
+// key tab reads, and every scale there is.
+export const KEY_SCALES = SCALES;
 
 // Pitch classes, for a root. Sharps rather than flats, because the firmware
 // stores a pitch class and has no opinion about spelling.
 export const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-// The id, for the places that store a ScaleId rather than a mask: an
-// algorithm's `scale` parameter, and the key in the globals.
+// The key's register, and the octave a node plays in when it names none of
+// its own (src/midi/global_key.h).
+export const DEFAULT_KEY_OCTAVE = P.KEY_DEFAULT_OCTAVE;
+export const MAX_KEY_OCTAVE = P.KEY_MAX_OCTAVE;
+
+// The id, for the one place that stores a ScaleId: the key in the globals.
 export function scaleIdOf(name) {
   if (typeof name === 'number') return name & 0xff;
   const found = SCALES.find((s) => s.label === String(name).toLowerCase().replace(/[_-]+/g, ' ').trim());
@@ -102,6 +107,13 @@ export function scaleIdOf(name) {
 }
 
 export const scaleName = (id) => SCALES.find((s) => s.value === id)?.label ?? String(id);
+
+// The 12-bit mask a scale id plays, from the firmware's own table. Anything
+// the module does not know reads as chromatic, which is what it plays.
+export function scaleMaskById(id) {
+  const found = SCALES.find((s) => s.value === id);
+  return found ? P.ScaleMask[found.key] : P.ScaleMask.SCALE_CHROMATIC;
+}
 
 export function scaleMaskOf(name) {
   const found = SCALES.find((s) => s.label === String(name).toLowerCase().replace(/[_-]+/g, ' ').trim());
@@ -150,6 +162,7 @@ export const CC_TARGET_KINDS = labelled(P.CcTargetKind, {
   CC_TARGET_CLOCK: 'the clock',
   CC_TARGET_TRANSPORT: 'the transport',
   CC_TARGET_PORT: 'a MIDI port (not built yet)',
+  CC_TARGET_KEY: 'the key',
   CC_TARGET_KINDS: '',
 }, 'CcTargetKind').filter((k) => k.label && k.key !== 'CC_TARGET_KINDS');
 
@@ -159,6 +172,15 @@ export const CLOCK_TARGETS = labelled(P.CcClockTarget, {
   CC_CLOCK_PPQN: 'CV pulses per quarter',
   CC_CLOCK_TARGETS: '',
 }, 'CcClockTarget').filter((t) => t.label);
+
+// The key is one setting for the whole patch and no node carries a copy, so
+// it is reached by kind rather than by node and parameter (src/node/patch.h).
+export const KEY_TARGETS = labelled(P.CcKeyTarget, {
+  CC_KEY_ROOT: 'root',
+  CC_KEY_SCALE: 'scale',
+  CC_KEY_OCTAVE: 'register',
+  CC_KEY_TARGETS: '',
+}, 'CcKeyTarget').filter((t) => t.label);
 
 export const TRANSPORT_TARGETS = labelled(P.CcTransportTarget, {
   CC_TRANSPORT_START: 'start',

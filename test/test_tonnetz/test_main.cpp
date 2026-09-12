@@ -4,14 +4,14 @@
 #include "bus/bus_manager.h"
 #include "node/patch.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "hal/midi_types.h"
 #include "algorithm/midi/tonnetz.h"
 #include "algorithm/midi/voicer.h"
 
-void setUp() { global_scale::set(SCALE_MAJOR, 0); }
-void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
+void setUp() { global_key::set(SCALE_MAJOR, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 // Tonnetz: chromatic triads where one voice moves a semitone.
 
@@ -29,7 +29,7 @@ static NodeConfig tonnetz_config(uint8_t cycle, uint8_t deviation = 0, uint8_t s
     c.out_bus[0] = NOTE_TRIAD;
     c.params[Tonnetz::P_CYCLE] = cycle;
     c.params[Tonnetz::P_DEVIATION] = deviation;
-    c.params[Tonnetz::P_ROOT] = 60;                    // middle C
+    c.params[Tonnetz::P_OCTAVE] = 5;                   // middle C
     c.params[Tonnetz::P_SEED] = seed;
     return c;
 }
@@ -201,7 +201,7 @@ static void test_diatonic_keeps_every_triad_inside_the_key() {
     NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_PL, 50);
     c.params[Tonnetz::P_DIATONIC] = 1;
     Tonnetz node(c);
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
 
     const uint16_t mask = scale_mask(SCALE_MAJOR);
     for (uint8_t i = 0; i < 40; i++){
@@ -340,21 +340,19 @@ static void test_into_a_voicer_two_of_three_voices_are_held() {
 // one starts minor, and a chromatic key has no degrees to take a flavour
 // from and starts major.
 static void test_the_first_triad_is_the_one_the_key_holds() {
-    struct Case { uint8_t scale; uint8_t key_root; uint8_t root; bool minor; };
+    struct Case { uint8_t scale; uint8_t key_root; bool minor; };
     static const Case CASES[4] = {
-        {SCALE_MAJOR,         0, 60, false},           // C major
-        {SCALE_NATURAL_MINOR, 9, 57, true},            // A minor
-        {SCALE_DORIAN,        2, 62, true},            // D dorian
-        {SCALE_CHROMATIC,     0, 60, false},           // no degrees to colour it
+        {SCALE_MAJOR,         0, false},               // C major
+        {SCALE_NATURAL_MINOR, 9, true},                // A minor
+        {SCALE_DORIAN,        2, true},                // D dorian
+        {SCALE_CHROMATIC,     0, false},               // no degrees to colour it
     };
     for (const Case& k : CASES){
-        global_scale::set(k.scale, k.key_root);
+        global_key::set(k.scale, k.key_root);
         BusManager bus;
-        NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_LR);
-        c.params[Tonnetz::P_ROOT] = k.root;
-        Tonnetz node(c);
+        Tonnetz node(tonnetz_config(Tonnetz::TONNETZ_LR));
         advance(node, bus);
-        TEST_ASSERT_EQUAL((uint8_t)(k.root % 12u), node.triad_root());
+        TEST_ASSERT_EQUAL(k.key_root, node.triad_root());
         TEST_ASSERT_EQUAL(k.minor, node.triad_is_minor());
     }
 }
@@ -399,7 +397,7 @@ static void test_a_played_root_does_not_drag_the_key_with_it() {
     c.in_bus[2] = NOTE_ROOT;
     c.params[Tonnetz::P_DIATONIC] = 1;
     Tonnetz node(c);
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
 
     const uint16_t mask = scale_mask(SCALE_MAJOR);
     play_root(node, bus, 64);                           // E4, the iii

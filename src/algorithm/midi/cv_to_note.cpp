@@ -1,6 +1,6 @@
 #include "algorithm/midi/cv_to_note.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "hal/midi_types.h"
 
 static const Domain IN[3] = {Domain::CV, Domain::Gate, Domain::CV};
@@ -12,15 +12,13 @@ static const char* const POLARITY_NAMES[CvToNote::CVN_POLARITIES] = {"bipolar", 
 
 static const ParamDescriptor PARAMS[CvToNote::N_PARAMS] = {
     {"map",      CvToNote::CVN_DEGREE,  CvToNote::CVN_MAPS,       CvToNote::CVN_DEGREE,  PARAM_ENUM,   MAP_NAMES},
-    {"root",     0, 127, CvToNote::DEFAULT_ROOT, PARAM_PITCH, nullptr},
+    {"octave",   0, KEY_MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"range",    1, CvToNote::MAX_RANGE, 2, PARAM_NUMBER,  nullptr},
-    {"scale",    0, SCALE_COUNT - 1,     0, PARAM_ENUM,    PARAM_SCALE_NAMES},
     {"mode",     CvToNote::CVN_AUTO,    CvToNote::CVN_MODES,      CvToNote::CVN_AUTO,    PARAM_ENUM,   MODE_NAMES},
     {"polarity", CvToNote::CVN_BIPOLAR, CvToNote::CVN_POLARITIES, CvToNote::CVN_BIPOLAR, PARAM_ENUM,   POLARITY_NAMES},
     {"gate",     0, 255,                 0, PARAM_MILLIS,  nullptr},
     {"velocity", 1, 127,               100, PARAM_NUMBER,  nullptr},
     {"channel",  1, 16,                  1, PARAM_CHANNEL, nullptr},
-    {"key",      0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, CvToNote::N_PARAMS, PARAMS}};
 
@@ -31,7 +29,8 @@ const AlgorithmDescriptor CvToNote::descriptor = {
     ALGO_CV_TO_NOTE, "CvToNote", 3, 1, 1, CvToNote::N_PARAMS, IN, OUT, sizeof(CvToNote), false,
     construct_node<CvToNote>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "The quantiser: a control signal becomes a melody, in the module's key.",
-    CATEGORY_MIDI };
+    CATEGORY_MIDI,
+    true };   // reads_key: every pitch it plays comes from the key
 
 static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
     if (stored == 0 || stored > max_value) return fallback;
@@ -44,15 +43,13 @@ CvToNote::CvToNote(const NodeConfig& config) :
     velocity_in(config.in_bus[2]),
     out(config.out_bus[0]),
     map(clamp_enum(config.params[0], CVN_MAPS, CVN_DEGREE)),
-    root(config.params[1] ? (uint8_t)(config.params[1] & 0x7F) : DEFAULT_ROOT),
+    octave(config.params[1] <= KEY_MAX_OCTAVE ? config.params[1] : (uint8_t)0),
     range(config.params[2] ? (config.params[2] > MAX_RANGE ? MAX_RANGE : config.params[2]) : (uint8_t)2),
-    scale(config.params[3] < SCALE_COUNT ? config.params[3] : (uint8_t)0),
-    mode(clamp_enum(config.params[4], CVN_MODES, CVN_AUTO)),
-    polarity(clamp_enum(config.params[5], CVN_POLARITIES, CVN_BIPOLAR)),
-    gate_ms(config.params[6]),
-    velocity(config.params[7] ? (uint8_t)(config.params[7] & 0x7F) : (uint8_t)100),
-    channel(config.params[8] ? config.params[8] : (uint8_t)1),
-    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
+    mode(clamp_enum(config.params[3], CVN_MODES, CVN_AUTO)),
+    polarity(clamp_enum(config.params[4], CVN_POLARITIES, CVN_BIPOLAR)),
+    gate_ms(config.params[5]),
+    velocity(config.params[6] ? (uint8_t)(config.params[6] & 0x7F) : (uint8_t)100),
+    channel(config.params[7] ? config.params[7] : (uint8_t)1),
     trigger(config.in_bus[1]),
     last_pitch(0xFF),
     due_us(0), timed(false),
@@ -60,13 +57,13 @@ CvToNote::CvToNote(const NodeConfig& config) :
 {}
 
 uint16_t CvToNote::active_mask() const {
-    return global_scale::resolve_id(scale);
+    return global_key::mask();
 }
 
-// The octave is this node's, the pitch class is the key's - see
-// global_scale::resolve_tonic, which Harmony resolves its roots the same way.
+// The pitch class is the key's, the register this node's - the same way
+// Harmony places its progression.
 uint8_t CvToNote::active_root() const {
-    return global_scale::resolve_tonic(key, root, DEFAULT_ROOT);
+    return global_key::tonic(octave);
 }
 
 // The matrix's reading of a signal (control/mod_matrix.cpp), so "bipolar"
@@ -173,15 +170,13 @@ void CvToNote::silence(BusManager& bus){
 bool CvToNote::set_param(uint16_t index, uint8_t value){
     switch (index){
         case 0: if (value == 0 || value > CVN_MAPS) return false; map = value; return true;
-        case 1: if (value > 127) return false; root = value; return true;
+        case 1: if (value > KEY_MAX_OCTAVE) return false; octave = value; return true;
         case 2: if (value == 0 || value > MAX_RANGE) return false; range = value; return true;
-        case 3: if (value >= SCALE_COUNT) return false; scale = value; return true;
-        case 4: if (value == 0 || value > CVN_MODES) return false; mode = value; return true;
-        case 5: if (value == 0 || value > CVN_POLARITIES) return false; polarity = value; return true;
-        case 6: gate_ms = value; return true;
-        case 7: if (value == 0 || value > 127) return false; velocity = value; return true;
-        case 8: if (value == 0 || value > 16) return false; channel = value; return true;
-        case P_KEY: if (value >= global_scale::KEY_MODES) return false; key = value; return true;
+        case 3: if (value == 0 || value > CVN_MODES) return false; mode = value; return true;
+        case 4: if (value == 0 || value > CVN_POLARITIES) return false; polarity = value; return true;
+        case 5: gate_ms = value; return true;
+        case 6: if (value == 0 || value > 127) return false; velocity = value; return true;
+        case 7: if (value == 0 || value > 16) return false; channel = value; return true;
         default: return false;
     }
 }
@@ -189,15 +184,13 @@ bool CvToNote::set_param(uint16_t index, uint8_t value){
 uint8_t CvToNote::get_param(uint16_t index) const {
     switch (index){
         case 0: return map;
-        case 1: return root;
+        case 1: return octave;
         case 2: return range;
-        case 3: return scale;
-        case 4: return mode;
-        case 5: return polarity;
-        case 6: return gate_ms;
-        case 7: return velocity;
-        case 8: return channel;
-        case P_KEY: return key;
+        case 3: return mode;
+        case 4: return polarity;
+        case 5: return gate_ms;
+        case 6: return velocity;
+        case 7: return channel;
         default: return 0;
     }
 }

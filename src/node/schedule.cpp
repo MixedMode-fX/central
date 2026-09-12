@@ -29,7 +29,7 @@ Schedule::Schedule() : ports(), order(), publish(), early(), n(0) {
 void Schedule::clear(){
     n = 0;
     for (uint8_t i = 0; i < N_NODE; i++){
-        ports[i] = Ports{0, 0};
+        ports[i] = Ports{0, 0, false, false};
         order[i] = i;
         publish[i] = BusSet{0, 0, 0};
     }
@@ -39,7 +39,7 @@ void Schedule::clear(){
 void Schedule::set(uint8_t index, const NodeConfig& config, const AlgorithmDescriptor& descriptor){
     if (index >= N_NODE) return;
     Ports& p = ports[index];
-    p = Ports{0, 0};
+    p = Ports{0, 0, descriptor.reads_key, descriptor.writes_key};
     for (uint8_t i = 0; i < descriptor.n_in; i++){
         if (config.in_bus[i] == NO_BUS) continue;
         p.read |= bus_bit(descriptor.in_domain[i], config.in_bus[i]);
@@ -69,12 +69,19 @@ void Schedule::build(){
             if (ports[i].write & ((uint32_t)1u << b)) writers[b] |= (uint64_t)1u << i;
         }
     }
+    // The key, the same way: whoever writes it runs before whoever plays in
+    // it. There is one key, so this is one word rather than one per index.
+    uint64_t key_writers = 0;
+    for (uint8_t i = 0; i < n; i++){
+        if (ports[i].writes_key) key_writers |= (uint64_t)1u << i;
+    }
     uint64_t needs[N_NODE] = {0};
     for (uint8_t i = 0; i < n; i++){
         uint64_t before_this = 0;
         for (uint8_t b = 0; b < N_BUS_TOTAL; b++){
             if (ports[i].read & ((uint32_t)1u << b)) before_this |= writers[b];
         }
+        if (ports[i].reads_key) before_this |= key_writers;
         // A node reading a bus it writes itself is a loop of one: it reads
         // what it published last pass, which is how a NOT oscillates rather
         // than hanging.

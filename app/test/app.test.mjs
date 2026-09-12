@@ -568,7 +568,8 @@ await test('every example patch is one the firmware accepts', async () => {
 // beside them still point at what the firmware would play.
 await test('the scale names name the firmware\'s scales', async () => {
   const { E } = await instantiate();
-  assert.equal(SCALES.length, E.emu_scale_count(), 'a scale has been added or removed');
+  // Id 0 is not a scale but an unset byte, and the list leaves it out.
+  assert.equal(SCALES.length, E.emu_scale_count() - 1, 'a scale has been added or removed');
   for (const scale of SCALES) {
     assert.equal(scaleMaskOf(scale.label), E.emu_scale_mask(scale.value),
                  `${scale.label} (${scale.key}) is not the mask the firmware uses`);
@@ -596,6 +597,71 @@ await test('the note values and directions name the firmware\'s own options', as
 
 // A route to the clock reaches something that is not a node, so no block on
 // the canvas carries it. It is still in the patch, and a route in the patch
+// The key is one setting for the whole patch and no node carries a copy, so a
+// knob reaches it by kind rather than by node and parameter - and the app has
+// to offer that, or the key is the one thing on the module a controller
+// cannot move.
+await test('a knob and a modulator can be pointed at the key', async () => {
+  const { describeTarget } = await import('../src/modmatrix.js');
+  const { module } = await instantiate();
+  const device = await connected(module);
+
+  const patch = codec.emptyPatch();
+  patch.ccMap[0] = {
+    sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 1, cc: 20,
+    targetKind: P.CcTargetKind.CC_TARGET_KEY, targetIndex: 0,
+    param: P.CcKeyTarget.CC_KEY_ROOT, min: 0, max: 0, flags: 0,
+  };
+  patch.modMap[0] = {
+    bus: 0, targetKind: P.CcTargetKind.CC_TARGET_KEY, targetIndex: 0,
+    param: P.CcKeyTarget.CC_KEY_SCALE, min: 0, max: 0, depth: 255, flags: 0,
+  };
+  const app = { patch, device };
+  assert.equal(describeTarget(app, patch.ccMap[0]), 'key · root');
+  assert.equal(describeTarget(app, patch.modMap[0]), 'key · scale');
+
+  // The module is the judge of whether either is a target at all.
+  await device.sendPatch(patch, codec.emptyGlobals());
+});
+
+// The key tab is the only place a scale is chosen, so it has to show what the
+// choice does: a keyboard with the notes of the key lit, the root ringed, and
+// every key a way of moving the root.
+await test('the key tab draws the scale on a keyboard, and a key moves the root', async () => {
+  const { keyPanel } = await import('../src/key.js');
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const globals = { ...codec.emptyGlobals(), scale: P.ScaleId.SCALE_NATURAL_MINOR, root: 9 };
+  const sent = [];
+  const app = { device, globals, edit: (fn, what) => sent.push(what), render: () => {} };
+
+  const panel = withDom(() => keyPanel(app));
+  const board = find(panel, (n) => n.className === 'keyboard');
+  assert.ok(board, 'there is a keyboard');
+  // Two octaves: fourteen white keys and ten black ones, in piano order.
+  const keys = board.children;
+  assert.equal(keys.filter((k) => k.className.includes('kb-white')).length, 14);
+  assert.equal(keys.filter((k) => k.className.includes('kb-black')).length, 10);
+
+  // A minor is A B C D E F G: seven of the twelve pitch classes, lit twice
+  // over, and A is the one ringed.
+  const lit = keys.filter((k) => k.className.includes(' in'));
+  assert.equal(lit.length, 14, 'seven notes, two octaves');
+  const ringed = keys.filter((k) => k.className.includes('root'));
+  assert.equal(ringed.length, 2);
+  assert.ok(ringed.every((k) => k.attrs['aria-label'] === 'root A'));
+  // Every lit key says which degree of the key it is; a key outside it says so.
+  assert.ok(lit.every((k) => /degree [1-7] of the key/.test(k.attrs.title)));
+  const dark = keys.find((k) => k.attrs['aria-label'] === 'root C#');
+  assert.match(dark.attrs.title, /not in the key/);
+  assert.match(words(panel), /A minor — A B C D E F G/);
+
+  // And a key is a control, not a picture.
+  dark.fire('click');
+  assert.equal(globals.root, 1, 'pressing C# put the module in C#');
+  assert.deepEqual(sent, ['key']);
+});
+
 // that appears nowhere is a route nobody can find or remove.
 await test('a route with no block to land on is still listed', async () => {
   const { routeTable, describeTarget } = await import('../src/modmatrix.js');
@@ -629,8 +695,7 @@ await test('parameters are filed by what they do, on every node', async () => {
   for (const name of ['Chord', 'Tonnetz', 'Harmony']) {
     const d = named(name);
     assert.ok(d, `${name} is in this firmware`);
-    assert.equal(where(d, 'root'), 'pitch', `${name}: root`);
-    assert.equal(where(d, 'scale'), 'pitch', `${name}: scale`);
+    assert.equal(where(d, 'octave'), 'pitch', `${name}: octave`);
     assert.equal(where(d, 'velocity'), 'level', `${name}: velocity`);
   }
   assert.equal(where(named('Tonnetz'), 'channel'), 'midi');
@@ -1456,6 +1521,26 @@ await test('the add list is shelved by what the module says each algorithm is', 
   assert.ok(logic.length >= 7 && logic.every((o) => o.hint), 'a shelf can be searched for by name');
   assert.deepEqual(filterGroups(groups, 'nothing called this'), [],
                    'a search that matches nothing leaves no empty shelves behind');
+});
+
+// The key has one value, so the module refuses a second Key node. Offering
+// one and having it refused on the way out is the worst of both: the list
+// stops offering it once the patch holds it.
+await test('an algorithm there may only be one of is offered once', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const key = device.algorithms.find((d) => d?.name === 'Key');
+  assert.ok(key?.singleton, 'the module says the Key node is a singleton');
+  assert.ok(!device.algorithms.some((d) => d && d.singleton && d.name !== 'Key'),
+            'and it is the only one so far');
+
+  const offered = (inPatch) =>
+    optionsOf(catalogue(device.algorithms, [], inPatch)).some((o) => o.label === 'Key');
+  assert.ok(offered([]), 'a patch without one can add one');
+  assert.ok(!offered([key.id]), 'a patch with one is not offered a second');
+  // Everything else is unaffected: one Chord does not stop a second.
+  const chord = device.algorithms.find((d) => d?.name === 'Chord');
+  assert.ok(optionsOf(catalogue(device.algorithms, [], [chord.id])).some((o) => o.label === 'Chord'));
 });
 
 // An algorithm from firmware this app has never heard of still has to be

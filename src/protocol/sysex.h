@@ -29,7 +29,11 @@
 // Bumped when a message's layout changes in a way an older host would
 // misread. A host that does not know this version is told so and writes
 // nothing, rather than writing garbage into a live patch.
-#define SYSEX_PROTOCOL_VERSION 5
+//
+// Version 6 is the key: CC_TARGET_KEY and its NRPN block are new addresses,
+// eight algorithms lost their `scale`, `key` and `root` parameters, and the
+// patch format moved with them (patch/patch_codec.h).
+#define SYSEX_PROTOCOL_VERSION 6
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.

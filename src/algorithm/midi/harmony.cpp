@@ -1,6 +1,6 @@
 #include "algorithm/midi/harmony.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "hal/midi_types.h"
 #include "midi/root_motion.h"
 
@@ -12,8 +12,7 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"cadence",  0, 100,              75, PARAM_PERCENT, nullptr},
     {"gravity",  0, 100,               0, PARAM_PERCENT, nullptr},
     {"loop",     0, 1,                 0, PARAM_BOOL,    nullptr},
-    {"root",     0, 127, Harmony::DEFAULT_ROOT, PARAM_PITCH, nullptr},
-    {"scale",    0, SCALE_COUNT - 1,   0, PARAM_ENUM,    PARAM_SCALE_NAMES},
+    {"octave",   0, KEY_MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"velocity", 1, 127,             100, PARAM_NUMBER,  nullptr},
     {"channel",  1, 16,                1, PARAM_CHANNEL, nullptr},
     {"seed",     0, 255,               0, PARAM_NUMBER,  nullptr},
@@ -24,7 +23,6 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"leading",  1, 100, Harmony::DEFAULT_LEADING, PARAM_PERCENT, nullptr},
     {"spread",   1, 100, Harmony::DEFAULT_SPREAD,  PARAM_PERCENT, nullptr},
     {"drift",    0, 100,                       0, PARAM_PERCENT, nullptr},
-    {"key",      0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Harmony::N_PARAMS, PARAMS}};
 
@@ -35,7 +33,8 @@ const AlgorithmDescriptor Harmony::descriptor = {
     ALGO_HARMONY, "Harmony", 2, 1, 2, Harmony::N_PARAMS, IN, OUT, sizeof(Harmony), false,
     construct_node<Harmony>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "A chord progression in the module's key: weighs every move against the scale, plays the root.",
-    CATEGORY_MIDI };
+    CATEGORY_MIDI,
+    true };   // reads_key: every pitch it plays comes from the key
 
 
 Harmony::Harmony(const NodeConfig& config) :
@@ -51,8 +50,7 @@ Harmony::Harmony(const NodeConfig& config) :
                                      : (uint8_t)75),
     gravity(config.params[P_GRAVITY] > 100 ? (uint8_t)100 : config.params[P_GRAVITY]),
     loop(config.params[P_LOOP] ? 1 : 0),
-    root(config.params[P_ROOT] ? (uint8_t)(config.params[P_ROOT] & 0x7F) : DEFAULT_ROOT),
-    scale(config.params[P_SCALE] < SCALE_COUNT ? config.params[P_SCALE] : (uint8_t)0),
+    octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? (uint8_t)(config.params[P_VELOCITY] & 0x7F) : (uint8_t)100),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
     seed(config.params[P_SEED]),
@@ -67,7 +65,6 @@ Harmony::Harmony(const NodeConfig& config) :
                                                                    : config.params[P_SPREAD])
                                    : DEFAULT_SPREAD),
     drift(config.params[P_DRIFT] > 100 ? (uint8_t)100 : config.params[P_DRIFT]),
-    key(config.params[P_KEY] < global_scale::KEY_MODES ? config.params[P_KEY] : (uint8_t)0),
     current(0), position(0), recorded(0), started(false), at_first(true), written(),
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
@@ -76,7 +73,7 @@ Harmony::Harmony(const NodeConfig& config) :
 }
 
 uint8_t Harmony::usable_degrees() const {
-    const uint8_t n = scale_size(global_scale::resolve_id(scale));
+    const uint8_t n = scale_size(global_key::mask());
     return n < DEGREES ? n : DEGREES;
 }
 
@@ -85,10 +82,10 @@ uint8_t Harmony::usable_degrees() const {
 // right answer - unlike a melody note, where Transpose and CvToNote drop it,
 // because there a folded note is a wrong note and a missing one is a rest.
 uint8_t Harmony::pitch_of(uint8_t deg) const {
-    const uint16_t mask = global_scale::resolve_id(scale);
+    const uint16_t mask = global_key::mask();
     const uint8_t n = usable_degrees();
     if (deg >= n && n) deg = (uint8_t)(n - 1u);
-    int16_t pitch = (int16_t)global_scale::resolve_tonic(key, root, DEFAULT_ROOT)
+    int16_t pitch = (int16_t)global_key::tonic(octave)
                   + scale_degree_to_semitone((int16_t)deg, mask);
     while (pitch > 127) pitch -= 12;
     while (pitch < 0) pitch += 12;
@@ -99,7 +96,7 @@ uint8_t Harmony::pitch_of(uint8_t deg) const {
 // because it is also what proves the walk: `likeliest_from` reads the same
 // numbers with none of the randomness on top.
 uint8_t Harmony::weigh(uint8_t from, uint32_t* weight) const {
-    const uint16_t mask = global_scale::resolve_id(scale);
+    const uint16_t mask = global_key::mask();
     const uint8_t n = usable_degrees();
     for (uint8_t j = 0; j < DEGREES; j++) weight[j] = 0;
     if (n <= 1) return n;
@@ -320,8 +317,7 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
             loop = value;
             recorded = 0;          // on: record the next phrase. off: walk again.
             return true;
-        case P_ROOT: if (value > 127) return false; root = value; return true;
-        case P_SCALE: if (value >= SCALE_COUNT) return false; scale = value; return true;
+        case P_OCTAVE: if (value > KEY_MAX_OCTAVE) return false; octave = value; return true;
         case P_VELOCITY: if (value == 0 || value > 127) return false; velocity = value; return true;
         case P_CHANNEL: if (value == 0 || value > 16) return false; channel = value; return true;
         case P_SEED: seed = value; return true;
@@ -333,7 +329,6 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
         case P_LEADING: if (value > 100) return false; leading = value ? value : DEFAULT_LEADING; return true;
         case P_SPREAD:  if (value > 100) return false; spread = value ? value : DEFAULT_SPREAD; return true;
         case P_DRIFT:   if (value > 100) return false; drift = value; return true;
-        case P_KEY:     if (value >= global_scale::KEY_MODES) return false; key = value; return true;
         default: return false;
     }
 }
@@ -344,8 +339,7 @@ uint8_t Harmony::get_param(uint16_t index) const {
         case P_CADENCE: return cadence;
         case P_GRAVITY: return gravity;
         case P_LOOP: return loop;
-        case P_ROOT: return root;
-        case P_SCALE: return scale;
+        case P_OCTAVE: return octave;
         case P_VELOCITY: return velocity;
         case P_CHANNEL: return channel;
         case P_SEED: return seed;
@@ -354,7 +348,6 @@ uint8_t Harmony::get_param(uint16_t index) const {
         case P_LEADING: return leading;
         case P_SPREAD:  return spread;
         case P_DRIFT:   return drift;
-        case P_KEY:     return key;
         default: return 0;
     }
 }

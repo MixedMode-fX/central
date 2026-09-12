@@ -2,7 +2,7 @@
 #include "node/registry.h"
 #include "version.h"
 #include "hal/midi_types.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 
 // A tiny formatting layer rather than snprintf: the Teensy's newlib printf
 // pulls in a large chunk of flash and a reentrancy structure, and everything
@@ -210,16 +210,15 @@ void Console::cmd_clock(uint8_t n, uint32_t now_us){
 
 // The key, for the same reason and by the same route as the clock above: it
 // is one of the patch's globals, so setting it here is saved with the patch
-// and pushed to every algorithm that did not name a scale of its own.
+// and pushed to every algorithm that plays a note.
 void Console::cmd_key(uint8_t n, uint32_t now_us){
     if (n >= 2){
         GlobalSettings g = patches.globals();
         bool ok = false;
         const uint32_t id = arg_uint(1, ok);
-        // Not SCALE_GLOBAL: that is the value an *algorithm* carries to say
-        // "whatever this is", and the module cannot follow itself.
-        if (!ok || id == SCALE_GLOBAL || id >= SCALE_COUNT){
-            put_line("key: scale is 1..14 (see the scale parameter of any algorithm)");
+        // Not SCALE_NONE: zero is an unset byte and not a scale.
+        if (!ok || id == SCALE_NONE || id >= SCALE_COUNT){
+            put_line("key: scale is 1..14");
             return;
         }
         g.scale = (uint8_t)id;
@@ -228,26 +227,23 @@ void Console::cmd_key(uint8_t n, uint32_t now_us){
             if (!ok || root > 11){ put_line("key: root is a pitch class, 0..11"); return; }
             g.root = (uint8_t)root;
         }
-        // The register, optional and separate: a key without one names no
-        // pitch, and every node with an absolute root keeps its own - which
-        // is what the module did before a register existed. 0 turns it off
-        // again (midi/global_scale.h).
+        // The register every node that names none of its own plays in
+        // (midi/global_key.h).
         if (n >= 4){
             const uint32_t octave = arg_uint(3, ok);
-            if (!ok || octave > 10){ put_line("key: octave is 0 (none) or 1..10"); return; }
+            if (!ok || octave == 0 || octave > KEY_MAX_OCTAVE){
+                put_line("key: octave is 1..10");
+                return;
+            }
             g.root_octave = (uint8_t)octave;
         }
         patches.set_globals(g, now_us);
     }
     put("scale     ");
-    put_line(PARAM_SCALE_NAMES[global_scale::id()]);
-    put_kv("root     ", global_scale::root());
-    if (global_scale::octave() == 0){
-        put_line("octave    none");
-    } else {
-        put_kv("octave   ", global_scale::octave());
-        put_kv("root note", global_scale::root_note());
-    }
+    put_line(PARAM_SCALE_NAMES[global_key::id()]);
+    put_kv("root     ", global_key::root());
+    put_kv("octave   ", global_key::octave());
+    put_kv("root note", global_key::tonic(0));
 }
 
 void Console::cmd_patch(){

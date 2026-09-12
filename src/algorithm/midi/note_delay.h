@@ -44,13 +44,11 @@
 // keeps the clock it was scheduled on, so changing the mode does not strand
 // or stampede what is already out there.
 //
-// **Transposing needs a root, so this node has one.** A scale step is only
-// defined relative to a tonic: the same interval pattern rooted on A and on C
-// are different keys, and a delay that assumed C would put its canon a third
-// away in the wrong one. So `root` is here for exactly the reason
-// NoteQuantise has it - it is the tonic used when this node *names* a scale,
-// and it is ignored when the node follows the module's key, because following
-// a key means following its root.
+// **Transposing needs a root**, because a scale step is only defined relative
+// to a tonic: the same interval pattern rooted on A and on C are different
+// keys, and a delay that assumed C would put its canon a third away in the
+// wrong one. The tonic is the key the module is in (midi/global_key.h), which
+// is the only place a scale and a root are named.
 //
 // **The articulation is the input's, not a setting.** A repeat is released
 // exactly as long after its note-on as the source note was held, because the
@@ -94,11 +92,8 @@
 // params[6]  decay     velocity percent per repeat
 // params[7]  chance    percent that each repeat happens at all
 // params[8]  spread    signed percent the gaps grow by, per repeat
-// params[9]  scale     0 follows the module's key
-// params[10] root      pitch class, when this node names its own key
-// params[11] channel   0 keeps the source's
-// params[12] dry       pass the input through, or emit only the repeats
-// params[13] key       follow the module's root, or use this node's own
+// params[9]  channel   0 keeps the source's
+// params[10] dry       pass the input through, or emit only the repeats
 class NoteDelay : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -177,11 +172,8 @@ class NoteDelay : public Node{
         uint8_t decay;
         uint8_t chance;
         uint8_t spread;          // as stored, signed
-        uint8_t scale;
-        uint8_t root;            // pitch class, when this node names its own key
         uint8_t channel;
         uint8_t dry;
-        uint8_t key;             // global_scale::KeyFollow
         uint32_t subtick;        // the master clock's count, when synced
         uint32_t drops;
         EdgeIn clear_in;

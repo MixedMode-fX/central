@@ -719,7 +719,8 @@ export function addBar(app) {
   // Shelved by what each algorithm *is*, which the module says itself - so a
   // list of thirty is six short lists of the kind of thing you came looking
   // for, and an algorithm added to the firmware still arrives on a shelf.
-  const groups = catalogue(app.device.algorithms, ENDPOINTS);
+  const groups = catalogue(app.device.algorithms, ENDPOINTS,
+                           app.patch.nodes.map((n) => n.algorithmId));
   if (!optionFor(groups, app.addPick)) app.addPick = optionsOf(groups)[0]?.value ?? null;
 
   return el('div', { class: 'add-row' },

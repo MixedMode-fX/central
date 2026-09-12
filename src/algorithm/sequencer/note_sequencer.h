@@ -11,24 +11,18 @@
 //
 //     pitch = root + scale_degree_to_semitone(degree, scale)
 //
-// so changing the root transposes the whole pattern and keeps it in key, and
-// changing the scale gives the same pattern a different character - both
-// one-parameter operations on a pattern nobody touches. The root can come
-// from a note bus (last note-on wins), so a keyboard transposes the running
-// sequence; the scale is a 12-bit mask (midi/scale.h), two bytes that cover
-// every named mode and any user scale. An empty mask - what a pattern that
-// never named a scale carries - follows the module's own
-// (midi/global_scale.h), so one key change moves every sequencer in the
-// patch.
+// so changing the key transposes the whole pattern and keeps it in key, and
+// changing its scale gives the same pattern a different character - both one
+// setting on a pattern nobody touches.
 //
-// **The root follows the key only when the key names a register**, and only
-// while `key` says to follow it. It is an
-// absolute pitch here, naming the octave the pattern starts in, and a pitch
-// class cannot say that - which is why a sequencer used to be the exception
-// to the key's root half. A key with a register (midi/global_scale.h) can
-// say it, so one that has one moves the pattern bodily and one that has none
-// leaves the anchor exactly where it was. Patch the root inlet to move it
-// from a keyboard, which outranks both.
+// **Both halves of that come from the key** (midi/global_key.h): the scale
+// and the root are the module's, and all a sequencer says for itself is the
+// register it plays in - which the key cannot say for it, because a bass
+// line and a lead are the same key two octaves apart. `octave` 0, the
+// default, is the key's own register, so one key setting moves every
+// sequencer in the patch and each keeps its place in it. The root inlet
+// outranks all of it: note-ons there set the anchor as a whole pitch, so a
+// keyboard transposes the running sequence.
 //
 // Inlet 0 (gate): advance. One step per rising edge, from a ClockDiv, a
 //         logic gate, a jack, or another sequencer.
@@ -69,22 +63,22 @@
 //                   1..100: the last edge-unit of every note is shortened to
 //                   this percent of the measured step period - an estimate,
 //                   see "Note length" below.
-//   [3] scale low   scale mask bits 0..7   (both 0 -> the module's scale)
-//   [4] scale high  scale mask bits 8..11
-//   [5] root        MIDI note when the root inlet is unpatched (0 -> 60)
-//   [6] vel scale   percent applied to every velocity (0 -> 100)
-//   [7] vel offset  int8 added after scaling
-//   [8] channel     1..16 (0 -> 1)
-//   [9] accent      velocity added by the accent flag (0 -> 30)
-//  [10] stall       advance periods of silence after which sounding notes
+//   [3] octave      the register degree 0 is measured from, when the root
+//                   inlet is unpatched; 0, the default, is the key's own
+//                   (midi/global_key.h)
+//   [4] vel scale   percent applied to every velocity (0 -> 100)
+//   [5] vel offset  int8 added after scaling
+//   [6] channel     1..16 (0 -> 1)
+//   [7] accent      velocity added by the accent flag (0 -> 30)
+//   [8] stall       advance periods of silence after which sounding notes
 //                   are released (0 -> 4, 255 -> never), so a clock that
 //                   stops cannot leave a note held for ever
-//  [11] rest key    the note that writes a rest when recording (0 -> note 0)
-//  [12] tie key     the note that writes a tie when recording (0 -> note 1)
-//  [13] rec velocity 0 keeps the velocity played, 1..127 forces one
-//  [14] key         follow the module's root, or use this pattern's own
-//                   anchor (global_scale::KeyFollow)
-//  [15]             reserved, zero
+//   [9] rest key    the note that writes a rest when recording (0 -> note 0)
+//  [10] tie key     the note that writes a tie when recording (0 -> note 1)
+//  [11] rec velocity 0 keeps the velocity played, 1..127 forces one
+//  [12..15]         reserved, zero. The header is sixteen bytes whatever it
+//                   uses, so the steps keep their parameter numbers - which
+//                   an NRPN address and a pattern message both name.
 //
 // Steps, from params[STEP_BASE], stride(voices) bytes each:
 //   per voice: degree (int8), velocity (1..127; 0 -> the voice is silent)
@@ -115,7 +109,7 @@
 // Note-off ownership: the sequencer owns a note-off for every note-on it
 // emits and releases it with the pitch it actually sent, from the ledger
 // (midi/sounding_notes.h) - never recomputed from the current root or scale.
-// The root moving under a held note, the scale changing, the pattern
+// The root moving under a held note, the key changing, the pattern
 // changing, the clock stopping (see `stall`) and the patch being swapped
 // (silence(), called by the master before the node is destroyed) all
 // release correctly, and there are tests for each.
@@ -123,13 +117,12 @@ class NoteSequencerBase : public Node{
     public:
         static constexpr uint8_t MAX_VOICES = NOTE_SEQ_VOICES;
         static constexpr uint16_t STEP_BASE = 16;
-        static constexpr uint8_t P_LENGTH = 0, P_DIRECTION = 1, P_GATE = 2, P_SCALE_LO = 3, P_SCALE_HI = 4,
-                                 P_ROOT = 5, P_VEL_SCALE = 6, P_VEL_OFFSET = 7, P_CHANNEL = 8, P_ACCENT = 9,
-                                 P_STALL = 10, P_REST_KEY = 11, P_TIE_KEY = 12, P_REC_VELOCITY = 13,
-                                 P_KEY = 14;
+        static constexpr uint8_t P_LENGTH = 0, P_DIRECTION = 1, P_GATE = 2, P_OCTAVE = 3,
+                                 P_VEL_SCALE = 4, P_VEL_OFFSET = 5, P_CHANNEL = 6, P_ACCENT = 7,
+                                 P_STALL = 8, P_REST_KEY = 9, P_TIE_KEY = 10, P_REC_VELOCITY = 11;
         static constexpr uint8_t LENGTH_MASK = 0x1F, FLAG_REST = 0x20, FLAG_TIE = 0x40, FLAG_ACCENT = 0x80;
         static constexpr uint8_t NO_PITCH = 0xFF;
-        static constexpr uint8_t DEFAULT_LENGTH = 8, DEFAULT_ROOT = 60, DEFAULT_ACCENT = 30, DEFAULT_STALL = 4;
+        static constexpr uint8_t DEFAULT_LENGTH = 8, DEFAULT_ACCENT = 30, DEFAULT_STALL = 4;
         static constexpr uint8_t DEFAULT_REST_KEY = 0, DEFAULT_TIE_KEY = 1;
         static constexpr uint8_t STALL_NEVER = 255;
         // With no measured period, the stall timeout counts this per period.
@@ -160,8 +153,7 @@ class NoteSequencerBase : public Node{
         static const ParamDescriptor HEADER[16];
 
         // The typed seams, kept because they read better in a test.
-        void set_root(uint8_t note){ root = note & 0x7F; }
-        void set_scale_mask(uint16_t mask){ scale_mask = mask & 0x0FFF; }
+        void set_octave(uint8_t register_octave){ octave = register_octave; }
         // Live length change: the cursor is left alone and clamped on the
         // next advance (StepEngine::set_length), so the pattern does not jump
         // under a running sequence.
@@ -169,15 +161,13 @@ class NoteSequencerBase : public Node{
         void set_step(uint8_t step, uint8_t voice, int8_t degree, uint8_t velocity);
 
         uint8_t voices() const { return n_voices; }
-        uint8_t root_note() const { return root; }
-        uint16_t scale() const { return scale_mask; }
-        // What is actually played: the module's scale when this one named
-        // none. Every pitch this class produces goes through it.
+        // What is actually played: the key's scale. Every pitch this class
+        // produces goes through it.
         uint16_t active_mask() const;
-        // The pitch the degrees are measured from. Its own root unless the
-        // key names a register (midi/global_scale.h), and a patched root
-        // inlet outranks both. Every pitch this class produces goes through
-        // it, step-record included.
+        // The pitch the degrees are measured from: the key's root, in the
+        // register this pattern names (midi/global_key.h). A patched root
+        // inlet outranks it. Every pitch this class produces goes through it,
+        // step-record included.
         uint8_t active_root() const;
         uint8_t channel_number() const { return channel; }
         uint8_t length() const { return engine.length(); }
@@ -235,7 +225,10 @@ class NoteSequencerBase : public Node{
         uint8_t rec_enable_bus;    // NO_BUS when nothing gates recording
         uint8_t out;
         uint8_t n_voices;
-        uint16_t scale_mask;
+        uint8_t octave;
+        // The pitch the root inlet last played, or NO_PITCH until it has:
+        // an unplayed cable has said nothing, so the key still places the
+        // pattern.
         uint8_t root;
         uint8_t gate_pct;
         uint8_t vel_scale;
@@ -246,7 +239,6 @@ class NoteSequencerBase : public Node{
         uint8_t rest_key;
         uint8_t tie_key;
         uint8_t rec_velocity;
-        uint8_t key;                  // global_scale::KeyFollow
         uint8_t rec_cursor;
         uint32_t snap_count;
         uint32_t last_edge_us;

@@ -49,6 +49,7 @@ enum AlgorithmId : uint8_t {
     ALGO_TONNETZ      = 39,
     ALGO_NOTE_FILTER  = 40,
     ALGO_CHANNEL      = 41,
+    ALGO_KEY          = 42,
 };
 
 enum ConfigError : uint8_t {

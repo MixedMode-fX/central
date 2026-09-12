@@ -5,7 +5,7 @@
 #include "bus/bus_manager.h"
 #include "node/patch.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "hal/midi_types.h"
 #include "algorithm/midi/note_delay.h"
@@ -18,8 +18,8 @@ void operator delete[](void* p) noexcept { free(p); }
 void operator delete(void* p, size_t) noexcept { free(p); }
 void operator delete[](void* p, size_t) noexcept { free(p); }
 
-void setUp() { global_scale::set(SCALE_MAJOR, 0); }
-void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
+void setUp() { global_key::set(SCALE_MAJOR, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 // NoteDelay (#35): every edge in a patch descends from one clock, so a patch
 // had exactly one rhythmic surface and nothing could leave it on purpose.
@@ -49,7 +49,7 @@ static NodeConfig delay_config(uint8_t sync, uint8_t time_tens, uint8_t repeats,
     c.params[4] = repeats;
     c.params[5] = interval;
     c.params[6] = decay;
-    c.params[12] = NoteDelay::ND_MUTE;      // the repeats alone, so the log is only echoes
+    c.params[10] = NoteDelay::ND_MUTE;      // the repeats alone, so the log is only echoes
     return c;
 }
 
@@ -206,60 +206,37 @@ static void test_no_interval_is_transparent_to_a_chromatic_line() {
     }
 }
 
-// A scale step is only defined against a tonic, so a node out of the key has
-// to name its root too - the same reason NoteQuantise has one. Without it
-// this node would transpose in A minor's interval pattern rooted on C, which
-// is a different key and the wrong canon.
-static void test_a_named_scale_transposes_against_its_own_root() {
-    BusManager bus;
+// A scale step is only defined against a tonic, and the tonic is the key's:
+// the canon is transposed in the key the module is in, which is the whole
+// reason a delay does not carry a scale of its own.
+static void test_the_canon_transposes_in_the_key() {
     NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 2, 1, 100);
-    c.params[9] = SCALE_NATURAL_MINOR;
-    c.params[10] = 9;                            // A
-    c.params[13] = global_scale::KEY_OWN;        // and its own root, not the key's
-    NoteDelay named(c);
+    NoteDelay node(c);
 
-    // A minor from A3: A B C D E F G. One step above E4 is F4, and two is G4.
-    TEST_ASSERT_EQUAL_UINT8(65, named.pitch_for(64, 1));
-    TEST_ASSERT_EQUAL_UINT8(67, named.pitch_for(64, 2));
+    // A minor from A: A B C D E F G. One step above E4 is F4, and two is G4.
+    global_key::set(SCALE_NATURAL_MINOR, 9);
+    TEST_ASSERT_EQUAL_UINT8(65, node.pitch_for(64, 1));
+    TEST_ASSERT_EQUAL_UINT8(67, node.pitch_for(64, 2));
 
-    // The module is in C major and this node is not following it, so the key
-    // moving changes nothing.
-    global_scale::set(SCALE_MAJOR, 0);
-    TEST_ASSERT_EQUAL_UINT8(65, named.pitch_for(64, 1));
+    // The minor pattern on C is C D D# ..., so one step above D is D#; move
+    // the key to D major and the same note steps to E instead.
+    global_key::set(SCALE_NATURAL_MINOR, 0);
+    TEST_ASSERT_EQUAL_UINT8(63, node.pitch_for(62, 1));
+    global_key::set(SCALE_MAJOR, 2);
+    TEST_ASSERT_EQUAL_UINT8(64, node.pitch_for(62, 1));
 
-    // A node that names a scale but not a key of its own is a different
-    // thing: it steps in its own scale, rooted where the module says. The
-    // minor pattern on C is C D D# ..., so one step above D is D#; move the
-    // key to D and the same pattern starts there, where one step above D is
-    // E. The mode is this node's, the key is the module's.
-    NodeConfig m = delay_config(NoteDelay::ND_FREE, 10, 2, 1, 100);
-    m.params[9] = SCALE_NATURAL_MINOR;
-    NoteDelay modal(m);
-    TEST_ASSERT_EQUAL_UINT8(63, modal.pitch_for(62, 1));
-    global_scale::set(SCALE_MAJOR, 2);           // the key moves, and it goes too
-    TEST_ASSERT_EQUAL_UINT8(64, modal.pitch_for(62, 1));
-    global_scale::set(SCALE_MAJOR, 0);
-
-    // A node that names no scale follows the key, root and all: in A minor
-    // the same note steps the same way, and in C major it does not.
-    NodeConfig f = delay_config(NoteDelay::ND_FREE, 10, 2, 1, 100);
-    NoteDelay follower(f);
-    global_scale::set(SCALE_NATURAL_MINOR, 9);
-    TEST_ASSERT_EQUAL_UINT8(65, follower.pitch_for(64, 1));
-    global_scale::set(SCALE_MAJOR, 0);
-    TEST_ASSERT_EQUAL_UINT8(65, follower.pitch_for(64, 1));   // E -> F in C major too
-    TEST_ASSERT_EQUAL_UINT8(64, follower.pitch_for(62, 1));   // D -> E in C major
-    global_scale::set(SCALE_NATURAL_MINOR, 9);
-    TEST_ASSERT_EQUAL_UINT8(64, follower.pitch_for(62, 1));   // D -> E in A minor as well
-    // ... and the two keys disagree where they should: B is the seventh of C
-    // major and the second of A minor.
-    global_scale::set(SCALE_MAJOR, 0);
-    TEST_ASSERT_EQUAL_UINT8(72, follower.pitch_for(71, 1));   // B -> C
-    global_scale::set(SCALE_NATURAL_MINOR, 9);
-    TEST_ASSERT_EQUAL_UINT8(72, follower.pitch_for(71, 1));   // B -> C here too
-    TEST_ASSERT_EQUAL_UINT8(69, follower.pitch_for(67, 1));   // G -> A in A minor
-    global_scale::set(SCALE_MAJOR, 0);
-    TEST_ASSERT_EQUAL_UINT8(69, follower.pitch_for(67, 1));   // G -> A in C major
+    // Two keys agree where they share a degree and disagree where they do
+    // not: B is the seventh of C major and the second of A minor.
+    global_key::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL_UINT8(65, node.pitch_for(64, 1));      // E -> F
+    TEST_ASSERT_EQUAL_UINT8(64, node.pitch_for(62, 1));      // D -> E
+    TEST_ASSERT_EQUAL_UINT8(72, node.pitch_for(71, 1));      // B -> C
+    global_key::set(SCALE_NATURAL_MINOR, 9);
+    TEST_ASSERT_EQUAL_UINT8(64, node.pitch_for(62, 1));      // D -> E here too
+    TEST_ASSERT_EQUAL_UINT8(72, node.pitch_for(71, 1));      // B -> C here too
+    TEST_ASSERT_EQUAL_UINT8(69, node.pitch_for(67, 1));      // G -> A in A minor
+    global_key::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL_UINT8(69, node.pitch_for(67, 1));      // G -> A in C major too
 }
 
 static void test_a_note_outside_the_key_echoes_inside_it() {
@@ -375,7 +352,7 @@ static void test_the_scale_moving_between_the_on_and_the_off_strands_nothing() {
 
     // The whole key moves under it. What was sent is what is released,
     // because the pitch was decided when the echo was scheduled.
-    global_scale::set(SCALE_NATURAL_MINOR, 9);
+    global_key::set(SCALE_NATURAL_MINOR, 9);
     pass(node, bus, t, &off, 0);
     run(node, bus, t + 1000, 400);
 
@@ -465,7 +442,7 @@ static void test_dry_pass_sends_the_input_through_and_mute_does_not() {
     BusManager bus;
     logged = 0;
     NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 1, 0, 100);
-    c.params[12] = NoteDelay::ND_PASS;
+    c.params[10] = NoteDelay::ND_PASS;
     NoteDelay node(c);
 
     const MidiEvent on = {MIDI_NOTE_ON, 1, 60, 100};
@@ -494,7 +471,7 @@ static void test_a_patch_swap_releases_the_copy_as_well_as_the_echoes() {
     BusManager bus;
     logged = 0;
     NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 2, 0, 100);
-    c.params[12] = NoteDelay::ND_PASS;
+    c.params[10] = NoteDelay::ND_PASS;
     NoteDelay node(c);
 
     const MidiEvent on = {MIDI_NOTE_ON, 1, 60, 100};
@@ -518,7 +495,7 @@ static void test_a_note_off_for_a_note_that_was_never_passed_is_swallowed() {
     BusManager bus;
     logged = 0;
     NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 2, 0, 100);
-    c.params[12] = NoteDelay::ND_PASS;
+    c.params[10] = NoteDelay::ND_PASS;
     NoteDelay node(c);
 
     // Half a phrase - the note-off of something played before this node was
@@ -533,8 +510,8 @@ static void test_the_channel_override_moves_the_copy_too() {
     BusManager bus;
     logged = 0;
     NodeConfig c = delay_config(NoteDelay::ND_FREE, 10, 1, 0, 100);
-    c.params[11] = 7;
-    c.params[12] = NoteDelay::ND_PASS;
+    c.params[9] = 7;
+    c.params[10] = NoteDelay::ND_PASS;
     NoteDelay node(c);
 
     const MidiEvent on = {MIDI_NOTE_ON, 1, 60, 100};
@@ -572,7 +549,7 @@ int main(int, char**) {
     RUN_TEST(test_decay_quietens_each_repeat_and_stops_when_it_runs_out);
     RUN_TEST(test_the_interval_is_scale_steps_so_a_canon_stays_in_key);
     RUN_TEST(test_no_interval_is_transparent_to_a_chromatic_line);
-    RUN_TEST(test_a_named_scale_transposes_against_its_own_root);
+    RUN_TEST(test_the_canon_transposes_in_the_key);
     RUN_TEST(test_a_note_outside_the_key_echoes_inside_it);
     RUN_TEST(test_an_echo_off_the_end_of_the_keyboard_is_a_rest);
     RUN_TEST(test_spread_makes_each_gap_longer_than_the_last);

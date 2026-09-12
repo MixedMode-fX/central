@@ -34,6 +34,14 @@
 // input flickers, it does not hang - and a loop now costs one pass in total
 // rather than one per node in it.
 //
+// **The key is ordered here too.** It is not a bus - it is one control-plane
+// value for the whole patch (midi/global_key.h) - but a Key node writing it
+// from a note bus and a Chord reading it are producer and consumer in exactly
+// the sense above, and left unordered a key change would be heard a pass
+// late. So a descriptor's `reads_key` and `writes_key` (node/node.h) join the
+// buses a node reads and writes, and everything below - the topological
+// order, the loop that costs one pass - is unchanged.
+//
 // **It is computed once per edit, not per pass.** build() is O(n^2) over the
 // pool with everything in bitmasks, and runs on a patch load or on the one
 // node an incremental edit reconstructs (#11). A pass walks an array.
@@ -67,12 +75,14 @@ class Schedule {
         const BusSet& after(uint8_t position) const;
 
     private:
-        // What one node reads and writes, over the three domains in one index
-        // space (see the .cpp). Eight bytes a node, which is all build()
-        // needs of a NodeConfig.
+        // What one node reads and writes: the three domains in one index
+        // space (see the .cpp), and the key, which is not a bus and needs no
+        // index because there is only one of it.
         struct Ports {
             uint32_t read;
             uint32_t write;
+            bool reads_key;
+            bool writes_key;
         };
 
         Ports ports[N_NODE];

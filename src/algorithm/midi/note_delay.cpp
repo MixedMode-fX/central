@@ -1,7 +1,7 @@
 #include "algorithm/midi/note_delay.h"
 #include "node/registry.h"
 #include "midi/note_event.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "hal/midi_types.h"
 
 static const Domain IN[2] = {Domain::Note, Domain::Gate};
@@ -10,7 +10,7 @@ static const Domain OUT[1] = {Domain::Note};
 static const char* const SYNC_NAMES[NoteDelay::ND_SYNCS] = {"clock", "free"};
 static const char* const DRY_NAMES[NoteDelay::ND_DRYS] = {"pass", "mute"};
 
-static const ParamDescriptor PARAMS[14] = {
+static const ParamDescriptor PARAMS[11] = {
     {"sync",     NoteDelay::ND_CLOCK, NoteDelay::ND_SYNCS, NoteDelay::ND_CLOCK, PARAM_ENUM, SYNC_NAMES},
     {"division", DIV_8_BARS,    DIVISIONS, DIV_EIGHTH,    PARAM_ENUM, DIVISION_NAMES},
     {"feel",     FEEL_STRAIGHT, FEELS,     FEEL_STRAIGHT, PARAM_ENUM, FEEL_NAMES},
@@ -20,22 +20,20 @@ static const ParamDescriptor PARAMS[14] = {
     {"decay",    0, 100, 70,  PARAM_PERCENT, nullptr},
     {"chance",   0, 100, 100, PARAM_PERCENT, nullptr},
     {"spread",   0, 255, 0,   PARAM_SIGNED,  nullptr},
-    {"scale",    0, SCALE_COUNT - 1, 0, PARAM_ENUM, PARAM_SCALE_NAMES},
-    {"root",     0, 11, 0, PARAM_PITCH_CLASS, nullptr},
     {"channel",  0, 16, 0, PARAM_CHANNEL, nullptr},
     {"dry",      NoteDelay::ND_PASS, NoteDelay::ND_DRYS, NoteDelay::ND_PASS, PARAM_ENUM, DRY_NAMES},
-    {"key",      0, global_scale::KEY_MODES - 1, 0, PARAM_ENUM, PARAM_KEY_NAMES},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 14, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, 11, PARAMS}};
 
 static const char* const IN_NAMES[2] = {"notes in", "clear"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor NoteDelay::descriptor = {
-    ALGO_NOTE_DELAY, "NoteDelay", 2, 1, 1, 14, IN, OUT, sizeof(NoteDelay), true,
+    ALGO_NOTE_DELAY, "NoteDelay", 2, 1, 1, 11, IN, OUT, sizeof(NoteDelay), true,
     construct_node<NoteDelay>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "A delay that is a canon: repeats transposed in the key, and spread off the grid.",
-    CATEGORY_MIDI };
+    CATEGORY_MIDI,
+    true };   // reads_key: every pitch it plays comes from the key
 
 static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
     if (stored == 0 || stored > max_value) return fallback;
@@ -56,11 +54,8 @@ NoteDelay::NoteDelay(const NodeConfig& config) :
     decay(config.params[6] ? (config.params[6] > 100 ? (uint8_t)100 : config.params[6]) : (uint8_t)70),
     chance(step_probability(config.params[7])),
     spread(config.params[8]),
-    scale(config.params[9] < SCALE_COUNT ? config.params[9] : (uint8_t)0),
-    root((uint8_t)(config.params[10] % 12u)),
-    channel(config.params[11] > 16 ? (uint8_t)0 : config.params[11]),
-    dry(clamp_enum(config.params[12], ND_DRYS, ND_PASS)),
-    key(config.params[13] < global_scale::KEY_MODES ? config.params[13] : (uint8_t)0),
+    channel(config.params[9] > 16 ? (uint8_t)0 : config.params[9]),
+    dry(clamp_enum(config.params[10], ND_DRYS, ND_PASS)),
     subtick(0), drops(0),
     clear_in(config.in_bus[1]),
     rng(entropy::seed()),
@@ -122,8 +117,8 @@ uint32_t NoteDelay::delay_of(uint8_t k) const {
 uint8_t NoteDelay::pitch_for(uint8_t pitch, uint8_t k) const {
     const int8_t step = as_signed(interval);
     if (step == 0 || k == 0) return pitch;
-    const uint16_t mask = global_scale::resolve_id(scale);
-    const uint8_t r = global_scale::resolve_root(key, root);
+    const uint16_t mask = global_key::mask();
+    const uint8_t r = global_key::root();
     const int16_t rel = (int16_t)pitch - (int16_t)r;
     const int16_t degree = semitone_to_scale_degree(rel, mask);
     const int16_t moved = (int16_t)(degree + (int16_t)step * (int16_t)k);
@@ -261,11 +256,8 @@ bool NoteDelay::set_param(uint16_t index, uint8_t value){
         case 6: if (value > 100) return false; decay = value; return true;
         case 7: if (value > 100) return false; chance = step_probability(value); return true;
         case 8: spread = value; return true;
-        case 9: if (value >= SCALE_COUNT) return false; scale = value; return true;
-        case 10: if (value > 11) return false; root = value; return true;
-        case 11: if (value > 16) return false; channel = value; return true;
-        case 12: if (value == 0 || value > ND_DRYS) return false; dry = value; return true;
-        case 13: if (value >= global_scale::KEY_MODES) return false; key = value; return true;
+        case 9: if (value > 16) return false; channel = value; return true;
+        case 10: if (value == 0 || value > ND_DRYS) return false; dry = value; return true;
         default: return false;
     }
 }
@@ -281,11 +273,8 @@ uint8_t NoteDelay::get_param(uint16_t index) const {
         case 6: return decay;
         case 7: return chance;
         case 8: return spread;
-        case 9: return scale;
-        case 10: return root;
-        case 11: return channel;
-        case 12: return dry;
-        case 13: return key;
+        case 9: return channel;
+        case 10: return dry;
         default: return 0;
     }
 }

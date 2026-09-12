@@ -101,8 +101,10 @@ static void test_every_port_and_algorithm_is_named() {
         // list, which is the wall grouping was meant to remove.
         TEST_ASSERT_TRUE_MESSAGE(d->category != CATEGORY_NONE, d->name);
         TEST_ASSERT_TRUE_MESSAGE(d->category <= CATEGORY_UTILITY, d->name);
-        TEST_ASSERT_NOT_NULL_MESSAGE(d->in_name, d->name);
-        TEST_ASSERT_NOT_NULL_MESSAGE(d->out_name, d->name);
+        if (d->n_in) TEST_ASSERT_NOT_NULL_MESSAGE(d->in_name, d->name);
+        // A node with no outlets - the Key node writes the key, which is not
+        // a bus - has no names to give.
+        if (d->n_out) TEST_ASSERT_NOT_NULL_MESSAGE(d->out_name, d->name);
         for (uint8_t k = 0; k < d->n_in && k < MAX_IN; k++) {
             TEST_ASSERT_NOT_NULL_MESSAGE(d->in_name[k], d->name);
             TEST_ASSERT_TRUE_MESSAGE(d->in_name[k][0] != '\0', d->name);
@@ -382,9 +384,9 @@ static void test_a_bad_parameter_leaves_the_running_patch_alone() {
     master.setup();
 
     Patch bad = empty_patch();
-    bad.nodes[0] = node_config(ALGO_NOTE_QUANTISE);
+    bad.nodes[0] = node_config(ALGO_CHORD);
     bad.nodes[0].in_bus[0] = 0; bad.nodes[0].out_bus[0] = 1;
-    bad.nodes[0].params[0] = SCALE_COUNT + 3;         // no such scale
+    bad.nodes[0].params[Chord::P_QUALITY] = Chord::QUALITY_COUNT + 3;   // no such quality
     bad.n_nodes = 1;
     TEST_ASSERT_EQUAL(LOAD_NODE_INVALID, master.load(bad));
     TEST_ASSERT_EQUAL(CONFIG_PARAM_OUT_OF_RANGE, master.last_node_error());
@@ -454,12 +456,6 @@ static void modifier_under_held_notes(uint8_t algorithm, uint16_t param, uint8_t
 
 static void test_transpose_offset_moving_under_a_chord_hangs_nothing() {
     modifier_under_held_notes(ALGO_TRANSPOSE, 0, 7, "Transpose offset");
-}
-static void test_note_quantise_scale_moving_under_a_chord_hangs_nothing() {
-    modifier_under_held_notes(ALGO_NOTE_QUANTISE, 0, SCALE_PENTATONIC_MINOR, "NoteQuantise scale");
-}
-static void test_note_quantise_root_moving_under_a_chord_hangs_nothing() {
-    modifier_under_held_notes(ALGO_NOTE_QUANTISE, 1, 7, "NoteQuantise root");
 }
 static void test_chord_quality_moving_under_a_chord_hangs_nothing() {
     modifier_under_held_notes(ALGO_CHORD, Chord::P_QUALITY, Chord::QUALITY_NINTH, "Chord quality");
@@ -531,10 +527,10 @@ static void test_note_sequencer_root_moving_hangs_nothing() {
         gpio.set_input(0, true);  run_passes(master, 1, now);
         gpio.set_input(0, false); run_passes(master, 1, now);
         if (i == 2) TEST_ASSERT_EQUAL(PARAM_SET_OK,
-                                      master.set_node_param(0, NoteSequencerBase::P_ROOT, 72));
+                                      master.set_node_param(0, NoteSequencerBase::P_OCTAVE, 6));
     }
     master.unload();
-    assert_no_hanging_notes(midi, "NoteSequencer root");
+    assert_no_hanging_notes(midi, "NoteSequencer octave");
 }
 
 // ---------------------------------------------------------------------------
@@ -578,8 +574,6 @@ int main() {
     RUN_TEST(test_out_of_range_parameter_is_rejected_by_the_validator);
     RUN_TEST(test_a_bad_parameter_leaves_the_running_patch_alone);
     RUN_TEST(test_transpose_offset_moving_under_a_chord_hangs_nothing);
-    RUN_TEST(test_note_quantise_scale_moving_under_a_chord_hangs_nothing);
-    RUN_TEST(test_note_quantise_root_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_chord_quality_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_chord_voicing_moving_under_a_chord_hangs_nothing);
     RUN_TEST(test_chord_inversion_moving_under_a_chord_hangs_nothing);

@@ -33,6 +33,17 @@ LoadError MixedModeMaster::validate(const Patch& patch){
             node_error_index = i;
             return LOAD_NODE_INVALID;
         }
+        // At most one of a singleton algorithm. The Key node is one because
+        // the key has one value and two writers would race over it
+        // (algorithm/midi/key.h); the check is on the descriptor rather than
+        // on the id, so the next one costs nothing here.
+        const AlgorithmDescriptor* d = registry::find(patch.nodes[i].algorithm_id);
+        if (d == nullptr || !d->singleton) continue;
+        for (uint8_t j = 0; j < i; j++){
+            if (patch.nodes[j].algorithm_id != patch.nodes[i].algorithm_id) continue;
+            node_error_index = i;
+            return LOAD_DUPLICATE_SINGLETON;
+        }
     }
     for (uint8_t i = 0; i < N_CC_MAP; i++){
         if (patch.cc_map[i].source_mask == 0) continue;
@@ -64,6 +75,9 @@ static bool target_exists(const Patch& patch, uint8_t kind, uint8_t index, uint1
         }
         case CC_TARGET_CLOCK:     return param < CC_CLOCK_TARGETS;
         case CC_TARGET_TRANSPORT: return param < CC_TRANSPORT_TARGETS;
+        // The key exists whatever the patch holds, so unlike a node
+        // parameter there is nothing here to check it against.
+        case CC_TARGET_KEY:       return param < CC_KEY_TARGETS;
         default:                  return false;         // CC_TARGET_PORT is reserved
     }
 }

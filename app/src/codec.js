@@ -83,11 +83,12 @@ export function emptyGlobals() {
     nrpnEnabled: 0,
     nrpnChannel: 0,
     nrpnSourceMask: 0,
-    // The key every algorithm follows unless it names a scale of its own
-    // (src/midi/global_scale.h). Chromatic is "no key set".
+    // The key every algorithm plays in (src/midi/global_key.h). Chromatic on
+    // C is "no key set", and the register is where a node that names no
+    // octave of its own plays.
     scale: P.ScaleId.SCALE_CHROMATIC,
     root: 0,
-    rootOctave: 0,
+    rootOctave: P.KEY_DEFAULT_OCTAVE,
   };
 }
 

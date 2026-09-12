@@ -4,13 +4,13 @@
 #include "bus/bus_manager.h"
 #include "node/patch.h"
 #include "node/registry.h"
-#include "midi/global_scale.h"
+#include "midi/global_key.h"
 #include "midi/note_event.h"
 #include "hal/midi_types.h"
 #include "algorithm/midi/mirror.h"
 
 void setUp() {}
-void tearDown() { global_scale::set(SCALE_CHROMATIC, 0); }
+void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 
 // Mirror: negative harmony, which is the circle of fifths reflected.
 
@@ -59,7 +59,7 @@ static bool has_class(const std::vector<uint8_t>& classes, uint8_t pitch_class){
 // subdominant becomes the minor dominant - which is the reflection exchanging
 // the two halves of the circle about the tonic.
 static void test_negative_harmony_maps_the_three_chords() {
-    global_scale::set(SCALE_MAJOR, 0);                 // C major
+    global_key::set(SCALE_MAJOR, 0);                 // C major
 
     struct Case { uint8_t in[3]; uint8_t want[3]; };
     static const Case CASES[3] = {
@@ -83,7 +83,7 @@ static void test_negative_harmony_maps_the_three_chords() {
 // off the bottom of the keyboard. The reflection is a pitch class, placed in
 // the octave nearest the note that caused it.
 static void test_the_reflection_lands_near_the_note_that_caused_it() {
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = mirror_config(Mirror::MIRROR_NEGATIVE);
     Mirror node(c);
@@ -100,7 +100,7 @@ static void test_the_reflection_lands_near_the_note_that_caused_it() {
 // Inversion is the same operation about the tonic itself: what a melody wants
 // rather than what a progression does. In C, E goes to A flat and G to F.
 static void test_inversion_reflects_about_the_tonic() {
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = mirror_config(Mirror::MIRROR_INVERSION);
     Mirror node(c);
@@ -113,7 +113,7 @@ static void test_inversion_reflects_about_the_tonic() {
 // The axis is the key's, and a cable outranks the key - the rule every node
 // with a root inlet follows.
 static void test_the_root_inlet_moves_the_axis() {
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = mirror_config(Mirror::MIRROR_NEGATIVE, true);
     Mirror node(c);
@@ -130,7 +130,7 @@ static void test_the_root_inlet_moves_the_axis() {
 // off by default. Turned on, the reflection comes back into the scale: in C
 // major, E flat is not there and D is the nearest tone that is.
 static void test_snap_puts_the_reflection_back_in_the_key() {
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = mirror_config(Mirror::MIRROR_NEGATIVE);
     Mirror node(c);
@@ -146,7 +146,7 @@ static void test_snap_puts_the_reflection_back_in_the_key() {
 // patched a mirror asked for. At one percent almost nothing is - which is how
 // "off" is spelled, since a stored zero means the default.
 static void test_amount_is_a_percentage_of_the_note_ons() {
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = mirror_config(Mirror::MIRROR_NEGATIVE);
     Mirror node(c);
@@ -179,7 +179,7 @@ static void test_amount_is_a_percentage_of_the_note_ons() {
 // sounding note and the note-off is computed from the new one. The release is
 // taken from the ledger instead, so it is the pitch that was actually sent.
 static void test_moving_the_axis_under_a_sounding_note_releases_what_was_sent() {
-    global_scale::set(SCALE_MAJOR, 0);
+    global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = mirror_config(Mirror::MIRROR_NEGATIVE);
     Mirror node(c);
@@ -190,7 +190,7 @@ static void test_moving_the_axis_under_a_sounding_note_releases_what_was_sent() 
     const uint8_t emitted = out[0].data1;
     TEST_ASSERT_EQUAL(1, node.sounding_count());
 
-    global_scale::set(SCALE_MAJOR, 7);                 // the whole module changes key
+    global_key::set(SCALE_MAJOR, 7);                 // the whole module changes key
     TEST_ASSERT_TRUE(node.set_param(Mirror::P_MODE, Mirror::MIRROR_INVERSION));
 
     bus.note_write(IN_BUS, off(64));
@@ -229,7 +229,7 @@ static void test_mirror_hangs_nothing() {
             for (uint8_t j = index; j + 1u < n_held; j++) held[j] = held[j + 1];
             n_held--;
         }
-        if ((i % 64) == 0) global_scale::set(SCALE_MAJOR, (uint8_t)(i % 12u));
+        if ((i % 64) == 0) global_key::set(SCALE_MAJOR, (uint8_t)(i % 12u));
 
         for (const MidiEvent& e : run_pass(bus, node)){
             if (is_note_on(e)) balance[e.data1]++;

@@ -33,11 +33,17 @@ bool NrpnDecoder::resolve(uint16_t addr, uint8_t& kind, uint8_t& index, uint16_t
         param = (uint16_t)(addr - NRPN_CLOCK_BASE);
         return param < CC_CLOCK_TARGETS;
     }
-    if (addr < NRPN_RESERVED_BASE){
+    if (addr < NRPN_KEY_BASE){
         kind = CC_TARGET_TRANSPORT;
         index = 0;
         param = (uint16_t)(addr - NRPN_TRANSPORT_BASE);
         return param < CC_TRANSPORT_TARGETS;
+    }
+    if (addr < NRPN_RESERVED_BASE){
+        kind = CC_TARGET_KEY;
+        index = 0;
+        param = (uint16_t)(addr - NRPN_KEY_BASE);
+        return param < CC_KEY_TARGETS;
     }
     return false;
 }
@@ -55,6 +61,10 @@ bool NrpnDecoder::address_of(uint8_t kind, uint8_t index, uint16_t param, uint16
         case CC_TARGET_TRANSPORT:
             if (param >= CC_TRANSPORT_TARGETS) return false;
             addr = (uint16_t)(NRPN_TRANSPORT_BASE + param);
+            return true;
+        case CC_TARGET_KEY:
+            if (param >= CC_KEY_TARGETS) return false;
+            addr = (uint16_t)(NRPN_KEY_BASE + param);
             return true;
         default:
             return false;

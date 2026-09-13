@@ -400,8 +400,7 @@ static void test_a_triad_on_every_degree_comes_out_the_right_quality() {
     Harmony harmony(hc);
 
     NodeConfig cc = node_config(ALGO_CHORD);
-    cc.in_bus[0] = NO_BUS;                 // nothing played: the chord follows its root inlet
-    cc.in_bus[1] = NOTE_ROOT;
+    cc.in_bus[0] = NOTE_ROOT;              // Harmony's root is what plays the chord
     cc.out_bus[0] = NOTE_CHORD;
     cc.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord chord(cc);

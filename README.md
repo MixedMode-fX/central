@@ -252,11 +252,10 @@ is only what a parameter list cannot say.
 - **`Tonnetz` is the other walk.** P, L and R each move one voice by a semitone
   or a tone; alternating two of them traces a cycle — `LR` fifths, `PL` major
   thirds, `PR` minor thirds. `deviation` is the chance of leaving the cycle,
-  `diatonic` refuses triads the key does not hold. Its `root` inlet plays it
-  the way `Chord`'s does — a note-on starts the walk again on that note,
-  register and all, and does not move the key — and the
-  triad it starts on is whichever one the key holds there, so the quality is
-  not a setting. It emits root position and leaves the voice leading to
+  `diatonic` refuses triads the key does not hold. A note-on on its `root`
+  inlet starts the walk again on that note, register and all unless `octave`
+  names one, and does not move the key; the triad it starts on is whichever
+  one the key holds there, so the quality is not a setting. It emits root position and leaves the voice leading to
   `Voicer`.
 - **A note bus is already a splitter, so `NoteFilter` is the split.** A bus
   fans out to every reader and in from every writer, so three filters on one
@@ -314,7 +313,9 @@ and nobody wants a patch in two keys at once. What a node still chooses is the
 register, because a bass line and a lead are the same key two octaves apart —
 one `octave` parameter, where 0 (the default) is the key's own register and
 1..10 names one outright. So one setting moves the whole patch and a part that
-has been placed keeps its place. **A patched root inlet outranks all of it.**
+has been placed keeps its place. **A patched root inlet outranks the key's
+root, never the node's register**: the cable says which note, `octave` still
+says where it sits.
 
 Set the key from the console (`key <scale> <root> <oct>`), over
 `SYSEX_SET_GLOBALS`, on the app's key page — or from inside the patch:
@@ -339,9 +340,10 @@ on every degree of the key; `inversion` says which voice is in the bass;
 a chord with, so there each quality plays its own shape in semitones instead.
 With nothing patched to its note inlet `Chord` **plays itself**: the tonic
 chord of its key, held, which makes a chord + metronome + arpeggiator a
-complete patch with no input. A held chord is re-voiced whenever
-what it should play changes, releasing from the ledger first. A repeated root
-does not re-strike unless `retrigger` is set.
+complete patch with no input. A held chord is re-voiced whenever what it
+should play changes, releasing from the ledger first. It has one inlet and no
+`retrigger`: a chord lasts exactly as long as the note that asked for it, so
+whether a repeated degree re-strikes is decided by whoever is playing it.
 
 ## Control and feedback
 

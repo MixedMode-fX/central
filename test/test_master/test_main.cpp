@@ -572,8 +572,8 @@ static void test_stopping_the_transport_releases_a_root_driven_chord() {
     p.nodes[1] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
     p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS;
     p.nodes[1].out_bus[0] = 0; p.nodes[1].out_bus[1] = NO_BUS;
-    p.nodes[2] = node_config(ALGO_CHORD);                      // note 0 (root) -> note 1
-    p.nodes[2].in_bus[0] = NO_BUS; p.nodes[2].in_bus[1] = 0;
+    p.nodes[2] = node_config(ALGO_CHORD);                      // note 0 -> note 1
+    p.nodes[2].in_bus[0] = 0;
     p.nodes[2].out_bus[0] = 1;
     p.n_nodes = 3;
     p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
@@ -782,7 +782,7 @@ static void test_the_arpeggio_plays_the_chord_the_same_pulse_chose() {
     p.nodes[0] = arp;
 
     NodeConfig chord = node_config(ALGO_CHORD);
-    chord.in_bus[1] = 0;                                // root      <- note bus 0
+    chord.in_bus[0] = 0;                                // note in   <- note bus 0
     chord.out_bus[0] = 1;
     chord.params[11] = 1;                               // quality: triad
     p.nodes[1] = chord;
@@ -838,9 +838,11 @@ static void test_the_arpeggio_plays_the_chord_the_same_pulse_chose() {
     }
     // The patch really did run: the harmony moved, the figure played, and the
     // step that lands on the chord change - the one that used to be a bar
-    // late - happened.
+    // late - happened. The figure starts when the harmony does rather than
+    // before it, because a Chord with `note in` patched is waiting to be
+    // played, so the first of the four bars is silent.
     TEST_ASSERT_GREATER_THAN_UINT32(2, chord_changes);
-    TEST_ASSERT_GREATER_THAN_UINT32(30, steps);
+    TEST_ASSERT_GREATER_THAN_UINT32(20, steps);
     TEST_ASSERT_GREATER_THAN_UINT32(2, steps_on_a_change);
 }
 

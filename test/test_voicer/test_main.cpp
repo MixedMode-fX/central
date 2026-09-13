@@ -325,17 +325,16 @@ static void test_voicer_hangs_nothing() {
 // Downstream of Chord, which is where it actually sits
 // ---------------------------------------------------------------------------
 
-// The patch the design note ends on, minus the clock: a self-playing `Chord`
-// walked by a root, voiced. `Chord` releases and re-sounds in one pass, and
-// the voicer has to see one chord replacing another rather than the silence
-// in between.
+// The patch the design note ends on, minus the clock: a `Chord` walked by a
+// sequenced note, voiced. The step's note-off and the next step's note-on
+// arrive in one pass, so the voicer has to see one chord replacing another
+// rather than the silence in between.
 static void test_a_chord_walked_by_a_root_is_voice_led() {
     BusManager bus;
     global_key::set(SCALE_MAJOR, 0);
 
     NodeConfig cc = node_config(ALGO_CHORD);
-    cc.in_bus[0] = NO_BUS;                 // plays itself
-    cc.in_bus[1] = 2;                      // root inlet
+    cc.in_bus[0] = 2;                      // played by the root walking below
     cc.out_bus[0] = IN_BUS;
     cc.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord chord(cc);
@@ -347,13 +346,16 @@ static void test_a_chord_walked_by_a_root_is_voice_led() {
     // its successor's input on the *next* pass, so the voicer is always one
     // pass behind the chord. That latency is the graph's model, not a wait.
     auto pass = [&](){ bus.swap(); chord.process(bus, 0); voicer.process(bus, 0); };
+    bus.note_write(2, on(60));
     pass();                                // the chord sounds its tonic triad
     pass();                                // the voicer places it
     TEST_ASSERT_EQUAL(3, voicer.voice_count());
     TEST_ASSERT_EQUAL(48, voicer.voice(0));
 
-    // Walk the root to F. The chord releases three and sounds three; the
+    // Walk to F, the way a sequencer does it - the old step off and the new
+    // one on, in one pass. The chord releases three and sounds three; the
     // voicer moves two voices and holds one.
+    bus.note_write(2, off(60));
     bus.note_write(2, on(65));
     pass();
     pass();

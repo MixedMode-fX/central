@@ -49,8 +49,9 @@
 // A voice pushed off either end of the keyboard is dropped rather than
 // folded, and two voices landing on the same pitch sound once.
 //
-// The scale and the root are the key's (midi/global_key.h), and a patched
-// root inlet outranks them - the same rule NoteQuantise follows.
+// The scale and the root are the key's (midi/global_key.h), and nothing here
+// overrides them: a patch that wants its key moved from a note bus patches a
+// Key node, which moves it for every node at once rather than for this one.
 //
 // A played note the scale does not contain is snapped into it first (the
 // same snap NoteQuantise does), so the chord is in key even when the playing
@@ -67,67 +68,48 @@
 // holding them.
 //
 // A held chord is not a silent one: it is **re-voiced** whenever what it
-// should be playing changes - a note-on on the root inlet (so a sequencer
-// moves the chord a bar at a time), the key changing under it, or any
-// parameter of the voicing being edited.
+// should be playing changes - the key moving under it, or any parameter of
+// the voicing being edited.
 //
-// **A root that repeats is not a change, and `retrigger` is what says
-// otherwise.** A held chord that re-struck itself every time a sequencer
-// resent the note it is already playing would be a chord nobody could drone
-// on, so by default it does not. But `Harmony` repeats a degree whenever its
-// style or its `gravity` says so, and there the silence is a hole in the
-// progression rather than a held note - one chord of the phrase simply does
-// not sound. So it is a switch, defaulting to the held behaviour, which is
-// what a stored zero has always meant here. Re-voicing releases every note it
-// had sounding from the ledger and sounds the new chord, so a chord editable
-// while it drones cannot strand a note, and a downstream arpeggiator simply
-// sees the figure change.
+// **The articulation is the input's, not a setting.** A chord lasts exactly
+// as long as the note that asked for it: a sequencer whose steps run into
+// each other gives a progression that sustains from bar to bar, and one that
+// gates them short gives block chords. `Harmony` holds its root until the
+// next chord, so `Harmony -> Chord` sustains and every repeated degree of the
+// phrase sounds. There is no `retrigger` and no `hold`, because a node that
+// decided this for itself would be overruling the thing playing it - the same
+// rule NoteDelay follows for its echoes.
 //
-// **A chord played by the root inlet is released when the transport stops.**
-// It is held until the next root note-on, and a stopped clock is the one
-// moment the module knows that note-on may never come (node/node.h) - the
-// same reason Harmony releases its root there. The next root note-on brings
-// it back. A chord with neither inlet patched has no edge to wait for and is
-// not a chord the transport was ever driving, so it drones through the stop.
-//
-// The root inlet is what a self-playing chord is *played* by, so on one it
-// means what `note in` means everywhere else: the whole note rather than only
-// its pitch class - a sequencer sends C3 and the chord moves to C3, octave
-// and all, unless `octave` names a register of its own - and it does not
-// touch the key. That is the difference between a
-// sequenced root walking through the chords of one key and one dragging the
-// key along behind it, and only the first is a chord progression. With a note
-// inlet patched the root inlet means what it always did: the key's root, and
-// the pitch comes from the notes.
+// **It has no transport to stop.** Every note it emits is owed to a note-on
+// somebody sent, and the note-off that ends it comes from the same place, so
+// a stop is nothing this node has to act on: whoever is playing it releases
+// there instead (node/node.h), and a drone with nothing patched at all was
+// never the transport's to stop.
 //
 // Inlet 0 (note, optional): the note to voice. Unpatched, the node plays
 //         itself, as above.
-// Inlet 1 (note, optional): the root. Note-ons set it - the key's root
-//         normally, the note to play on a self-playing node.
 //
 // params[0] quality   which stack of scale steps to voice
 // params[1] voicing   how far apart the voices sit
 // params[2] inversion how many of the lowest voices go up an octave
-// params[3] octave    which register a self-playing chord sits in. Its root
-//                     is 12 x octave + the pitch class of whatever is playing
-//                     it - the key's root, or the note the root inlet named.
-//                     0, the default, is the key's own register, and a played
-//                     note's own when one has played, so a chord left alone
-//                     moves with the key and a sequenced one keeps the
-//                     register it was sent in. Ignored while a note inlet is
-//                     patched.
+// params[3] octave    which register the chord sits in: 12 x octave + the
+//                     pitch class of whatever is playing it - the key's root
+//                     on a node nobody is playing, the note that arrived on
+//                     one somebody is. 0, the default, is the key's own
+//                     register, and a played note's own when one is playing,
+//                     so a chord left alone moves with the key and a played
+//                     one keeps the register it was sent in.
 // params[4] velocity  what a self-playing chord is sounded at. Ignored
 //                     while a note inlet is patched: a played note keeps
 //                     the velocity it was played with.
-// params[5] retrigger re-strike the chord on every root note-on, including
-//                     one that names the note already sounding.
 class Chord : public Node{
     public:
         // A ninth is the widest named stack: four steps over the root.
         static constexpr uint8_t MAX_STEPS = 4, MAX_VOICES = MAX_STEPS + 1;
+        // The parameter order is the preset format, so these never move.
         static constexpr uint16_t P_QUALITY = 0, P_VOICING = 1, P_INVERSION = 2,
-                                  P_OCTAVE = 3, P_VELOCITY = 4, P_RETRIGGER = 5;
-        static constexpr uint8_t N_PARAMS = 6;
+                                  P_OCTAVE = 3, P_VELOCITY = 4;
+        static constexpr uint8_t N_PARAMS = 5;
 
         // Numbered from 1, so that a stored zero is the default triad the way
         // a stored zero is the default everywhere else in this module
@@ -158,19 +140,13 @@ class Chord : public Node{
         static constexpr uint8_t MAX_INVERSION = 3;
         // The velocity a note nobody played should sound at.
         static constexpr uint8_t DEFAULT_VELOCITY = 100;
-        // No note: what `free_note` holds until the root inlet names one, and
-        // what `voiced` holds while nothing is sounding.
+        // No note: what `voiced` holds while nothing is sounding.
         static constexpr uint8_t NO_NOTE = 0xFF;
 
         static const AlgorithmDescriptor descriptor;
         explicit Chord(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
-        // A chord the root inlet is playing is held until the next root
-        // note-on, so a stopped transport would hold it for ever. A drone
-        // nothing is playing, and a chord played through `note in`, are left
-        // alone (node/node.h).
-        void transport_stopped(BusManager& bus) override;
         bool set_param(uint16_t index, uint8_t value) override;
         uint8_t get_param(uint16_t index) const override;
 
@@ -180,8 +156,7 @@ class Chord : public Node{
         // The root a self-playing chord is sounding, or NO_NOTE.
         uint8_t voiced_note() const { return voiced; }
         uint32_t refused() const { return sounding.refused(); }
-        // The scale and root actually played: the key's, unless the root
-        // inlet has said otherwise.
+        // The scale and root actually played, which are the key's.
         uint16_t active_mask() const;
         uint8_t active_root() const;
 
@@ -201,30 +176,18 @@ class Chord : public Node{
         void play_free(BusManager& bus, uint16_t mask, uint8_t tonic);
 
         uint8_t in;
-        uint8_t root_in;
         uint8_t out;
         uint8_t quality;
         uint8_t voicing;
         uint8_t inversion;
-        // The pitch class the root inlet last wrote, or NO_NOTE until it
-        // has: an unplayed cable has said nothing, so the key still stands.
-        uint8_t root;
         uint8_t octave;
         uint8_t velocity;
-        bool retrigger;
-        // Free-running state. `free_note` is the note the root inlet last
-        // named (NO_NOTE: derive it from the key and the octave), `voiced`
-        // the root actually sounding, `voiced_mask` the scale it was voiced
-        // in, `dirty` a parameter edit that has to be heard, and `stopped`
-        // a transport stop this node stood down for: nothing sounds again
-        // until the root inlet plays it, so a parameter edit cannot start a
-        // chord the stop took down.
-        uint8_t free_note;
+        // Free-running state: `voiced` is the root actually sounding,
+        // `voiced_mask` the scale it was voiced in, and `dirty` a parameter
+        // edit that has to be heard.
         uint8_t voiced;
-        uint8_t free_channel;
         uint16_t voiced_mask;
         bool dirty;
-        bool stopped;
         SoundingNotes sounding;
 };
 

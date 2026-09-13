@@ -12,10 +12,15 @@ rather than opening it from disk — a browser will not load a module from
 `file://` and Web MIDI needs a secure context.
 
 ```sh
-make module                       # compiles the firmware to WebAssembly
-python3 -m http.server 8080       # from the repository root, then /app/
-make app                          # the above, plus the checks below
+make dev                          # builds the module and serves /app/ on 8080
+make app                          # the checks below, against the module
+make stop                         # stop the server
 ```
+
+`make dev` is `scripts/start_app.sh`: idempotent, detached, and it serves the
+repository root rather than `app/`, because the page reaches the module at
+`../../emulator/dist/mmmc.wasm`. `make preview` serves the single-file build
+instead.
 
 `make module` also writes `emulator/dist/index.html`, the whole app as one file
 with the module embedded, which opens from a download. The build from `main` is

@@ -14,37 +14,13 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Native unit tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+  # Everything the commit gate covers, by the same name and the same script.
+  checks:
+    uses: ./.github/workflows/checks.yml
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-            ~/.cache/pip
-          key: pio-native-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-native-
-
-      - name: Install PlatformIO
-        run: pip install --upgrade platformio
-
-      - name: Run tests
-        run: pio test -e native
-
-      - name: Algorithms must not name hardware
-        # Nothing under src/algorithm/ may include Arduino.h, name a GPIO pin
-        # or a MIDI transport: only the hardware port nodes do that.
-        run: |
-          ! grep -rnE 'Arduino\.h|GPIO_PIN_|mmMIDI_|hardware\.h|hal/teensy|IGpio|IMidiOut' src/algorithm/
-
+  # Not in the gate: it needs the ARM toolchain, and what it proves - that the
+  # thing fits on the board and links against the Teensy core - is not
+  # something a host build can tell you.
   firmware:
     name: Teensy 4.1 firmware
     runs-on: ubuntu-latest
@@ -69,13 +45,13 @@ jobs:
           restore-keys: pio-teensy-
 
       - name: Install PlatformIO
-        run: pip install --upgrade platformio
+        run: scripts/bootstrap.sh
 
       - name: Build firmware
-        run: pio run -e teensy41
+        run: make build
 
       - name: Report size
-        run: pio run -e teensy41 -t size
+        run: make size
 
       # Every build is downloadable, so a branch can be flashed and tried on
       # hardware without cutting a release for it. On a pull_request event
@@ -89,60 +65,5 @@ jobs:
           path: |
             .pio/build/teensy41/*.hex
             .pio/build/teensy41/*.elf
-          if-no-files-found: error
-          retention-days: 14
-
-  app:
-    name: The app and the WebAssembly module
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # build.sh stamps `git describe` into the page like the firmware.
-          fetch-depth: 0
-
-      # The module is the firmware core compiled to WebAssembly with a stock
-      # clang; lld provides wasm-ld and llvm the nm used to check imports.
-      #
-      # The runner image carries third-party apt sources this build does not
-      # use, and one of them serving an index that disagrees with its own
-      # Release file fails `apt-get update` outright - exit 100, before a
-      # single package is fetched, which took this job down with a Chrome
-      # index nothing here has ever wanted. So the source is dropped, a
-      # partial update is tolerated, and the *install* is what decides whether
-      # the indexes were good enough: clang, lld and llvm all come from
-      # Ubuntu's own archive, so a third party cannot make this job red.
-      - name: Install clang and lld
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.*
-          sudo apt-get update || true
-          sudo apt-get install -y clang lld llvm
-
-      - name: Build
-        run: emulator/build.sh
-
-      # The same scenarios as test/test_master, driven through the wasm
-      # module: proves the browser build behaves like the native one.
-      - name: Smoke test the module
-        run: node emulator/test/smoke.mjs
-
-      # The app is a client of the firmware's protocol, so it is checked
-      # against the firmware: the generated protocol module must match the
-      # headers, and the app's codec, validator, patch library and runtime
-      # seam are driven against the module compiled to WebAssembly over the
-      # real SysEx protocol. A protocol change therefore breaks both at once,
-      # which is the reason the app lives in this repository (#12).
-      - name: Check the app against the firmware
-        run: |
-          node app/tools/generate-protocol.mjs --check
-          node app/test/protocol.test.mjs
-          node app/test/app.test.mjs
-
-      # A single self-contained page: download, open, no server needed.
-      - name: Upload the app
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-${{ github.event.pull_request.head.sha || github.sha }}
-          path: emulator/dist/index.html
           if-no-files-found: error
           retention-days: 14

@@ -8,8 +8,12 @@ ModMatrix::ModMatrix(PatchManager& manager, CcMapper& mapper) :
 
 void ModMatrix::reset(){
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
-        lanes[i] = Lane{unused_route(), 0, 0, false};
+        lanes[i] = Lane{unused_route(), 0, 0, false, idle_state()};
     }
+}
+
+ModState ModMatrix::idle_state(){
+    return ModState{MOD_STATUS_UNUSED, 0, 0, 0, 0, 0, 0};
 }
 
 bool ModMatrix::same_route(const ModRoute& a, const ModRoute& b){
@@ -26,6 +30,12 @@ bool ModMatrix::same_route(const ModRoute& a, const ModRoute& b){
 bool ModMatrix::last_written(uint8_t slot, uint16_t& value_out) const {
     if (slot >= N_MOD_ROUTE || !lanes[slot].have_written) return false;
     value_out = lanes[slot].written;
+    return true;
+}
+
+bool ModMatrix::state(uint8_t slot, ModState& state_out) const {
+    if (slot >= N_MOD_ROUTE) return false;
+    state_out = lanes[slot].reported;
     return true;
 }
 
@@ -73,14 +83,26 @@ void ModMatrix::apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us
         // The route changed under us. Whatever centre this lane was holding
         // belonged to a different binding, so it goes rather than being
         // applied to the new one.
-        lane = Lane{route, 0, 0, false};
+        lane = Lane{route, 0, 0, false, idle_state()};
     }
-    if (route.bus == NO_BUS || route.bus >= N_CV_BUS) return;
-    if (route.depth == 0) return;              // a silent route costs a compare
+    // Every return below says what it decided before it takes it. The reasons
+    // a route does nothing are these early exits and nothing else, so an
+    // editor showing `reported` is showing the matrix's own reasoning rather
+    // than a second guess at it that can disagree.
+    ModState& said = lane.reported;
+    if (route.bus == NO_BUS || route.bus >= N_CV_BUS){ said = idle_state(); return; }
+    if (route.depth == 0){                     // a silent route costs a compare
+        said = idle_state();
+        said.status = MOD_STATUS_SILENT;
+        return;
+    }
+
+    said.cv = buses.cv_read(route.bus);
 
     uint16_t lo = 0, hi = 0;
     if (!cc.target_range(route.target_kind, route.target_index, route.param, lo, hi)){
         refuse_count++;
+        said.status = MOD_STATUS_NO_TARGET;
         return;
     }
     // The route's own sub-range, clamped into what the target actually
@@ -92,16 +114,30 @@ void ModMatrix::apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us
     if (range_hi > hi) range_hi = hi;
     if (range_hi < range_lo) range_hi = range_lo;
     const int32_t span = (int32_t)range_hi - (int32_t)range_lo;
+    said.range_lo = range_lo;
+    said.range_hi = range_hi;
 
     int32_t position = 0;
     int32_t swing = 0;
-    read_signal(route, buses.cv_read(route.bus), position, swing);
+    read_signal(route, said.cv, position, swing);
+    said.position = (uint16_t)position;
+
+    // A route whose range has collapsed to one value is running perfectly and
+    // moving nothing, which is worth telling apart from every other kind of
+    // nothing: the fault is in the min and max somebody typed, not in the
+    // signal, the depth or the target.
+    if (span == 0){
+        said.status = MOD_STATUS_PINNED;
+        said.centre = range_lo;
+        said.value = range_lo;
+    }
 
     int32_t want;
     if ((route.flags & MOD_MODE_MASK) == MOD_OFFSET){
         uint16_t current = 0;
         if (!cc.read_control(route.target_kind, route.target_index, route.param, current)){
             refuse_count++;
+            said.status = MOD_STATUS_REFUSED;
             return;
         }
         // A target that is not where this lane left it has been moved by
@@ -118,16 +154,25 @@ void ModMatrix::apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us
         // direction, which is the honest reading of it and not a clip.
         const int32_t delta = (swing * route.depth / 255) * span / CV_FULL;
         want = (int32_t)lane.centre + delta;
+        said.centre = lane.centre;
     } else {
         // Absolute: the position *is* the value, depth scaling how much of
         // the range it reaches. Rounded rather than truncated, so the top of
         // the signal reaches range_hi.
         const int32_t scaled = position * route.depth / 255;
         want = range_lo + (scaled * span + CV_MAX / 2) / CV_MAX;
+        // Absolute mode has no set point: the parameter's own value is what
+        // the signal replaces, so the bottom of the range is the honest thing
+        // to measure the swing against.
+        said.centre = range_lo;
     }
 
     if (want < range_lo) want = range_lo;
     if (want > range_hi) want = range_hi;
+    if (said.status != MOD_STATUS_PINNED){
+        said.status = MOD_STATUS_ACTIVE;
+        said.value = (uint16_t)want;
+    }
 
     if (lane.have_written && (uint16_t)want == lane.written) return;
     // Transient: the node takes the value, the patch image and the store do
@@ -141,5 +186,6 @@ void ModMatrix::apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us
         lane.have_written = true;
     } else {
         refuse_count++;
+        said.status = MOD_STATUS_REFUSED;
     }
 }

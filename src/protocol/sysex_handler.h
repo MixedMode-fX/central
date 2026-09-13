@@ -8,6 +8,7 @@
 #include "protocol/sysex.h"
 #include "patch/patch_manager.h"
 #include "control/cc_mapper.h"
+#include "control/mod_matrix.h"
 #include "led/status_leds.h"
 
 // The patch protocol's device end (#11).
@@ -49,7 +50,8 @@ class SysexHandler : public ISysexIn {
         static constexpr uint8_t BEATS_PER_BAR = 4;
 
         SysexHandler(PatchManager& patches, MixedModeMaster& master,
-                     PatchStore& store, StatusLeds& leds, IMidiOut& midi, CcMapper& mapper);
+                     PatchStore& store, StatusLeds& leds, IMidiOut& midi, CcMapper& mapper,
+                     ModMatrix& matrix);
         SysexHandler(const SysexHandler&) = delete;
         SysexHandler& operator=(const SysexHandler&) = delete;
 
@@ -92,6 +94,7 @@ class SysexHandler : public ISysexIn {
         void reply_slots(uint8_t source);
         void reply_cc_map(uint8_t source, uint8_t slot);
         void reply_mod_route(uint8_t source, uint8_t slot);
+        void reply_mod_state(uint8_t source, uint8_t slot);
         void reply_pattern(uint8_t source, uint8_t node, uint16_t offset, uint16_t length);
         void ack(uint8_t source);
         void nak(uint8_t source, SysexError code);
@@ -128,6 +131,10 @@ class SysexHandler : public ISysexIn {
         StatusLeds& leds;
         IMidiOut& midi;
         CcMapper& cc;
+        // Read-only here: the protocol reports what modulation is doing, it
+        // never drives it. A route is edited through the patch like anything
+        // else.
+        const ModMatrix& mod;
 
         // The staging image a bulk transfer accumulates into. The live graph
         // is untouched until the last chunk has arrived and the whole image

@@ -50,7 +50,7 @@ static PatchManager patches(master, store, leds);
 static CcMapper cc_map(patches, master);
 static ModMatrix mod_matrix(patches, cc_map);
 static NrpnDecoder nrpn(patches, cc_map);
-static SysexHandler protocol(patches, master, store, leds, midi, cc_map);
+static SysexHandler protocol(patches, master, store, leds, midi, cc_map, mod_matrix);
 
 // The patch under construction. Separate from what is running: the page fills
 // this through the emu_patch_* setters and calls emu_load() to make it live.

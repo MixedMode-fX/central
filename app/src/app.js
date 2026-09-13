@@ -40,7 +40,7 @@ import { Listener } from './audio.js';
 import { drumSources } from './drums.js';
 import { Controller } from './controller.js';
 import { Library, toBase64 } from './storage.js';
-import { el, busUsers, iconButton, closeMenu } from './views.js';
+import { el, busUsers, iconButton, closeMenu, refreshModLive } from './views.js';
 import { icon } from './icons.js';
 import {
   connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
@@ -84,6 +84,12 @@ const TABS = [
 
 const AUTOSAVE_MS = 400;
 
+// How often the page asks the module what its modulation routes are doing. A
+// meter drawn faster than this says nothing more - a modulation slow enough to
+// be a modulation moves a parameter in tenths of a second - and over a DIN
+// cable every question is a round trip that the musical stream is waiting for.
+const MOD_POLL_MS = 100;
+
 // A cleared binding, on the wire: the module has a fixed table, so a slot is
 // emptied rather than removed.
 const EMPTY_MAPPING = {
@@ -125,6 +131,12 @@ class App {
     this.autosaveTimer = null;
     this.stopLive = null;          // unsubscribes the per-frame repaint
     this.renderScheduled = false;
+    // What each modulation route is doing, as the module last reported it
+    // (src/control/mod_matrix.h). Keyed by slot, and it is *live* state, not
+    // patch state: nothing here is saved, exported or sent anywhere.
+    this.modLive = new Map();
+    this.modPolling = false;
+    this.stopModPoll = null;
     // What the on-screen keyboard sends.
     this.play = { port: P.MidiPort.mmMIDI_USB_0, channel: 1, velocity: 100, octave: 4, cc: 74, ccValue: 64 };
     // The module has not got this patch. An incremental edit addresses a node
@@ -264,6 +276,7 @@ class App {
     this.offline = false;
     this.diverged = false;
     this.status = 'connected';
+    this.startModPoll();
   }
 
   // Back to (or on to) the module in the page.
@@ -1087,7 +1100,60 @@ class App {
   // The LEDs, the jack lamps, the gate buses, the MIDI log and the sequencer
   // playheads, written straight into the DOM ten times a second. Re-rendering
   // the page for them would fight every open <select> and every held key.
-  refreshLive() { refreshLive(this); }
+  refreshLive() { refreshLive(this); refreshModLive(this); }
+
+  // --- what modulation is doing --------------------------------------------
+
+  // A modulation route moves a parameter between passes, so the number in the
+  // patch is the set point and not what the node is running. The module knows
+  // both, and the only honest way to show it is to ask: this polls the routes
+  // whose meters are on screen and hands the answers to `refreshModLive`.
+  //
+  // **Polled, and only while somebody is looking.** A modulator writes every
+  // pass; a module that announced each write would fill the control cable with
+  // a message per millisecond per route, and the page can only draw sixty
+  // times a second anyway. So the rate is the page's, the question is only
+  // asked about routes that have a meter in the DOM, and a tab in the
+  // background asks nothing at all - `requestAnimationFrame` does not fire
+  // there.
+  startModPoll() {
+    if (this.stopModPoll) return;
+    let running = true;
+    let last = 0;
+    const tick = (ts) => {
+      if (!running) return;
+      requestAnimationFrame(tick);
+      if (ts - last < MOD_POLL_MS) return;
+      last = ts;
+      this.pollModState();
+    };
+    requestAnimationFrame(tick);
+    this.stopModPoll = () => { running = false; };
+  }
+
+  // One round of questions, never two at once: over a DIN cable a round trip
+  // is milliseconds, and a queue of overlapping polls would outlive whatever
+  // it was asked about.
+  async pollModState() {
+    if (this.modPolling || !this.device || this.diverged) return;
+    const slots = [...document.querySelectorAll('[data-mod-slot]')]
+      .map((node) => Number(node.dataset.modSlot));
+    if (!slots.length) { this.modLive.clear(); return; }
+    this.modPolling = true;
+    try {
+      for (const slot of new Set(slots)) {
+        const state = await this.device.getModState(slot);
+        if (state) this.modLive.set(slot, state); else this.modLive.delete(slot);
+      }
+    } catch {
+      // A module that has gone away is the connection's problem, not this
+      // view's: the meters go quiet and every other panel is unaffected.
+      this.modLive.clear();
+    } finally {
+      this.modPolling = false;
+    }
+    refreshModLive(this);
+  }
 
   view() {
     const problems = this.device?.capabilities ? validate(this.device, this.patch) : [];

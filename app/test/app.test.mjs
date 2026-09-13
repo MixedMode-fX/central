@@ -34,6 +34,7 @@ import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/sche
 import { EmbeddedModule } from '../src/module.js';
 import {
   slider, learnButton, paramSections, paramSection, PARAM_SECTIONS, nodeCard, triadQuality,
+  refreshModLive,
 } from '../src/views.js';
 import { shade, nodeRollSources, scopeRows } from '../src/scope.js';
 import { ICON_NAMES } from '../src/icons.js';
@@ -786,7 +787,17 @@ await test('parameters are filed by what they do, on every node', async () => {
   assert.equal(where(named('GateToNote'), 'channel'), 'midi');
   assert.equal(where(named('Probability'), 'seed'), 'chance');
   assert.equal(where(named('Arpeggiator'), 'mode'), 'mode');
-  assert.equal(where(named('LFO'), 'rate'), 'time');
+  // The LFO names its own for a third reason: `sync` decides which of its two
+  // rate settings is live, and sorting by word puts it under behaviour while
+  // both of the settings it governs land under timing - so the control and
+  // the two it switches between were in different sections of the card.
+  assert.deepEqual(paramSections(named('LFO').params).map((section) => section.label),
+                   ['shape', 'rate', 'level']);
+  assert.deepEqual(paramSections(named('LFO').params)
+                     .find((section) => section.label === 'rate').params.map((p) => p.pd.name),
+                   ['sync', 'rate', 'division', 'feel']);
+  assert.equal(where(named('LFO'), 'polarity'), 'shape',
+               'two runs of the parameter order under one label are one section');
   assert.equal(paramSection({ name: 'anything at all', kind: P.ParamKind.PARAM_NUMBER }), 'other',
                'a word the table has never met is still a control');
 
@@ -867,6 +878,115 @@ await test('a route from the parameter side is the route a drag makes, and moves
   // And the answer to "what is not possible" is a sentence, not a throw.
   assert.equal(planBusModulation(patch, caps, 1, semitones, 99).ok, false);
   assert.equal(planBusModulation(patch, caps, 7, 0, 0).ok, false);
+});
+
+// The question the modulation panel exists to answer: what is this doing to
+// the parameter right now, and - when the answer is "nothing" - which of the
+// several possible nothings it is. Every number here comes from the module
+// (SYSEX_GET_MOD_STATE), so this is also the check that the firmware's own
+// account of a route and the meter drawn from it are the same account.
+await test('a modulation route shows what it is doing, and says why when it is doing nothing', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const lfo = device.algorithms.find((d) => d?.name === 'LFO');
+  const transpose = device.algorithms.find((d) => d?.name === 'Transpose');
+  for (const d of [lfo, transpose]) {
+    const node = codec.emptyNode(d.id);
+    connectNewNode(device, patch, node, d);
+    patch.nodes.push(node);
+  }
+  const semitones = transpose.params[0].fields.findIndex((pd) => pd.name === 'semitones');
+  const bus = patch.nodes[0].outBus[0];
+  const plan = planBusModulation(patch, device.capabilities, 1, semitones, bus, { device });
+  assert.ok(plan.ok, plan.why);
+  const slot = plan.routes[0].slot;
+  patch.modMap[slot] = plan.routes[0].route;
+  await device.sendPatch(patch, codec.emptyGlobals());
+  module.advance(400_000);                 // long enough for the LFO to have moved
+
+  const app = {
+    patch, device, module, globals: codec.emptyGlobals(),
+    render: () => {}, scrolled: new Map(), modLive: new Map(),
+    // As App answers it: the control draws its live readout only when it
+    // knows a route reaches it.
+    routeFor: (node, param) => {
+      const found = patch.modMap.findIndex((r) => r && r.bus !== P.NO_BUS
+        && r.targetKind === P.CcTargetKind.CC_TARGET_NODE
+        && r.targetIndex === node && r.param === param);
+      return found < 0 ? null : { slot: found, ...patch.modMap[found] };
+    },
+  };
+  const shown = async () => {
+    const state = await device.getModState(slot);
+    assert.ok(state, 'the module answers with a state');
+    app.modLive.set(slot, state);
+    const card = nodeCard(app, 1);
+    document.body.append(card);
+    refreshModLive(app);
+    return { state, said: words(card) };
+  };
+
+  await withDom(async () => {
+    const live = await shown();
+    assert.equal(live.state.status, P.ModStatus.MOD_STATUS_ACTIVE, 'a route with a signal on it is active');
+    assert.ok(live.state.rangeHi > live.state.rangeLo, 'the module reports the range it may write');
+    assert.match(live.said, /signal \d+ %/, 'the meter says what the signal is doing');
+    assert.match(live.said, /now /, 'and the control says where the modulation has taken it');
+    assert.equal(document.querySelectorAll('[data-mod-slot]').length, 1, 'one meter, on its slot');
+
+    // Depth zero is the most confusing of the nothings, because every other
+    // field of the route still reads as correct.
+    patch.modMap[slot] = { ...patch.modMap[slot], depth: 0 };
+    await device.setModRoute(slot, patch.modMap[slot]);
+    module.advance(20_000);
+    document.body.children.length = 0;
+    const silent = await shown();
+    assert.equal(silent.state.status, P.ModStatus.MOD_STATUS_SILENT);
+    assert.match(silent.said, /depth is zero/);
+
+    // And the one the module cannot report, because from the matrix's side a
+    // bus nobody writes is a perfectly good signal that happens to be zero.
+    const empty = P.N_CV_BUS - 1;
+    assert.ok(!patch.nodes.some((n) => n.outBus.includes(empty)), 'a bus with no writer');
+    patch.modMap[slot] = { ...patch.modMap[slot], bus: empty, depth: 255 };
+    await device.setModRoute(slot, patch.modMap[slot]);
+    module.advance(20_000);
+    document.body.children.length = 0;
+    const quiet = await shown();
+    assert.equal(quiet.state.status, P.ModStatus.MOD_STATUS_ACTIVE, 'the matrix is running it');
+    assert.match(quiet.said, new RegExp(`nothing writes CV bus ${empty}`));
+  });
+});
+
+// A control that is stored, real, and reaching nothing until another control
+// says so. The LFO has two rates and one of them is live at a time.
+await test('a setting the algorithm is currently ignoring says so', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const lfo = device.algorithms.find((d) => d?.name === 'LFO');
+  const node = codec.emptyNode(lfo.id);
+  connectNewNode(device, patch, node, lfo);
+  patch.nodes.push(node);
+  const at = (name) => lfo.params.flatMap((g) => (g.repeat > 1 ? [] : g.fields.map((pd, f) => ({ pd, i: g.first + f }))))
+    .find((x) => x.pd.name === name).i;
+
+  const app = { patch, device, module, globals: codec.emptyGlobals(),
+                render: () => {}, scrolled: new Map(), modLive: new Map() };
+
+  // Free-running: the rate decides the cycle, and the note value does not.
+  node.params[at('sync')] = 1;
+  let said = withDom(() => words(nodeCard(app, 0)));
+  assert.match(said, /free-running: the rate decides the cycle/);
+  assert.doesNotMatch(said, /the cycle is locked to the clock/);
+
+  // Locked: the other way round, and the control that decides is in the same
+  // section as the two it switches between.
+  node.params[at('sync')] = 2;
+  said = withDom(() => words(nodeCard(app, 0)));
+  assert.match(said, /the cycle is locked to the clock/);
+  assert.doesNotMatch(said, /the rate decides the cycle/);
 });
 
 // A control signal is a level, so the scope keeps its value per column the
@@ -2390,12 +2510,26 @@ await test('what is being listened to survives a reload', async () => {
 // events at it. views.js touches nothing else, and a fake this small is
 // honest: the sequences fired at it come from a real browser.
 function fakeDocument() {
+  // The two selector shapes the live views use, and no more: a class and the
+  // presence of an attribute. A parser that understood more of CSS than the
+  // app writes would be a second thing to get wrong.
+  const matches = (node, selector) => {
+    if (node.nodeType !== 1) return false;
+    if (selector.startsWith('.')) return String(node.className).split(/\s+/).includes(selector.slice(1));
+    if (selector.startsWith('[') && selector.endsWith(']')) return selector.slice(1, -1) in (node.attrs ?? {});
+    return node.tag === selector;
+  };
+  const descendants = (node, out = []) => {
+    for (const kid of node.children ?? []) { out.push(kid); descendants(kid, out); }
+    return out;
+  };
   const make = (tag) => {
     const listeners = new Map();
-    return {
+    const element = {
       // Children are kept rather than dropped, so a test can read the words
       // a panel put on the page. Nothing here lays anything out.
       tag, nodeType: 1, className: '', attrs: {}, value: '', children: [],
+      style: {}, textContent: '',
       setAttribute(key, value) { this.attrs[key] = String(value); if (key === 'value') this.value = String(value); },
       addEventListener(type, fn) {
         if (!listeners.has(type)) listeners.set(type, []);
@@ -2407,7 +2541,8 @@ function fakeDocument() {
       // again: it is anchored on a rectangle, it focuses its first row, and
       // it is found by its id when the next one opens.
       getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 0, right: 0 }),
-      querySelector: () => null,
+      querySelector(selector) { return descendants(this).find((kid) => matches(kid, selector)) ?? null; },
+      querySelectorAll(selector) { return descendants(this).filter((kid) => matches(kid, selector)); },
       contains: () => false,
       focus() {},
       remove() {
@@ -2415,6 +2550,27 @@ function fakeDocument() {
         if (where >= 0) document.body.children.splice(where, 1);
       },
     };
+    // `data-mod-slot` reads back as `dataset.modSlot`, as it does in a
+    // browser: the live views address a meter by the slot it carries.
+    Object.defineProperty(element, 'dataset', {
+      get() {
+        const out = {};
+        for (const [key, value] of Object.entries(this.attrs)) {
+          if (!key.startsWith('data-')) continue;
+          out[key.slice(5).replace(/-(.)/g, (_, c) => c.toUpperCase())] = value;
+        }
+        return out;
+      },
+    });
+    element.classList = {
+      add: (name) => { if (!matches(element, `.${name}`)) element.className = `${element.className} ${name}`.trim(); },
+      remove: (name) => {
+        element.className = String(element.className).split(/\s+/).filter((c) => c && c !== name).join(' ');
+      },
+      contains: (name) => matches(element, `.${name}`),
+      toggle: (name, on) => (on ? element.classList.add(name) : element.classList.remove(name)),
+    };
+    return element;
   };
   const body = make('body');
   const document = {
@@ -2424,7 +2580,11 @@ function fakeDocument() {
     // The icons are SVG, built through the namespace: same element here.
     createElementNS: (_ns, tag) => make(tag),
     body,
-    getElementById(id) { return body.children.find((kid) => kid.attrs?.id === id) ?? null; },
+    // The whole tree, not the top of it: a live view writes into an element
+    // wherever the panel that built it happened to nest it.
+    getElementById(id) { return descendants(body).find((kid) => kid.attrs?.id === id) ?? null; },
+    querySelector(selector) { return body.querySelector(selector); },
+    querySelectorAll(selector) { return body.querySelectorAll(selector); },
   };
   return document;
 }
@@ -2522,7 +2682,11 @@ async function listening() {
 
 // Everything a panel wrote, as one string: what a user would read off it.
 function words(node) {
-  return [node?.text ?? '', ...(node?.children ?? []).map(words)].flat().join(' ');
+  // `textContent` as well as the children: a live view writes straight onto
+  // an element rather than rebuilding it, and that is exactly the half a test
+  // of a live view wants to read.
+  return [node?.text ?? '', node?.textContent ?? '',
+          ...(node?.children ?? []).map(words)].flat().join(' ');
 }
 
 // The first element in a panel that answers a question - "is there a select in
@@ -2541,7 +2705,17 @@ function find(node, matches) {
 function withDom(fn) {
   const had = globalThis.document;
   globalThis.document = fakeDocument();
-  try { return fn(); } finally { globalThis.document = had; }
+  const restore = () => { globalThis.document = had; };
+  try {
+    const result = fn();
+    // A live view is read back after asking the module something, so the body
+    // of a test may be async - and putting the page away in `finally` would
+    // take it down on the first await rather than at the end.
+    return result instanceof Promise ? result.finally(restore) : (restore(), result);
+  } catch (error) {
+    restore();
+    throw error;
+  }
 }
 
 async function instantiate() {

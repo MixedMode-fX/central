@@ -48,10 +48,12 @@ class Node {
         // note-on, so it releases here and that note-on is what brings it
         // back.
         //
-        // Called inside the pass, after process() and before the swap, so the
-        // note-offs are published and flushed like any other write - and a
-        // node that played on a stale edge this pass is released in the same
-        // pass, with the note-off after the note-on it cancels.
+        // Called inside the pass, at this node's own place in the graph order:
+        // after its process() and before its outlets are published, so the
+        // note-offs cross the graph and reach the transports in the pass that
+        // wrote them, like any other write - and a node that played on a stale
+        // edge this pass is released in the same pass, with the note-off after
+        // the note-on it cancels.
         //
         // A stop is not instantaneous in a graph with latency, so the master
         // calls this for several passes (see MixedModeMaster::settle_stop)

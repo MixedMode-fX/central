@@ -190,6 +190,21 @@ void MixedModeMaster::pass(uint32_t now_us){
     //    before anything downstream of it runs.
     const bool ticking = tick_pending;
     tick_pending = false;
+    // A transport that stopped. A node holding a note until its next advance
+    // edge may never see one again, and this is the one moment the module
+    // knows it (Node::transport_stopped). It is told inside the loop below,
+    // at its own place in the graph order: *after* its process(), so a node
+    // that played on a stale edge this pass is released in the same pass with
+    // the note-off after the note-on it cancels, and *before* its outlets are
+    // published, so those note-offs cross the graph in the pass that wrote
+    // them like any other write. Published after the pool instead and a
+    // release reaches the MIDI outputs but no node: the bus's first publish
+    // of the next pass clears the front buffer before the reader downstream
+    // of it runs, so a Voicer or a NoteDelay never sees the note-off and
+    // holds the chord for ever.
+    const bool running = clk.running();
+    const bool settling = !running && settling_stop();
+    was_running = running;
     const uint8_t n = sched.count();
     for (uint8_t pos = 0; pos < n; pos++){
         const uint8_t i = sched.node_at(pos);
@@ -197,22 +212,11 @@ void MixedModeMaster::pass(uint32_t now_us){
         if (node == nullptr) continue;
         node->process(bus, now_us);
         if (ticking && pool.descriptor(i)->wants_tick) node->tick(bus, tick_count);
+        if (settling) node->transport_stopped(bus);
         bus.publish(sched.after(pos).gate, sched.after(pos).note, sched.after(pos).cv);
     }
-    // 2b. a transport that stopped. A node holding a note until its next
-    //     advance edge may never see one again, and this is the one moment
-    //     the module knows it (Node::transport_stopped). It runs *after* the
-    //     nodes, so a node that played on a stale edge this pass is released
-    //     in the same pass rather than left sounding, and before the pass
-    //     ends, so the note-offs go out with this pass's own writes - after
-    //     the note-ons they cancel, which is the order a transport needs them
-    //     in.
-    const bool running = clk.running();
-    if (!running) settle_stop();
-    was_running = running;
-    // 3. the end of the pass: what those releases wrote is merged into the
-    //    buses that have already been published, and anything written to a
-    //    bus the schedule does not know about is published too.
+    // 3. the end of the pass: anything written to a bus the schedule does not
+    //    know about is published too.
     bus.swap();
     // 4. hardware outputs
     for (uint8_t i = 0; i < GPIO_N; i++) gate_out[i].process(bus, now_us);
@@ -229,11 +233,11 @@ void MixedModeMaster::pass(uint32_t now_us){
 // and by the end of it whatever was in flight has drained. Nothing is
 // silenced after that: a patch advanced from a jack has nothing to do with
 // the transport and must keep playing.
-void MixedModeMaster::settle_stop(){
+bool MixedModeMaster::settling_stop(){
     if (was_running) stop_settle = (uint8_t)(pool.count() + 1u);
-    if (stop_settle == 0) return;
+    if (stop_settle == 0) return false;
     stop_settle--;
-    for (uint8_t i = 0; i < pool.count(); i++) pool.node(i)->transport_stopped(bus);
+    return true;
 }
 
 LoadError MixedModeMaster::replace_node(uint8_t index, const NodeConfig& config){

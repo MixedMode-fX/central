@@ -93,7 +93,8 @@
 // The root inlet is what a self-playing chord is *played* by, so on one it
 // means what `note in` means everywhere else: the whole note rather than only
 // its pitch class - a sequencer sends C3 and the chord moves to C3, octave
-// and all - and it does not touch the key. That is the difference between a
+// and all, unless `octave` names a register of its own - and it does not
+// touch the key. That is the difference between a
 // sequenced root walking through the chords of one key and one dragging the
 // key along behind it, and only the first is a chord progression. With a note
 // inlet patched the root inlet means what it always did: the key's root, and
@@ -107,10 +108,14 @@
 // params[0] quality   which stack of scale steps to voice
 // params[1] voicing   how far apart the voices sit
 // params[2] inversion how many of the lowest voices go up an octave
-// params[3] octave    where a self-playing chord sits: its root is
-//                     12 x octave + the key's root, and 0 is the key's own
-//                     register, so a chord left alone moves with the key.
-//                     Ignored while a note inlet is patched.
+// params[3] octave    which register a self-playing chord sits in. Its root
+//                     is 12 x octave + the pitch class of whatever is playing
+//                     it - the key's root, or the note the root inlet named.
+//                     0, the default, is the key's own register, and a played
+//                     note's own when one has played, so a chord left alone
+//                     moves with the key and a sequenced one keeps the
+//                     register it was sent in. Ignored while a note inlet is
+//                     patched.
 // params[4] velocity  what a self-playing chord is sounded at. Ignored
 //                     while a note inlet is patched: a played note keeps
 //                     the velocity it was played with.

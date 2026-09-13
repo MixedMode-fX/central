@@ -235,7 +235,11 @@ void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t tonic){
     // root, in the register this node names - and `octave` 0, the default, is
     // the key's own register, so one key setting moves every voice and a
     // chord that has been placed keeps its place (midi/global_key.h).
-    const uint8_t wanted = (free_note != NO_NOTE) ? free_note : global_key::tonic(octave);
+    // The root inlet says which note; `octave` says which register. Left at
+    // its default the played note keeps the one it arrived in, so a sequenced
+    // root still moves the chord an octave when it means to (midi/global_key.h).
+    const uint8_t wanted = (free_note != NO_NOTE) ? global_key::placed(free_note, octave)
+                                                  : global_key::tonic(octave);
     const uint8_t base = scale_quantise(wanted, tonic, mask);
 
     if (!dirty && base == voiced && mask == voiced_mask) return;

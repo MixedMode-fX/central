@@ -960,6 +960,43 @@ static void test_stopping_the_transport_releases_a_sequenced_chord() {
     TEST_ASSERT_EQUAL(4, node.sounding_count());
 }
 
+// **`octave` is a live control on a sequenced chord, not one a single root
+// note-on kills.** The root inlet says which note is playing the chord; the
+// parameter says which register it sits in, and left at its default the
+// played note keeps the one it arrived in.
+static void test_the_octave_places_a_root_the_inlet_played() {
+    BusManager bus;
+    NodeConfig c = free_chord(true);
+    Chord node(c);
+    global_key::set(SCALE_MAJOR, 0);
+
+    // Default: the chord goes where the sequencer put it, register and all.
+    bus.note_write(0, on(48));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(48, out[0].data1);
+
+    // Named: the same pitch class, in the register the node asks for, and
+    // heard now - the held chord is released and sounded again there.
+    TEST_ASSERT_TRUE(node.set_param(Chord::P_OCTAVE, 7));
+    out = run_pass(bus, node, 1);
+    uint8_t offs = 0, ons = 0, first = 0;
+    for (const MidiEvent& e : out){
+        if (is_note_off(e)) offs++;
+        else if (is_note_on(e)){ if (!ons) first = e.data1; ons++; }
+    }
+    TEST_ASSERT_EQUAL(3, offs);
+    TEST_ASSERT_EQUAL(3, ons);
+    TEST_ASSERT_EQUAL(84, first);
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+
+    // And the register it names outlives the next root: a sequencer walking
+    // the chords of one key does not drag them back out of the register.
+    bus.note_write(0, on(55));
+    out = run_pass(bus, node, 1);
+    for (const MidiEvent& e : out) if (is_note_on(e)){ TEST_ASSERT_EQUAL(91, e.data1); break; }
+}
+
 // A drone is not the transport's to stop. With nothing patched to either
 // inlet there is no advance edge to wait for and no note-on that would ever
 // bring the chord back, so it plays straight through a stop.
@@ -1928,6 +1965,7 @@ int main() {
     RUN_TEST(test_chord_voicing_opens_the_stack);
     RUN_TEST(test_a_repeated_root_re_strikes_only_when_asked);
     RUN_TEST(test_stopping_the_transport_releases_a_sequenced_chord);
+    RUN_TEST(test_the_octave_places_a_root_the_inlet_played);
     RUN_TEST(test_stopping_the_transport_leaves_a_drone_alone);
     RUN_TEST(test_stopping_the_transport_leaves_a_played_chord_alone);
     RUN_TEST(test_editing_a_self_playing_chord_re_voices_it);

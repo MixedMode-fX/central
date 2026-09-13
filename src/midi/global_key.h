@@ -76,6 +76,20 @@ namespace global_key {
     // clipped, so a tonic past the top of the keyboard is the same pitch
     // class an octave down instead of a different note.
     uint8_t tonic(uint8_t node_octave);
+
+    // **A note somebody played, in the register a node names.** The other
+    // half of the same question: a node with an absolute root asks `tonic()`
+    // where home is when nothing is playing it, and this when something is.
+    // The pitch class is the played note's - that is what playing it means -
+    // and the register is the node's own parameter, so `octave` is a live
+    // control on a sequenced Chord or Tonnetz instead of a knob a single root
+    // note-on kills for the life of the patch.
+    //
+    // `node_octave` 0 is the played note's own register, not the key's: a
+    // parameter left at its default has named no register, and moving a
+    // sequenced root that arrived as C3 is not something nobody asked for.
+    // Folded rather than clipped, as `tonic()` is.
+    uint8_t placed(uint8_t note, uint8_t node_octave);
 }
 
 #endif

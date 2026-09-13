@@ -31,6 +31,7 @@
 #include "algorithm/midi/note_filter.h"
 #include "algorithm/midi/channel.h"
 #include "algorithm/midi/key.h"
+#include "algorithm/midi/retrigger.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -77,6 +78,7 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &NoteFilter::descriptor,
     &Channel::descriptor,
     &Key::descriptor,
+    &Retrigger::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

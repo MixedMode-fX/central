@@ -852,8 +852,8 @@ class App {
       this.resetCanvas();
       this.sendWhole(`restored “${this.current.name}”`);
     } catch (error) {
-      // A patch image from an older format version is not a crash: it is a
-      // patch this build cannot read, and saying so beats an empty page.
+      // An image this build's decoder refuses is not a crash: it is a patch
+      // this build cannot read, and saying so beats an empty page.
       this.status = `could not reopen the last patch: ${error.message}`;
       this.library.clearWorking();
     }

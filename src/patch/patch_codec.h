@@ -27,21 +27,12 @@
 // Everything here is 8-bit and allocation-free. #11 does the 7-bit packing
 // the MIDI wire needs on top; the store writes these bytes as they are.
 
-// Bumped when the layout below changes in a way an older decoder would
-// misread. A decoder refuses a version it does not know rather than reading
-// garbage into a live patch.
-// Version 3 appended the modulation routes after the controller bindings.
-// Version 4 took the `scale`, `key` and `root` parameters off every algorithm
-// that had them, leaving one key for the whole patch (midi/global_key.h).
-// Nothing moved in the layout, but the parameter *numbers* of eight
-// algorithms did, so an older image would decode into the wrong bytes -
-// which is exactly what a format version is for. Version 3 and below are
-// refused rather than misread.
-// Version 5 took Chord's `root` inlet away (algorithm/midi/chord.h), so a
-// version 4 image has a cable on an inlet that no longer exists and would
-// load as a chord nothing is playing. Refused, like version 3.
+// The one version a decoder accepts. Nothing is migrated and no other version
+// is read: a module flashed over an EEPROM written by a different build, or a
+// `.syx` file from one, is refused rather than decoded into the wrong bytes.
+// Bump it whenever anything below moves - including a parameter number or an
+// algorithm id, which change no field here but change what the bytes mean.
 #define PATCH_FORMAT_VERSION 5
-#define PATCH_FORMAT_MIN_VERSION 5
 
 // "MMMC", big-endian, at the head of every stored or transmitted image.
 #define PATCH_MAGIC 0x4D4D4D43u
@@ -61,8 +52,7 @@ enum CodecError : uint8_t {
 
 // Global settings that travel with a patch: everything the module needs to
 // come up the same way twice that is not a node (#7). The CV calibration #8
-// adds goes in the reserved bytes rather than at the end, so the format
-// version does not have to move for it.
+// adds goes in the reserved bytes, which is what they are for.
 struct GlobalSettings {
     uint8_t clock_source;      // MasterClock::Source
     uint8_t cv_ppqn;

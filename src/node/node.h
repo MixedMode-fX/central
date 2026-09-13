@@ -100,8 +100,8 @@ struct NodeConfig {
 // the wire, because a category worked out in the editor from an algorithm's
 // name is a guess that goes stale the moment the firmware gains one.
 //
-// Never renumber: a host may keep these, and an older one reading a category
-// it does not know shows the algorithm under "other" rather than hiding it.
+// A host reading a category it does not know shows the algorithm under
+// "other" rather than hiding it, so gaining one breaks nothing.
 enum AlgorithmCategory : uint8_t {
     CATEGORY_NONE      = 0,   // never shipped: test_params fails on it
     CATEGORY_LOGIC     = 1,   // gates: what a gate bus does to another

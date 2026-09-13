@@ -2118,8 +2118,9 @@ await test('every kit can play every drum, and no two kits are the same kit', as
   // agree about it, one of them is not a kit.
   const kicks = KITS.map((kit) => JSON.stringify(voiceSpec(kit.id, 'kick')));
   assert.equal(new Set(kicks).size, KITS.length, 'two kits have the same kick');
-  // An unknown kit is a saved setup from a version that had other kits, or a
-  // selector given a value it should not have: it plays rather than throws.
+  // An unknown kit is a stored setup naming a kit this build does not have,
+  // or a selector given a value it should not have: it plays rather than
+  // throws.
   assert.ok(voiceSpec('no such kit', 'snare').noise, 'an unknown kit has no fallback');
 });
 

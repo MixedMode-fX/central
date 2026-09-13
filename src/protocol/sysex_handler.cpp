@@ -13,7 +13,7 @@
 //   4+ arguments           command-specific, every byte <= 0x7F
 //
 // The version sits inside every message rather than only in a handshake, so
-// an older editor talking to newer firmware is refused per message and
+// an editor built against a different protocol is refused per message and
 // cannot get half a transfer in before anyone notices.
 
 static constexpr uint16_t HEADER_BYTES = 4;
@@ -165,14 +165,12 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
 
         // A parameter is a byte, and a SysEx data byte is seven bits. Values
         // above 127 are ordinary - a step pattern's high byte *is* step 8,
-        // and several ranges reach 255 - so the eighth bit rides in an
-        // optional fifth argument rather than being truncated on the wire.
-        // Appended, not spliced: a host that sends four arguments writes the
-        // same value it always did, which is why this needs no version bump.
+        // and several ranges reach 255 - so the value is a u14: seven bits in
+        // args[3] and the eighth in args[4].
         case SYSEX_SET_PARAM: {
-            if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 5){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             const uint16_t param = (uint16_t)(args[1] | ((uint16_t)args[2] << 7));
-            const uint8_t value = (uint8_t)(args[3] | ((n > 4 && (args[4] & 0x01)) ? 0x80u : 0u));
+            const uint8_t value = (uint8_t)(args[3] | ((args[4] & 0x01) ? 0x80u : 0u));
             switch (patches.set_param(args[0], param, value, now_us)){
                 case PARAM_SET_OK: ack(source); return;
                 case PARAM_VALUE_OUT_OF_RANGE:
@@ -189,9 +187,8 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             begin_reply(SYSEX_PARAM_VALUE);
             put(args[0]);
             put_u14(param);
-            // The value's low seven bits where they have always been, its
-            // eighth bit appended: an older host reads the same byte it read
-            // before, a current one reads the whole value back.
+            // A u14, the same shape SYSEX_SET_PARAM takes: the low seven bits
+            // and then the eighth, because a parameter byte reaches 255.
             put_u14(value);
             send_reply(source);
             return;
@@ -246,7 +243,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         }
 
         case SYSEX_SET_GLOBALS: {
-            if (n < 8){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 11){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             GlobalSettings g = patches.globals();
             g.clock_source = args[0];
             g.cv_ppqn = args[1];
@@ -255,17 +252,12 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             g.pc_channel = args[5];
             g.pc_source_mask = args[6];
             g.pc_quantise = args[7];
-            // The key (midi/global_key.h), appended: a host that predates
-            // it sends eight arguments and leaves the module in the key it
-            // is already in, rather than being told its message is short.
-            if (n >= 10){
-                g.scale = args[8];
-                g.root = args[9];
-            }
-            // The key's register, appended after the key for the same reason
-            // the key was appended after the clock: a host that predates it
-            // sends ten arguments and leaves the register alone.
-            if (n >= 11) g.root_octave = args[10];
+            // The key, and the register it sits in (midi/global_key.h). It is
+            // patch state rather than a node's, so it is set the same way the
+            // clock is.
+            g.scale = args[8];
+            g.root = args[9];
+            g.root_octave = args[10];
             if (g.clock_source > MasterClock::CLOCK_MIDI || g.pc_quantise > SWAP_NEXT_BAR
                 || g.scale >= SCALE_COUNT || g.root > 11
                 || g.root_octave > KEY_MAX_OCTAVE){
@@ -519,9 +511,6 @@ void SysexHandler::reply_capabilities(uint8_t source){
     put(DRUM_SEQ_LANES);
     put(MASTER_PPQN);
     put(MIDI_CONTROL_PORT);
-    // Appended after the fields a version 2 host knows, for the same reason
-    // the algorithm record's names are appended: an older host stops at the
-    // field it knows and reads the same record it always did.
     put(N_CC_MAP);
     put(N_MOD_ROUTE);
     put_u14(CV_FULL);
@@ -546,12 +535,9 @@ void SysexHandler::reply_algorithms(uint8_t source){
         for (uint8_t in = 0; in < d->n_in && in < MAX_IN; in++) put((uint8_t)d->in_domain[in]);
         for (uint8_t out = 0; out < d->n_out && out < MAX_OUT; out++) put((uint8_t)d->out_domain[out]);
         put_string(d->name);
-        // What each connection *means*, and what the algorithm is for. These
-        // are appended after the name rather than spliced in, so a host that
-        // only knows the older layout stops at the name and reads the same
-        // record it always did - the reason this needs no protocol version
-        // bump. A host that does know them gets a patch that reads as
-        // "advance" and "reset" instead of "in 0" and "in 1".
+        // What each connection *means*, and what the algorithm is for, so a
+        // patch reads as "advance" and "reset" instead of "in 0" and "in 1".
+        // Last, because they are the variable-length part of the record.
         for (uint8_t in = 0; in < d->n_in && in < MAX_IN; in++){
             put_string(d->in_name != nullptr ? d->in_name[in] : nullptr);
         }
@@ -559,10 +545,8 @@ void SysexHandler::reply_algorithms(uint8_t source){
             put_string(d->out_name != nullptr ? d->out_name[out] : nullptr);
         }
         put_string(d->summary, SUMMARY_MAX);
-        // Which shelf of the editor's list it belongs on, appended last for
-        // the same reason: a host that stops at the summary reads the record
-        // it always did, and one that does not shows thirty algorithms in six
-        // short lists rather than as one undivided wall.
+        // Which shelf of the editor's list it belongs on, so thirty
+        // algorithms show as six short lists rather than one undivided wall.
         put((uint8_t)d->category);
         // And whether the patch may hold more than one of it, so an editor
         // can grey the second one out rather than offer a patch the module

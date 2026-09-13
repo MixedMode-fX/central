@@ -65,8 +65,26 @@ survives the merge.
 Most sessions here are fired from a phone and read back as a pull request. A
 stated bug, a scoped issue, a change already described — build it and push it.
 Ask first only where the shape of the machine is a real choice: the preset
-format, a new algorithm's parameters, anything that changes what a patch built
-last week does when it is loaded next week.
+format, a new algorithm's parameters, what a control does to the sound.
+
+## Compatibility
+
+**There is none, and none is wanted.** Nothing here is deployed and nobody's
+patches are in the field, so the preset format, the SysEx protocol, the app's
+stored state and any algorithm's parameters may change shape in any commit.
+Breaking changes are the expected cost of getting the shape right.
+
+- **No migrations and no shims.** Never read an older image, keep an optional
+  field because something might not send it, or accept a range of versions. A
+  decoder takes exactly what the current encoder writes and refuses the rest.
+- **`PATCH_FORMAT_VERSION` and `SYSEX_PROTOCOL_VERSION` are mismatch
+  detectors, not a compatibility window.** They exist so a module flashed over
+  an old EEPROM, or an app served from a stale cache, refuses the bytes
+  instead of misreading them. Bump either when its layout changes; there is no
+  second version it still accepts.
+- **A patch saved last week is not a constraint.** Renumbering an algorithm
+  id, a scale id or a parameter invalidates every stored patch, and that is
+  allowed — bump `PATCH_FORMAT_VERSION` and move on.
 
 ## Code
 
@@ -78,8 +96,9 @@ last week does when it is loaded next week.
   `NODE_SLOT_SIZE` is checked per class with `static_assert`.
 - Sizing constants live in `src/config.h`, pins in `src/hardware.h`. Use the
   names, never the literals.
-- Algorithm ids in `src/node/registry.h` are part of the preset format: append,
-  never renumber.
+- Algorithm ids in `src/node/registry.h` are the preset format. Appending is
+  free; renumbering invalidates every stored patch, which is allowed — see
+  Compatibility.
 - A node that emits a note-on owns its note-off, released with the
   transformation originally applied. Use `SoundingNotes`.
 - Builds are `-Wall -Wextra -Weffc++ -Wshadow -Werror`. Warnings are errors.

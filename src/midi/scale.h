@@ -16,10 +16,10 @@
 // is never worse off than chromatic - scale_size(), scale_quantise() and the
 // degree maps all treat an empty mask as chromatic.
 //
-// Ids are preset format: never renumber, only append. SCALE_CHROMATIC is at
-// the end for that reason. It used to be id 0, and 0 is now SCALE_NONE: not a
-// scale but an unset byte, which reads as chromatic - so a patch stored
-// before there was a key still plays exactly the same notes.
+// Ids are preset format, so renumbering one invalidates every stored patch;
+// bump PATCH_FORMAT_VERSION with it. Id 0 is SCALE_NONE rather than a scale,
+// because a zeroed byte is one nobody set, and the module's rule is that such
+// a byte means the default - here, chromatic.
 enum ScaleId : uint8_t {
     SCALE_NONE = 0,           // not a scale: an unset byte, read as chromatic
     SCALE_MAJOR,

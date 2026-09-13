@@ -24,8 +24,8 @@ void global_key::set_octave(uint8_t register_octave){
 
 void global_key::set_scale(uint8_t scale_id){
     const uint16_t m = scale_mask(scale_id);
-    // SCALE_NONE is a zeroed byte and not a scale; it reads as chromatic,
-    // which is what the module played before there was a key at all.
+    // SCALE_NONE is a zeroed byte and not a scale, so it reads as chromatic:
+    // a module nobody has set a key on is in no key.
     current_id = m ? scale_id : (uint8_t)SCALE_CHROMATIC;
     current_mask = m ? m : (uint16_t)0x0FFF;
 }

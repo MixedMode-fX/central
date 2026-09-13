@@ -80,6 +80,7 @@ export const SysexCommand = Object.freeze({
   SYSEX_GET_CONTROL: 28,
   SYSEX_SET_MOD_ROUTE: 29,
   SYSEX_GET_MOD_ROUTE: 30,
+  SYSEX_GET_MOD_STATE: 31,
   SYSEX_SLOT_SAVE: 32,
   SYSEX_SLOT_LOAD: 33,
   SYSEX_SLOT_ERASE: 34,
@@ -95,6 +96,7 @@ export const SysexCommand = Object.freeze({
   SYSEX_PATTERN: 83,
   SYSEX_CONTROL_VALUE: 84,
   SYSEX_MOD_ROUTE: 85,
+  SYSEX_MOD_STATE: 86,
   SYSEX_SLOTS: 99,
   SYSEX_ACK: 112,
   SYSEX_NAK: 113,
@@ -183,6 +185,15 @@ export const CcFlags = Object.freeze({
 export const ModMode = Object.freeze({
   MOD_ABSOLUTE: 0,
   MOD_OFFSET: 1,
+});
+
+export const ModStatus = Object.freeze({
+  MOD_STATUS_UNUSED: 0,
+  MOD_STATUS_SILENT: 1,
+  MOD_STATUS_NO_TARGET: 2,
+  MOD_STATUS_REFUSED: 3,
+  MOD_STATUS_PINNED: 4,
+  MOD_STATUS_ACTIVE: 5,
 });
 
 export const ModFlags = Object.freeze({

@@ -417,6 +417,36 @@ export class Device extends EventTarget {
     };
   }
 
+  // What a route is *doing* - the signal it is reading, the range it may
+  // write, and the value it is holding the target at. The firmware works all
+  // of this out once a pass anyway (src/control/mod_matrix.h), so this asks it
+  // rather than re-deriving the same arithmetic here: a second implementation
+  // of the matrix in JavaScript would be right until the day it was not, and
+  // the day it was not is the day somebody is already confused about why a
+  // modulation is doing nothing.
+  //
+  // A module built before this message answers with a NAK, which reads as
+  // null: the panel drops the live view and the rest of the editor is
+  // unaffected.
+  async getModState(slot) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_MOD_STATE, [slot]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_MOD_STATE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    if (!reply || this.isReply(reply, P.SysexCommand.SYSEX_NAK)) return null;
+    return {
+      slot: reply[5],
+      status: reply[6],
+      // Biased by CV_FULL on the wire, because a bus reading is signed and a
+      // SysEx data byte is not.
+      cv: codec.readU14(reply, 7) - P.CV_FULL,
+      position: codec.readU14(reply, 9),
+      rangeLo: codec.readU14(reply, 11),
+      rangeHi: codec.readU14(reply, 13),
+      centre: codec.readU14(reply, 15),
+      value: codec.readU14(reply, 17),
+    };
+  }
+
   async learnCc(slot, targetKind, targetIndex, param) {
     return this.command(P.SysexCommand.SYSEX_CC_LEARN,
       [1, slot, targetKind, targetIndex, ...codec.u14(param)]);

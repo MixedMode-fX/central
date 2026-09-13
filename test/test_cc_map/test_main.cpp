@@ -42,12 +42,13 @@ struct Rig {
     PatchStore store;
     PatchManager patches;
     CcMapper cc;
+    ModMatrix mod;
     SysexHandler sysex;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master),
-            sysex(patches, master, store, leds, midi, cc) {}
+            patches(master, store, leds), cc(patches, master), mod(patches, cc),
+            sysex(patches, master, store, leds, midi, cc, mod) {}
 
     // One CC through the whole input path: offered to the mapping table, and
     // delivered to the graph only if it was not consumed. This is exactly

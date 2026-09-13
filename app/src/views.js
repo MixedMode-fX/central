@@ -518,7 +518,7 @@ export function jackCard(app, index) {
       : null);
 }
 
-// What is modulating this node, and how much of it.
+// What is modulating this node, how much of it, and what it is doing *now*.
 //
 // A route is made on the canvas - drag a control signal onto a block and pick
 // a parameter - but *how* it modulates is not something a drag can say, and
@@ -527,6 +527,16 @@ export function jackCard(app, index) {
 // They live here, beside the parameter they move, rather than in a table of
 // routes somewhere else, because "what is happening to this control" is the
 // question somebody is asking when they look at it.
+//
+// **And the answer to that question is a moving picture, not a form.** Every
+// field of a route could be set correctly and the parameter still not move -
+// the depth is zero, the range is one value wide, nothing writes the bus, the
+// signal is sitting still - and all four look identical from a panel that only
+// shows what was typed into it. So each route carries a meter of the target's
+// own range with the set point, the reach and the live value on it, and a line
+// of words for the cases where there is nothing to see. Both come from the
+// module (`ModMatrix::state`), because the alternative is a second
+// implementation of the matrix here that is right until the day it is not.
 //
 // Nothing is drawn when nothing is modulating the node: an empty panel on
 // every block would be a section heading repeated thirty-two times. A route to
@@ -544,10 +554,61 @@ function modPanel(app, index) {
 
   return el('div', { class: 'params mod-routes' },
     el('h4', {}, 'modulation'),
-    routes.map(({ slot, route }) => modRow(app, slot, route)));
+    routes.map(({ slot, route }) => modRow(app, index, slot, route)));
 }
 
-function modRow(app, slot, route) {
+// What the module says about a route, in the words of the thing that decided
+// it. The status is the firmware's own enum, so this cannot drift away from
+// what the matrix actually does - a status this app has never heard of falls
+// through to its number rather than to a confident wrong sentence.
+const MOD_WHY = {
+  [P.ModStatus.MOD_STATUS_SILENT]: 'the depth is zero, so this route is switched off',
+  [P.ModStatus.MOD_STATUS_NO_TARGET]: 'the module has nothing at this target',
+  [P.ModStatus.MOD_STATUS_REFUSED]: 'the module refused the value',
+  [P.ModStatus.MOD_STATUS_PINNED]: 'the range is one value wide: there is nowhere to move',
+  [P.ModStatus.MOD_STATUS_UNUSED]: 'the module is not running this route',
+};
+
+// The one reason the module cannot report, because it is not the matrix's:
+// the matrix reads the bus and finds whatever is on it, and zero every pass is
+// a perfectly valid signal. Nothing *writing* the bus is a fact about the
+// patch, and the patch is here.
+function modNoSource(app, route) {
+  const { writers } = busUsers(app, Domain.CV, route.bus);
+  return writers.length ? null : `nothing writes CV bus ${route.bus}`;
+}
+
+// The target parameter's own range, which is the scale the meter is drawn on:
+// a route covering a tenth of a control should look like a tenth of it.
+function modTargetRange(app, route) {
+  const node = app.patch.nodes[route.targetIndex];
+  const pd = node ? app.device?.describeParam(node.algorithmId, route.param) : null;
+  return pd && pd.max > pd.min ? { pd, min: pd.min, max: pd.max } : null;
+}
+
+// The meter: the target's whole range as a track, with the part of it this
+// route can reach as a band, the set point as a tick, and the live value as a
+// filled bar from one to the other. Empty until the module answers - it is
+// built here and filled by `refreshModLive`, which is the only thing that
+// touches it after that, because re-rendering the page sixty times a second
+// would fight every open select and every dragged slider on the card.
+function modMeter(app, slot, route) {
+  const range = modTargetRange(app, route);
+  const track = el('div', { class: 'mod-track' },
+    el('div', { class: 'mod-band' }),
+    el('div', { class: 'mod-reach' }),
+    el('div', { class: 'mod-centre' }),
+    el('div', { class: 'mod-now' }));
+  return el('div', { class: 'mod-meter', 'data-mod-slot': String(slot) },
+    track,
+    el('div', { class: 'mod-scale' },
+      el('span', {}, range ? paramText(range.pd, range.min) : ''),
+      el('span', { class: 'mod-live' }, 'waiting for the module…'),
+      el('span', {}, range ? paramText(range.pd, range.max) : '')),
+    el('p', { class: 'mod-why' }));
+}
+
+function modRow(app, index, slot, route) {
   const write = (changed) => {
     const next = { ...route, ...changed };
     app.patch.modMap[slot] = next;
@@ -558,12 +619,17 @@ function modRow(app, slot, route) {
   const name = modParamName(app.device, app.patch, route);
 
   const modeSelect = el('select', {
+    class: 'grow', 'aria-label': `how CV bus ${route.bus} reaches ${name}`,
     onchange: (e) => write({
       flags: (route.flags & ~P.ModFlags.MOD_MODE_MASK) | Number(e.target.value),
     }),
   },
-    el('option', { value: String(P.ModMode.MOD_OFFSET) }, 'offset'),
-    el('option', { value: String(P.ModMode.MOD_ABSOLUTE) }, 'absolute'));
+    // Named by what they do to the control, because "offset" and "absolute"
+    // are the firmware's words for it and neither says which one leaves the
+    // knob below still working. Each reads on from its label: "moves it
+    // around the setting", "moves it instead of the setting".
+    el('option', { value: String(P.ModMode.MOD_OFFSET) }, 'around the setting'),
+    el('option', { value: String(P.ModMode.MOD_ABSOLUTE) }, 'instead of the setting'));
   modeSelect.value = String(mode);
 
   // Through `slider`, and on commit rather than on input: `write` re-renders,
@@ -581,24 +647,111 @@ function modRow(app, slot, route) {
     onCommit: (v) => write({ depth: Number(v) }),
   });
 
-  const flag = (bit, label) => {
+  const flag = (bit, label, hint) => {
     const box = el('input', {
       type: 'checkbox', class: 'switch',
       onchange: (e) => write({ flags: e.target.checked ? (route.flags | bit) : (route.flags & ~bit) }),
     });
     box.checked = (route.flags & bit) !== 0;
-    return el('label', { class: 'bool' }, box, el('span', {}, label));
+    return el('label', { class: 'bool', title: hint }, box, el('span', {}, label));
   };
 
+  const field = (label, ...controls) => el('div', { class: 'field' },
+    el('span', { class: 'field-name' }, label), ...controls);
+
+  // Three questions, one per row, in the order they are asked: what does it
+  // reach, how far does it move it, and how is the signal read. Laid out flat
+  // - a select, a slider and two switches on one line - they read as four
+  // unrelated controls, which is what the card looked like.
   return el('div', { class: 'param mod-route' },
-    el('span', { class: 'param-name' }, name),
-    el('span', { class: 'param-value dom-CV' }, `CV bus ${route.bus}`),
-    el('div', { class: 'param-controls' }, modeSelect, depth, percent),
-    el('div', { class: 'param-controls' },
-      flag(P.ModFlags.MOD_BIPOLAR, 'bipolar'),
-      flag(P.ModFlags.MOD_INVERT, 'invert'),
+    el('div', { class: 'param-head' },
+      el('span', { class: 'param-name' }, name),
+      el('span', { class: 'param-cc dom-CV' }, `CV ${route.bus}`),
       iconButton({ icon: 'cut', label: `stop modulating ${name}`, class: 'ghost danger',
-                   onclick: () => app.clearModRoute(slot) })));
+                   onclick: () => app.clearModRoute(slot) })),
+    modMeter(app, slot, route),
+    el('div', { class: 'fields' },
+      field('moves it', modeSelect),
+      // On one line rather than two: the field is a two-column grid, so a
+      // slider and a reading handed to it separately stack in the second
+      // column and the number lands under the middle of the slider.
+      field('by', el('div', { class: 'param-controls' }, depth, percent)),
+      field('reading the signal', el('div', { class: 'param-controls' },
+            flag(P.ModFlags.MOD_BIPOLAR, 'bipolar', 'the signal swings either side of zero'),
+            flag(P.ModFlags.MOD_INVERT, 'invert', 'the other way up')))));
+}
+
+// The live half of every modulation meter on the page, written straight into
+// the DOM from what the module last reported. Nothing here rebuilds an
+// element: a route's meter is built once by `modMeter` and moved by this.
+export function refreshModLive(app) {
+  for (const meter of document.querySelectorAll('[data-mod-slot]')) {
+    const slot = Number(meter.dataset.modSlot);
+    const route = app.patch.modMap?.[slot];
+    const state = app.modLive.get(slot);
+    const range = route ? modTargetRange(app, route) : null;
+    const live = meter.querySelector('.mod-live');
+    const why = meter.querySelector('.mod-why');
+    if (!route || !range) continue;
+
+    const at = (value) => `${((value - range.min) * 100) / (range.max - range.min)}%`;
+    const width = (lo, hi) => `${((hi - lo) * 100) / (range.max - range.min)}%`;
+
+    if (!state) {
+      meter.classList.add('waiting');
+      if (live) live.textContent = 'waiting for the module…';
+      if (why) why.textContent = '';
+      continue;
+    }
+    meter.classList.remove('waiting');
+
+    // Every status but "active" has a reason, and the one the module cannot
+    // give is checked first: a route with nothing writing its bus reads as
+    // perfectly active, holding the target at whatever zero maps to.
+    const idle = state.status !== P.ModStatus.MOD_STATUS_ACTIVE;
+    const why_text = idle
+      ? (MOD_WHY[state.status] ?? `the module reports status ${state.status}`)
+      : modNoSource(app, route);
+    meter.classList.toggle('idle', Boolean(why_text));
+    if (why) why.textContent = why_text ?? '';
+
+    const lo = Math.max(range.min, Math.min(range.max, state.rangeLo));
+    const hi = Math.max(lo, Math.min(range.max, state.rangeHi));
+    const centre = Math.max(lo, Math.min(hi, state.centre));
+    const value = Math.max(lo, Math.min(hi, state.value));
+    const band = meter.querySelector('.mod-band');
+    const reach = meter.querySelector('.mod-reach');
+    const tick = meter.querySelector('.mod-centre');
+    const now = meter.querySelector('.mod-now');
+    if (band) { band.style.left = at(lo); band.style.width = width(lo, hi); }
+    // The bar runs from the set point to where the modulation has taken it, so
+    // its length *is* the modulation: a route doing nothing has no bar at all,
+    // whatever its depth says.
+    if (reach) {
+      reach.style.left = at(Math.min(centre, value));
+      reach.style.width = width(Math.min(centre, value), Math.max(centre, value));
+    }
+    if (tick) tick.style.left = at(centre);
+    if (now) now.style.left = at(value);
+
+    if (live) {
+      live.textContent = idle
+        ? paramText(range.pd, value)
+        // The value the node is running, and the signal that put it there.
+        // Both, because either alone leaves the other half of "why is this
+        // not moving" unanswered.
+        : `${paramText(range.pd, value)} · signal ${Math.round((state.position * 100) / P.CV_FULL)} %`;
+    }
+
+    // And the control itself, wherever it is on the card: a parameter being
+    // modulated shows where it has been taken to, beside the set point that
+    // says where it was put.
+    const readout = document.getElementById(`param-live-${route.targetIndex}-${route.param}`);
+    if (readout) {
+      readout.textContent = idle ? '' : `now ${paramText(range.pd, value)}`;
+      readout.classList.toggle('empty', idle);
+    }
+  }
 }
 
 // A control per parameter, drawn from the descriptor: a range for a number, a
@@ -752,10 +905,12 @@ function paramAt(descriptor, name) {
   return null;
 }
 
-// Tonnetz's fourth cycle. The descriptor numbers its options from its own
-// minimum and the page reads the names from the firmware, so this is the one
-// place a value of that enum is written down.
+// Tonnetz's fourth cycle, and the LFO's clock-locked sync. The descriptors
+// number their options from their own minimum and the page reads the names
+// from the firmware, so this is the one place a value of either enum is
+// written down.
 const TONNETZ_FREE = 4;
+const LFO_CLOCK = 2;
 
 // What a parameter is set to, in the firmware's terms: a stored zero is the
 // descriptor's default everywhere (src/node/param.h).
@@ -788,6 +943,21 @@ function paramInert(app, index, pd) {
       if (!((mask >> 11) & 1)) return 'this key has no leading tone';
     }
     if (pd.name === 'drift' && !paramValue(app, index, 'loop')) return 'nothing is looping';
+  }
+  // A modulator with two rates has one of them live at a time, and which one
+  // is a different control again - the classic "I turned rate and nothing
+  // happened".
+  if (algorithm === 'LFO') {
+    const synced = paramValue(app, index, 'sync') === LFO_CLOCK;
+    if (pd.name === 'rate' && synced) return 'the cycle is locked to the clock';
+    if ((pd.name === 'division' || pd.name === 'feel') && !synced) {
+      return 'free-running: the rate decides the cycle';
+    }
+  }
+  // Slew's fall follows rise while they are linked, so the control is there
+  // and stored and reaching nothing.
+  if (algorithm === 'Slew' && pd.name === 'fall' && paramValue(app, index, 'link')) {
+    return 'linked: fall follows rise';
   }
   if (algorithm === 'Tonnetz') {
     // `free` draws all three transforms uniformly, so there is no cycle's
@@ -883,6 +1053,12 @@ function paramControl(app, index, at, pd) {
       el('span', { class: 'param-name' }, pd.name),
       binding ? el('span', { class: 'param-cc' }, `CC ${binding.cc}`) : null,
       route ? el('span', { class: 'param-cc dom-CV' }, `CV ${route.bus}`) : null,
+      // Where modulation has taken it, beside the set point the control is
+      // showing. A modulated parameter's stored byte is what the knob was left
+      // at and *not* what the node is running (src/control/mod_matrix.h), and
+      // a control that silently means something other than what it says is the
+      // whole confusion this answers. Filled by `refreshModLive`.
+      route ? el('span', { class: 'param-live empty', id: `param-live-${index}-${at}` }) : null,
       inline ? null : el('span', { class: 'param-value' }, paramText(pd, value))),
     el('div', { class: 'param-controls' }, controls,
       learnButton(app, index, at, pd.name, binding),

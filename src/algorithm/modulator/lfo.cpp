@@ -24,14 +24,31 @@ static const ParamDescriptor PARAMS[9] = {
     {"phase",    0, 255, 0,   PARAM_NUMBER,  nullptr},
     {"polarity", Lfo::LFO_BIPOLAR, Lfo::LFO_POLARITIES, Lfo::LFO_BIPOLAR, PARAM_ENUM, POLARITY_NAMES},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 9, PARAMS}};
+// Three questions, in the order somebody setting up a modulator asks them:
+// what shape is it, how fast does it go, and how far does it move. Sorted by
+// name instead, `rate`, `division`, `feel` and `phase` all read as timing and
+// land together under one heading - which puts the phase a reset starts at
+// next to the note value the cycle is locked to, and leaves `sync` (the
+// control that decides which of the two rate settings is live) in a different
+// section from both of them.
+//
+// `shape` and `phase`/`polarity` are two groups sharing one label rather than
+// one group, because the parameter order is the preset format and cannot be
+// rearranged to make them adjacent. The editor folds groups with the same
+// label into one section (app/src/views.js, paramSections).
+static const ParamGroup GROUPS[4] = {
+    {0, 1, 1, PARAMS,     "shape"},     // shape
+    {1, 1, 4, PARAMS + 1, "rate"},      // sync, rate, division, feel
+    {5, 1, 2, PARAMS + 5, "level"},     // depth, offset
+    {7, 1, 2, PARAMS + 7, "shape"},     // phase, polarity
+};
 
 static const char* const IN_NAMES[1] = {"reset"};
 static const char* const OUT_NAMES[1] = {"cv"};
 
 const AlgorithmDescriptor Lfo::descriptor = {
     ALGO_LFO, "LFO", 1, 0, 1, 9, IN, OUT, sizeof(Lfo), true, construct_node<Lfo>,
-    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    GROUPS, 4, IN_NAMES, OUT_NAMES,
     "A modulation source on a control bus: seven shapes, free-running or locked to the clock.",
     CATEGORY_MODULATOR };
 

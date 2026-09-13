@@ -20,8 +20,9 @@ static constexpr uint16_t HEADER_BYTES = 4;
 
 SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
                            PatchStore& patch_store, StatusLeds& status, IMidiOut& midi_out,
-                           CcMapper& mapper) :
+                           CcMapper& mapper, ModMatrix& matrix) :
     patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out), cc(mapper),
+    mod(matrix),
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
     pending_patch(empty_patch()), pending_globals(default_globals()),
@@ -333,6 +334,11 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         case SYSEX_GET_MOD_ROUTE:
             if (n < 1 || args[0] >= N_MOD_ROUTE){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
             reply_mod_route(source, args[0]);
+            return;
+
+        case SYSEX_GET_MOD_STATE:
+            if (n < 1 || args[0] >= N_MOD_ROUTE){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_mod_state(source, args[0]);
             return;
 
         case SYSEX_GET_CC_MAP:
@@ -750,6 +756,34 @@ void SysexHandler::reply_mod_route(uint8_t source, uint8_t slot){
     put_u14(r.max);
     put((uint8_t)(r.depth & 0x7F));
     put((uint8_t)((r.flags & 0x3F) | ((r.depth & 0x80) ? 0x40u : 0u)));
+    send_reply(source);
+}
+
+// What a route is doing, as the matrix saw it on the last pass.
+//
+// **A reply, never an event.** A modulator moves its target every pass, and a
+// module that announced each one would fill the control cable with a message
+// per millisecond per route. A host that wants to watch asks at whatever rate
+// it can draw.
+//
+// `cv` is the raw bus reading and can be negative, so it travels biased by
+// CV_FULL and clamped into a u14 - a bus value outside +/- CV_FULL is a sum
+// that has already saturated, and the sign is what a reader needs from it.
+void SysexHandler::reply_mod_state(uint8_t source, uint8_t slot){
+    ModState s = ModState{MOD_STATUS_UNUSED, 0, 0, 0, 0, 0, 0};
+    mod.state(slot, s);
+    int32_t biased = (int32_t)s.cv + CV_FULL;
+    if (biased < 0) biased = 0;
+    if (biased > 0x3FFF) biased = 0x3FFF;
+    begin_reply(SYSEX_MOD_STATE);
+    put(slot);
+    put(s.status);
+    put_u14((uint16_t)biased);
+    put_u14(s.position);
+    put_u14(s.range_lo);
+    put_u14(s.range_hi);
+    put_u14(s.centre);
+    put_u14(s.value);
     send_reply(source);
 }
 

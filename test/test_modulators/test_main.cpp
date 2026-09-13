@@ -710,6 +710,78 @@ static void test_an_unchanged_value_costs_no_write() {
     TEST_ASSERT_LESS_THAN_UINT32(10, rig.mod.writes());
 }
 
+// What the editor draws a live meter from. A route that does nothing looks
+// exactly like a route that does nothing whatever the reason, so the matrix
+// reports which reason it was - and these are the reasons, each reached the
+// way a user reaches it.
+static void test_a_route_says_what_it_is_doing() {
+    Rig rig;
+    Patch p = modulation_patch();
+    p.mod_map[0] = route_to(1, 1, MOD_ABSOLUTE);
+    TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(p, default_globals(), 0));
+
+    ModState s;
+    // Nothing has run yet, so nothing has been decided yet.
+    TEST_ASSERT_TRUE(rig.mod.state(0, s));
+    TEST_ASSERT_EQUAL(MOD_STATUS_UNUSED, s.status);
+
+    for (uint32_t t = 0; t <= 300000u; t += 1000u) rig.turn(t);
+    TEST_ASSERT_TRUE(rig.mod.state(0, s));
+    TEST_ASSERT_EQUAL(MOD_STATUS_ACTIVE, s.status);
+    // ClockDiv's amount is 1..255, and the route has no sub-range of its own.
+    TEST_ASSERT_EQUAL_UINT16(1, s.range_lo);
+    TEST_ASSERT_EQUAL_UINT16(255, s.range_hi);
+    // The value it reports is the value the node is actually running.
+    uint8_t running = 0;
+    TEST_ASSERT_TRUE(rig.master.get_node_param(1, 1, running));
+    TEST_ASSERT_EQUAL_UINT16(running, s.value);
+    TEST_ASSERT_TRUE(s.position <= CV_MAX);
+
+    // A slot nothing uses is unused, and a slot that is not a slot is not
+    // answered for at all.
+    TEST_ASSERT_TRUE(rig.mod.state(1, s));
+    TEST_ASSERT_EQUAL(MOD_STATUS_UNUSED, s.status);
+    TEST_ASSERT_FALSE(rig.mod.state(N_MOD_ROUTE, s));
+}
+
+// The three nothings, told apart. Every one of them leaves the parameter
+// sitting still with a route that reads as correctly configured.
+static void test_a_route_says_why_it_is_doing_nothing() {
+    Rig rig;
+    Patch p = modulation_patch();
+    p.mod_map[0] = route_to(1, 1, MOD_ABSOLUTE, 0);        // depth zero
+    TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(p, default_globals(), 0));
+    for (uint32_t t = 0; t <= 20000u; t += 1000u) rig.turn(t);
+    ModState s;
+    TEST_ASSERT_TRUE(rig.mod.state(0, s));
+    TEST_ASSERT_EQUAL(MOD_STATUS_SILENT, s.status);
+
+    // A range one value wide: the route runs, reads its signal and has
+    // nowhere to put it.
+    Patch pinned = modulation_patch();
+    pinned.mod_map[0] = route_to(1, 1, MOD_ABSOLUTE);
+    pinned.mod_map[0].min = 40;
+    pinned.mod_map[0].max = 40;
+    TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(pinned, default_globals(), 0));
+    for (uint32_t t = 0; t <= 20000u; t += 1000u) rig.turn(t);
+    TEST_ASSERT_TRUE(rig.mod.state(0, s));
+    TEST_ASSERT_EQUAL(MOD_STATUS_PINNED, s.status);
+    TEST_ASSERT_EQUAL_UINT16(40, s.value);
+
+    // And the nothing the matrix cannot report, which is why the editor has
+    // to say this one for itself: a bus nobody writes reads as a signal
+    // sitting at zero, which is a perfectly good signal. The route is running
+    // and the parameter is pinned to the bottom of its range.
+    Patch nowhere = modulation_patch();
+    nowhere.mod_map[0] = route_to(1, 1, MOD_ABSOLUTE);
+    nowhere.mod_map[0].bus = N_CV_BUS - 1;                 // the LFO writes bus 0
+    TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(nowhere, default_globals(), 0));
+    for (uint32_t t = 0; t <= 20000u; t += 1000u) rig.turn(t);
+    TEST_ASSERT_TRUE(rig.mod.state(0, s));
+    TEST_ASSERT_EQUAL(MOD_STATUS_ACTIVE, s.status);
+    TEST_ASSERT_EQUAL_UINT16(s.range_lo, s.value);
+}
+
 static void test_two_routes_on_one_parameter_are_refused() {
     Rig rig;
     Patch p = modulation_patch();
@@ -980,6 +1052,8 @@ int main() {
     RUN_TEST(test_a_zero_depth_route_writes_nothing);
     RUN_TEST(test_a_route_writes_once_a_pass_at_most);
     RUN_TEST(test_an_unchanged_value_costs_no_write);
+    RUN_TEST(test_a_route_says_what_it_is_doing);
+    RUN_TEST(test_a_route_says_why_it_is_doing_nothing);
     RUN_TEST(test_two_routes_on_one_parameter_are_refused);
     RUN_TEST(test_a_route_to_a_parameter_that_does_not_exist_is_refused);
     RUN_TEST(test_a_route_cannot_press_the_transport);

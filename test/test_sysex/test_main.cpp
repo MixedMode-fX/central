@@ -47,6 +47,7 @@ struct Rig {
     PatchStore store;
     PatchManager patches;
     CcMapper cc;
+    ModMatrix mod;
     SysexHandler sysex;
     // The time every message is delivered at. Zero by default; a test that
     // cares about uptime moves it, the way a module that has been on for a
@@ -55,8 +56,8 @@ struct Rig {
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master),
-            sysex(patches, master, store, leds, midi, cc), now(0) {}
+            patches(master, store, leds), cc(patches, master), mod(patches, cc),
+            sysex(patches, master, store, leds, midi, cc, mod), now(0) {}
 
     // One command, framed the way the wire carries it.
     void send(uint8_t command, const std::vector<uint8_t>& args = {}) {
@@ -654,6 +655,66 @@ static void test_a_parameter_edit_preserves_all_node_state() {
     TEST_ASSERT_EQUAL(16, r->bytes[8]);
 }
 
+// A modulation route is the one thing in a patch whose failure is invisible
+// from the patch: every field reads as correct and the parameter sits still.
+// The module says what the matrix decided, so an editor can draw it rather
+// than re-deriving the matrix's arithmetic and getting a different answer.
+static void test_a_modulation_route_reports_what_it_is_doing() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    Patch p = two_node_patch();
+    p.nodes[0].params[0] = 0;                 // Transpose semitones, the target
+    rig.patches.apply(p, g, 0);
+
+    // Nothing routed: the slot answers, and says it is not being run.
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MOD_STATE, {0});
+    const auto* idle = rig.midi.last_reply(SYSEX_MOD_STATE);
+    TEST_ASSERT_NOT_NULL(idle);
+    TEST_ASSERT_EQUAL(0, idle->bytes[5]);                  // the slot asked for
+    TEST_ASSERT_EQUAL(MOD_STATUS_UNUSED, idle->bytes[6]);
+
+    // A slot that is not a slot is refused rather than answered for.
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MOD_STATE, {N_MOD_ROUTE});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+    TEST_ASSERT_NULL(rig.midi.last_reply(SYSEX_MOD_STATE));
+
+    // With a route on it and the matrix having run: the range it may write,
+    // and the value the target is at.
+    ModRoute r = unused_route();
+    r.bus = 0;
+    r.target_kind = CC_TARGET_NODE;
+    r.target_index = 0;
+    r.param = 0;
+    r.depth = 255;
+    r.flags = MOD_ABSOLUTE;
+    p.mod_map[0] = r;
+    TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(p, g, 0));
+    ModMatrix& matrix = rig.mod;
+    for (uint32_t t = 0; t <= 5000u; t += 1000u){
+        matrix.apply(rig.master.buses(), t);
+        rig.master.pass(t);
+    }
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MOD_STATE, {0});
+    const auto* live = rig.midi.last_reply(SYSEX_MOD_STATE);
+    TEST_ASSERT_NOT_NULL(live);
+    const auto& b = live->bytes;
+    const auto u14 = [&b](size_t at){ return (uint16_t)(b[at] | ((uint16_t)b[at + 1] << 7)); };
+    TEST_ASSERT_EQUAL(MOD_STATUS_ACTIVE, b[6]);
+    // The bus reading travels biased by CV_FULL, because it is signed and a
+    // data byte is not. Nothing writes bus 0 in this patch, so it is zero.
+    TEST_ASSERT_EQUAL_UINT16(CV_FULL, u14(7));
+    uint16_t lo = 0, hi = 0;
+    TEST_ASSERT_TRUE(rig.cc.target_range(CC_TARGET_NODE, 0, 0, lo, hi));
+    TEST_ASSERT_EQUAL_UINT16(lo, u14(11));
+    TEST_ASSERT_EQUAL_UINT16(hi, u14(13));
+    uint8_t running = 0;
+    TEST_ASSERT_TRUE(rig.master.get_node_param(0, 0, running));
+    TEST_ASSERT_EQUAL_UINT16(running, u14(17));
+}
+
 // A parameter byte reaches 255 and a SysEx data byte holds seven bits. The
 // high byte of a step pattern *is* step 8, so truncating the value would not
 // round it - it would turn step 8 off and clear the other seven with it.
@@ -1170,6 +1231,7 @@ int main() {
     RUN_TEST(test_one_bus_change_leaves_every_other_node_undisturbed);
     RUN_TEST(test_an_invalid_connection_is_refused_and_changes_nothing);
     RUN_TEST(test_a_parameter_edit_preserves_all_node_state);
+    RUN_TEST(test_a_modulation_route_reports_what_it_is_doing);
     RUN_TEST(test_a_parameter_above_127_survives_the_wire);
     RUN_TEST(test_a_parameter_beyond_its_range_is_refused);
     RUN_TEST(test_port_edits_reconstruct_nothing);

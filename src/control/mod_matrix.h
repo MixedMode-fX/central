@@ -50,6 +50,41 @@
 // (MixedModeMaster::route_valid), because two writers racing over one value
 // has no defined result - and because the module already has a place to mix
 // two modulators, which is the CV bus itself: fan-in there is a sum.
+
+// Why a route is doing nothing, when it is doing nothing.
+//
+// A modulation that does not move its target is the hardest thing in this
+// module to work out from the outside: the parameter simply sits where it was
+// put, and every one of half a dozen different reasons looks exactly like
+// that. The matrix decides which one it is once a pass anyway - the early
+// returns in apply_one() *are* the reasons - so it says which rather than
+// leaving an editor to re-derive them from the patch and get a different
+// answer.
+//
+// Never renumber: these travel on the wire (SYSEX_MOD_STATE), and a host
+// reading a status it does not know shows the number rather than a wrong word.
+enum ModStatus : uint8_t {
+    MOD_STATUS_UNUSED = 0,    // no bus: the slot is empty
+    MOD_STATUS_SILENT = 1,    // depth is zero - switched off, not broken
+    MOD_STATUS_NO_TARGET = 2, // nothing answers at that target: a stale route
+    MOD_STATUS_REFUSED = 3,   // the target would not give or take a value
+    MOD_STATUS_PINNED = 4,    // the range it may write is one value wide
+    MOD_STATUS_ACTIVE = 5,    // it is writing
+};
+
+// What one route is doing, as of the last pass. Everything here is read off
+// the same variables apply_one() uses, at the point it uses them, so this
+// cannot disagree with what the matrix actually did.
+struct ModState {
+    uint8_t  status;     // ModStatus
+    int16_t  cv;         // the raw bus value this route read
+    uint16_t position;   // that signal as this route reads it, 0 .. CV_MAX
+    uint16_t range_lo;   // the range the route may write, already clamped
+    uint16_t range_hi;   // into the target's own
+    uint16_t centre;     // offset mode's set point; range_lo in absolute mode
+    uint16_t value;      // where the target is, in its own units
+};
+
 class ModMatrix {
     public:
         ModMatrix(PatchManager& patches, CcMapper& mapper);
@@ -72,6 +107,11 @@ class ModMatrix {
         // slot is unused or has not written yet - which is what an editor
         // needs to draw a modulated parameter as modulated.
         bool last_written(uint8_t slot, uint16_t& value_out) const;
+        // What a route is doing, and why it is doing nothing when it is not.
+        // False only for a slot that is not a slot. A route the matrix has
+        // never reached - the patch has just loaded - reads as unused, which
+        // is what it is until the first pass says otherwise.
+        bool state(uint8_t slot, ModState& state_out) const;
 
     private:
         struct Lane {
@@ -85,6 +125,7 @@ class ModMatrix {
             uint16_t centre;        // offset mode's set point
             uint16_t written;       // what this lane last wrote
             bool have_written;
+            ModState reported;      // what apply_one() saw, for an editor
         };
 
         // The signal on `bus`, read as this route asks and turned into a
@@ -93,6 +134,8 @@ class ModMatrix {
                                 int32_t& position, int32_t& swing);
         void apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us);
         static bool same_route(const ModRoute& a, const ModRoute& b);
+        // A lane that has decided nothing yet.
+        static ModState idle_state();
 
         PatchManager& patches;
         CcMapper& cc;

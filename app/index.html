@@ -351,9 +351,65 @@
   .param-sections { display: grid; gap: .7rem; }
   .param-section h4 { margin-bottom: .35rem; padding-bottom: .2rem; border-bottom: 1px solid var(--line); }
   .node .summary { margin-bottom: .6rem; font-size: .8rem; }
-  /* A modulation route is a different row: its depth slider shares with a
-     mode select and a percentage, and there is no width left to share. */
-  .mod-route .param-controls .slider { flex: 1 0 100%; }
+  /* --- a modulation route, beside the parameter it moves --- */
+  /* One route is a block, not a row: a meter of what it is doing, then the
+     three settings that decide it, each on a named line. Flat - a select, a
+     slider and two switches side by side - they read as four unrelated
+     controls with no hint that any of them belong to the meter above. */
+  .mod-routes { gap: 1rem; }
+  .mod-route { border: 1px solid var(--line); border-radius: 8px; padding: .6rem .7rem; }
+  .mod-route .param-head { margin-bottom: .5rem; }
+  .mod-route .fields { margin-bottom: 0; gap: .5rem; }
+  /* The label stays above its control, as every other field on the card does.
+     Beside it in a fixed column, a phone leaves the select about eight
+     characters and "instead of the setting" arrives as "instead of the sett".
+     The `.fields` grid spreads them into columns of their own where there is
+     room for one. */
+  .mod-route .field .slider { min-width: 0; }
+
+  /* The meter. The track is the *target parameter's* whole range, so a route
+     reaching a tenth of a control looks like a tenth of it; the band is the
+     part of that range this route may write, the tick is the set point it
+     swings around, and the bar between the tick and the dot is the modulation
+     itself - which means a route doing nothing has no bar, whatever its depth
+     says it should be doing. */
+  .mod-meter { margin: .1rem 0 .7rem; }
+  .mod-track {
+    position: relative; height: .85rem; border-radius: 5px;
+    background: var(--bg); border: 1px solid var(--line); overflow: hidden;
+  }
+  .mod-band { position: absolute; inset-block: 0; background: var(--raised); }
+  .mod-reach { position: absolute; inset-block: 2px;
+               background: color-mix(in srgb, var(--cv) 55%, transparent); }
+  .mod-centre { position: absolute; inset-block: 0; width: 2px; margin-left: -1px;
+                background: var(--dim); }
+  .mod-now { position: absolute; top: 50%; width: .55rem; height: .55rem; margin: -.275rem 0 0 -.275rem;
+             border-radius: 50%; background: var(--cv); }
+  /* The transition is what makes it read as a signal rather than as a value
+     that keeps being replaced: the poll is ten a second and an LFO is slower
+     than that, so the dot glides instead of stepping. */
+  @media (prefers-reduced-motion: no-preference) {
+    .mod-now, .mod-reach { transition: left .1s linear, width .1s linear; }
+  }
+  .mod-scale {
+    display: flex; gap: .5rem; align-items: baseline; margin-top: .25rem;
+    color: var(--dim); font-size: .72rem; font-variant-numeric: tabular-nums;
+  }
+  /* The live reading is the one thing here worth looking at, so it takes the
+     middle and the ink; the two ends are the scale and stay out of the way. */
+  .mod-live { flex: 1 1 auto; text-align: center; color: var(--cv); }
+  .mod-why { margin: .35rem 0 0; color: var(--dim); font-size: .75rem; font-style: italic; }
+  .mod-why:empty { display: none; }
+  /* A route that is not moving anything says so in the meter as well as in
+     words: the signal colour is what "this is live" looks like everywhere
+     else in the app, and a dead route must not borrow it. */
+  .mod-meter.idle .mod-now, .mod-meter.idle .mod-reach { background: var(--dim); }
+  .mod-meter.idle .mod-live { color: var(--dim); }
+  .mod-meter.waiting .mod-now, .mod-meter.waiting .mod-reach { display: none; }
+  /* Where modulation has taken a parameter, beside the set point the control
+     shows. In the signal's colour, because that is what moved it. */
+  .param-live { color: var(--cv); font-size: .72rem; font-variant-numeric: tabular-nums; }
+  .param-live.empty { display: none; }
 
   /* --- the key's keyboard --- */
   /* Two octaves from C, with the notes of the key lit and its root ringed:

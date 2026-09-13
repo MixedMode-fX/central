@@ -50,13 +50,14 @@ struct Rig {
     PatchStore store;
     PatchManager patches;
     CcMapper cc;
+    ModMatrix mod;
     NrpnDecoder nrpn;
     SysexHandler sysex;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master), nrpn(patches, cc),
-            sysex(patches, master, store, leds, midi, cc) {}
+            patches(master, store, leds), cc(patches, master), mod(patches, cc), nrpn(patches, cc),
+            sysex(patches, master, store, leds, midi, cc, mod) {}
 
     // The whole input path, as main.cpp runs it.
     bool feed_cc(uint8_t number, uint8_t value, uint8_t channel = 1,

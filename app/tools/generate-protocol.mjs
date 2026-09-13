@@ -140,6 +140,7 @@ const enums = {
   CcKeyTarget: enumeration(read('src/node/patch.h'), 'CcKeyTarget'),
   CcFlags: enumeration(read('src/node/patch.h'), 'CcFlags'),
   ModMode: enumeration(read('src/node/patch.h'), 'ModMode'),
+  ModStatus: enumeration(read('src/control/mod_matrix.h'), 'ModStatus'),
   ModFlags: enumeration(read('src/node/patch.h'), 'ModFlags'),
   GatePortDirection: enumeration(read('src/node/patch.h'), 'GatePortDirection'),
   ParamKind: enumeration(read('src/node/param.h'), 'ParamKind'),

@@ -78,6 +78,10 @@ enum SysexCommand : uint8_t {
     SYSEX_GET_CONTROL      = 0x1C,   // read any target, by kind and index
     SYSEX_SET_MOD_ROUTE    = 0x1D,   // one modulation route: a CV bus to a parameter
     SYSEX_GET_MOD_ROUTE    = 0x1E,
+    // <slot>: what that route is doing right now, and why it is doing
+    // nothing when it is. A route is the one thing in the module whose
+    // failure is invisible from the patch - see control/mod_matrix.h.
+    SYSEX_GET_MOD_STATE    = 0x1F,
     SYSEX_SLOT_SAVE        = 0x20,
     SYSEX_SLOT_LOAD        = 0x21,
     SYSEX_SLOT_ERASE       = 0x22,
@@ -95,6 +99,7 @@ enum SysexCommand : uint8_t {
     SYSEX_PATTERN          = 0x53,
     SYSEX_CONTROL_VALUE    = 0x54,
     SYSEX_MOD_ROUTE        = 0x55,
+    SYSEX_MOD_STATE        = 0x56,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>

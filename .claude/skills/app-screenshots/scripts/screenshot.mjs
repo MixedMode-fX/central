@@ -40,7 +40,10 @@ const DEFAULT_HEIGHT = 900;
 
 const opt = {
   widths: [],
-  clicks: [],
+  // Clicks and selections, kept in one list because the order they were
+  // asked for in is the order the page needs them: a menu is opened, then a
+  // choice is made in it.
+  steps: [],
   path: '/',
   name: 'shot',
   base: null,
@@ -54,7 +57,15 @@ for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
     case '--width': opt.widths.push(args[++i]); break;
     case '--path': opt.path = args[++i]; break;
-    case '--click': opt.clicks.push(args[++i]); break;
+    case '--click': opt.steps.push({ click: args[++i] }); break;
+    // Some of the app is only reachable through a <select>, and a select is
+    // not opened by a click: an example patch is loaded by choosing it, and
+    // everything it puts on the page is unphotographable without this.
+    case '--select': {
+      const [selector, ...rest] = args[++i].split('=');
+      opt.steps.push({ select: selector, value: rest.join('=') });
+      break;
+    }
     case '--name': opt.name = args[++i]; break;
     case '--base': opt.base = args[++i]; break;
     case '--theme': opt.theme = args[++i]; break;
@@ -76,6 +87,7 @@ screenshot.mjs [options]
   --width phone|tablet|desktop|<px>   repeatable; default phone
   --path <path>                       page or #fragment to open (default /)
   --click <selector>                  repeatable, applied in order
+  --select <selector>=<value>         choose in a <select>; ordered with --click
   --theme light|dark                  force a colour scheme
   --full-page                         capture the whole scroll height
   --wait <ms>                         settle time before the shot
@@ -165,8 +177,9 @@ for (const w of opt.widths) {
   page.on('pageerror', (e) => console.error(`  pageerror: ${e.message}`));
 
   await page.goto(url, { waitUntil: 'networkidle' });
-  for (const selector of opt.clicks) {
-    await page.click(selector, { timeout: 5000 });
+  for (const step of opt.steps) {
+    if (step.click) await page.click(step.click, { timeout: 5000 });
+    else await page.selectOption(step.select, step.value, { timeout: 5000 });
   }
   if (opt.wait) await page.waitForTimeout(opt.wait);
   // Fonts land after first paint; a shot taken before they do is a picture of

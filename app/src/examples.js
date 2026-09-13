@@ -64,7 +64,7 @@ export const EXAMPLES = {
     about: 'DIN 1 → Chord → Transpose +12 → USB 1. Nothing names a key, so the triad is the plain major one: root, +4, +7. Every note-on becomes three, and every note-off releases exactly those three.',
     patch: {
       midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
-      nodes: [{ algo: 'Chord', in: [0], out: [1] }, { algo: 'Transpose', in: [1], out: [2], params: [12] }],
+      nodes: [{ algo: 'Chord', in: [0], out: [1] }, { algo: 'Transpose', in: [1], out: [2], params: [140] }],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
@@ -267,7 +267,7 @@ export const EXAMPLES = {
         { algo: 'Transpose', in: [0], out: [1] },
       ],
       mod_map: [{ slot: 0, bus: 1, targetKind: 0, targetIndex: 5, param: 0,
-                  min: 0, max: 12, depth: 255, flags: 0 }],
+                  min: 128, max: 140, depth: 255, flags: 0 }],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },

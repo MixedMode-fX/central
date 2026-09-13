@@ -90,7 +90,7 @@ static void test_worked_example_arpeggio_to_two_outputs_an_octave_apart() {
     p.nodes[0] = node_config(ALGO_ARPEGGIATOR);                           // note 0 (held), gate 0 (advance) -> note 1
     p.nodes[0].in_bus[0] = 0; p.nodes[0].in_bus[1] = 0; p.nodes[0].out_bus[0] = 1;
     p.nodes[1] = node(ALGO_TRANSPOSE, 1, 2);                              // note 1 -> note 2, +12
-    p.nodes[1].params[0] = 12;
+    p.nodes[1].params[0] = PARAM_CENTRE + 12;
     p.n_nodes = 2;
     p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 1, 1};                    // note 1 -> USB 0, channel 1
     p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 2, 2};                 // note 2 -> DIN 2, channel 2
@@ -432,7 +432,7 @@ static void test_worked_example_with_a_real_clock_divider() {
     p.nodes[1] = node_config(ALGO_ARPEGGIATOR);                // note 0 + gate 0 -> note 1
     p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = 0; p.nodes[1].out_bus[0] = 1;
     p.nodes[2] = node(ALGO_TRANSPOSE, 1, 2);                   // note 1 -> note 2, +12
-    p.nodes[2].params[0] = 12;
+    p.nodes[2].params[0] = PARAM_CENTRE + 12;
     p.n_nodes = 3;
     p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 1, 1};
     p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 2, 2};
@@ -678,7 +678,7 @@ static void test_stopping_the_transport_leaves_a_held_note_alone() {
     Patch p = empty_patch();
     p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};        // DIN 1 -> note bus 0
     p.nodes[0] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, +12
-    p.nodes[0].params[0] = 12;
+    p.nodes[0].params[0] = PARAM_CENTRE + 12;
     p.n_nodes = 1;
     p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 1};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
@@ -711,7 +711,7 @@ static void test_transpose_arpeggiator_priority_chain() {
     p.nodes[0].out_bus[0] = 0;
     p.nodes[0].params[1] = 2;
     p.nodes[1] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, -12
-    p.nodes[1].params[0] = (uint8_t)(int8_t)-12;
+    p.nodes[1].params[0] = PARAM_CENTRE - 12;
     p.nodes[2] = node_config(ALGO_ARPEGGIATOR);                // note 1 + gate 0 -> note 2
     p.nodes[2].in_bus[0] = 1; p.nodes[2].in_bus[1] = 0; p.nodes[2].out_bus[0] = 2;
     p.nodes[3] = node(ALGO_NOTE_PRIORITY, 2, 3);               // note 2 -> note 3

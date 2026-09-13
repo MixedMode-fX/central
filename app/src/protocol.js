@@ -36,6 +36,7 @@ export const NRPN_CLOCK_BASE = 14784;
 export const NRPN_KEY_BASE = 14816;
 export const NRPN_RESERVED_BASE = 14832;
 export const NRPN_TRANSPORT_BASE = 14800;
+export const PARAM_CENTRE = 128;
 export const PATCH_FORMAT_VERSION = 5;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
@@ -207,6 +208,7 @@ export const ParamKind = Object.freeze({
   PARAM_MILLIS: 7,
   PARAM_PERCENT: 8,
   PARAM_CHANNEL: 9,
+  PARAM_CENTRED: 10,
 });
 
 export const ConfigError = Object.freeze({

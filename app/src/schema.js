@@ -65,6 +65,7 @@ const KIND_NOTE = {
   [P.ParamKind.PARAM_PITCH]: 'a MIDI note number',
   [P.ParamKind.PARAM_PITCH_CLASS]: `a pitch class, 0 = ${PITCH_CLASSES[0]} … 11 = ${PITCH_CLASSES[11]}`,
   [P.ParamKind.PARAM_SIGNED]: 'an int8 kept in the byte: 128..255 read as -128..-1',
+  [P.ParamKind.PARAM_CENTRED]: `a byte biased by ${P.PARAM_CENTRE}: the value is the byte less ${P.PARAM_CENTRE}`,
   [P.ParamKind.PARAM_MILLIS]: 'milliseconds',
   [P.ParamKind.PARAM_PERCENT]: 'percent',
   [P.ParamKind.PARAM_CHANNEL]: 'a MIDI channel 1..16, or 0 for omni',
@@ -84,11 +85,16 @@ const KIND_SLUG = {
   [P.ParamKind.PARAM_MILLIS]: 'millis',
   [P.ParamKind.PARAM_PERCENT]: 'percent',
   [P.ParamKind.PARAM_CHANNEL]: 'channel',
+  [P.ParamKind.PARAM_CENTRED]: 'centred',
 };
 
-const defaultText = (pd) => (pd.kind === P.ParamKind.PARAM_ENUM
-  ? `${pd.def} (${pd.options?.[pd.def - pd.min] ?? pd.def})`
-  : String(pd.def));
+const defaultText = (pd) => {
+  if (pd.kind === P.ParamKind.PARAM_ENUM) return `${pd.def} (${pd.options?.[pd.def - pd.min] ?? pd.def})`;
+  // The byte and what it means, because a centred parameter's default is the
+  // middle of its travel and "default 128" reads like a transposition.
+  if (pd.kind === P.ParamKind.PARAM_CENTRED) return `${pd.def} (${pd.def - P.PARAM_CENTRE})`;
+  return String(pd.def);
+};
 
 // One parameter, as the firmware describes it. **Zero is legal for every
 // parameter** - it is how the format says "the default" (`param.h`), which is

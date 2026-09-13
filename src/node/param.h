@@ -22,7 +22,44 @@ enum ParamKind : uint8_t {
     PARAM_MILLIS,
     PARAM_PERCENT,
     PARAM_CHANNEL,      // MIDI channel, 1..16
+    PARAM_CENTRED,      // a byte biased by PARAM_CENTRE: the value is stored - 128
 };
+
+// The zero of a PARAM_CENTRED byte.
+//
+// **A bipolar control with real bounds cannot live in a PARAM_SIGNED byte.**
+// Everything that sweeps a parameter from outside - a mapped CC, a CV route, an
+// NRPN - scales and clamps inside one rising interval [min, max], and -12..+12
+// as an int8 is not one: it is 244..255 followed by 0..12. A knob sweeping
+// that would jump from the top of the range to the bottom halfway up its
+// travel, and `min > max` breaks the clamp outright. So a parameter that is
+// bipolar *and* bounded stores an unsigned byte biased by 128, min and max are
+// the plain byte bounds they are everywhere else, and nothing that sweeps a
+// parameter has to know the difference. PARAM_SIGNED stays what it is: the
+// unbounded int8, for the parameters that take the whole -128..+127.
+//
+// The bias is a constant and not the middle of the range, so widening or
+// narrowing a bounded control later does not re-read every byte already saved
+// in a patch: +12 semitones is 140 whether the control stops at 12 or at 24.
+//
+// A #define rather than a constant, because app/src/protocol.js is generated
+// from these headers and the editor has to read the same zero the firmware
+// writes (app/tools/generate-protocol.mjs).
+#define PARAM_CENTRE 128
+
+// What a PARAM_CENTRED byte means. Zero means the default everywhere, and a
+// centred parameter's default is the centre, so an untouched byte is no shift
+// rather than -128.
+inline int8_t param_centred(uint8_t stored){
+    // Not named `byte`: the Teensy core typedefs that, and -Wshadow is an error.
+    const int16_t raw = (stored == 0) ? (int16_t)PARAM_CENTRE : (int16_t)stored;
+    return (int8_t)(raw - (int16_t)PARAM_CENTRE);
+}
+
+// The byte that means `value`, for a PARAM_CENTRED parameter.
+inline uint8_t param_centred_byte(int8_t value){
+    return (uint8_t)((int16_t)value + (int16_t)PARAM_CENTRE);
+}
 
 // One parameter's range and meaning.
 //

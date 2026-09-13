@@ -23,6 +23,8 @@ const NOTE_ON = 0x90, NOTE_OFF = 0x80, CC = 0xB0;
 const USB_0 = 0x01, USB_1 = 0x02, SERIAL_1 = 0x10, SERIAL_2 = 0x20, HOST_1 = 0x80;
 const GATE_IN = 1, GATE_OUT = 2;
 const NO_BUS = E.emu_const_no_bus();
+// A centred parameter's zero, as the firmware writes it (src/node/param.h).
+const CENTRE = 128;
 
 const algo = name => {
   const mem = new Uint8Array(E.memory.buffer);
@@ -76,7 +78,7 @@ test('worked example: arpeggio to two outputs an octave apart', () => {
   E.emu_patch_gate_port(0, GATE_IN, 0);
   E.emu_patch_node(0, algo('Arpeggiator'));
   E.emu_patch_node_in(0, 0, 0); E.emu_patch_node_in(0, 1, 0); E.emu_patch_node_out(0, 0, 1);
-  node(1, 'Transpose', 1, 2); E.emu_patch_node_param(1, 0, 12);
+  node(1, 'Transpose', 1, 2); E.emu_patch_node_param(1, 0, CENTRE + 12);
   E.emu_patch_midi_out(0, USB_0, 1, 1);
   E.emu_patch_midi_out(1, SERIAL_2, 2, 2);
   assert.equal(E.emu_load(), 0);

@@ -70,6 +70,14 @@ static void test_every_parameter_of_every_algorithm_is_described() {
                 // rule produce a value the validator would reject.
                 TEST_ASSERT_TRUE_MESSAGE(p.def == 0 || (p.def >= p.min && p.def <= p.max), p.name);
                 if (p.kind == PARAM_ENUM) TEST_ASSERT_NOT_NULL_MESSAGE(p.options, p.name);
+                // A centred parameter's zero is PARAM_CENTRE and nowhere else
+                // (node/param.h), so its range has to contain the centre and
+                // its default has to be it: anything else and a zeroed preset
+                // would load playing a shift nobody asked for.
+                if (p.kind == PARAM_CENTRED) {
+                    TEST_ASSERT_EQUAL_MESSAGE(PARAM_CENTRE, p.def, p.name);
+                    TEST_ASSERT_TRUE_MESSAGE(p.min <= PARAM_CENTRE && p.max >= PARAM_CENTRE, p.name);
+                }
             }
         }
         char msg[96];
@@ -378,7 +386,7 @@ static void test_a_bad_parameter_leaves_the_running_patch_alone() {
 
     Patch good = empty_patch();
     good.nodes[0] = node(ALGO_TRANSPOSE, 0, 1);
-    good.nodes[0].params[0] = 12;
+    good.nodes[0].params[0] = PARAM_CENTRE + 12;
     good.n_nodes = 1;
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(good));
     master.setup();
@@ -395,7 +403,7 @@ static void test_a_bad_parameter_leaves_the_running_patch_alone() {
     TEST_ASSERT_EQUAL(1, master.node_count());
     uint8_t v = 0;
     TEST_ASSERT_TRUE(master.get_node_param(0, 0, v));
-    TEST_ASSERT_EQUAL(12, v);
+    TEST_ASSERT_EQUAL(PARAM_CENTRE + 12, v);
 }
 
 // ---------------------------------------------------------------------------
@@ -455,7 +463,7 @@ static void modifier_under_held_notes(uint8_t algorithm, uint16_t param, uint8_t
 }
 
 static void test_transpose_offset_moving_under_a_chord_hangs_nothing() {
-    modifier_under_held_notes(ALGO_TRANSPOSE, 0, 7, "Transpose offset");
+    modifier_under_held_notes(ALGO_TRANSPOSE, 0, PARAM_CENTRE + 7, "Transpose offset");
 }
 static void test_chord_quality_moving_under_a_chord_hangs_nothing() {
     modifier_under_held_notes(ALGO_CHORD, Chord::P_QUALITY, Chord::QUALITY_NINTH, "Chord quality");

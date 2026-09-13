@@ -252,7 +252,7 @@ static void test_scale_masks_and_quantisation() {
 static void test_transpose_releases_what_it_sent_after_the_offset_moves() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = 12;
+    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = PARAM_CENTRE + 12;
     Transpose node(c);
 
     bus.note_write(0, on(60));
@@ -274,7 +274,7 @@ static void test_transpose_releases_what_it_sent_after_the_offset_moves() {
 static void test_transpose_drops_out_of_range_notes_and_their_offs() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = 24;
+    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[1] = PARAM_CENTRE + 2;   // +2 octaves
     Transpose node(c);
 
     bus.note_write(0, on(120));                   // 144: gone
@@ -289,6 +289,100 @@ static void test_transpose_drops_out_of_range_notes_and_their_offs() {
     TEST_ASSERT_EQUAL(1, out.size());             // no off for the dropped note
     TEST_ASSERT_EQUAL(84, out[0].data1);
     TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
+// Down as readily as up, and the two controls add.
+static void test_transpose_goes_down_and_adds_the_octaves_to_the_semitones() {
+    struct Case { int8_t semitones; int8_t octaves; uint8_t expected; };
+    const Case cases[5] = {
+        {  0,  0, 60 },
+        { -5,  0, 55 },
+        {-12, -4,  0 },      // the bottom of both controls, from middle C
+        { 12,  4, 120 },     // and the top
+        { -7,  2, 77 },      // a fifth down, two octaves up
+    };
+    for (uint8_t i = 0; i < 5; i++) {
+        BusManager bus;
+        NodeConfig c = node_config(ALGO_TRANSPOSE);
+        c.in_bus[0] = 0; c.out_bus[0] = 1;
+        c.params[0] = param_centred_byte(cases[i].semitones);
+        c.params[1] = param_centred_byte(cases[i].octaves);
+        Transpose node(c);
+
+        bus.note_write(0, on(60));
+        std::vector<MidiEvent> out = run_pass(bus, node, 1);
+        TEST_ASSERT_EQUAL(1, out.size());
+        TEST_ASSERT_EQUAL(cases[i].expected, out[0].data1);
+
+        bus.note_write(0, off(60));
+        out = run_pass(bus, node, 1);
+        TEST_ASSERT_EQUAL(1, out.size());
+        TEST_ASSERT_EQUAL(cases[i].expected, out[0].data1);
+        TEST_ASSERT_EQUAL(0, node.sounding_count());
+    }
+}
+
+// A zeroed preset - every byte of it - is no shift at all, not the bottom of
+// either control: that is the zero-means-default rule on a centred byte.
+static void test_transpose_left_alone_shifts_nothing() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_TRANSPOSE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    Transpose node(c);
+    TEST_ASSERT_EQUAL(0, node.offset());
+    TEST_ASSERT_EQUAL(PARAM_CENTRE, node.get_param(0));
+    TEST_ASSERT_EQUAL(PARAM_CENTRE, node.get_param(1));
+
+    bus.note_write(0, on(60));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);
+}
+
+// Either control may move while notes are held, and the release still matches
+// what was sent: the octaves are on the same ledger the semitones are.
+static void test_transpose_releases_what_it_sent_after_the_octave_moves() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_TRANSPOSE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[1] = PARAM_CENTRE - 1;   // an octave down
+    Transpose node(c);
+
+    bus.note_write(0, on(60));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(48, out[0].data1);
+
+    TEST_ASSERT_TRUE(node.set_param(1, param_centred_byte(3)));
+    bus.note_write(0, off(60));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(MIDI_NOTE_OFF, out[0].type);
+    TEST_ASSERT_EQUAL(48, out[0].data1);          // as sent, not 96
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
+// A runtime write outside a control's bounds is refused rather than clamped,
+// because there is a caller there to tell; a stored byte is clamped instead,
+// because a preset saved under wider bounds is still worth loading.
+static void test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_one() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_TRANSPOSE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    Transpose node(c);
+    TEST_ASSERT_TRUE(node.set_param(0, param_centred_byte(Transpose::MAX_SEMITONES)));
+    TEST_ASSERT_FALSE(node.set_param(0, param_centred_byte(Transpose::MAX_SEMITONES + 1)));
+    TEST_ASSERT_FALSE(node.set_param(0, param_centred_byte(-Transpose::MAX_SEMITONES - 1)));
+    TEST_ASSERT_EQUAL(Transpose::MAX_SEMITONES, node.offset());      // the refused ones did nothing
+    TEST_ASSERT_TRUE(node.set_param(1, param_centred_byte(-Transpose::MAX_OCTAVES)));
+    TEST_ASSERT_FALSE(node.set_param(1, param_centred_byte(-Transpose::MAX_OCTAVES - 1)));
+    TEST_ASSERT_FALSE(node.set_param(2, PARAM_CENTRE));               // no such parameter
+
+    NodeConfig wide = node_config(ALGO_TRANSPOSE);
+    wide.in_bus[0] = 0; wide.out_bus[0] = 1;
+    wide.params[0] = param_centred_byte(40);
+    wide.params[1] = param_centred_byte(-9);
+    Transpose stored(wide);
+    TEST_ASSERT_EQUAL(Transpose::MAX_SEMITONES - Transpose::MAX_OCTAVES * 12, stored.offset());
 }
 
 // ---------------------------------------------------------------------------
@@ -1915,6 +2009,10 @@ int main() {
     RUN_TEST(test_scale_masks_and_quantisation);
     RUN_TEST(test_transpose_releases_what_it_sent_after_the_offset_moves);
     RUN_TEST(test_transpose_drops_out_of_range_notes_and_their_offs);
+    RUN_TEST(test_transpose_goes_down_and_adds_the_octaves_to_the_semitones);
+    RUN_TEST(test_transpose_left_alone_shifts_nothing);
+    RUN_TEST(test_transpose_releases_what_it_sent_after_the_octave_moves);
+    RUN_TEST(test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_one);
     RUN_TEST(test_note_priority_modes);
     RUN_TEST(test_note_priority_falls_back_on_release);
     RUN_TEST(test_velocity_curves_never_reach_zero);

@@ -76,7 +76,7 @@ static Patch three_node_patch() {
     p.nodes[2] = node_config(ALGO_TRANSPOSE);
     p.nodes[2].in_bus[0] = 1;
     p.nodes[2].out_bus[0] = 1;
-    p.nodes[2].params[0] = (uint8_t)(int8_t)-5;
+    p.nodes[2].params[0] = PARAM_CENTRE - 5;
     p.n_nodes = 3;
     return p;
 }

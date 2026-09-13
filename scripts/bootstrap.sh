@@ -15,6 +15,13 @@ if [ ! -x .venv/bin/python ]; then
     python3 -m venv .venv
 fi
 
+# A venv can exist with no pip in it: a container image that ships a
+# half-built one, or `python3 -m venv` on a system whose ensurepip is a
+# separate package. The interpreter is there, so the guard above is happy, and
+# the first install then dies on "No module named pip". Repair it here rather
+# than making every caller recognise that message.
+.venv/bin/python -m pip --version >/dev/null 2>&1 || .venv/bin/python -m ensurepip --upgrade
+
 .venv/bin/python -m pip install --quiet --upgrade pip
 .venv/bin/python -m pip install --quiet --upgrade platformio
 

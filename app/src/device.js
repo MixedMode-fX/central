@@ -121,18 +121,9 @@ export class Device extends EventTarget {
       sequenceLength: u8(), voices: u8(), drumLanes: u8(),
       ppqn: u8(), controlPort: u8(),
     };
-    // Appended to the message after the fields a version 2 module sent, so
-    // they are read only if they are there: a module built before modulation
-    // existed stops at controlPort and reports none.
-    if (at + 3 < reply.length) {
-      this.capabilities.ccMappings = u8();
-      this.capabilities.modRoutes = u8();
-      this.capabilities.cvFull = u14();
-    } else {
-      this.capabilities.ccMappings = P.N_CC_MAP;
-      this.capabilities.modRoutes = 0;
-      this.capabilities.cvFull = P.CV_FULL;
-    }
+    this.capabilities.ccMappings = u8();
+    this.capabilities.modRoutes = u8();
+    this.capabilities.cvFull = u14();
     return this.capabilities;
   }
 
@@ -184,22 +175,18 @@ export class Device extends EventTarget {
         return text;
       };
       descriptor.name = string() ?? `algorithm ${descriptor.id}`;
-      // What each connection means, and what the algorithm is for. These come
-      // after the name, so a module whose firmware predates them simply runs
-      // out of record here and the app falls back to the index - the
-      // reason string() reports the end rather than reading past it.
+      // What each connection means, and what the algorithm is for. These are
+      // the variable-length tail of the record, which is why string() reports
+      // the end rather than reading past it into the next message.
       for (let i = 0; i < descriptor.nIn; i++) descriptor.inName.push(string());
       for (let i = 0; i < descriptor.nOut; i++) descriptor.outName.push(string());
       descriptor.summary = string();
-      // What kind of thing it is, one byte after the summary. A module whose
-      // firmware predates it runs out of record here, and CATEGORY_NONE is
-      // what the picker files under "other" - the algorithm is still
-      // offered, which is the point of appending rather than splicing.
+      // What kind of thing it is, which is the shelf of the picker's list it
+      // goes on. A truncated record leaves CATEGORY_NONE, which files it
+      // under "other": the algorithm is still offered.
       if (at < end) descriptor.category = reply[at++];
-      // Whether the patch may hold more than one of it, appended last for the
-      // same reason. Only the key is one so far (src/algorithm/midi/key.h),
-      // and a module that predates the byte says nothing, which reads as
-      // "as many as you like" - the behaviour every algorithm had.
+      // Whether the patch may hold more than one of it. Only the key is one
+      // so far (src/algorithm/midi/key.h).
       if (at < end) descriptor.singleton = reply[at++] !== 0;
       this.algorithms[index] = descriptor;
       this.byId.set(descriptor.id, descriptor);
@@ -263,10 +250,9 @@ export class Device extends EventTarget {
         options.push(String.fromCharCode(...reply.subarray(at, at + length)));
         at += length;
       }
-      // What the algorithm calls this group, appended after the options and
-      // empty for the algorithms with no opinion. Read only if it is there:
-      // this field is newer than the message, and a module that predates it
-      // ends the record at the last option name.
+      // What the algorithm calls this group, after the options and empty for
+      // the algorithms with no opinion. The options are variable-length, so
+      // where it starts is only known once they have been read.
       const end = reply[reply.length - 1] === 0xf7 ? reply.length - 1 : reply.length;
       let label = '';
       if (at < end) {
@@ -356,10 +342,9 @@ export class Device extends EventTarget {
     return this.command(P.SysexCommand.SYSEX_SET_MIDI_PORT,
       [index, flags, mask & 0x7f, channel, bus === P.NO_BUS ? 0x7f : bus]);
   }
-  // The key (src/midi/global_scale.h) is appended to the same message, and
-  // its register after that: the firmware takes eight arguments, ten or
-  // eleven, so an older module is left in the key it is in rather than
-  // refusing the message.
+  // The key and the register it sits in (src/midi/global_key.h) ride on the
+  // same message: they are patch state rather than a node's, so they are set
+  // the same way the clock is.
   async setGlobals(g) {
     return this.command(P.SysexCommand.SYSEX_SET_GLOBALS, [
       g.clockSource, g.cvPpqn, ...codec.u14(g.bpm),

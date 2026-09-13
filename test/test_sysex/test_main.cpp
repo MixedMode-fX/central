@@ -565,7 +565,7 @@ static void test_garbage_cannot_stop_the_next_valid_patch_landing() {
     // Every way this can go wrong, in a row.
     rig.send(0x7E);                                        // no such command
     rig.send(SYSEX_PATCH_CHUNK_IN, {9, 0, 99, 1, 2, 3});   // a chunk from nowhere
-    rig.send(SYSEX_SET_PARAM, {200, 0, 0, 0});             // no such node
+    rig.send(SYSEX_SET_PARAM, {200, 0, 0, 0, 0});          // no such node
     rig.send(SYSEX_SLOT_LOAD, {99});                       // no such slot
     const uint8_t rubbish[] = {0xF0, SYSEX_MANUFACTURER, 0, SYSEX_PATCH_CHUNK_IN,
                                SYSEX_PROTOCOL_VERSION, 0x7F, 0x7F, 0x7F, 0x7F, 0xF7};
@@ -641,7 +641,7 @@ static void test_a_parameter_edit_preserves_all_node_state() {
     for (int i = 0; i < 5; i++) { rig.master.pass(now); now += 1000; }
     const uint32_t before = seq->steps_taken();
 
-    rig.send(SYSEX_SET_PARAM, {1, 0, 0, 16});             // node 1, param 0, length 16
+    rig.send(SYSEX_SET_PARAM, {1, 0, 0, 16, 0});          // node 1, param 0, length 16
     TEST_ASSERT_TRUE(rig.acked());
     TEST_ASSERT_EQUAL(16, seq->length());
     TEST_ASSERT_EQUAL(before, seq->steps_taken());
@@ -671,21 +671,25 @@ static void test_a_parameter_above_127_survives_the_wire() {
     const auto* r = rig.midi.last_reply(SYSEX_PARAM_VALUE);
     TEST_ASSERT_NOT_NULL(r);
     TEST_ASSERT_EQUAL(0x81, (uint16_t)(r->bytes[8] | (r->bytes[9] << 7)));
-    // The low seven bits are where they always were, so a host that predates
-    // the eighth bit reads exactly what it read before.
+    // The low seven bits first, the eighth after them.
     TEST_ASSERT_EQUAL(0x01, r->bytes[8]);
 
-    // And a host that sends four arguments still writes a 7-bit value.
-    rig.send(SYSEX_SET_PARAM, {1, 3, 0, 0x7F});
+    // A value below 128 carries a zero high byte, not a missing one.
+    rig.send(SYSEX_SET_PARAM, {1, 3, 0, 0x7F, 0x00});
     TEST_ASSERT_TRUE(rig.acked());
     TEST_ASSERT_EQUAL(0x7F, rig.patches.active().nodes[1].params[3]);
+
+    // A message without the high byte is short, and is refused rather than
+    // guessed at.
+    rig.send(SYSEX_SET_PARAM, {1, 3, 0, 0x01});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_TRUNCATED));
 }
 
 static void test_a_parameter_beyond_its_range_is_refused() {
     Rig rig;
     GlobalSettings g = default_globals();
     rig.patches.apply(two_node_patch(), g, 0);
-    rig.send(SYSEX_SET_PARAM, {1, 0, 0, 99});             // length max is 32
+    rig.send(SYSEX_SET_PARAM, {1, 0, 0, 99, 0});          // length max is 32
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
     TEST_ASSERT_EQUAL(8, rig.patches.active().nodes[1].params[0]);
 }
@@ -926,43 +930,44 @@ static void test_globals_can_be_set_and_come_back_in_a_dump() {
     rig.patches.boot(0);
     rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 2,
                                  (uint8_t)(150 & 0x7F), (uint8_t)(150 >> 7),
-                                 1, 5, 0x01, SysexHandler::SWAP_NEXT_BEAT});
+                                 1, 5, 0x01, SysexHandler::SWAP_NEXT_BEAT,
+                                 SCALE_CHROMATIC, 0, 0});
     TEST_ASSERT_TRUE(rig.acked());
     TEST_ASSERT_EQUAL(150, rig.master.clock().bpm());
     TEST_ASSERT_EQUAL(2, rig.master.clock().cv_ppqn());
     TEST_ASSERT_EQUAL(1, rig.patches.globals().pc_enabled);
     TEST_ASSERT_EQUAL(5, rig.patches.globals().pc_channel);
 
-    rig.send(SYSEX_SET_GLOBALS, {9, 2, 0, 1, 0, 0, 0, 0});     // no such clock source
+    rig.send(SYSEX_SET_GLOBALS, {9, 2, 0, 1, 0, 0, 0, 0,
+                                 SCALE_CHROMATIC, 0, 0});      // no such clock source
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+
+    // Every field is required: a short message is refused rather than half
+    // applied.
+    rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 2, 0, 1, 0, 0, 0, 0});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_TRUNCATED));
 }
 
-// The key (midi/global_key.h) rides on the same message, appended: a host
-// that predates it sends eight arguments and is not told its message is
-// short, and the module is left in the key it was already in.
+// The key (midi/global_key.h) rides on the same message as the clock: it is
+// patch state rather than a node's, so it is set the way the clock is and
+// comes back in the dump the way the clock does.
 static void test_the_key_travels_with_the_globals() {
     Rig rig;
     rig.patches.boot(0);
-    const uint8_t was = global_key::id();
 
     rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
                                  (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
-                                 0, 1, 0, 0});
-    TEST_ASSERT_TRUE(rig.acked());
-    TEST_ASSERT_EQUAL(was, global_key::id());
-
-    rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
-                                 (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
-                                 0, 1, 0, 0, SCALE_LYDIAN, 7});
+                                 0, 1, 0, 0, SCALE_LYDIAN, 7, 0});
     TEST_ASSERT_TRUE(rig.acked());
     TEST_ASSERT_EQUAL(SCALE_LYDIAN, rig.patches.globals().scale);
     TEST_ASSERT_EQUAL(7, rig.patches.globals().root);
     TEST_ASSERT_EQUAL(SCALE_LYDIAN, global_key::id());       // and it is live
     TEST_ASSERT_EQUAL(7, global_key::root());
 
-    // The register rides one further along, for the same reason and with the
-    // same rule: ten arguments leave it alone, eleven set it.
-    TEST_ASSERT_EQUAL(KEY_DEFAULT_OCTAVE, rig.patches.globals().root_octave);
+    // A zero register is one nobody set: it is stored as it arrived and read
+    // as the module's default.
+    TEST_ASSERT_EQUAL(0, rig.patches.globals().root_octave);
+    TEST_ASSERT_EQUAL(KEY_DEFAULT_OCTAVE, global_key::octave());
     TEST_ASSERT_EQUAL(67, global_key::tonic(0));             // 5 x 12 + 7
     rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
                                  (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
@@ -978,7 +983,7 @@ static void test_the_key_travels_with_the_globals() {
 
     rig.send(SYSEX_SET_GLOBALS, {MasterClock::CLOCK_INTERNAL, 4,
                                  (uint8_t)(120 & 0x7F), (uint8_t)(120 >> 7),
-                                 0, 1, 0, 0, SCALE_COUNT, 0});  // no such scale
+                                 0, 1, 0, 0, SCALE_COUNT, 0, 0});  // no such scale
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
     TEST_ASSERT_EQUAL(SCALE_LYDIAN, global_key::id());
     global_key::set(SCALE_CHROMATIC, 0);
@@ -997,18 +1002,20 @@ static void test_the_protocol_never_allocates() {
     // std::vector helper, because the helper allocates and the firmware is
     // what is being measured.
     uint8_t message[16] = {0xF0, SYSEX_MANUFACTURER, SYSEX_DEFAULT_DEVICE, 0,
-                           SYSEX_PROTOCOL_VERSION, 0, 0, 0, 0, 0xF7};
+                           SYSEX_PROTOCOL_VERSION, 0, 0, 0, 0, 0, 0xF7};
     rig.midi.clear();
     rig.midi.sysex.reserve(4096);
 
     const size_t before = g_allocations;
     for (int i = 0; i < 5; i++) {
         message[3] = SYSEX_SET_PARAM;
-        message[5] = 1; message[6] = 0; message[7] = 0; message[8] = (uint8_t)(8 + i);
-        rig.sysex.deliver_sysex(CONTROL, message, 10, rig.now);
+        message[5] = 1; message[6] = 0; message[7] = 0;
+        message[8] = (uint8_t)(8 + i); message[9] = 0; message[10] = 0xF7;
+        rig.sysex.deliver_sysex(CONTROL, message, 11, rig.now);
 
         message[3] = SYSEX_SET_CONNECTION;
-        message[5] = 0; message[6] = 1; message[7] = 0; message[8] = (uint8_t)(1 + (i % 3));
+        message[5] = 0; message[6] = 1; message[7] = 0;
+        message[8] = (uint8_t)(1 + (i % 3)); message[9] = 0xF7;
         rig.sysex.deliver_sysex(CONTROL, message, 10, rig.now);
 
         rig.sysex.service((uint32_t)(1000 * i));
@@ -1125,7 +1132,7 @@ static void test_a_sysex_edit_is_autosaved_after_the_settle_time_not_at_once() {
 
     rig.now = 30000000u;
     const uint32_t writes = rig.store.writes();
-    rig.send(SYSEX_SET_PARAM, {0, 1, 0, 5});
+    rig.send(SYSEX_SET_PARAM, {0, 1, 0, 5, 0});
     TEST_ASSERT_TRUE(rig.acked());
     rig.patches.service(rig.now + 1000);                         // the next loop
     TEST_ASSERT_EQUAL_MESSAGE(writes, rig.store.writes(), "flash was written on the very next loop");

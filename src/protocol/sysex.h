@@ -26,14 +26,12 @@
 // protocol says "development build" by its second byte.
 #define SYSEX_MANUFACTURER 0x7D
 
-// Bumped when a message's layout changes in a way an older host would
-// misread. A host that does not know this version is told so and writes
-// nothing, rather than writing garbage into a live patch.
-//
-// Version 6 is the key: CC_TARGET_KEY and its NRPN block are new addresses,
-// eight algorithms lost their `scale`, `key` and `root` parameters, and the
-// patch format moved with them (patch/patch_codec.h).
-#define SYSEX_PROTOCOL_VERSION 6
+// The one version the module speaks, in every message rather than only in a
+// handshake. A host that sends anything else is told so and writes nothing,
+// rather than writing garbage into a live patch. Nothing is negotiated and no
+// other version is accepted: bump this whenever a message's layout changes,
+// and the app - generated from this header - moves with it.
+#define SYSEX_PROTOCOL_VERSION 7
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -62,10 +60,9 @@ enum SysexCommand : uint8_t {
     SYSEX_DUMP_REQUEST     = 0x05,   // send me the running patch
     SYSEX_PATCH_CHUNK_IN   = 0x06,   // one chunk of a patch, into staging
     SYSEX_PATCH_ABORT      = 0x07,   // forget the partial transfer
-    // <node> <param u14> <value low 7> [<value bit 7>]. A parameter byte
-    // reaches 255 and a SysEx data byte holds seven bits, so the eighth bit
-    // is an optional extra argument; SYSEX_PARAM_VALUE answers with the
-    // value as a u14 for the same reason.
+    // <node> <param u14> <value u14>. A parameter byte reaches 255 and a
+    // SysEx data byte holds seven bits, so the value is two bytes: the low
+    // seven and then the eighth. SYSEX_PARAM_VALUE answers the same way.
     SYSEX_SET_PARAM        = 0x10,
     SYSEX_GET_PARAM        = 0x11,
     SYSEX_SET_CONNECTION   = 0x12,   // one inlet or outlet of one node

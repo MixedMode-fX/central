@@ -35,8 +35,7 @@
 //                          max               2
 //                          flags             1
 //                      }
-//   n_routes           1   (modulation; unused slots are not stored. Absent
-//                          from a version 2 image, which simply has none)
+//   n_routes           1   (modulation; unused slots are not stored)
 //   routes             n_routes x {
 //                          slot              1   which mod_map entry it is
 //                          bus               1
@@ -216,8 +215,7 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
 
     Reader r{in, length, 0, false};
     if (r.u32() != PATCH_MAGIC) return CODEC_BAD_MAGIC;
-    const uint8_t version = r.u8();
-    if (version < PATCH_FORMAT_MIN_VERSION || version > PATCH_FORMAT_VERSION) return CODEC_BAD_VERSION;
+    if (r.u8() != PATCH_FORMAT_VERSION) return CODEC_BAD_VERSION;
     r.u8();                                     // flags
     const uint16_t payload = r.u16();
     if (HEADER_BYTES + (size_t)payload + CRC_BYTES > length) return CODEC_TRUNCATED;
@@ -286,10 +284,6 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
         patch.cc_map[slot] = m;
     }
     if (r.underflowed) return CODEC_TRUNCATED;
-
-    // Version 2 stopped here. `patch` came from empty_patch(), so its routes
-    // are already the unused ones a version 2 image means.
-    if (version < 3 || r.at >= r.length) return CODEC_OK;
 
     const uint8_t n_routes = r.u8();
     if (r.underflowed) return CODEC_TRUNCATED;

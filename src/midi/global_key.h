@@ -7,14 +7,10 @@
 // The key the module is in: one scale, one root and one register, for the
 // whole patch. There is no second copy of it anywhere.
 //
-// Every algorithm that has a scale used to keep its own, which is right for
-// the algorithm and wrong for the instrument: changing key meant editing a
-// quantiser, two sequencers and a chord voicer and hoping they agreed. The
-// obvious repair is a global setting each node may override, and that is
-// what this was - a `scale` parameter, a `key` parameter and a `root`
-// parameter on eight algorithms, three ways for a node to leave the key it
-// is in. Nobody wants a patch in two keys at once. The parameters are gone
-// and this is the only key there is.
+// A scale per algorithm is right for the algorithm and wrong for the
+// instrument: changing key would mean editing a quantiser, two sequencers and
+// a chord voicer and hoping they agreed. Nobody wants a patch in two keys at
+// once, so no algorithm carries a scale, a key or a root of its own.
 //
 // **What a node still chooses is the register**, because a bass line, a pad
 // and a lead are the same key in three different octaves. A node with an
@@ -37,8 +33,6 @@
 // modulation route reaches it as CC_TARGET_KEY, through the one applier every
 // other control-plane write goes through.
 //
-// Chromatic on C until a user sets a key, which is what a zeroed preset byte
-// already gave.
 // The register a zeroed `octave` parameter, and a zeroed preset byte, land
 // on: 5 * 12 is 60, so the key's root note is middle C by default.
 #define KEY_DEFAULT_OCTAVE 5

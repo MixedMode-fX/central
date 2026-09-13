@@ -32,6 +32,7 @@
 #include "algorithm/midi/channel.h"
 #include "algorithm/midi/key.h"
 #include "algorithm/midi/retrigger.h"
+#include "algorithm/clock/transport.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -79,6 +80,7 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &Channel::descriptor,
     &Key::descriptor,
     &Retrigger::descriptor,
+    &Transport::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

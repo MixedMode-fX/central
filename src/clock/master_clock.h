@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "config.h"
+#include "clock/transport_edge.h"
 
 // The one time base for the whole module (#4).
 //
@@ -68,6 +69,18 @@ class MasterClock {
         void stop();
         void resume();
         bool running() const { return is_running; }
+        // What the transport did since the last call, as a TransportEdge
+        // mask, and clears it. Every one of start(), stop() and resume()
+        // latches its bit **whatever the state already was**: a second stop
+        // is a message the module was sent, and a start under a running
+        // clock is a re-sync rather than nothing at all.
+        //
+        // The master takes these once a pass and hands them to the pool, so
+        // this is the one reader (master.cpp). Latched from the main loop
+        // only - MIDI realtime arrives through deliver_midi(), the console,
+        // a CC and the protocol all run between passes - so unlike the
+        // counter this never crosses an interrupt.
+        uint8_t take_transport_edges();
 
         // Timer ------------------------------------------------------------
         // What the interval timer should be programmed at, in microseconds.
@@ -119,6 +132,7 @@ class MasterClock {
         volatile uint32_t rejected;
         volatile bool interval_dirty;
         volatile bool is_running;
+        uint8_t transport_edges;
         volatile bool have_edge;
         uint32_t last_consumed;
         uint32_t last_tap_us;

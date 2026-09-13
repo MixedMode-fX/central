@@ -227,6 +227,21 @@ export const EXAMPLES = {
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
+  'Locked to the transport': {
+    about: 'Two gate sequencers at different lengths \u2014 five steps against eight \u2014 off one sixteenth-note metronome, so they walk in and out of phase with each other. Transport is the third node: MIDI start, stop and continue reach the clock and never a bus, and this is what puts them back on one. Its start outlet is wired to both sequencers\u2019 reset inlets, so pressing start under play drops both patterns back to step one together, wherever the phrase had got to \u2014 jack 3 flashes the trigger itself. A sequencer counts edges rather than the clock\u2019s count, so without this a stopped and restarted DAW would have it resume mid-pattern. Enable audio under play, then press stop and start a few bars apart.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 3 }, { port: 2, dir: 'out', bus: 4 }, { port: 3, dir: 'out', bus: 1 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
+        { algo: 'Transport', out: [1] },
+        { algo: 'StepSequencer', in: [0, 1], out: [3], seq: { hits: 'x..x.' } },
+        { algo: 'EuclidianSequencer', in: [0, 1], out: [4], params: [8, 0, 0, 3, 0] },
+        { algo: 'GateToNote', in: [3], out: [0], params: [36, 127, 10] },
+        { algo: 'GateToNote', in: [4], out: [0], params: [42, 80, 10] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+    },
+  },
   'Divider chain': {
     about: 'The ClockDiv has its inlet connected, so it divides rising edges of the metronome instead of the master count \u2014 which is how a rate this module does not name by note value still gets built. Jack 1 is the beat, jack 2 pulses once per bar.',
     patch: {

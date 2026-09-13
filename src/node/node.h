@@ -6,6 +6,7 @@
 #include <new>
 #include "config.h"
 #include "bus/domain.h"
+#include "clock/transport_edge.h"
 #include "bus/bus_manager.h"
 #include "node/param.h"
 
@@ -60,6 +61,27 @@ class Node {
         // and a node has to tolerate being told more than once. Releasing an empty ledger writes nothing, so an
         // implementation that is simply `silence(bus)` already does.
         virtual void transport_stopped(BusManager&) {}
+
+        // The transport *moved*: a TransportEdge mask of what it did since
+        // the last pass (clock/transport_edge.h), never zero. Called at this
+        // node's own place in the graph order, after its process() and
+        // before its outlets are published, so what is written here crosses
+        // the whole graph in this pass like any other write - which is the
+        // point, because what a start is for is resetting the patch that
+        // follows it before the first tick of the new bar reaches it.
+        //
+        // This and transport_stopped() are not two names for one thing. That
+        // one is the *drain*: it says "whatever the clock was playing, let go
+        // of it", it is called for several passes running until the graph has
+        // settled, and it is about notes. This is the *edge*: it says what
+        // the transport was told to do, exactly once per message, including
+        // the two messages that hook cannot see at all - a start and a
+        // continue, which differ only in where the count resumes.
+        //
+        // It reaches every node, not just the one algorithm that turns it
+        // into a gate (algorithm/clock/transport.h), because the transport is
+        // the module's, not a node's.
+        virtual void transport_event(BusManager&, uint8_t) {}
 
         // Set one parameter after construction (#20). `index` is < the
         // descriptor's n_params; `value` has already been range-checked

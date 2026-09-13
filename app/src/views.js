@@ -796,6 +796,7 @@ function gridPanel(app, index) {
     case 'DrumSeqMidi':    return drumGrid(app, index, d.name === 'DrumSeqMidi');
     case 'NoteSequencer':
     case 'PolySequencer':  return noteLane(app, index, d.name === 'PolySequencer');
+    case 'Harmony':        return harmonyCircle(app, index);
     default:               return null;
   }
 }
@@ -946,6 +947,350 @@ function noteLane(app, index, isPoly) {
   return el('div', { class: 'grid' },
     el('div', { class: 'grid-title' }, `degrees · root ${noteName(root)}`),
     scroller(app, `grid-${index}`, el('div', { class: 'lanes' }, rows)));
+}
+
+// --- the circle of fifths ---------------------------------------------------
+//
+// Harmony's claim is that its progression is *computed* from the scale rather
+// than looked up in a table of genres (src/midi/root_motion.h), and a claim
+// like that is unreadable as five sliders and a number. So it is drawn: the
+// key's chords on the circle of fifths, and every move the walk would make
+// from one of them as an arrow whose weight is how much it wants it. Moving
+// `fifths` turns the arrows round, `smooth` swings them from the fifths to
+// the mediants, and `spread` fattens or starves them - which is the fastest
+// way there is to learn what those four controls are.
+//
+// **The weights are the node's own.** `Harmony::weigh` is the function the
+// draw reads (`module.js`), not a second opinion about it in JavaScript: a
+// rule reimplemented here would be a rule that could drift, and a picture
+// that disagrees with the music is worse than no picture.
+//
+// Two things are shown, because they are two different questions: **moves**
+// is what the walk *would* do from a chord - what it will generate - and
+// **loop** is the progression it has written down and is repeating.
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const svg = (tag, attrs = {}, ...children) => {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+    else if (value !== null && value !== undefined) node.setAttribute(key, value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined) continue;
+    node.append(child.nodeType ? child : document.createTextNode(String(child)));
+  }
+  return node;
+};
+
+// Which chord the arrows come from, and which of the two pictures is up, per
+// node. Neither is part of the patch - they are where you are looking, like a
+// block's position on the canvas - so they live here and not in the image. An
+// absent focus means *follow*: the arrows come from whatever is sounding,
+// which is what makes the circle a view of the music rather than a diagram.
+const harmonyFocus = new Map();
+const harmonyMode = new Map();
+
+const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+const CIRCLE = { mid: 120, ring: 78, label: 105, dot: 15 };
+
+// Where a pitch class sits on the circle, counted in fifths from the tonic,
+// so the key's own tonic is always at the top and the picture is about *this*
+// key. Seven is its own inverse mod twelve, which is why a pitch class maps
+// back to a position by the same multiplication that put it there.
+const fifthsFrom = (pc, tonicPc) => (((pc - tonicPc) * 7) % 12 + 12) % 12;
+const circlePoint = (k, r) => {
+  const a = (k * 30 - 90) * Math.PI / 180;
+  return [CIRCLE.mid + r * Math.cos(a), CIRCLE.mid + r * Math.sin(a)];
+};
+
+// The quality of a triad, read off the pitch classes the firmware reports for
+// it. Nothing in Harmony knows what a chord quality is - the stack is in
+// scale steps, so the key decides - and this is the one place the app has to
+// name what came out, to put an "m" on the label.
+export function triadQuality(set, rootPc) {
+  const steps = [];
+  for (let pc = 0; pc < 12; pc++) if (set & (1 << pc)) steps.push((pc - rootPc + 12) % 12);
+  steps.sort((a, b) => a - b);
+  if (steps.length < 3) return 'other';
+  const [, third, fifth] = steps;
+  if (third === 3 && fifth === 6) return 'dim';
+  if (third === 3 && fifth === 7) return 'min';
+  if (third === 4 && fifth === 8) return 'aug';
+  if (third === 4 && fifth === 7) return 'maj';
+  return 'other';
+}
+// A chord is named twice on the circle, and the two namings say different
+// things: the note name outside the ring is what you would call it (Dm), and
+// the numeral inside is what it does in this key (ii). The numeral's *case*
+// is already the minor mark, so it takes the other marks and not the "m".
+const QUALITY_MARK = { min: 'm', dim: '°', aug: '+', maj: '', other: '' };
+const chordName = (pc, quality) => `${NAMES[pc]}${QUALITY_MARK[quality] ?? ''}`;
+function numeral(degree, quality) {
+  const word = NUMERALS[degree] ?? String(degree + 1);
+  const lower = quality === 'min' || quality === 'dim';
+  const mark = quality === 'min' ? '' : (QUALITY_MARK[quality] ?? '');
+  return (lower ? word.toLowerCase() : word) + mark;
+}
+
+// Everything the picture needs, read from the running node in one place: a
+// degree's pitch, its triad, and where on the circle that puts it.
+function harmonyShape(app, index) {
+  const m = app.module;
+  const n = m?.harmonyDegrees ? m.harmonyDegrees(index) : 0;
+  if (!n) return null;
+  const chords = [];
+  for (let d = 0; d < n; d++) {
+    const pitch = m.harmonyPitch(index, d);
+    const pc = pitch % 12;
+    const quality = triadQuality(m.harmonyTriad(index, d), pc);
+    chords.push({ degree: d, pitch, pc, quality, name: chordName(pc, quality), roman: numeral(d, quality) });
+  }
+  const tonicPc = chords[0].pc;
+  for (const chord of chords) chord.k = fifthsFrom(chord.pc, tonicPc);
+  return { n, chords, tonicPc, byPosition: new Map(chords.map((c) => [c.k, c])) };
+}
+
+function harmonyCircle(app, index) {
+  const shape = harmonyShape(app, index);
+  if (!shape) {
+    // Every other panel here is drawn from the patch; this one is drawn from
+    // the *running* node, which is the only thing that can answer "what would
+    // it play". A patch the module has not taken has no such node yet.
+    return el('div', { class: 'grid' },
+      el('div', { class: 'grid-title' }, 'circle of fifths'),
+      el('p', { class: 'hint' }, 'the circle is read from the running node, and appears once the module has taken the patch'));
+  }
+  const m = app.module;
+  const loopLength = m.harmonyLoopLength(index);
+  const mode = loopLength ? (harmonyMode.get(index) ?? 'loop') : 'moves';
+
+  const marks = [];
+  for (let k = 0; k < 12; k++) {
+    const [x, y] = circlePoint(k, CIRCLE.label);
+    const chord = shape.byPosition.get(k);
+    marks.push(svg('text', {
+      x, y, class: `circle-label ${chord ? 'in-key' : ''}`,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+    }, chord ? chord.name : NAMES[(shape.tonicPc + k * 7) % 12]));
+  }
+
+  const dots = shape.chords.map((chord) => {
+    const [x, y] = circlePoint(chord.k, CIRCLE.ring);
+    const focused = harmonyFocus.get(index) === chord.degree;
+    return svg('g', {
+      id: `harm-${index}-deg-${chord.degree}`,
+      class: `chord-dot q-${chord.quality} ${focused ? 'focused' : ''}`,
+      role: 'button', tabindex: '0',
+      // Clicking a chord pins the arrows to it; clicking it again lets them
+      // follow the music. One control, and no third state to explain.
+      onclick: () => {
+        harmonyFocus.set(index, focused ? null : chord.degree);
+        app.render();
+      },
+      onkeydown: (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        harmonyFocus.set(index, focused ? null : chord.degree);
+        app.render();
+      },
+    },
+      svg('title', {}, `${chord.roman} — ${chord.name} (${noteName(chord.pitch)})`),
+      svg('circle', { cx: x, cy: y, r: CIRCLE.dot }),
+      svg('text', { x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, chord.roman));
+  });
+
+  const fan = svg('g', { id: `harm-${index}-fan`, class: 'fan' });
+  const picture = svg('svg', {
+    class: 'circle-of-fifths', viewBox: '0 0 240 240', role: 'img',
+    'aria-label': `the key's chords on the circle of fifths, ${mode === 'loop' ? 'with the loop it is playing' : 'with the moves the walk would make'}`,
+  },
+    svg('defs', {}, svg('marker', {
+      id: `harm-arrow-${index}`, viewBox: '0 0 10 10', refX: '9', refY: '5',
+      markerWidth: '5', markerHeight: '5', markerUnits: 'userSpaceOnUse', orient: 'auto',
+    }, svg('path', { d: 'M0 0 L10 5 L0 10 z' }))),
+    svg('circle', { class: 'circle-ring', cx: CIRCLE.mid, cy: CIRCLE.mid, r: 92 }),
+    marks,
+    fan,
+    dots);
+
+  const caption = el('p', { class: 'hint', id: `harm-${index}-caption` }, '');
+  drawHarmony(app, index, fan, caption);
+  return el('div', { class: 'grid harmony' },
+    el('div', { class: 'grid-title' },
+      `circle of fifths · ${shape.chords[0].name} · ${shape.n} chords`),
+    loopLength
+      ? segmented([{ value: 'loop', label: 'loop', hint: 'the progression it has written down' },
+                   { value: 'moves', label: 'moves', hint: 'every move the walk would make from one chord' }],
+                  mode, (chosen) => { harmonyMode.set(index, chosen); app.render(); },
+                  { label: 'what the circle shows' })
+      : null,
+    picture, caption,
+    loopLength ? loopSlots(app, index, shape, loopLength) : null);
+}
+
+// The loop as its slots: the chord in each, and which one the next advance
+// falls on. A loop still being captured has empty slots at the end, and they
+// fill one per advance, which is the whole of what "it is writing it down"
+// looks like.
+function loopSlots(app, index, shape, loopLength) {
+  const chips = [];
+  for (let slot = 0; slot < loopLength; slot++) {
+    const chip = el('div', { id: `harm-${index}-slot-${slot}`, class: 'chord-slot' },
+      el('span', { class: 'roman' }, ''), el('span', { class: 'name' }, ''));
+    fillSlot(chip, shape, app.module.harmonyLoopChord(index, slot), slot);
+    chips.push(chip);
+  }
+  // Not a `lane-row`: a sequencer's lane is a line of fixed cells that
+  // scrolls where it fits and wraps where it does not, and the loop is a
+  // handful of chips that should use the width it has at either size.
+  return el('div', { class: 'loop-row' },
+    el('span', { class: 'lane-name' }, `loop (${loopLength})`),
+    el('div', { class: 'chord-slots' }, chips));
+}
+
+// What one slot says. Written into a chip that already exists rather than
+// built with it, because a loop being captured fills one slot per advance and
+// the card is not rebuilt between them.
+function fillSlot(chip, shape, degree, slot) {
+  const chord = degree === 0xFF ? null : shape.chords[degree];
+  chip.setAttribute('data-degree', String(degree));
+  chip.className = `chord-slot ${chord ? '' : 'empty'}`;
+  chip.setAttribute('title', chord ? `chord ${slot + 1}: ${chord.roman} (${chord.name})`
+                                   : `chord ${slot + 1}: not written yet`);
+  chip.children[0].textContent = chord ? chord.roman : '·';
+  chip.children[1].textContent = chord ? chord.name : '';
+}
+
+// The arrows, and the sentence under them. Drawn into a panel that already
+// exists rather than built with it, because this is also what the playhead
+// does: while the arrows follow the music they are redrawn as each chord
+// lands, and nothing else on the card is rebuilt.
+function drawHarmony(app, index, fan, caption) {
+  const shape = harmonyShape(app, index);
+  if (!fan || !shape) return;
+  const m = app.module;
+  const playing = m.harmonyDegree(index);
+  const pinned = harmonyFocus.get(index);
+  const from = (pinned ?? null) !== null ? Math.min(pinned, shape.n - 1)
+             : (playing === 0xFF ? 0 : Math.min(playing, shape.n - 1));
+  const loopLength = m.harmonyLoopLength(index);
+  const mode = loopLength ? (harmonyMode.get(index) ?? 'loop') : 'moves';
+  fan.setAttribute('data-drawn', `${mode}:${from}:${loopLength}:${m.harmonyLoopPosition(index)}`);
+  while (fan.firstChild) fan.firstChild.remove();
+
+  // A move is an arc, not a chord line. Two chords a fifth apart are
+  // *neighbours* on this circle - that is what the circle is - so the most
+  // important move there is would be a straight line ten pixels long between
+  // two touching dots, and invisible. Bending every arc halfway towards the
+  // middle gives the short ones room and leaves the long ones nearly
+  // straight, and the curve's own tangents are where it starts and ends, so
+  // the arrowheads land square on the dots whatever the span.
+  const arc = (a, b, attrs) => {
+    const [x0, y0] = circlePoint(a.k, CIRCLE.ring);
+    const [x1, y1] = circlePoint(b.k, CIRCLE.ring);
+    const cx = (x0 + x1) / 2 + (CIRCLE.mid - (x0 + x1) / 2) * 0.5;
+    const cy = (y0 + y1) / 2 + (CIRCLE.mid - (y0 + y1) / 2) * 0.5;
+    const step = (from, to, by) => {
+      const dx = to[0] - from[0], dy = to[1] - from[1];
+      const len = Math.hypot(dx, dy) || 1;
+      return [from[0] + dx / len * by, from[1] + dy / len * by];
+    };
+    const start = step([x0, y0], [cx, cy], CIRCLE.dot + 2);
+    const end = step([x1, y1], [cx, cy], CIRCLE.dot + 6);
+    return svg('path', {
+      d: `M${start[0].toFixed(1)} ${start[1].toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${end[0].toFixed(1)} ${end[1].toFixed(1)}`,
+      fill: 'none', 'marker-end': `url(#harm-arrow-${index})`, ...attrs,
+    });
+  };
+
+  if (mode === 'loop') {
+    const chords = [];
+    for (let slot = 0; slot < loopLength; slot++) {
+      const degree = m.harmonyLoopChord(index, slot);
+      if (degree !== 0xFF && degree < shape.n) chords.push({ slot, chord: shape.chords[degree] });
+    }
+    for (let i = 0; i + 1 < chords.length; i++) {
+      if (chords[i].chord.degree === chords[i + 1].chord.degree) continue;   // a repeat draws nothing
+      fan.append(arc(chords[i].chord, chords[i + 1].chord, { class: 'move loop' }));
+    }
+    // The loop is a loop: the last chord goes back to the first.
+    if (chords.length === loopLength && loopLength > 1
+        && chords[loopLength - 1].chord.degree !== chords[0].chord.degree) {
+      fan.append(arc(chords[loopLength - 1].chord, chords[0].chord, { class: 'move loop round' }));
+    }
+    if (caption) {
+      caption.textContent = chords.length < loopLength
+        ? `writing it down: ${chords.length} of ${loopLength} chords`
+        : `${chords.map(({ chord }) => chord.roman).join(' → ')} →`;
+    }
+    return;
+  }
+
+  const weights = [];
+  let total = 0, top = 0, best = -1;
+  for (let to = 0; to < shape.n; to++) {
+    weights[to] = m.harmonyWeight(index, from, to);
+    total += weights[to];
+    if (weights[to] > top) { top = weights[to]; best = to; }
+  }
+  if (!total) {
+    if (caption) caption.textContent = 'this key has one chord: the walk has nowhere to go';
+    return;
+  }
+  for (let to = 0; to < shape.n; to++) {
+    if (to === from || !weights[to]) continue;
+    const share = weights[to] / top;
+    fan.append(arc(shape.chords[from], shape.chords[to], {
+      class: `move ${to === best ? 'top' : ''}`,
+      'stroke-width': (0.8 + share * 4.2).toFixed(2),
+      'stroke-opacity': (0.18 + share * 0.72).toFixed(2),
+    }));
+  }
+  if (caption) {
+    const percent = (w) => `${Math.round(w * 100 / total)}%`;
+    const stays = weights[from] ? `, stays on ${shape.chords[from].roman} ${percent(weights[from])}` : '';
+    const source = (pinned ?? null) !== null ? 'from' : 'playing';
+    caption.textContent = best < 0 || best === from
+      ? `${source} ${shape.chords[from].roman}: it stays`
+      : `${source} ${shape.chords[from].roman} → most likely ${shape.chords[best].roman} ${percent(top)}${stays}`;
+  }
+}
+
+// What the module is doing to the circle, painted onto a card that is already
+// on the page: the chord sounding, the slot the loop is on, and - while the
+// arrows are following rather than pinned - the fan redrawn as each chord
+// lands. Called from the same frame loop as the sequencer playheads.
+export function paintHarmony(app, node) {
+  const degrees = app.module.harmonyDegrees?.(node) ?? 0;
+  if (!degrees) return;
+  const degree = app.module.harmonyDegree(node);
+  for (let d = 0; d < degrees; d++) {
+    document.getElementById(`harm-${node}-deg-${d}`)?.classList.toggle('playing', d === degree);
+  }
+  const loopLength = app.module.harmonyLoopLength(node);
+  const at = app.module.harmonyLoopPosition(node);
+  let shape = null;
+  for (let slot = 0; slot < loopLength; slot++) {
+    const chip = document.getElementById(`harm-${node}-slot-${slot}`);
+    if (!chip) continue;
+    const degree = app.module.harmonyLoopChord(node, slot);
+    if (chip.getAttribute('data-degree') !== String(degree)) {
+      shape ??= harmonyShape(app, node);
+      if (shape) fillSlot(chip, shape, degree, slot);
+    }
+    chip.classList.toggle('playing', slot === at);
+  }
+  // Redrawn only when what it would draw has changed, so a card that is
+  // merely open costs nothing per frame.
+  const fan = document.getElementById(`harm-${node}-fan`);
+  if (!fan) return;
+  const mode = loopLength ? (harmonyMode.get(node) ?? 'loop') : 'moves';
+  const pinned = harmonyFocus.get(node);
+  const from = (pinned ?? null) !== null ? pinned : (degree === 0xFF ? 0 : degree);
+  if (fan.getAttribute('data-drawn') !== `${mode}:${from}:${loopLength}:${at}`) {
+    drawHarmony(app, node, fan, document.getElementById(`harm-${node}-caption`));
+  }
 }
 
 // Mirrors midi/scale.h so the displayed pitch is the one the module will play.

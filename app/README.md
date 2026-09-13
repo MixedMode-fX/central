@@ -51,7 +51,10 @@ and every route in the patch, and every field of a binding, so one can be
 built with no controller in the room. Sequencers get purpose-built views — a
 step grid for the gate and drum sequencers, a note lane over scale degrees for
 the note sequencers — and the step being played is outlined in the grid you
-are editing.
+are editing. `Harmony` gets the **circle of fifths**: the key's chords where
+the circle puts them, and either the moves the walk would make from one of
+them, each arrow weighted by how much it wants it, or the loop it has written
+down as a path through them.
 
 **play** — the module running: the LEDs and gate buses, the clock, the jacks,
 an on-screen keyboard and CC sender, and two views that answer questions no
@@ -143,6 +146,14 @@ when the patch is replaced — so they are read under the graph they act on, not
 beside the cables and the clock, which outlive any patch. A CC is bound from
 the same two places a route is made: the button beside the control, and the
 matrix under the graph.
+
+**A picture of an algorithm is the algorithm's own numbers.** The arrows on
+the circle of fifths are `Harmony::weigh`, read off the running node through
+`module.js` — not the same rule written a second time in JavaScript, which
+would be a rule that could drift. A picture that disagrees with the music is
+worse than no picture. It follows that such a view is drawn from the *running*
+node and says so when there is not one yet, where every other panel is drawn
+from the patch.
 
 **A modulated parameter is a socket; the rest are not.** A node has anywhere
 from two to `N_PARAM` parameters, so drawing them all would bury the signal

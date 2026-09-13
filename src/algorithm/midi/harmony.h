@@ -88,17 +88,27 @@
 //
 // **`phrase` and `cadence` are what make it composed rather than drifting.**
 // A walk with no phrase structure wanders; a phrase of four with a cadence of
-// 75% resolves to the tonic three times in four, which is a period. And
-// `loop` is the difference between improvising and writing: turn it on and
-// the next `phrase` chords become the piece, repeated exactly, until it is
-// turned off again.
+// 75% resolves to the tonic three times in four, which is a period.
+//
+// **`loop` is the difference between improvising and writing, and it is a
+// length.** Set it to four and the next four chords become the piece,
+// repeated exactly - four advances and it comes round - until it is set back
+// to zero. A loop is *not* the phrase: the phrase is how often the music
+// resolves and the loop is how much of it repeats, so a loop of eight over a
+// phrase of four is a period with two cadences in it, and a loop of three
+// over a phrase of four is three chords that sit across the resolution. It
+// was a switch that meant "repeat the phrase", and one number can only ever
+// say one of those two things.
+//
+// A loop is captured from the top of a phrase, so what is caught is a phrase
+// and not the tail of one, and `reset` puts the loop back to its first chord
+// along with the phrase.
 //
 // **`drift` is what keeps a loop alive.** An accident that happens once is a
-// glitch and one that comes back is a decision, so a looping phrase redraws
-// one of its chords with this probability and *keeps* the new one. At 0 the
-// loop is exact, which is what it always was. A few percent is a piece that
-// is recognisably itself and never quite the same twice, which is the whole
-// of what this node is for.
+// glitch and one that comes back is a decision, so a running loop redraws one
+// of its chords with this probability and *keeps* the new one. At 0 the loop
+// is exact. A few percent is a piece that is recognisably itself and never
+// quite the same twice, which is the whole of what this node is for.
 //
 // **Degrees the key does not have are not reachable.** The walk runs over the
 // first seven degrees of the scale, or over all of them when the scale has
@@ -121,7 +131,8 @@
 // params[0] phrase    chords per phrase
 // params[1] cadence   percent chance the phrase's last chord is the tonic
 // params[2] gravity   percent pull to the tonic; 100 never leaves it
-// params[3] loop      keep the first phrase and repeat it
+// params[3] loop      chords in the loop: 0 walks on, 4 comes round every
+//                     fourth advance
 // params[4] octave    the register degree 0 sits in; 0, the default, is the
 //                     key's own, so one key setting moves the progression
 //                     (midi/global_key.h)
@@ -133,7 +144,7 @@
 // params[10] leading  1 avoids the leading tone, 100 wants it
 // params[11] spread   below 50 sharpens toward a loop, above it flattens
 //                     toward a uniform walk
-// params[12] drift    percent chance a looping phrase redraws one chord and
+// params[12] drift    percent chance a running loop redraws one chord and
 //                     keeps it
 class Harmony : public Node{
     public:
@@ -170,6 +181,22 @@ class Harmony : public Node{
         // Diagnostics / tests.
         // The degree being played, 0 = the tonic. 0xFF before the first advance.
         uint8_t degree() const { return started ? current : (uint8_t)0xFF; }
+        // Which slot of the loop the next advance falls on, or 0xFF when
+        // nothing is looping. While the loop is still being captured that is
+        // the slot about to be written, which is the same square either way.
+        uint8_t loop_position() const {
+            if (!loop) return 0xFF;
+            return recorded < loop ? recorded : loop_pos;
+        }
+        // The degree written in a slot of the loop, or 0xFF if that slot has
+        // not been captured yet.
+        uint8_t loop_chord(uint8_t slot) const {
+            return (loop && slot < recorded) ? written[slot] : (uint8_t)0xFF;
+        }
+        // The triad the key puts on a degree, as a set of the twelve pitch
+        // classes. Stacked in scale steps, so the quality is the key's and
+        // never this node's (root_motion.h).
+        uint16_t triad_of(uint8_t deg) const;
         // The pitch that is sounding, or 0xFF when nothing is.
         uint8_t playing() const { return sounding.count() ? sounding.at(0).note : (uint8_t)0xFF; }
         // Where in the phrase the next chord falls.
@@ -214,6 +241,7 @@ class Harmony : public Node{
         uint8_t drift;
         uint8_t current;              // the degree being played
         uint8_t position;             // where in the phrase the next chord falls
+        uint8_t loop_pos;             // where in the loop the next chord falls
         uint8_t recorded;             // chords committed to the loop
         bool started;                 // a chord has been played at all
         bool at_first;                // the next advance plays the tonic

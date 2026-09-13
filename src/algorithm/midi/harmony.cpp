@@ -11,7 +11,7 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"phrase",   2, Harmony::MAX_PHRASE, 4, PARAM_NUMBER,  nullptr},
     {"cadence",  0, 100,              75, PARAM_PERCENT, nullptr},
     {"gravity",  0, 100,               0, PARAM_PERCENT, nullptr},
-    {"loop",     0, 1,                 0, PARAM_BOOL,    nullptr},
+    {"loop",     0, Harmony::MAX_PHRASE, 0, PARAM_NUMBER, nullptr},
     {"octave",   0, KEY_MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"velocity", 1, 127,             100, PARAM_NUMBER,  nullptr},
     {"channel",  1, 16,                1, PARAM_CHANNEL, nullptr},
@@ -49,7 +49,7 @@ Harmony::Harmony(const NodeConfig& config) :
                                                                       : config.params[P_CADENCE])
                                      : (uint8_t)75),
     gravity(config.params[P_GRAVITY] > 100 ? (uint8_t)100 : config.params[P_GRAVITY]),
-    loop(config.params[P_LOOP] ? 1 : 0),
+    loop(config.params[P_LOOP] > MAX_PHRASE ? MAX_PHRASE : config.params[P_LOOP]),
     octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? (uint8_t)(config.params[P_VELOCITY] & 0x7F) : (uint8_t)100),
     channel(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
@@ -65,7 +65,7 @@ Harmony::Harmony(const NodeConfig& config) :
                                                                    : config.params[P_SPREAD])
                                    : DEFAULT_SPREAD),
     drift(config.params[P_DRIFT] > 100 ? (uint8_t)100 : config.params[P_DRIFT]),
-    current(0), position(0), recorded(0), started(false), at_first(true), written(),
+    current(0), position(0), loop_pos(0), recorded(0), started(false), at_first(true), written(),
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
 {
@@ -90,6 +90,19 @@ uint8_t Harmony::pitch_of(uint8_t deg) const {
     while (pitch > 127) pitch -= 12;
     while (pitch < 0) pitch += 12;
     return (uint8_t)pitch;
+}
+
+// Real pitch classes, not scale intervals: root_motion works in semitones
+// above the tonic, because that is all a weight needs, and anything asking
+// what the chord *is* - a display, a test - wants the notes it will hear. So
+// the set is turned to where the key actually sits.
+uint16_t Harmony::triad_of(uint8_t deg) const {
+    const uint8_t n = usable_degrees();
+    if (!n) return 0;
+    if (deg >= n) deg = (uint8_t)(n - 1u);
+    const uint16_t set = root_motion::triad(root_motion::degrees_of(global_key::mask(), n), deg);
+    const uint8_t tonic = global_key::root();
+    return (uint16_t)(((set << tonic) | (set >> (12u - tonic))) & 0x0FFFu);
 }
 
 // Every move weighed against the scale, then shaped. Split out of choose()
@@ -235,7 +248,15 @@ void Harmony::restart(){
     // first step. It does not silence what is sounding - a root that dropped
     // out between the reset and the next chord would be a hole in the music,
     // and the next advance replaces it anyway.
+    //
+    // The loop goes back to its first chord too, and a *written* one is kept:
+    // it is the piece, and a reset asks to hear it from the top rather than
+    // to write another one. A half-written one is not a piece yet, so it is
+    // caught again from here - which is also the only way its first chord can
+    // be the tonic the reset is about to play.
     position = 0;
+    loop_pos = 0;
+    if (recorded < loop) recorded = 0;
     at_first = true;
 }
 
@@ -243,16 +264,17 @@ void Harmony::process(BusManager& bus, uint32_t){
     if (reset_in.rising(bus)) restart();
 
     if (advance_in.rising(bus)){
+        const bool written_out = loop && recorded >= loop;   // the loop is the piece now
         uint8_t deg;
-        if (loop && recorded >= phrase){
-            deg = written[position];               // the phrase, as written
+        if (written_out){
+            deg = written[loop_pos];               // the loop, as written
             // An accident that happens once is a glitch and one that comes
             // back is a decision, so a redraw *replaces* the chord it landed
-            // on. A looping phrase with a few percent of drift is a piece
-            // that is recognisably itself and never quite the same twice.
+            // on. A loop with a few percent of drift is a piece that is
+            // recognisably itself and never quite the same twice.
             if (drift && rng.chance(drift)){
                 deg = choose();
-                written[position] = deg;
+                written[loop_pos] = deg;
             }
         } else if (at_first){
             deg = 0;                               // the first advance is the tonic
@@ -261,16 +283,22 @@ void Harmony::process(BusManager& bus, uint32_t){
         }
         at_first = false;
 
-        // Recording only ever starts at the top of a phrase, so switching
-        // `loop` on halfway through waits for the next one rather than
-        // capturing a phrase that begins in the middle.
-        if (loop && recorded < phrase && recorded == position){
-            written[position] = deg;
-            recorded = (uint8_t)(position + 1u);
+        // A loop is captured from the top of a phrase, so setting a length
+        // halfway through one waits for the next rather than catching a
+        // phrase that begins in the middle. After that the loop fills
+        // straight through, however long the phrase is: its length is its
+        // own, not the cadence's.
+        if (loop && recorded < loop && (recorded || position == 0)){
+            written[recorded] = deg;
+            recorded = (uint8_t)(recorded + 1u);
         }
 
         strike(bus, deg);
         position = (uint8_t)((position + 1u) % phrase);
+        // Only the playback counter moves: while the loop is being captured
+        // the slot to write is `recorded`, and it lands on 0 when the last
+        // one is written, which is where playback starts.
+        if (written_out) loop_pos = (uint8_t)((loop_pos + 1u) % loop);
     } else if (sounding.count()){
         // Re-voiced when what it should be playing changes - the key moving
         // under it, or the root or the scale being edited. Chord does exactly
@@ -303,19 +331,22 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
         case P_PHRASE:
             if (value < 2 || value > MAX_PHRASE) return false;
             if (value == phrase) return true;
-            // A phrase of a different length is a different phrase, so the
-            // one that was recorded is no longer the piece.
+            // The phrase is how often the music resolves and the loop is how
+            // much of it repeats, so moving one does not throw the other
+            // away: a written loop survives a change of cadence period.
             phrase = value;
-            recorded = 0;
             if (position >= phrase) position = 0;
             return true;
         case P_CADENCE: if (value > 100) return false; cadence = value; return true;
         case P_GRAVITY: if (value > 100) return false; gravity = value; return true;
         case P_LOOP:
-            if (value > 1) return false;
+            if (value > MAX_PHRASE) return false;
             if (value == loop) return true;
+            // A loop of a different length is a different piece, so it is
+            // written again from the next top of a phrase. 0 walks on.
             loop = value;
-            recorded = 0;          // on: record the next phrase. off: walk again.
+            recorded = 0;
+            loop_pos = 0;
             return true;
         case P_OCTAVE: if (value > KEY_MAX_OCTAVE) return false; octave = value; return true;
         case P_VELOCITY: if (value == 0 || value > 127) return false; velocity = value; return true;

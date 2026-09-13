@@ -14,7 +14,7 @@
 // job for the notes. Both are in `scope.js`.
 
 import * as P from './protocol.js';
-import { el, noteName, slider, busUsers, iconButton } from './views.js';
+import { el, noteName, slider, busUsers, iconButton, paintHarmony } from './views.js';
 import { portNames, MUSICAL_PORTS, CLOCK_SOURCES } from './names.js';
 import { scopePanel, drawScope, rollPanel, drawRoll } from './scope.js';
 import { WAVES } from './audio.js';
@@ -691,7 +691,8 @@ function refreshLog(app) {
 
 // A playhead on the step grids in the patch tab, read from the running node.
 // This is what "edit it while it plays" means in practice: the step being
-// edited and the step being played are the same square.
+// edited and the step being played are the same square. A harmony's circle of
+// fifths is the same idea in another shape, so it is painted from here too.
 function refreshPlayheads(app) {
   if (app.tab !== 'patch') return;
   for (const cell of document.querySelectorAll('.cell.playing, .note-cell.playing')) {
@@ -699,6 +700,7 @@ function refreshPlayheads(app) {
   }
   const nodes = Math.min(app.patch.nodes.length, app.module.nodeCount());
   for (let node = 0; node < nodes; node++) {
+    paintHarmony(app, node);
     if (!app.module.seqKind(node)) continue;
     const lanes = app.module.seqLanes(node);
     for (let lane = 0; lane < lanes; lane++) {

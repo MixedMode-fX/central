@@ -18,6 +18,7 @@
 #include "algorithm/sequencer/gate_sequencer.h"
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/drum_sequencer.h"
+#include "algorithm/midi/harmony.h"
 #include "midi/scale.h"
 #include "midi/global_key.h"
 #include "patch/patch_manager.h"
@@ -347,6 +348,74 @@ EMU_EXPORT uint32_t emu_seq_lane_channel(uint32_t i, uint32_t lane){
     if (d == nullptr || d->id != ALGO_DRUM_SEQ_MIDI) return 0;
     return static_cast<DrumSeqMidi*>(master.node((uint8_t)i))->lane_channel((uint8_t)lane);
 }
+// Harmony view (#33) ------------------------------------------------------
+//
+// What the page's circle of fifths shows: where the key's chords sit, how
+// strongly the walk wants each move, and the loop it has written down. The
+// weights are the node's own - `Harmony::weigh` is the function the draw
+// reads, not a second opinion about it - so the picture cannot disagree with
+// the music. Read-only, and resolved from the descriptor id like the
+// sequencer view above.
+
+static Harmony* harmony_at(uint32_t i){
+    const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
+    if (d == nullptr || d->id != ALGO_HARMONY) return nullptr;
+    return static_cast<Harmony*>(master.node((uint8_t)i));
+}
+
+// Chords the key has, 0 when node `i` is not a Harmony: the page's test for
+// whether to draw the circle at all.
+EMU_EXPORT uint32_t emu_harmony_degrees(uint32_t i){
+    Harmony* h = harmony_at(i);
+    return h ? h->usable_degrees() : 0;
+}
+// The chord sounding now, 0xFF before the first advance.
+EMU_EXPORT uint32_t emu_harmony_degree(uint32_t i){
+    Harmony* h = harmony_at(i);
+    return h ? h->degree() : 0xFF;
+}
+// Where a degree sits: the pitch it plays, and its triad as a set of pitch
+// classes - which is what puts it on the circle and names its quality.
+EMU_EXPORT uint32_t emu_harmony_pitch(uint32_t i, uint32_t degree){
+    Harmony* h = harmony_at(i);
+    return h ? h->pitch_of((uint8_t)degree) : 0xFF;
+}
+EMU_EXPORT uint32_t emu_harmony_triad(uint32_t i, uint32_t degree){
+    Harmony* h = harmony_at(i);
+    return h ? h->triad_of((uint8_t)degree) : 0;
+}
+// How much this walk wants to move from one degree to another, shaped by
+// every control that shapes the draw. Raw weights on the node's own scale:
+// the page reads a row of them and normalises, so no scaling decision is
+// taken twice.
+EMU_EXPORT uint32_t emu_harmony_weight(uint32_t i, uint32_t from, uint32_t to){
+    Harmony* h = harmony_at(i);
+    if (h == nullptr || to >= Harmony::DEGREES) return 0;
+    uint32_t weight[Harmony::DEGREES];
+    const uint8_t n = h->weigh((uint8_t)from, weight);
+    return to < n ? weight[to] : 0;
+}
+// The loop: its length, the slot the next advance falls on (0xFF when
+// nothing is looping), and the degree written in a slot (0xFF until it is).
+EMU_EXPORT uint32_t emu_harmony_loop_length(uint32_t i){
+    Harmony* h = harmony_at(i);
+    return h ? h->get_param(Harmony::P_LOOP) : 0;
+}
+EMU_EXPORT uint32_t emu_harmony_loop_position(uint32_t i){
+    Harmony* h = harmony_at(i);
+    return h ? h->loop_position() : 0xFF;
+}
+EMU_EXPORT uint32_t emu_harmony_loop_chord(uint32_t i, uint32_t slot){
+    Harmony* h = harmony_at(i);
+    return h ? h->loop_chord((uint8_t)slot) : 0xFF;
+}
+// Where in the phrase the next chord falls: what says which advance the
+// cadence is due on.
+EMU_EXPORT uint32_t emu_harmony_phrase_position(uint32_t i){
+    Harmony* h = harmony_at(i);
+    return h ? h->phrase_position() : 0;
+}
+
 // The algorithm id of a loaded node, for the page's labels.
 EMU_EXPORT uint32_t emu_node_algo(uint32_t i){
     const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);

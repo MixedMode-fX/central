@@ -353,7 +353,7 @@ static void test_drift_keeps_a_loop_alive() {
     BusManager bus;
 
     NodeConfig exact = harmony_config(4, 1, 0, 13);
-    exact.params[Harmony::P_LOOP] = 1;
+    exact.params[Harmony::P_LOOP] = 4;
     Harmony fixed(exact);
     uint32_t now = 0;
     uint8_t first[4];
@@ -366,7 +366,7 @@ static void test_drift_keeps_a_loop_alive() {
     }
 
     NodeConfig loose = harmony_config(4, 1, 0, 13);
-    loose.params[Harmony::P_LOOP] = 1;
+    loose.params[Harmony::P_LOOP] = 4;
     loose.params[Harmony::P_DRIFT] = 40;
     Harmony alive(loose);
     now = 0;
@@ -454,14 +454,39 @@ static void test_a_triad_on_every_degree_comes_out_the_right_quality() {
     TEST_ASSERT_TRUE(seen_major && seen_minor && seen_diminished);
 }
 
+// The same triads, asked for rather than played. `triad_of` is what a display
+// draws and what names a chord, so it reports the pitch classes that will be
+// *heard* - not the semitones above the tonic the weights are computed in.
+static void test_the_triad_it_reports_is_the_one_it_will_be_heard_playing() {
+    global_key::set(SCALE_NATURAL_MINOR, 9);                  // A minor
+    BusManager bus;
+    NodeConfig c = harmony_config(16, 1, 100, 7);       // pinned to the tonic
+    Harmony node(c);
+    uint32_t now = 0;
+    advance(node, bus, now);
+
+    const uint16_t i = node.triad_of(0);
+    TEST_ASSERT_EQUAL_UINT16((1u << 9) | (1u << 0) | (1u << 4), i);     // A C E
+    TEST_ASSERT_EQUAL_UINT16((1u << 11) | (1u << 2) | (1u << 5), node.triad_of(1));  // B D F
+    TEST_ASSERT_EQUAL_UINT16((1u << 0) | (1u << 4) | (1u << 7), node.triad_of(2));   // C E G
+
+    // Every triad carries the root that is sounding on that degree, which is
+    // the join between the picture and the music.
+    for (uint8_t deg = 0; deg < node.usable_degrees(); deg++){
+        TEST_ASSERT_TRUE_MESSAGE(node.triad_of(deg) & (uint16_t)(1u << (node.pitch_of(deg) % 12u)),
+                                 "a triad without its own root in it");
+    }
+    global_key::set(SCALE_MAJOR, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Phrase, loop, reset, key
 // ---------------------------------------------------------------------------
 
-static void test_loop_keeps_the_first_phrase_and_repeats_it() {
+static void test_loop_keeps_the_first_chords_and_repeats_them() {
     BusManager bus;
     NodeConfig c = harmony_config(4, 1, 0, 9);
-    c.params[Harmony::P_LOOP] = 1;
+    c.params[Harmony::P_LOOP] = 4;
     Harmony node(c);
     uint32_t now = 0;
 
@@ -497,7 +522,7 @@ static void test_switching_loop_on_waits_for_the_top_of_a_phrase() {
     advance(node, bus, now);               // phrase position is now 1
     advance(node, bus, now);               // ... 2
     TEST_ASSERT_EQUAL_UINT8(2, node.phrase_position());
-    TEST_ASSERT_TRUE(node.set_param(Harmony::P_LOOP, 1));
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_LOOP, 4));
 
     // Nothing is recorded until the phrase comes round, so what is captured
     // is a phrase and not the tail of one.
@@ -507,6 +532,146 @@ static void test_switching_loop_on_waits_for_the_top_of_a_phrase() {
     TEST_ASSERT_EQUAL_UINT8(0, node.recorded_chords());
     advance(node, bus, now);               // position 0: recording starts here
     TEST_ASSERT_EQUAL_UINT8(1, node.recorded_chords());
+}
+
+// The loop's length is its own. This is the control the node was asked for
+// and did not have: `loop` used to be a switch that meant "repeat the
+// phrase", so the only loop reachable was exactly as long as the cadence
+// period. Six chords over a phrase of four is a period with two resolutions
+// in it, and it has to come round on the sixth advance and not the fourth.
+static void test_a_loop_is_as_long_as_it_is_told() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 11);
+    c.params[Harmony::P_LOOP] = 6;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    uint8_t loop[6];
+    for (uint8_t i = 0; i < 6; i++){
+        advance(node, bus, now);
+        loop[i] = node.degree();
+        TEST_ASSERT_EQUAL_UINT8(i + 1u, node.recorded_chords());
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, node.loop_position());
+    for (uint8_t i = 0; i < 6; i++) TEST_ASSERT_EQUAL_UINT8(loop[i], node.loop_chord(i));
+
+    for (uint8_t round = 0; round < 10; round++){
+        for (uint8_t i = 0; i < 6; i++){
+            advance(node, bus, now);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[i], node.degree(), "the loop drifted");
+        }
+    }
+    // ... and it is genuinely six long: a four-long loop of the same chords
+    // would have put a different degree somewhere in the first six.
+    bool sixth_is_not_a_fourth = false;
+    for (uint8_t i = 0; i < 6; i++) if (loop[i] != loop[i % 4]) sixth_is_not_a_fourth = true;
+    TEST_ASSERT_TRUE_MESSAGE(sixth_is_not_a_fourth, "six chords that were also four");
+}
+
+// The other way round: a loop shorter than the phrase sits across the
+// resolution, which is the two-chord vamp a lot of music is made of.
+static void test_a_loop_shorter_than_the_phrase_comes_round_on_its_own_length() {
+    BusManager bus;
+    NodeConfig c = harmony_config(8, 1, 0, 29);
+    c.params[Harmony::P_LOOP] = 2;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    uint8_t first, second;
+    advance(node, bus, now); first = node.degree();
+    advance(node, bus, now); second = node.degree();
+    TEST_ASSERT_EQUAL_UINT8(2, node.recorded_chords());
+
+    for (uint8_t round = 0; round < 12; round++){
+        advance(node, bus, now);
+        TEST_ASSERT_EQUAL_UINT8(first, node.degree());
+        advance(node, bus, now);
+        TEST_ASSERT_EQUAL_UINT8(second, node.degree());
+    }
+}
+
+static void test_a_loop_length_the_node_has_not_got_is_refused() {
+    BusManager bus;
+    Harmony node(harmony_config(4, 1, 0, 3));
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_LOOP, Harmony::MAX_PHRASE));
+    TEST_ASSERT_FALSE(node.set_param(Harmony::P_LOOP, Harmony::MAX_PHRASE + 1));
+    TEST_ASSERT_EQUAL_UINT8(Harmony::MAX_PHRASE, node.get_param(Harmony::P_LOOP));
+    // Nothing is looping at all until a length is set, and 0 says so.
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_LOOP, 0));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, node.loop_position());
+}
+
+// The phrase is how often the music resolves and the loop is how much of it
+// repeats, so moving the one does not throw the other away.
+static void test_moving_the_phrase_keeps_the_loop() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 31);
+    c.params[Harmony::P_LOOP] = 4;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_PHRASE, 8));
+    TEST_ASSERT_EQUAL_UINT8(4, node.recorded_chords());
+    for (uint8_t round = 0; round < 4; round++){
+        for (uint8_t i = 0; i < 4; i++){
+            advance(node, bus, now);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[i], node.degree(), "a written loop was thrown away");
+        }
+    }
+}
+
+// A written loop is the piece, so a reset asks to hear it from the top rather
+// than to write another one.
+static void test_reset_plays_the_loop_from_its_first_chord() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 37);
+    c.params[Harmony::P_LOOP] = 4;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
+    advance(node, bus, now);
+    advance(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(2, node.loop_position());
+
+    pulse_reset(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(0, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8(4, node.recorded_chords());
+    for (uint8_t i = 0; i < 4; i++){
+        advance(node, bus, now);
+        TEST_ASSERT_EQUAL_UINT8(loop[i], node.degree());
+    }
+}
+
+// A loop that is not finished is not the piece yet, so a reset in the middle
+// of writing one starts it again - on the tonic the reset is about to play.
+static void test_reset_catches_a_half_written_loop_again() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 41);
+    c.params[Harmony::P_LOOP] = 4;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    advance(node, bus, now);
+    advance(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(2, node.recorded_chords());
+
+    pulse_reset(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(0, node.recorded_chords());
+    TEST_ASSERT_EQUAL_UINT8(0, node.loop_position());
+
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
+    TEST_ASSERT_EQUAL_UINT8(0, loop[0]);          // the reset's tonic opens it
+    for (uint8_t round = 0; round < 4; round++){
+        for (uint8_t i = 0; i < 4; i++){
+            advance(node, bus, now);
+            TEST_ASSERT_EQUAL_UINT8(loop[i], node.degree());
+        }
+    }
 }
 
 static void test_reset_starts_the_phrase_again_on_the_tonic() {
@@ -693,7 +858,14 @@ int main(int, char**) {
     RUN_TEST(test_gravity_stays_home_far_more_than_a_flat_walk);
     RUN_TEST(test_drift_keeps_a_loop_alive);
     RUN_TEST(test_a_triad_on_every_degree_comes_out_the_right_quality);
-    RUN_TEST(test_loop_keeps_the_first_phrase_and_repeats_it);
+    RUN_TEST(test_the_triad_it_reports_is_the_one_it_will_be_heard_playing);
+    RUN_TEST(test_loop_keeps_the_first_chords_and_repeats_them);
+    RUN_TEST(test_a_loop_is_as_long_as_it_is_told);
+    RUN_TEST(test_a_loop_shorter_than_the_phrase_comes_round_on_its_own_length);
+    RUN_TEST(test_a_loop_length_the_node_has_not_got_is_refused);
+    RUN_TEST(test_moving_the_phrase_keeps_the_loop);
+    RUN_TEST(test_reset_plays_the_loop_from_its_first_chord);
+    RUN_TEST(test_reset_catches_a_half_written_loop_again);
     RUN_TEST(test_switching_loop_on_waits_for_the_top_of_a_phrase);
     RUN_TEST(test_reset_starts_the_phrase_again_on_the_tonic);
     RUN_TEST(test_the_key_moving_transposes_the_progression);

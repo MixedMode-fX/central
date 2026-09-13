@@ -32,7 +32,9 @@ import {
 import { EXAMPLES } from '../src/examples.js';
 import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/schema.js';
 import { EmbeddedModule } from '../src/module.js';
-import { slider, learnButton, paramSections, paramSection, PARAM_SECTIONS } from '../src/views.js';
+import {
+  slider, learnButton, paramSections, paramSection, PARAM_SECTIONS, nodeCard, triadQuality,
+} from '../src/views.js';
 import { shade, nodeRollSources, scopeRows } from '../src/scope.js';
 import { ICON_NAMES } from '../src/icons.js';
 import { Listener, gateHits } from '../src/audio.js';
@@ -828,6 +830,111 @@ await test('a node\'s roll lists what it reads and writes, in the domain\'s colo
   }
   assert.equal(shade('not a colour', 1), 'not a colour', 'a colour it cannot read is left alone');
   assert.ok(ICON_NAMES.includes('cv') && ICON_NAMES.includes('cut'), 'the icons the buttons ask for exist');
+});
+
+// --- the circle of fifths ----------------------------------------------------
+//
+// Harmony's claim is that the progression is computed from the scale, and the
+// circle is where that claim is legible. The picture is drawn from the running
+// node's own weights, so this test drives the real module: a metronome
+// advancing a harmony with a four-chord loop, and then the card it builds.
+
+// A parameter's index and its enum options, by name, off the descriptor - the
+// same way the app finds anything about an algorithm.
+function paramNamed(d, name) {
+  for (const group of d.params ?? []) {
+    for (let f = 0; f < group.nFields; f++) {
+      if (group.fields[f]?.name === name) return { at: group.first + f, pd: group.fields[f] };
+    }
+  }
+  return null;
+}
+
+await test('a harmony draws its key on the circle of fifths, and the loop it wrote', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const harmony = device.algorithms.find((d) => d?.name === 'Harmony');
+  const metronome = device.algorithms.find((d) => d?.name === 'Metronome');
+  const patch = codec.emptyPatch();
+
+  const clock = codec.emptyNode(metronome.id);
+  connectNewNode(device, patch, clock, metronome);
+  patch.nodes.push(clock);
+
+  const node = codec.emptyNode(harmony.id);
+  connectNewNode(device, patch, node, harmony);
+  const loop = paramNamed(harmony, 'loop');
+  assert.ok(loop.pd.max > 1, 'loop is a length, not a switch: that is the control it needed');
+  node.params[loop.at] = 4;
+  node.params[paramNamed(harmony, 'seed').at] = 7;     // one seed is one progression
+  patch.nodes.push(node);
+
+  // D major, not C: a key whose tonic is not pitch class zero is the only one
+  // that can tell a real pitch class from a semitone above the tonic.
+  const globals = codec.emptyGlobals();
+  globals.scale = P.ScaleId.SCALE_MAJOR;
+  globals.root = 2;
+  await device.sendPatch(patch, globals);
+
+  const app = { patch, device, module, render: () => {}, scrolled: new Map() };
+  const harmonyAt = patch.nodes.length - 1;
+
+  // Before it has played: seven chords of C major on the circle, the walk's
+  // arrows from the tonic, and four empty slots waiting to be written.
+  let card = withDom(() => nodeCard(app, harmonyAt));
+  let said = words(card);
+  assert.match(said, /circle of fifths/);
+  assert.match(said, /7 chords/, 'a major key has seven chords');
+  assert.match(said, /circle of fifths · D/, 'the title names the key it drew');
+  for (const name of ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#°']) {
+    assert.ok(said.split(/\s+/).includes(name), `${name} is not on the circle`);
+  }
+  for (const roman of ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°']) {
+    assert.ok(said.split(/\s+/).includes(roman), `${roman} is not on the circle`);
+  }
+  assert.match(said, /loop \(4\)/, 'the loop says how long it is');
+  // The sentence under the picture is written straight onto the element, the
+  // way the frame loop rewrites it as the music moves.
+  const caption = (built) => find(built, (kid) => /-caption$/.test(kid.attrs?.id ?? ''))?.textContent ?? '';
+  assert.match(caption(card), /writing it down: 0 of 4 chords/, 'nothing is written before it plays');
+
+  // Playing: the loop fills, and the circle draws it as a path through the
+  // chords. Long enough for more than four bars of the metronome's default.
+  module.advance(20_000_000);
+  assert.equal(module.harmonyLoopLength(harmonyAt), 4);
+  const written = [0, 1, 2, 3].map((slot) => module.harmonyLoopChord(harmonyAt, slot));
+  assert.ok(written.every((d) => d !== 0xFF), `the loop never filled: ${written}`);
+  assert.equal(written[0], 0, 'the first advance is the tonic, so the loop starts on it');
+  assert.ok(module.harmonyLoopPosition(harmonyAt) < 4, 'and it is somewhere inside the loop');
+
+  card = withDom(() => nodeCard(app, harmonyAt));
+  assert.doesNotMatch(caption(card), /writing it down/, 'the loop is written, not being written');
+  assert.match(caption(card), / → /, 'the written loop is named in order');
+
+  // The weights are the firmware's, and they are the circle of fifths: from
+  // the tonic of a major key the strongest move is a fifth away. Nothing is
+  // ever weighted to zero, so every chord of the key is reachable.
+  const weights = [0, 1, 2, 3, 4, 5, 6].map((to) => module.harmonyWeight(harmonyAt, 0, to));
+  const best = weights.indexOf(Math.max(...weights));
+  assert.ok(best === 3 || best === 4, `the likeliest move from I was degree ${best}, not a fifth`);
+  assert.ok(weights.filter((w, d) => d !== 0 && w > 0).length === 6, 'a move the walk can never make');
+
+  // A quality is read off the pitch classes the firmware reports, because
+  // nothing in Harmony knows what a chord quality is.
+  assert.equal(triadQuality(module.harmonyTriad(harmonyAt, 0), module.harmonyPitch(harmonyAt, 0) % 12), 'maj');
+  assert.equal(triadQuality(module.harmonyTriad(harmonyAt, 1), module.harmonyPitch(harmonyAt, 1) % 12), 'min');
+  assert.equal(triadQuality(module.harmonyTriad(harmonyAt, 6), module.harmonyPitch(harmonyAt, 6) % 12), 'dim');
+  // The triad is pitch classes, so it carries the root that will sound.
+  for (let d = 0; d < 7; d++) {
+    const set = module.harmonyTriad(harmonyAt, d);
+    assert.ok(set & (1 << (module.harmonyPitch(harmonyAt, d) % 12)),
+              `degree ${d}: the triad does not contain the root it plays`);
+  }
+
+  // Every other algorithm has no circle, which is also how the view knows not
+  // to draw one.
+  assert.equal(module.harmonyDegrees(0), 0, 'a metronome is not a harmony');
+  assert.doesNotMatch(words(withDom(() => nodeCard(app, 0))), /circle of fifths/);
 });
 
 // --- the patch format, as a schema -------------------------------------------

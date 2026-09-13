@@ -276,6 +276,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_CHANNEL: 41,
   ALGO_KEY: 42,
   ALGO_RETRIGGER: 43,
+  ALGO_TRANSPORT: 44,
 });
 
 export const AlgorithmCategory = Object.freeze({

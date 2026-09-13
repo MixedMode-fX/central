@@ -3,7 +3,7 @@
 
 MasterClock::MasterClock() :
     subticks(0), interval_us(0), edge_index(0), last_edge_us(0), rejected(0),
-    interval_dirty(true), is_running(true), have_edge(false),
+    interval_dirty(true), is_running(true), transport_edges(0), have_edge(false),
     last_consumed(0), last_tap_us(0), tap_intervals(), tap_count(0),
     tempo(CLOCK_DEFAULT_BPM),
     src(CLOCK_INTERNAL), cv_pulses(4)
@@ -63,6 +63,7 @@ void MasterClock::set_cv_ppqn(uint8_t ppqn){
 }
 
 void MasterClock::start(){
+    transport_edges |= TRANSPORT_START;
     subticks = 0;
     edge_index = 0;
     last_edge_us = 0;
@@ -71,12 +72,20 @@ void MasterClock::start(){
 }
 
 void MasterClock::stop(){
+    transport_edges |= TRANSPORT_STOP;
     is_running = false;
 }
 
 void MasterClock::resume(){
+    transport_edges |= TRANSPORT_CONTINUE;
     have_edge = false;
     is_running = true;
+}
+
+uint8_t MasterClock::take_transport_edges(){
+    const uint8_t edges = transport_edges;
+    transport_edges = 0;
+    return edges;
 }
 
 bool MasterClock::take_interval_change(){

@@ -42,7 +42,9 @@ enum LoadError : uint8_t {
 //   2. pool nodes, in the order node/schedule.h computed: each one's
 //      process(), then its tick() if a tick fired and it wants one, then the
 //      buses whose last writer it is
-//   2b. while a stop is settling, the pool releases what the clock was
+//   2b. the transport's edges, if it moved since the last pass, reach every
+//       node at its own place in that order (Node::transport_event)
+//   2c. while a stop is settling, the pool releases what the clock was
 //       playing (Node::transport_stopped)
 //   3. publish whatever those releases wrote, and end the pass
 //   4. hardware output nodes read their buses and drive the pins/transports

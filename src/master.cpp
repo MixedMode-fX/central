@@ -161,6 +161,10 @@ void MixedModeMaster::unload(){
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].release();
     bus.reset();
     tick_pending = false;
+    // A transport edge nobody has been told about yet was the old patch's to
+    // hear, like the tick above: the patch that was loaded while a start was
+    // in the air did not miss it, it was not there for it.
+    clk.take_transport_edges();
     // Nothing of the old patch is in flight any more, so a stop that was
     // still settling has nothing left to settle against.
     stop_settle = 0;
@@ -205,6 +209,11 @@ void MixedModeMaster::pass(uint32_t now_us){
     const bool running = clk.running();
     const bool settling = !running && settling_stop();
     was_running = running;
+    // And a transport that *moved*, which is not the same question. Taken
+    // once here rather than per node, so every node in the pass is told about
+    // the same edges, and cleared whether the patch holds a node that cares
+    // or not - an edge no node listened to is spent, not queued.
+    const uint8_t edges = clk.take_transport_edges();
     const uint8_t n = sched.count();
     for (uint8_t pos = 0; pos < n; pos++){
         const uint8_t i = sched.node_at(pos);
@@ -212,6 +221,7 @@ void MixedModeMaster::pass(uint32_t now_us){
         if (node == nullptr) continue;
         node->process(bus, now_us);
         if (ticking && pool.descriptor(i)->wants_tick) node->tick(bus, tick_count);
+        if (edges) node->transport_event(bus, edges);
         if (settling) node->transport_stopped(bus);
         bus.publish(sched.after(pos).gate, sched.after(pos).note, sched.after(pos).cv);
     }

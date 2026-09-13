@@ -80,7 +80,8 @@ Every pass, `MixedModeMaster` runs:
 1. input port nodes sample and write their buses, published together with every
    bus the pool does not write;
 2. each pool node in turn: `process()`, then `tick()` if a clock tick fired and
-   it subscribes, then the buses whose last writer it is;
+   it subscribes, then `transport_event()` if the transport moved, then the
+   buses whose last writer it is;
 3. while a transport stop is settling, `Node::transport_stopped()`;
 4. the end of the pass, which publishes what those releases wrote;
 5. output port nodes read their buses and drive the jacks and transports.
@@ -127,6 +128,13 @@ period and each edge re-phases the count **forward only**, so a node never sees
 time reverse. Multiplication from a gate source is refused: it would have to
 extrapolate. Trigger width is wall-clock (`TRIGGER_WIDTH_US`), never ticks.
 
+**Starting, stopping and continuing are events, and the patch hears them.**
+The count going back to zero is what a start leaves behind; it says nothing to
+a node that counts edges rather than subticks. Every node is told what the
+transport did, at its own place in the pass (`Node::transport_event`), whatever
+moved it — a realtime message on any MIDI input, the console, a CC bound to
+`CC_TARGET_TRANSPORT`. `Transport` is the node that turns those into triggers.
+
 **Stop releases what the clock was playing.** A node that holds a note until
 its next advance edge implements `Node::transport_stopped()`; the master holds
 the stop against the pool until the gates that were in flight have drained,
@@ -139,7 +147,7 @@ touched.
 | Domain | Algorithms |
 |---|---|
 | Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR` |
-| Clock | `ClockDiv`, `Metronome` |
+| Clock | `ClockDiv`, `Metronome`, `Transport` |
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
 | Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
@@ -162,6 +170,15 @@ is only what a parameter list cannot say.
   sequencer. `Metronome` is the same clock in note values with a straight,
   dotted or triplet feel; every one of its rates is a whole number of subticks,
   asserted against `config.h` at compile time.
+- **`Transport` is the transport as a trigger.** Start, stop and continue
+  reach the clock and never a bus, which puts the count back on the downbeat
+  and leaves everything that counts *edges* — a sequencer's step, a latch, a
+  Turing register — where the last stop left it. This is the door between the
+  two: one fixed-width trigger per message, on an outlet of its own, so `start`
+  into the sequencers' resets is a patch that plays from the top whenever the
+  DAW does. A gate bus is the OR of its writers, so start and continue on one
+  bus is "whenever it rolls" with no logic node in between; `GateHold` in
+  `latch` mode, set from start and reset from stop, is the running gate.
 - **All three sequencer families share `StepEngine`**
   (`src/algorithm/sequencer/step_engine.h`), so a gate and a note sequencer at
   the same length and direction visit steps identically.

@@ -300,6 +300,23 @@ export const EXAMPLES = {
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
+  'Stepped modulation': {
+    about: 'The same idea as sample and hold, with the randomness taken out of it. StepMod draws a shape \u2014 a triangle here \u2014 and cuts it into eight steps; every trigger on jack 1\u2019s clock moves it one step along, so one period is eight beats and the speed is whatever is clocking it rather than a rate set to match. A modulation route turns that stepped level into the transposition the melody is played at, so the tune walks an octave up and back down in even steps and lands where it started. Under play, set direction to pendulum or random, or steps to 3 against the sequencer\u2019s 8, and the same eight notes come out as a different phrase.',
+    patch: {
+      globals: { scale: 'minor', root: 0 },
+      gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/8' } },
+        { algo: 'Metronome', out: [1], seq: { division: '1/16' } },
+        { algo: 'StepMod', in: [0], out: [0], params: [2, 8, 0, 255, 0, 2] },
+        { algo: 'NoteSequencer', in: [1], out: [0], seq: { length: 8, octave: 4, steps: [0, 2, 4, 2, 5, 4, 2, 0] } },
+        { algo: 'Transpose', in: [0], out: [1] },
+      ],
+      mod_map: [{ slot: 0, bus: 0, targetKind: 0, targetIndex: 4, param: 0,
+                  min: 128, max: 140, depth: 255, flags: 0 }],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
   'MIDI to CV and gate': {
     about: 'The converter that makes everything upstream reach something that is not a MIDI instrument. Play the keyboard under play: jack 1 is the gate, held for as long as a key is, and jack 2 is the trigger it fires on every attack. The pitch outlet is a control signal \u2014 twelve bits, one of them a fraction of a semitone so the wheel is not stepped \u2014 and a modulation route reads it straight back into a note here, which is what the DAC will do in volts. Five octaves of range from C2, so the note that comes back is the note you played; bend the wheel and it bends with you.',
     patch: {

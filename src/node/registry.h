@@ -52,6 +52,7 @@ enum AlgorithmId : uint8_t {
     ALGO_KEY          = 42,
     ALGO_RETRIGGER    = 43,
     ALGO_TRANSPORT    = 44,
+    ALGO_STEP_MOD     = 45,
 };
 
 enum ConfigError : uint8_t {

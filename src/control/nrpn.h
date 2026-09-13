@@ -9,7 +9,7 @@
 //
 // CC (#21) binds a knob to one parameter and is what a performance wants. It
 // cannot be the whole story: CC has 120 usable numbers and a 7-bit value, and
-// this module has N_NODE x N_PARAM = 14784 parameters before the clock and
+// this module has N_NODE x N_PARAM = 15120 parameters before the clock and
 // the transport are counted. NRPN is how synths have solved exactly this
 // since the 1990s - fourteen bits of address and fourteen of value - and it
 // is a second *transport* for parameter writes, not a second semantics: it
@@ -25,14 +25,14 @@
 // Fourteen bits, laid out so the common case is dense and nothing needs a
 // second lookup table:
 //
-//   0x0000 .. 0x39BF   a node's parameter.
+//   0x0000 .. 0x3B0F   a node's parameter.
 //                      node  = address / N_PARAM
 //                      param = address % N_PARAM
-//                      (N_NODE * N_PARAM = 44 * 336 = 14784 = 0x39C0)
-//   0x39C0 .. 0x39CF   the master clock: address - 0x39C0 is a CcClockTarget.
-//   0x39D0 .. 0x39DF   the transport: address - 0x39D0 is a CcTransportTarget.
-//   0x39E0 .. 0x39EF   the key: address - 0x39E0 is a CcKeyTarget.
-//   0x39F0 .. 0x3FFF   reserved.
+//                      (N_NODE * N_PARAM = 45 * 336 = 15120 = 0x3B10)
+//   0x3B10 .. 0x3B1F   the master clock: address - 0x3B10 is a CcClockTarget.
+//   0x3B20 .. 0x3B2F   the transport: address - 0x3B20 is a CcTransportTarget.
+//   0x3B30 .. 0x3B3F   the key: address - 0x3B30 is a CcKeyTarget.
+//   0x3B40 .. 0x3FFF   reserved.
 //
 // **The bases move whenever N_NODE does** (config.h), and the protocol
 // version moves with them, so a mismatch is refused per message rather than
@@ -42,10 +42,10 @@
 //
 // It is reported in the capability message, so an editor reads the layout
 // rather than hardcoding it, and the protocol version moves if it changes.
-#define NRPN_CLOCK_BASE     0x39C0u
-#define NRPN_TRANSPORT_BASE 0x39D0u
-#define NRPN_KEY_BASE       0x39E0u
-#define NRPN_RESERVED_BASE  0x39F0u
+#define NRPN_CLOCK_BASE     0x3B10u
+#define NRPN_TRANSPORT_BASE 0x3B20u
+#define NRPN_KEY_BASE       0x3B30u
+#define NRPN_RESERVED_BASE  0x3B40u
 
 // A four-message NRPN can be interleaved with other traffic, arrive out of
 // order, or stop halfway. A sequence older than this is abandoned rather than

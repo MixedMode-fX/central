@@ -3,6 +3,7 @@
 
 #include "node/node.h"
 #include "clock/musical_division.h"
+#include "algorithm/modulator/shape.h"
 #include "util/random.h"
 
 // A low-frequency oscillator on a CV bus - the module's first modulator.
@@ -54,16 +55,18 @@ class Lfo : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
 
-        // Indexed from 1, so a stored 0 still means the descriptor's default.
+        // The shared shape vocabulary (algorithm/modulator/shape.h), named
+        // here so a patch reads as the LFO's own. The two random shapes draw
+        // once per cycle.
         enum Shape : uint8_t {
-            LFO_SINE     = 1,
-            LFO_TRIANGLE = 2,
-            LFO_RAMP_UP  = 3,
-            LFO_RAMP_DOWN = 4,
-            LFO_SQUARE   = 5,
-            LFO_RANDOM_STEP = 6,   // a new random level every cycle
-            LFO_RANDOM_GLIDE = 7,  // ... slid into over the cycle
-            LFO_SHAPES   = 7,
+            LFO_SINE         = CV_SHAPE_SINE,
+            LFO_TRIANGLE     = CV_SHAPE_TRIANGLE,
+            LFO_RAMP_UP      = CV_SHAPE_RAMP_UP,
+            LFO_RAMP_DOWN    = CV_SHAPE_RAMP_DOWN,
+            LFO_SQUARE       = CV_SHAPE_SQUARE,
+            LFO_RANDOM_STEP  = CV_SHAPE_RANDOM_STEP,
+            LFO_RANDOM_GLIDE = CV_SHAPE_RANDOM_GLIDE,
+            LFO_SHAPES       = CV_SHAPES,
         };
 
         enum Sync : uint8_t {
@@ -97,10 +100,6 @@ class Lfo : public Node{
         // Recomputes sync_period from the division and the feel. Leaves the
         // phase alone: see the class comment.
         void derive();
-        // The raw shape, 0 .. CV_MAX, for a phase 0 .. CV_MAX.
-        uint16_t shape_at(uint16_t p) const;
-        // Applies depth, offset and polarity to a raw shape value.
-        int16_t scaled(uint16_t raw) const;
         // Draws the next random level and keeps the old one to glide from.
         void draw();
         // Back to the top of the cycle, in whichever mode is running.

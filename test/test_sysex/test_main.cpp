@@ -93,7 +93,7 @@ static Patch two_node_patch() {
     p.nodes[0] = node_config(ALGO_TRANSPOSE);
     p.nodes[0].in_bus[0] = 0;
     p.nodes[0].out_bus[0] = 1;
-    p.nodes[0].params[0] = 12;
+    p.nodes[0].params[0] = PARAM_CENTRE + 12;
     p.nodes[1] = node_config(ALGO_STEP_SEQ);
     p.nodes[1].in_bus[0] = 0;             // advance, gate bus 0
     p.nodes[1].out_bus[0] = 2;

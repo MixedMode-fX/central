@@ -724,6 +724,10 @@ export function paramText(pd, stored) {
     const signed = stored > 127 ? stored - 256 : stored;
     return signed > 0 ? `+${signed}` : String(signed);
   }
+  if (pd.kind === P.ParamKind.PARAM_CENTRED) {
+    const signed = effective - P.PARAM_CENTRE;
+    return signed > 0 ? `+${signed}` : String(signed);
+  }
   if (pd.kind === P.ParamKind.PARAM_ENUM) return pd.options?.[effective - pd.min] ?? String(effective);
   if (pd.kind === P.ParamKind.PARAM_BOOL) return stored ? 'on' : 'off';
   if (pd.kind === P.ParamKind.PARAM_MILLIS) return `${effective} ms`;
@@ -840,22 +844,29 @@ function paramControl(app, index, at, pd) {
     // slider takes whatever the compact number field and the icon-sized learn
     // button leave it, which is most of the card. The slider is built through
     // `slider`, so a finger scrolling the tab does not write a value.
-    const shown = value === 0 ? pd.def : value;
+    // A centred parameter is driven in the terms it is written in - -12, 0,
+    // +12 - and the bias is put back on at the write. The byte is the centre
+    // plus the value (`PARAM_CENTRE`, src/node/param.h), so a control showing
+    // the byte would offer a transposition of 128 and a detune of 116.
+    const bias = pd.kind === P.ParamKind.PARAM_CENTRED ? P.PARAM_CENTRE : 0;
+    const lo = pd.min - bias;
+    const hi = pd.max - bias;
+    const shown = (value === 0 ? pd.def : value) - bias;
     const number = el('input', {
-      type: 'number', class: 'number', min: String(pd.min), max: String(pd.max), step: '1',
+      type: 'number', class: 'number', min: String(lo), max: String(hi), step: '1',
       value: String(shown), 'aria-label': `${pd.name}, as a number`, inputmode: 'numeric',
     });
     const range = slider({
-      class: 'slider', min: String(pd.min), max: String(pd.max), step: '1',
+      class: 'slider', min: String(lo), max: String(hi), step: '1',
       value: String(shown), 'aria-label': pd.name,
     }, {
       onInput: (v) => { number.value = v; },
-      onCommit: (v) => write(Number(v)),
+      onCommit: (v) => write(Number(v) + bias),
     });
     number.addEventListener('change', (e) => {
-      const v = Math.max(pd.min, Math.min(pd.max, Number(e.target.value) || 0));
+      const v = Math.max(lo, Math.min(hi, Number(e.target.value) || 0));
       range.value = String(v);
-      write(v);
+      write(v + bias);
     });
     controls.push(range, number);
   }

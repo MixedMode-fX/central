@@ -157,7 +157,7 @@ static void test_gate_to_note_edges() {
 static void test_transpose_shifts_notes_and_passes_the_rest() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = (uint8_t)(int8_t)-12;
+    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = PARAM_CENTRE - 12;
     Transpose node(c);
     bus.note_write(0, MidiEvent{MIDI_NOTE_ON, 1, 60, 100});
     bus.note_write(0, MidiEvent{MIDI_CONTROL_CHANGE, 1, 64, 127});

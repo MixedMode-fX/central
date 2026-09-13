@@ -96,6 +96,7 @@ const constants = {
   ...defines(storeH, ['EEPROM_BYTES', 'PATCH_SLOTS']),
   ...defines(nrpnH, ['NRPN_CLOCK_BASE', 'NRPN_TRANSPORT_BASE', 'NRPN_KEY_BASE', 'NRPN_RESERVED_BASE']),
   ...defines(keyH, ['KEY_DEFAULT_OCTAVE', 'KEY_MAX_OCTAVE']),
+  ...defines(read('src/node/param.h'), ['PARAM_CENTRE']),
 };
 
 // PATCH_MAGIC and PATCH_SLOT_BYTES are expressions, not plain numbers.

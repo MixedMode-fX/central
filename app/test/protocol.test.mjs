@@ -287,7 +287,7 @@ function samplePatch() {
   const b = codec.emptyNode(transpose.id);
   b.inBus[0] = 0;
   b.outBus[0] = 1;
-  b.params[0] = 7;
+  b.params[0] = P.PARAM_CENTRE + 7;        // seven semitones up, as a centred byte
 
   patch.nodes = [a, b];
   patch.ccMap[0] = {

@@ -612,6 +612,14 @@ void SysexHandler::reply_param_descriptors(uint8_t source, uint8_t algorithm_id)
                                   ? (uint8_t)(p.max - p.min + 1u) : 0u;
             put(options);
             for (uint8_t o = 0; o < options; o++) put_string(p.options[o]);
+            // What the group is, when the algorithm says (node/param.h).
+            // Appended last, for the reason SYSEX_ALGORITHM appends its
+            // category: a host that stops here reads the record it always
+            // did, and one that does not gets the algorithm's own grouping
+            // instead of a guess made from the parameter's name. An empty
+            // string is "no opinion", which is what nearly every algorithm
+            // sends.
+            put_string(grp.label);
             send_reply(source);
         }
     }

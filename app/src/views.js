@@ -7,7 +7,7 @@
 
 import * as P from './protocol.js';
 import { Domain, busCount, domainName } from './validate.js';
-import { GATE_DIRECTIONS } from './names.js';
+import { GATE_DIRECTIONS, scaleMaskById, keySpelling, PITCH_CLASSES_FLAT } from './names.js';
 import { icon, midiIcon } from './icons.js';
 // The port names live with the patch-shape code, because the canvas needs them
 // too and it must not have to reach through the views to get them.
@@ -663,17 +663,40 @@ export function paramSection(pd) {
 // The header parameters of a descriptor, sorted onto the sections above and
 // in the firmware's own order inside each. Tables - a sequencer's steps, a
 // drum machine's lanes - are not here; they get a grid of their own.
+//
+// **An algorithm that labels its groups is believed instead.** Sorting by
+// what a name sounds like is right often enough to be worth doing and wrong
+// exactly where one algorithm has several controls over one mechanism:
+// Harmony's five controls over its chord walk landed under three different
+// headings, because `spread` is a pitch word from NoteDelay and `smooth` is a
+// level word from a filter. A descriptor that says what its groups are
+// (src/node/param.h) is describing its own machine and wins. Groups sharing a
+// label are one section, because the parameter order is the preset format and
+// one mechanism's controls are not always a single run of it; the order the
+// labels first appear in is the order they are shown in.
 export function paramSections(groups) {
+  const labelled = new Map();
   const sections = new Map(PARAM_SECTIONS.map((s) => [s.key, { ...s, params: [] }]));
   for (const group of groups ?? []) {
     if (!group || group.repeat > 1) continue;
+    const label = group.label || '';
     for (let f = 0; f < group.nFields; f++) {
       const pd = group.fields[f];
       if (!pd || (pd.min === 0 && pd.max === 0)) continue;      // reserved
-      sections.get(paramSection(pd)).params.push({ at: group.first + f, pd });
+      const param = { at: group.first + f, pd };
+      if (label) {
+        if (!labelled.has(label)) labelled.set(label, { key: label, label, params: [] });
+        labelled.get(label).params.push(param);
+      } else {
+        sections.get(paramSection(pd)).params.push(param);
+      }
     }
   }
-  return [...sections.values()].filter((s) => s.params.length);
+  // A descriptor that labels only some of its groups keeps the guess for the
+  // rest, after the ones it named: a parameter is a control whatever the
+  // firmware did or did not say about it, and one dropped off the card is one
+  // nobody can reach.
+  return [...labelled.values(), ...[...sections.values()].filter((x) => x.params.length)];
 }
 
 function paramPanel(app, index) {
@@ -686,7 +709,7 @@ function paramPanel(app, index) {
   // opposed to* the others, and there are none.
   const titled = sections.length > 1;
   return el('div', { class: 'param-sections' }, sections.map((section) =>
-    el('div', { class: `param-section sec-${section.key}` },
+    el('div', { class: `param-section sec-${section.key.replace(/[^a-z0-9]+/gi, '-')}` },
       titled ? el('h4', {}, section.label) : null,
       el('div', { class: 'params' },
         section.params.map(({ at, pd }) => paramControl(app, index, at, pd))))));
@@ -710,6 +733,52 @@ export function paramText(pd, stored) {
   if (pd.kind === P.ParamKind.PARAM_CHANNEL) return effective === 0 ? 'omni' : `ch ${effective}`;
   if (pd.kind === P.ParamKind.PARAM_BITFIELD) return `0b${effective.toString(2).padStart(8, '0')}`;
   return String(effective);
+}
+
+// Where a parameter lives on a node, by the name the firmware gave it - the
+// one thing the app may look a parameter up by, because the index is the
+// preset format and the position in a section is this file's own doing.
+function paramAt(descriptor, name) {
+  for (const group of descriptor?.params ?? []) {
+    if (!group || group.repeat > 1) continue;
+    for (let f = 0; f < group.nFields; f++) {
+      if (group.fields[f]?.name === name) return { at: group.first + f, pd: group.fields[f] };
+    }
+  }
+  return null;
+}
+
+// What a parameter is set to, in the firmware's terms: a stored zero is the
+// descriptor's default everywhere (src/node/param.h).
+function paramValue(app, index, name) {
+  const node = app.patch.nodes[index];
+  const found = paramAt(app.device.byId.get(node.algorithmId), name);
+  if (!found) return null;
+  const stored = node.params[found.at];
+  return stored === 0 ? found.pd.def : stored;
+}
+
+// **A control that is doing nothing right now, and why.** A knob that moves
+// and changes nothing is the most confusing thing a module can offer, and the
+// reason is never in the parameter: `leading` is a real control in a major
+// key and inert in a natural minor one, because there is no semitone below
+// the tonic there for it to want, and it says so in the firmware by weighting
+// nothing (src/midi/root_motion.h). The card is where that has to be said,
+// beside the knob, at the moment it is true.
+//
+// Only what the firmware actually ignores. A guess here is worse than
+// silence: a control marked dead that is not is a control nobody touches.
+function paramInert(app, index, pd) {
+  const node = app.patch.nodes[index];
+  if (app.device.byId.get(node.algorithmId)?.name !== 'Harmony') return null;
+  if (pd.name === 'leading') {
+    const mask = scaleMaskById(app.globals?.scale);
+    // Pitch class 11 above the root is the semitone below the tonic an
+    // octave up, which is the firmware's own test for having one.
+    if (!((mask >> 11) & 1)) return 'this key has no leading tone';
+  }
+  if (pd.name === 'drift' && !paramValue(app, index, 'loop')) return 'nothing is looping';
+  return null;
 }
 
 function paramControl(app, index, at, pd) {
@@ -774,7 +843,12 @@ function paramControl(app, index, at, pd) {
 
   const binding = app.bindingFor?.(index, at);
   const route = app.routeFor?.(index, at);
-  return el('div', { class: `param ${inline ? 'inline' : ''}` },
+  // Dimmed and captioned, never disabled: the setting is still real, it is
+  // still stored and it will do something again the moment the key or the
+  // patch says so, and a control the page will not let you touch is a worse
+  // lie than one that does nothing.
+  const inert = paramInert(app, index, pd);
+  return el('div', { class: `param ${inline ? 'inline' : ''} ${inert ? 'inert' : ''}` },
     el('div', { class: 'param-head' },
       el('span', { class: 'param-name' }, pd.name),
       binding ? el('span', { class: 'param-cc' }, `CC ${binding.cc}`) : null,
@@ -782,7 +856,8 @@ function paramControl(app, index, at, pd) {
       inline ? null : el('span', { class: 'param-value' }, paramText(pd, value))),
     el('div', { class: 'param-controls' }, controls,
       learnButton(app, index, at, pd.name, binding),
-      cvButton(app, index, at, pd.name, route)));
+      cvButton(app, index, at, pd.name, route)),
+    inert ? el('p', { class: 'param-inert' }, inert) : null);
 }
 
 // The generic parameter view is wrong for a sequencer: nobody enters a drum
@@ -1024,8 +1099,14 @@ export function triadQuality(set, rootPc) {
 // things: the note name outside the ring is what you would call it (Dm), and
 // the numeral inside is what it does in this key (ii). The numeral's *case*
 // is already the minor mark, so it takes the other marks and not the "m".
+//
+// **Named the way the key names it** (`keySpelling`), not off a list of
+// sharps. In C minor the third degree is E flat, and writing it "D#" does not
+// read as a spelling slip: it reads as the degrees being wrong, because D is
+// the second and that chord is sitting on the third. The name is what says
+// which chord this is.
 const QUALITY_MARK = { min: 'm', dim: '°', aug: '+', maj: '', other: '' };
-const chordName = (pc, quality) => `${NAMES[pc]}${QUALITY_MARK[quality] ?? ''}`;
+const chordName = (spelling, pc, quality) => `${spelling[pc]}${QUALITY_MARK[quality] ?? ''}`;
 function numeral(degree, quality) {
   const word = NUMERALS[degree] ?? String(degree + 1);
   const lower = quality === 'min' || quality === 'dim';
@@ -1039,16 +1120,18 @@ function harmonyShape(app, index) {
   const m = app.module;
   const n = m?.harmonyDegrees ? m.harmonyDegrees(index) : 0;
   if (!n) return null;
+  const spelling = keySpelling(app.globals?.root ?? 0, scaleMaskById(app.globals?.scale));
   const chords = [];
   for (let d = 0; d < n; d++) {
     const pitch = m.harmonyPitch(index, d);
     const pc = pitch % 12;
     const quality = triadQuality(m.harmonyTriad(index, d), pc);
-    chords.push({ degree: d, pitch, pc, quality, name: chordName(pc, quality), roman: numeral(d, quality) });
+    chords.push({ degree: d, pitch, pc, quality,
+                  name: chordName(spelling, pc, quality), roman: numeral(d, quality) });
   }
   const tonicPc = chords[0].pc;
   for (const chord of chords) chord.k = fifthsFrom(chord.pc, tonicPc);
-  return { n, chords, tonicPc, byPosition: new Map(chords.map((c) => [c.k, c])) };
+  return { n, chords, tonicPc, spelling, byPosition: new Map(chords.map((c) => [c.k, c])) };
 }
 
 function harmonyCircle(app, index) {
@@ -1069,10 +1152,16 @@ function harmonyCircle(app, index) {
   for (let k = 0; k < 12; k++) {
     const [x, y] = circlePoint(k, CIRCLE.label);
     const chord = shape.byPosition.get(k);
+    // A position the key has no chord on is named by where it sits rather
+    // than by the key's own table, which has no letter to spare for it:
+    // everything counter-clockwise of the tonic is written flat, because that
+    // is what counter-clockwise on this circle means. The tritone opposite is
+    // genuinely both, and is written sharp.
+    const pc = (shape.tonicPc + k * 7) % 12;
     marks.push(svg('text', {
       x, y, class: `circle-label ${chord ? 'in-key' : ''}`,
       'text-anchor': 'middle', 'dominant-baseline': 'middle',
-    }, chord ? chord.name : NAMES[(shape.tonicPc + k * 7) % 12]));
+    }, chord ? chord.name : (k >= 7 ? PITCH_CLASSES_FLAT : NAMES)[pc]));
   }
 
   const dots = shape.chords.map((chord) => {
@@ -1095,7 +1184,8 @@ function harmonyCircle(app, index) {
         app.render();
       },
     },
-      svg('title', {}, `${chord.roman} — ${chord.name} (${noteName(chord.pitch)})`),
+      svg('title', {}, `${chord.roman} — ${chord.name} `
+                     + `(${shape.spelling[chord.pc]}${Math.floor(chord.pitch / 12) - 1})`),
       svg('circle', { cx: x, cy: y, r: CIRCLE.dot }),
       svg('text', { x, y, 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, chord.roman));
   });

@@ -21,7 +21,7 @@
 // moves. Press a key to move the root.
 
 import { el, noteName } from './views.js';
-import { KEY_SCALES, PITCH_CLASSES, scaleMaskById,
+import { KEY_SCALES, PITCH_CLASSES, scaleMaskById, keySpelling,
          DEFAULT_KEY_OCTAVE, MAX_KEY_OCTAVE } from './names.js';
 
 // Two octaves from C, which is enough for the shape of any scale to repeat
@@ -49,6 +49,10 @@ function degrees(mask, root) {
 // that does to the rest of the notes before you commit to it.
 function keyboard(root, mask, setRoot) {
   const degree = degrees(mask, root);
+  // Named the way this key names them: the third of C minor is E flat on the
+  // keyboard as well as in the list under it, and a piano with one spelling
+  // and a sentence with another is two answers to one question.
+  const spelling = keySpelling(root, mask);
   const white = OCTAVES * WHITE.length;
   const step = 100 / white;
 
@@ -57,7 +61,7 @@ function keyboard(root, mask, setRoot) {
     const classes = ['kb-key', black ? 'kb-black' : 'kb-white'];
     if (d) classes.push('in');
     if (pitchClass === root) classes.push('root');
-    const name = PITCH_CLASSES[pitchClass];
+    const name = spelling[pitchClass];
     return el('button', {
       type: 'button',
       class: classes.join(' '),
@@ -90,6 +94,7 @@ export function keyPanel(app) {
   const root = g.root ?? 0;
   const mask = scaleMaskById(g.scale);
   const degree = degrees(mask, root);
+  const spelling = keySpelling(root, mask);
   // A stored zero is a byte nobody set, and the firmware reads it as the
   // default register - so the page shows the register that is playing.
   const octave = g.rootOctave || DEFAULT_KEY_OCTAVE;
@@ -101,9 +106,12 @@ export function keyPanel(app) {
     scale.append(option);
   }
 
+  // Spelled by the key it is choosing for, like everything else here: a
+  // keyboard reading E flat over a list reading D sharp is two answers to one
+  // question. The twelve are all offered whatever the key does with them.
   const rootSelect = el('select', { onchange: (e) => { g.root = Number(e.target.value); push(); } });
-  PITCH_CLASSES.forEach((name, pitchClass) => {
-    const option = el('option', { value: String(pitchClass) }, name);
+  PITCH_CLASSES.forEach((_, pitchClass) => {
+    const option = el('option', { value: String(pitchClass) }, spelling[pitchClass]);
     if (pitchClass === root) option.selected = true;
     rootSelect.append(option);
   });
@@ -127,14 +135,14 @@ export function keyPanel(app) {
   const notes = [];
   for (let i = 0; i < 12; i++) {
     const pitchClass = (root + i) % 12;
-    if (degree[pitchClass]) notes.push(PITCH_CLASSES[pitchClass]);
+    if (degree[pitchClass]) notes.push(spelling[pitchClass]);
   }
 
   return el('section', { class: 'panel' },
     el('h2', {}, 'the key'),
     keyboard(root, mask, (pitchClass) => { g.root = pitchClass; push(); }),
     el('p', { class: 'hint kb-notes' },
-      `${PITCH_CLASSES[root]} ${KEY_SCALES.find((s) => s.value === g.scale)?.label ?? ''}`
+      `${spelling[root]} ${KEY_SCALES.find((s) => s.value === g.scale)?.label ?? ''}`
       + ` — ${notes.join(' ')}`),
     el('div', { class: 'fields' },
       field('scale', scale, 'which notes'),

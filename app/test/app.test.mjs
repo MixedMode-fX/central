@@ -658,10 +658,68 @@ await test('the key tab draws the scale on a keyboard, and a key moves the root'
   assert.match(dark.attrs.title, /not in the key/);
   assert.match(words(panel), /A minor — A B C D E F G/);
 
+  // And in a flat key it says so: the panel claims to be what a musician
+  // writes down, so it cannot write the third of C minor as D sharp.
+  globals.root = 0;
+  const flat = withDom(() => keyPanel(app));
+  assert.match(words(flat), /C minor — C D E\u266d F G A\u266d B\u266d/);
+  assert.ok(find(flat, (n) => n.attrs?.['aria-label'] === 'root E\u266d'),
+            'the keyboard is spelled the same way as the sentence under it');
+
   // And a key is a control, not a picture.
   dark.fire('click');
   assert.equal(globals.root, 1, 'pressing C# put the module in C#');
   assert.deepEqual(sent, ['key']);
+});
+
+// A pitch class is a number and a number has no spelling, so a list of sharps
+// is right about half the time. The half it is wrong about is the half where
+// it stops being a spelling question: a chord called D# where E flat belongs,
+// on the third degree of C minor, reads as the degree being wrong, because D
+// is the second.
+//
+// The rule is the one a musician uses: a seven-note scale uses each letter
+// once, in order, so the letter of degree i is the tonic's plus i and the
+// accidental is whatever gets that letter to the pitch.
+await test('a key spells its own notes', async () => {
+  const { keySpelling, scaleMaskOf } = await import('../src/names.js');
+  const notes = (root, scale) => {
+    const mask = scaleMaskOf(scale);
+    const spelling = keySpelling(root, mask);
+    const out = [];
+    for (let step = 0; step < 12; step++) if ((mask >> step) & 1) out.push(spelling[(root + step) % 12]);
+    return out.join(' ');
+  };
+
+  assert.equal(notes(0, 'minor'), 'C D E\u266d F G A\u266d B\u266d', 'C minor is flat, and this is the bug');
+  assert.equal(notes(0, 'major'), 'C D E F G A B');
+  assert.equal(notes(9, 'minor'), 'A B C D E F G');
+  assert.equal(notes(4, 'major'), 'E F# G# A B C# D#', 'a sharp key stays sharp');
+  assert.equal(notes(10, 'major'), 'B\u266d C D E\u266d F G A');
+  // Each letter once, even where that costs an accidental on a white note:
+  // C sharp minor has an E and not an F, because the third is an E-something.
+  assert.equal(notes(1, 'minor'), 'C# D# E F# G# A B');
+  // Six sharps against six flats is a tie, and only one of them is written.
+  assert.equal(notes(3, 'minor'), 'E\u266d F G\u266d A\u266d B\u266d C\u266d D\u266d');
+  // A double flat is legal and a triple is not, which is what rules out
+  // spelling C sharp minor from D.
+  assert.equal(notes(0, 'harmonic minor'), 'C D E\u266d F G A\u266d B');
+
+  // A scale that is not seven notes has no letter-per-degree to follow, so it
+  // falls back to one decision for the whole key rather than inventing one.
+  assert.equal(notes(5, 'pentatonic major'), 'F G A C D');
+  assert.equal(notes(0, 'chromatic').split(' ').length, 12);
+
+  // Every key names all twelve pitch classes, because the circle draws the
+  // five the key has not got as well.
+  for (let root = 0; root < 12; root++) {
+    for (const scale of ['major', 'minor', 'dorian', 'blues', 'whole tone']) {
+      const spelling = keySpelling(root, scaleMaskOf(scale));
+      assert.equal(spelling.length, 12);
+      assert.ok(spelling.every((name) => typeof name === 'string' && name.length),
+                `${root} ${scale}: a pitch class with no name`);
+    }
+  }
 });
 
 // that appears nowhere is a route nobody can find or remove.
@@ -693,13 +751,33 @@ await test('parameters are filed by what they do, on every node', async () => {
   const where = (d, param) => paramSections(d.params)
     .find((section) => section.params.some((p) => p.pd.name === param))?.key;
 
-  // The same word lands in the same place whichever node it is on.
-  for (const name of ['Chord', 'Tonnetz', 'Harmony']) {
+  // The same word lands in the same place whichever node it is on - on every
+  // node that leaves the editor to guess, which is nearly all of them.
+  for (const name of ['Chord', 'Tonnetz']) {
     const d = named(name);
     assert.ok(d, `${name} is in this firmware`);
     assert.equal(where(d, 'octave'), 'pitch', `${name}: octave`);
     assert.equal(where(d, 'velocity'), 'level', `${name}: velocity`);
   }
+
+  // And an algorithm that labels its groups is believed instead of guessed
+  // at. Harmony's five controls over one chord walk were spread over three
+  // headings by the words alone - `spread` is a pitch word from NoteDelay,
+  // `smooth` a level word from a filter - and they are one section because
+  // the firmware says which section (src/node/param.h).
+  const harmony = named('Harmony');
+  assert.ok(harmony, 'Harmony is in this firmware');
+  const walk = paramSections(harmony.params).find((section) => section.label === 'the walk');
+  assert.ok(walk, 'Harmony names a section for its walk');
+  assert.deepEqual(walk.params.map((p) => p.pd.name),
+                   ['fifths', 'smooth', 'leading', 'spread', 'gravity', 'seed'],
+                   'every control over the walk, in one place and in one order');
+  assert.deepEqual(paramSections(harmony.params).map((section) => section.label),
+                   ['the walk', 'the form', 'the output'],
+                   'the sections are the firmware\u2019s, in the firmware\u2019s order');
+  // Runs of one mechanism that the preset order splits are one section again.
+  assert.ok(harmony.params.filter((g) => g?.label === 'the walk').length > 1,
+            'the walk is more than one run of the parameter order');
   assert.equal(where(named('Tonnetz'), 'channel'), 'midi');
   assert.equal(where(named('Tonnetz'), 'seed'), 'chance');
   assert.equal(where(named('Arpeggiator'), 'mode'), 'mode');
@@ -723,9 +801,23 @@ await test('parameters are filed by what they do, on every node', async () => {
     }
     const sections = paramSections(d.params);
     const seen = sections.flatMap((s) => s.params.map((p) => p.at)).sort((a, b) => a - b);
-    assert.deepEqual(seen, expected, `${d.name}: every parameter once`);
-    const keys = sections.map((s) => order.indexOf(s.key));
-    assert.deepEqual(keys, [...keys].sort((a, b) => a - b), `${d.name}: sections in order`);
+    // Both sorted: this is the "nothing is lost" claim, and a descriptor may
+    // declare its groups in the order it wants them shown rather than in
+    // parameter order.
+    assert.deepEqual(seen, expected.sort((a, b) => a - b), `${d.name}: every parameter once`);
+    // A descriptor that says nothing is sorted into the standard sections, in
+    // the standard order. One that labels its groups sets its own order, and
+    // it is the order the labels first appear in.
+    if (sections.every((s) => !s.label || order.includes(s.key))) {
+      const keys = sections.map((s) => order.indexOf(s.key));
+      assert.deepEqual(keys, [...keys].sort((a, b) => a - b), `${d.name}: sections in order`);
+    } else {
+      const labels = [];
+      for (const group of d.params) {
+        if (group?.label && !labels.includes(group.label)) labels.push(group.label);
+      }
+      assert.deepEqual(sections.map((s) => s.key), labels, `${d.name}: the firmware's order`);
+    }
   }
 });
 
@@ -876,7 +968,9 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
   globals.root = 2;
   await device.sendPatch(patch, globals);
 
-  const app = { patch, device, module, render: () => {}, scrolled: new Map() };
+  // The key is on the app as well as in the module: the circle names its
+  // chords the way this key spells them, and that is the app's own table.
+  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
   const harmonyAt = patch.nodes.length - 1;
 
   // Before it has played: seven chords of C major on the circle, the walk's
@@ -935,6 +1029,74 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
   // to draw one.
   assert.equal(module.harmonyDegrees(0), 0, 'a metronome is not a harmony');
   assert.doesNotMatch(words(withDom(() => nodeCard(app, 0))), /circle of fifths/);
+
+  // **A flat key is spelled flat.** In C minor the third degree is E flat,
+  // and calling it "D#" does not read as a spelling slip - it reads as the
+  // degrees being wrong, because D is the second and that chord is on the
+  // third. The numerals were always right; the names were not.
+  globals.scale = P.ScaleId.SCALE_NATURAL_MINOR;
+  globals.root = 0;
+  await device.sendPatch(patch, globals);
+  module.advance(1_000_000);
+  card = withDom(() => nodeCard(app, harmonyAt));
+  said = words(card);
+  for (const name of ['Cm', 'D\u00b0', 'E\u266d', 'Fm', 'Gm', 'A\u266d', 'B\u266d']) {
+    assert.ok(said.split(/\s+/).includes(name), `${name} is not on the circle of C minor`);
+  }
+  for (const wrong of ['D#', 'G#', 'A#']) {
+    assert.ok(!said.split(/\s+/).includes(wrong), `${wrong} is a sharp in a flat key`);
+  }
+  // And the second degree is still the second: this was never the bug, and it
+  // has to stay true while the names move.
+  assert.equal(module.harmonyPitch(harmonyAt, 1) % 12, 2, 'D is the second degree of C minor');
+  assert.equal(module.harmonyPitch(harmonyAt, 2) % 12, 3, 'E flat is the third');
+});
+
+// A control the firmware is currently ignoring says so where it is, because a
+// knob that moves and changes nothing is the most confusing thing a module
+// can offer - and the reason is never in the parameter itself.
+await test('a control the key has made inert says so, and is still a control', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const harmony = device.algorithms.find((d) => d?.name === 'Harmony');
+  const patch = codec.emptyPatch();
+  const node = codec.emptyNode(harmony.id);
+  connectNewNode(device, patch, node, harmony);
+  patch.nodes.push(node);
+  const globals = codec.emptyGlobals();
+  globals.scale = P.ScaleId.SCALE_MAJOR;
+  globals.root = 0;
+  await device.sendPatch(patch, globals);
+
+  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
+  const said = () => words(withDom(() => nodeCard(app, 0)));
+
+  // A major key has a semitone below the tonic, so `leading` is a real
+  // control and nothing is said about it.
+  assert.doesNotMatch(said(), /no leading tone/, 'a major key has one');
+
+  // A natural minor has not, and the firmware weights nothing with it
+  // (src/midi/root_motion.h). The card says so rather than leaving a knob
+  // that sweeps and changes nothing.
+  globals.scale = P.ScaleId.SCALE_NATURAL_MINOR;
+  await device.sendPatch(patch, globals);
+  assert.match(said(), /this key has no leading tone/, 'an inert control says why');
+
+  // Dimmed, never disabled: the setting is real and it will do something
+  // again the moment the key says so.
+  const control = find(withDom(() => nodeCard(app, 0)),
+                       (kid) => /(^|\s)param(\s|$)/.test(kid.className ?? '')
+                             && /(^|\s)inert(\s|$)/.test(kid.className ?? ''));
+  assert.ok(control, 'the row is marked');
+  assert.ok(find(control, (kid) => kid.tag === 'input' || kid.tag === 'select'),
+            'and still has a control in it, not a disabled one');
+
+  // `drift` redraws a chord of a running loop, so with nothing looping it is
+  // inert too - and setting a loop length brings it back.
+  assert.match(said(), /nothing is looping/);
+  node.params[paramNamed(harmony, 'loop').at] = 4;
+  await device.sendPatch(patch, globals);
+  assert.doesNotMatch(said(), /nothing is looping/, 'a loop gives drift something to do');
 });
 
 // --- the patch format, as a schema -------------------------------------------

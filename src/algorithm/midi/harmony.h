@@ -104,6 +104,19 @@
 // and not the tail of one, and `reset` puts the loop back to its first chord
 // along with the phrase.
 //
+// **A control over the walk rewrites a running loop, on the spot.** `fifths`,
+// `smooth`, `leading`, `spread`, `gravity`, `cadence`, `phrase` and `seed`
+// all decide what the walk produces, so with a loop written out they write a
+// new one immediately and playback restarts at its first chord. Without that
+// they reach nothing at all while a loop is playing - the loop is the piece,
+// and the piece was already decided - which left the length as the only way
+// to ask for another one: a number used as a button. `drift` is not one of
+// them, because it says how often a loop is redrawn rather than what a
+// redraw produces.
+//
+// A loop is still *captured* one chord per advance when its length is set,
+// because what it holds is what the walk played.
+//
 // **`drift` is what keeps a loop alive.** An accident that happens once is a
 // glitch and one that comes back is a decision, so a running loop redraws one
 // of its chords with this probability and *keeps* the new one. At 0 the loop
@@ -138,7 +151,8 @@
 //                     (midi/global_key.h)
 // params[5] velocity
 // params[6] channel
-// params[7] seed      0 draws from the entropy pool, anything else is exact
+// params[7] seed      0 draws from the entropy pool, anything else is exact,
+//                     and setting it re-seeds the walk where it stands
 // params[8] fifths    1 rises by fifths, 100 falls by them, 50 neither
 // params[9] smooth    which theory of motion: interval, or shared tones
 // params[10] leading  1 avoids the leading tone, 100 wants it
@@ -216,8 +230,15 @@ class Harmony : public Node{
         uint8_t weigh(uint8_t from, uint32_t* weight) const;
 
     private:
-        // The next degree, from the table, the tonic pull and the cadence.
-        uint8_t choose();
+        // The next degree after `from`, drawn from the weights, the tonic
+        // pull and the cadence - `at` being where in the phrase it falls, so
+        // that the cadence knows whether this is the chord that resolves.
+        // Both are passed rather than read off the node because `recompose`
+        // walks ahead of the music with them.
+        uint8_t choose(uint8_t from, uint8_t at);
+        // Writes a new loop, now. What every control over the walk does when
+        // one is running (`set_param`).
+        void recompose();
         // Plays `deg`, releasing the chord that was there.
         void strike(BusManager& bus, uint8_t deg);
         void restart();

@@ -57,11 +57,26 @@ struct ParamDescriptor {
 // lanes. A PolySequencer's 336 parameters are two groups and 26 descriptors
 // this way, rather than 336 hand-written entries that would drift the moment
 // a voice is added.
+//
+// **`label` is what the group is, when the algorithm knows better than the
+// editor does.** An editor with no other information sorts parameters by
+// what their names sound like, which is right often enough to be worth
+// doing and wrong exactly where an algorithm has several controls over one
+// mechanism: Harmony's `spread` shapes a chord walk and NoteDelay's spreads
+// echoes in time, and no table keyed on the word can put both in the right
+// place. An algorithm that says so splits its parameters into labelled
+// groups and the editor uses them; one that says nothing keeps a single
+// unlabelled group and the editor keeps guessing, which is what every
+// algorithm here did before and most still do.
+//
+// Defaulted rather than positional so that saying nothing costs nothing: the
+// thirty-odd descriptors that have no opinion are unchanged.
 struct ParamGroup {
     uint16_t first;
     uint16_t repeat;
     uint16_t n_fields;
     const ParamDescriptor* fields;
+    const char* label = nullptr;
 };
 
 // Cost, measured rather than guessed (#20 asks for the number): describing

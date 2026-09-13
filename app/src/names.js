@@ -91,6 +91,90 @@ export const KEY_SCALES = SCALES;
 // stores a pitch class and has no opinion about spelling.
 export const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
+// **The same twelve pitch classes, spelled the way the key spells them.**
+//
+// A pitch class is a number and a number has no spelling, so the list above
+// picks sharps and is right about half the time. In C minor that writes the
+// third degree "D#" and the sixth "G#", and a reader looking at a chord
+// called D# where E flat belongs does not conclude that the app is bad at
+// spelling - they conclude the degree is wrong, because D is the second and
+// this thing is sitting on the third. The names are not decoration: they are
+// what says which chord this is.
+//
+// The rule is the one a musician uses and not a preference for flats: a
+// seven-note scale uses each letter once, in order, so the letter of degree i
+// is the tonic's letter plus i and the accidental is whatever gets that
+// letter to the pitch. That is what makes C minor E flat rather than D sharp,
+// and C sharp minor E sharp rather than F.
+// The same twelve written the other way round. A pitch class the key has no
+// letter for - the five it does not play - is named from one of these two.
+export const PITCH_CLASSES_FLAT =
+  ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+
+const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const LETTER_PC = [0, 2, 4, 5, 7, 9, 11];
+const ACCIDENTALS = { '-2': '♭♭', '-1': '♭', 0: '', 1: '#', 2: '×' };
+
+// Semitones from a letter's natural pitch to `pc`, as a signed accidental in
+// -6..5 rather than a distance: B to C is one up, not eleven.
+const accidentalTo = (pc, letter) => ((pc - LETTER_PC[letter] + 18) % 12) - 6;
+
+// The scale spelled from one candidate tonic letter, or null if any degree
+// would need more than a double accidental. Scored by how many accidentals it
+// costs, which is the whole of why C minor is not spelled from D.
+function spellFrom(pcs, letter) {
+  const names = [];
+  let cost = 0;
+  for (let i = 0; i < pcs.length; i++) {
+    const l = (letter + i) % 7;
+    const a = accidentalTo(pcs[i], l);
+    if (a < -2 || a > 2) return null;
+    cost += Math.abs(a);
+    names.push(LETTERS[l] + ACCIDENTALS[a]);
+  }
+  return { names, cost };
+}
+
+// How to spell every pitch class of a key: a 12-entry table, indexed by pitch
+// class, of the name that key gives it.
+//
+// Scales that are not seven notes have no letter-per-degree to follow - a
+// pentatonic skips two of them and the chromatic has all twelve - so they
+// fall back to one flat-or-sharp decision for the whole key, taken from where
+// the tonic sits on the circle of fifths: the six keys counter-clockwise of C
+// are the flat ones.
+export function keySpelling(root, mask) {
+  const tonic = ((root % 12) + 12) % 12;
+  const pcs = [];
+  for (let step = 0; step < 12; step++) if ((mask >> step) & 1) pcs.push((tonic + step) % 12);
+
+  const table = new Array(12).fill(null);
+  if (pcs.length === 7) {
+    let best = null;
+    let bestAccidental = 0;
+    for (let letter = 0; letter < 7; letter++) {
+      // Only letters the tonic can actually be: C is never spelled from A.
+      const a = accidentalTo(tonic, letter);
+      if (a < -1 || a > 1) continue;
+      const tried = spellFrom(pcs, letter);
+      if (!tried) continue;
+      // Fewest accidentals wins, and a tie goes to the flat spelling: E flat
+      // minor and D sharp minor cost six each, and only one of them is ever
+      // written down.
+      if (best === null || tried.cost < best.cost
+          || (tried.cost === best.cost && a < bestAccidental)) {
+        best = tried;
+        bestAccidental = a;
+      }
+    }
+    if (best) for (let i = 0; i < pcs.length; i++) table[pcs[i]] ??= best.names[i];
+  }
+
+  const flat = ((tonic * 7) % 12) >= 6;
+  for (let pc = 0; pc < 12; pc++) table[pc] ??= (flat ? PITCH_CLASSES_FLAT : PITCH_CLASSES)[pc];
+  return table;
+}
+
 // The key's register, and the octave a node plays in when it names none of
 // its own (src/midi/global_key.h).
 export const DEFAULT_KEY_OCTAVE = P.KEY_DEFAULT_OCTAVE;

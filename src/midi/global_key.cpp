@@ -39,6 +39,14 @@ uint8_t global_key::root(){ return current_root; }
 uint8_t global_key::octave(){ return current_octave; }
 uint16_t global_key::mask(){ return current_mask; }
 
+uint8_t global_key::placed(uint8_t note, uint8_t node_octave){
+    if (node_octave == 0) return note;
+    const uint8_t octave_used = node_octave > KEY_MAX_OCTAVE ? KEY_MAX_OCTAVE : node_octave;
+    int16_t placed_note = (int16_t)octave_used * 12 + (int16_t)(note % 12u);
+    while (placed_note > 127) placed_note -= 12;
+    return (uint8_t)placed_note;
+}
+
 uint8_t global_key::tonic(uint8_t node_octave){
     const uint8_t octave_used = node_octave == 0 ? current_octave
                               : (node_octave > KEY_MAX_OCTAVE ? KEY_MAX_OCTAVE : node_octave);

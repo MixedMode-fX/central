@@ -29,14 +29,25 @@ static const ParamDescriptor PARAMS[Tonnetz::N_PARAMS] = {
     {"channel",   1, 16,  1, PARAM_CHANNEL, nullptr},
     {"seed",      0, 255, 0, PARAM_NUMBER,  nullptr},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, Tonnetz::N_PARAMS, PARAMS}};
+// Named rather than guessed. The editor sorts parameters by what their names
+// sound like, which is right often enough to be worth doing and wrong exactly
+// here: `cycle` and `diatonic` are behaviour words and `deviation` and `seed`
+// are chance words, so the four controls over one walk were shown under two
+// headings with the output's three scattered over three more.
+static const char* const WALK = "the walk";
+static const char* const OUTPUT = "the output";
+static const ParamGroup GROUPS[3] = {
+    {Tonnetz::P_CYCLE,  1, 3, &PARAMS[Tonnetz::P_CYCLE],  WALK},     // cycle..diatonic
+    {Tonnetz::P_SEED,   1, 1, &PARAMS[Tonnetz::P_SEED],   WALK},
+    {Tonnetz::P_OCTAVE, 1, 3, &PARAMS[Tonnetz::P_OCTAVE], OUTPUT},   // octave, velocity, channel
+};
 
 static const char* const IN_NAMES[3] = {"advance", "reset", "root"};
 static const char* const OUT_NAMES[1] = {"triad out"};
 
 const AlgorithmDescriptor Tonnetz::descriptor = {
     ALGO_TONNETZ, "Tonnetz", 3, 1, 1, Tonnetz::N_PARAMS, IN, OUT, sizeof(Tonnetz), false,
-    construct_node<Tonnetz>, GROUPS, 1, IN_NAMES, OUT_NAMES,
+    construct_node<Tonnetz>, GROUPS, 3, IN_NAMES, OUT_NAMES,
     "Chromatic triads where one voice moves a semitone: the circle of fifths in two dimensions.",
     CATEGORY_MIDI,
     true };   // reads_key: every pitch it plays comes from the key
@@ -60,6 +71,7 @@ Tonnetz::Tonnetz(const NodeConfig& config) :
     seed(config.params[P_SEED]),
     played(NO_NOTE),
     current_root(0), current_minor(false), step(0), started(false), at_first(true),
+    replace(false),
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
 {}
@@ -77,7 +89,13 @@ bool Tonnetz::set_param(uint16_t index, uint8_t value){
             diatonic = value != 0; return true;
         case P_OCTAVE:
             if (value > KEY_MAX_OCTAVE) return false;
-            octave = value; return true;
+            if (value == octave) return true;
+            octave = value;
+            // The register is where the triad *is*, not something the next
+            // transform decides, so a triad already sounding moves now rather
+            // than a bar from now - the same immediacy Chord's octave has.
+            replace = true;
+            return true;
         case P_VELOCITY:
             if (value > 127) return false;
             velocity = value ? value : DEFAULT_VELOCITY; return true;
@@ -85,10 +103,20 @@ bool Tonnetz::set_param(uint16_t index, uint8_t value){
             if (value > 16) return false;
             channel = value ? value : (uint8_t)1; return true;
         case P_SEED:
-            // The walk the *next* reset returns to. It does not redraw now: a
-            // seed that changed the chord the moment it was typed would make
-            // the parameter unusable while the patch is playing.
-            seed = value; return true;
+            // Reaching the walk that is running, not only the one the next
+            // reset returns to. Seeded in the constructor and in restart() and
+            // nowhere else, the one control whose whole purpose is a
+            // repeatable walk did nothing whatever until the patch was loaded
+            // again. Nothing sounding moves - the triad in the air is not
+            // redrawn, only the transforms after it - so this is safe to do
+            // while the patch is playing, which is the objection that kept it
+            // out. Unchanged is not a write: a modulation route sends one
+            // value per pass and reseeding on every one of them would stand
+            // the walk still.
+            if (value == seed) return true;
+            seed = value;
+            rng.reseed(seed ? (uint32_t)(seed * 2654435761u) : entropy::seed());
+            return true;
         default: return false;
     }
 }
@@ -136,10 +164,12 @@ uint8_t Tonnetz::scheduled() const {
 }
 
 uint8_t Tonnetz::active_root() const {
-    // A played root outranks both the key and the parameter, and it is the
-    // whole note: a sequencer sends C3 and the walk starts on C3, register
-    // and all.
-    if (played != NO_NOTE) return played;
+    // A played root says which note the walk starts on; `octave` says which
+    // register it sits in. Left at its default the played note keeps the one
+    // it arrived in - a sequencer sends C3 and the walk starts on C3, register
+    // and all - and set to an octave it puts the walk there instead
+    // (midi/global_key.h).
+    if (played != NO_NOTE) return global_key::placed(played, octave);
     return global_key::tonic(octave);
 }
 
@@ -237,7 +267,16 @@ void Tonnetz::process(BusManager& bus, uint32_t){
         }
     }
     if (reset_in.rising(bus)) restart();
-    if (!advance_in.rising(bus)) return;
+    const bool advancing = advance_in.rising(bus);
+    const bool replacing = replace;
+    replace = false;
+    if (!advancing){
+        // The register moved under a triad that is sounding. Re-striking is a
+        // release and a new triad, both from the ledger, so a walk placed
+        // while it plays cannot strand a note.
+        if (replacing && started) strike(bus);
+        return;
+    }
 
     if (at_first){
         current_root = (uint8_t)(active_root() % 12u);

@@ -37,8 +37,11 @@
 // algorithms did, so an older image would decode into the wrong bytes -
 // which is exactly what a format version is for. Version 3 and below are
 // refused rather than misread.
-#define PATCH_FORMAT_VERSION 4
-#define PATCH_FORMAT_MIN_VERSION 4
+// Version 5 took Chord's `root` inlet away (algorithm/midi/chord.h), so a
+// version 4 image has a cable on an inlet that no longer exists and would
+// load as a chord nothing is playing. Refused, like version 3.
+#define PATCH_FORMAT_VERSION 5
+#define PATCH_FORMAT_MIN_VERSION 5
 
 // "MMMC", big-endian, at the head of every stored or transmitted image.
 #define PATCH_MAGIC 0x4D4D4D43u

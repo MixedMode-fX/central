@@ -44,13 +44,16 @@
 // `deviation` is the chance of taking one of the other two transforms instead
 // of the cycle's next. At 0 the cycle is exact and repeats - `PL` returns to
 // its starting triad after six steps, `PR` after eight, `LR` after
-// twenty-four - and a few percent is what turns a cycle into a walk.
+// twenty-four - and a few percent is what turns a cycle into a walk. On
+// `free` there is no cycle's next to deviate from, so the control means
+// nothing there and the walk draws all three uniformly.
 //
 // `diatonic` refuses any transform whose triad is not entirely inside the
 // key, trying the others in turn and staying put if none fits. `P` is never
 // diatonic, so in practice it restricts the walk to `L` and `R` - which is
 // the fifth cycle, which is `Harmony`'s territory arrived at from the other
-// direction.
+// direction. A chromatic key contains every triad, so there it refuses
+// nothing.
 //
 // **The triad it starts on is the key's, and is not a setting.** A walk that
 // began on a major triad in a minor key began outside the key it was handed,
@@ -63,15 +66,16 @@
 //
 // **The root inlet is how it is played.** A note-on there is what `reset` is
 // with a pitch attached: the walk starts again, from that note - the whole
-// note, register and all - and the key it is measured in stays where it is,
+// note, register and all, unless `octave` names a register of its own - and
+// the key it is measured in stays where it is,
 // so a sequenced root walks through the triads of one key rather than
 // dragging the key behind it. Clock the root with `advance` and this is a
 // chord node, sounding the triad the key puts on each root; clock it slower
 // and the walk runs from each new root, which is the patch this node is for.
 //
 // The scale and the root are the key's (midi/global_key.h); this node only
-// says which register it starts in. A played root outranks that as a pitch
-// and does not touch the key.
+// says which register it sits in. A played root outranks that as a pitch
+// class and does not touch the key.
 //
 // Before the first advance nothing is sounding, and the first advance plays
 // the starting triad. Reset means the same here as in every sequencer: the
@@ -85,11 +89,14 @@
 // params[0] cycle      LR / PL / PR / free
 // params[1] deviation  percent chance of a transform the cycle did not name
 // params[2] diatonic   refuse a triad the key does not contain
-// params[3] octave     the register the walk starts in until the root inlet
-//                      plays a note; 0, the default, is the key's own
+// params[3] octave     which register the walk sits in, moving a triad
+//                      already sounding. 0, the default, is the key's own -
+//                      or a played root's own, when the root inlet has
+//                      named one
 // params[4] velocity
 // params[5] channel
-// params[6] seed       0 draws from the entropy pool, anything else is exact
+// params[6] seed       0 draws from the entropy pool, anything else is exact,
+//                      and setting it re-seeds the walk where it stands
 class Tonnetz : public Node{
     public:
         static constexpr uint16_t P_CYCLE = 0, P_DEVIATION = 1, P_DIATONIC = 2,
@@ -167,6 +174,9 @@ class Tonnetz : public Node{
         uint8_t step;              // which half of the cycle comes next
         bool started;
         bool at_first;
+        // An `octave` edit waiting to be heard: the register is where the
+        // triad is, so it moves what is sounding rather than what comes next.
+        bool replace;
         Xorshift32 rng;
         SoundingNotes sounding;
 };

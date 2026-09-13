@@ -3,7 +3,7 @@
 #include "midi/note_event.h"
 #include "midi/global_key.h"
 
-static const Domain IN[2] = {Domain::Note, Domain::Note};
+static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
 // The named stacks. The root itself is emitted by emit_chord and is not
@@ -54,17 +54,16 @@ static const ParamDescriptor PARAMS[Chord::N_PARAMS] = {
     {"inversion", 0, Chord::MAX_INVERSION,     0,          PARAM_ENUM,        INVERSION_NAMES},
     {"octave",    0, KEY_MAX_OCTAVE, 0,           PARAM_ENUM,        PARAM_OCTAVE_NAMES},
     {"velocity",  1, 127,               Chord::DEFAULT_VELOCITY, PARAM_NUMBER, nullptr},
-    {"retrigger", 0, 1,                 0,                       PARAM_BOOL,   nullptr},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Chord::N_PARAMS, PARAMS}};
 
-static const char* const IN_NAMES[2] = {"note in", "root"};
+static const char* const IN_NAMES[1] = {"note in"};
 static const char* const OUT_NAMES[1] = {"chord out"};
 
 // min_in is 0: with nothing patched to `note in` the node plays its own
 // chord and holds it (see the header).
 const AlgorithmDescriptor Chord::descriptor = {
-    ALGO_CHORD, "Chord", 2, 0, 1, Chord::N_PARAMS, IN, OUT, sizeof(Chord), false, construct_node<Chord>,
+    ALGO_CHORD, "Chord", 1, 0, 1, Chord::N_PARAMS, IN, OUT, sizeof(Chord), false, construct_node<Chord>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
     "A chord from one note - or from none: unpatched it plays and holds its own, in the key.",
     CATEGORY_MIDI,
@@ -107,11 +106,6 @@ bool Chord::set_param(uint16_t index, uint8_t value){
             if (value > 127) return false;
             velocity = value ? value : DEFAULT_VELOCITY;
             break;
-        case P_RETRIGGER:
-            if (value > 1) return false;
-            // Not a re-voice: it says what the *next* root note-on does.
-            retrigger = value != 0;
-            return true;
         default:
             return false;
     }
@@ -126,25 +120,20 @@ uint8_t Chord::get_param(uint16_t index) const {
         case P_INVERSION: return inversion;
         case P_OCTAVE:    return octave;
         case P_VELOCITY:  return velocity;
-        case P_RETRIGGER: return retrigger ? 1u : 0u;
         default:          return 0;
     }
 }
 
 Chord::Chord(const NodeConfig& config) :
     in(config.in_bus[0]),
-    root_in(config.in_bus[1]),
     out(config.out_bus[0]),
     quality(config.params[P_QUALITY] >= QUALITY_TRIAD && config.params[P_QUALITY] < QUALITY_COUNT
             ? config.params[P_QUALITY] : (uint8_t)QUALITY_TRIAD),
     voicing(config.params[P_VOICING] < VOICING_COUNT ? config.params[P_VOICING] : (uint8_t)VOICING_CLOSE),
     inversion(config.params[P_INVERSION] <= MAX_INVERSION ? config.params[P_INVERSION] : (uint8_t)0),
-    root(NO_NOTE),
     octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
-    retrigger(config.params[P_RETRIGGER] != 0),
-    free_note(NO_NOTE), voiced(NO_NOTE), free_channel(1), voiced_mask(0), dirty(false),
-    stopped(false), sounding()
+    voiced(NO_NOTE), voiced_mask(0), dirty(false), sounding()
 {}
 
 uint16_t Chord::active_mask() const {
@@ -152,11 +141,10 @@ uint16_t Chord::active_mask() const {
 }
 
 uint8_t Chord::active_root() const {
-    // A patched root inlet names the key - except on a self-playing node,
-    // where it is the thing playing the chord and names the note instead, so
-    // the chords a sequencer walks through stay in one key rather than
-    // dragging the key along with them.
-    if (root != NO_NOTE && in != NO_BUS) return root;
+    // The key's, and only the key's. A node that could be told a root of its
+    // own was the last of the per-node keys the global key set out to remove
+    // (midi/global_key.h), and a patch that wants its key moved from a note
+    // bus patches a Key node, which moves it for every node at once.
     return global_key::root();
 }
 
@@ -226,59 +214,27 @@ void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t to
 // playing. The pass costs one comparison once the chord is up - the work only
 // happens when what it should be sounding has actually moved.
 void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t tonic){
-    // Stood down by a stopped transport, and nothing here starts it again:
-    // re-voicing follows what is sounding, and a key or a parameter moving
-    // under a chord that is not sounding has nothing to move. The root
-    // note-on that plays this node is what brings it back.
-    if (stopped) return;
-    // The root inlet places it if anything does; otherwise it is the key's
-    // root, in the register this node names - and `octave` 0, the default, is
-    // the key's own register, so one key setting moves every voice and a
-    // chord that has been placed keeps its place (midi/global_key.h).
-    const uint8_t wanted = (free_note != NO_NOTE) ? free_note : global_key::tonic(octave);
+    // The key's root, in the register this node names - and `octave` 0, the
+    // default, is the key's own register, so one key setting moves every
+    // voice and a chord that has been placed keeps its place
+    // (midi/global_key.h).
+    const uint8_t wanted = global_key::tonic(octave);
     const uint8_t base = scale_quantise(wanted, tonic, mask);
 
     if (!dirty && base == voiced && mask == voiced_mask) return;
     // Re-voicing is a release and a new chord, both from the ledger, so
     // editing one while it drones cannot strand a note.
     sounding.release_all(bus, out);
-    emit_chord(bus, base, base, tonic, mask, velocity, free_channel);
+    emit_chord(bus, base, base, tonic, mask, velocity, 1);
     voiced = base;
     voiced_mask = mask;
     dirty = false;
 }
 
 void Chord::process(BusManager& bus, uint32_t){
-    const bool self_playing = (in == NO_BUS);
-
-    // The root first, so a root and a note arriving in the same pass agree,
-    // as in NoteQuantise.
-    if (root_in != NO_BUS){
-        const uint8_t rn = bus.note_count(root_in);
-        for (uint8_t i = 0; i < rn; i++){
-            const MidiEvent e = bus.note_read(root_in, i);
-            if (!is_note_on(e)) continue;
-            if (self_playing){
-                // Nothing else is playing this node, so this is what does:
-                // the whole note, octave and all, on the channel it arrived
-                // on. A root that names the note already sounding leaves it
-                // alone unless `retrigger` says otherwise: the chord is held,
-                // and a held chord is not re-struck for nothing.
-                free_note = e.data1;
-                free_channel = e.channel ? e.channel : 1u;
-                if (retrigger) dirty = true;
-                // Played again: this is the edge a stop stood the chord
-                // down to wait for.
-                stopped = false;
-            } else {
-                root = (uint8_t)(e.data1 % 12u);
-            }
-        }
-    }
-
     const uint16_t mask = active_mask();
     const uint8_t tonic = active_root();
-    if (self_playing){
+    if (in == NO_BUS){
         play_free(bus, mask, tonic);
         return;
     }
@@ -295,8 +251,12 @@ void Chord::process(BusManager& bus, uint32_t){
             continue;
         }
         // The root voice, in key: the note itself in a chromatic one, and the
-        // nearest note of the scale in any other.
-        emit_chord(bus, e.data1, scale_quantise(e.data1, tonic, mask), tonic, mask, e.data2, e.channel);
+        // nearest note of the scale in any other - in the register `octave`
+        // names, which is the played note's own until it names one
+        // (midi/global_key.h). The ledger records the note that *arrived*, so
+        // its own note-off still takes the chord down wherever it was put.
+        const uint8_t base = scale_quantise(global_key::placed(e.data1, octave), tonic, mask);
+        emit_chord(bus, e.data1, base, tonic, mask, e.data2, e.channel);
     }
 }
 
@@ -305,15 +265,4 @@ void Chord::silence(BusManager& bus){
     // Nothing is sounding, so a self-playing node voices again on its next
     // pass rather than believing a chord that has been taken down.
     voiced = NO_NOTE;
-}
-
-// A chord played by the root inlet is held until the next root note-on, and
-// on a stopped clock that note-on may never come (node/node.h). A chord
-// played through `note in` is released by the note-offs of whoever is playing
-// it, and one with neither inlet patched is a drone the transport was never
-// driving: both are left exactly as they are.
-void Chord::transport_stopped(BusManager& bus){
-    if (!free_running() || root_in == NO_BUS) return;
-    silence(bus);
-    stopped = true;
 }

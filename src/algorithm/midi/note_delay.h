@@ -123,6 +123,9 @@ class NoteDelay : public Node{
         void process(BusManager& bus, uint32_t now_us) override;
         void tick(BusManager& bus, uint32_t count) override;
         void silence(BusManager& bus) override;
+        // A synced echo is waiting on a subtick, and a stopped clock has no
+        // more of those (node/node.h).
+        void transport_stopped(BusManager& bus) override;
         bool set_param(uint16_t index, uint8_t value) override;
         uint8_t get_param(uint16_t index) const override;
 
@@ -160,6 +163,9 @@ class NoteDelay : public Node{
         void schedule(uint8_t source, uint8_t velocity, uint8_t channel, uint32_t now_us);
         void note_off_arrived(uint8_t source, uint32_t now_us);
         void release(BusManager& bus, Echo& e);
+        // Releases what has sounded and drops what has not, over every echo
+        // or only over the ones counting subticks.
+        void drop_echoes(BusManager& bus, bool clock_only);
 
         uint8_t in;
         uint8_t out;

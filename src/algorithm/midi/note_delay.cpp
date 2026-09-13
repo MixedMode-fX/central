@@ -193,15 +193,34 @@ void NoteDelay::release(BusManager& bus, Echo& e){
     e.state = ECHO_FREE;
 }
 
+// Everything in flight goes: an echo that has sounded is released, one still
+// waiting is dropped before it ever does. `clock_only` keeps the echoes
+// counting wall-clock microseconds, which arrive on their own whatever the
+// transport is doing.
+void NoteDelay::drop_echoes(BusManager& bus, bool clock_only){
+    for (uint8_t i = 0; i < MAX_ECHOES; i++){
+        if (clock_only && !echoes[i].by_subtick) continue;
+        if (echoes[i].state == ECHO_SOUNDING) release(bus, echoes[i]);
+        echoes[i].state = ECHO_FREE;
+    }
+}
+
 void NoteDelay::tick(BusManager&, uint32_t count){ subtick = count; }
 
+// A synced echo is scheduled in subticks, so on a stopped clock its note-on
+// and its note-off are both waiting for a subtick that may never come
+// (node/node.h) - the tail of a delay hangs for as long as the transport is
+// stopped. A free-running echo counts microseconds and lands whatever the
+// transport does, and the dry copies are released by the note-offs of
+// whoever is playing them: both are left exactly as they are.
+void NoteDelay::transport_stopped(BusManager& bus){
+    drop_echoes(bus, true);
+}
+
 void NoteDelay::process(BusManager& bus, uint32_t now_us){
+    // "Clear" means everything: the copies are this node's too.
     if (clear_in.rising(bus)){
-        for (uint8_t i = 0; i < MAX_ECHOES; i++){
-            if (echoes[i].state == ECHO_SOUNDING) release(bus, echoes[i]);
-            echoes[i].state = ECHO_FREE;
-        }
-        // The copies are this node's too, and "clear" means everything.
+        drop_echoes(bus, false);
         passed.release_all(bus, out);
     }
 
@@ -238,10 +257,7 @@ void NoteDelay::process(BusManager& bus, uint32_t now_us){
 }
 
 void NoteDelay::silence(BusManager& bus){
-    for (uint8_t i = 0; i < MAX_ECHOES; i++){
-        if (echoes[i].state == ECHO_SOUNDING) release(bus, echoes[i]);
-        echoes[i].state = ECHO_FREE;
-    }
+    drop_echoes(bus, false);
     passed.release_all(bus, out);
 }
 

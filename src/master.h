@@ -169,8 +169,10 @@ class MixedModeMaster {
     private:
         LoadError validate(const Patch& patch);
         // Holds a transport stop against the pool until the gates that were
-        // in flight when it stopped have drained.
-        void settle_stop();
+        // in flight when it stopped have drained. Returns whether this pass
+        // is one of those the stop is held for; the pool's own loop is what
+        // tells each node, at that node's place in the graph order.
+        bool settling_stop();
 
         IGpio& gpio;
         IMidiOut& midi;

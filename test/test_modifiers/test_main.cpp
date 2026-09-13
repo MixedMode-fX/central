@@ -646,10 +646,9 @@ static void test_chord_in_the_chromatic_scale_is_fixed_semitones() {
 // Chord with no note inlet: it plays itself
 // ---------------------------------------------------------------------------
 
-static NodeConfig free_chord(bool with_root_inlet) {
+static NodeConfig free_chord(bool played) {
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = NO_BUS;                              // nothing plays it
-    if (with_root_inlet) c.in_bus[1] = 0;
+    c.in_bus[0] = played ? (uint8_t)0 : NO_BUS;        // NO_BUS: nothing plays it
     c.out_bus[0] = 1;                                  // a triad, the default quality
     return c;
 }
@@ -723,15 +722,13 @@ static void test_chord_quality_takes_its_flavour_from_the_degree() {
     Chord node(c);
 
     global_key::set(SCALE_MAJOR, 0);
-    run_pass(bus, node, 1);
-
     bus.note_write(0, on(67));                         // G, the fifth degree
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(8, out.size());                  // four off, four on
-    TEST_ASSERT_EQUAL(67, out[4].data1);
-    TEST_ASSERT_EQUAL(71, out[5].data1);
-    TEST_ASSERT_EQUAL(74, out[6].data1);
-    TEST_ASSERT_EQUAL(77, out[7].data1);               // F natural: G7, not Gmaj7
+    TEST_ASSERT_EQUAL(4, out.size());
+    TEST_ASSERT_EQUAL(67, out[0].data1);
+    TEST_ASSERT_EQUAL(71, out[1].data1);
+    TEST_ASSERT_EQUAL(74, out[2].data1);
+    TEST_ASSERT_EQUAL(77, out[3].data1);               // F natural: G7, not Gmaj7
 }
 
 // One self-playing chord in C major, sounded once, so a voicing and an
@@ -813,40 +810,47 @@ static void test_chord_voicing_opens_the_stack() {
 // `Harmony` repeats a degree whenever its style or its gravity says so, and a
 // progression where one chord of the phrase does not sound is a hole in it.
 // Held is still the default - this is the switch that says otherwise.
-static void test_a_repeated_root_re_strikes_only_when_asked() {
+static void test_the_articulation_belongs_to_whoever_is_playing() {
     BusManager bus;
     NodeConfig c = free_chord(true);
-    c.params[Chord::P_RETRIGGER] = 1;
     Chord node(c);
-
     global_key::set(SCALE_MAJOR, 0);
-    run_pass(bus, node, 1);
 
+    // Held: the chord sounds once and stays, however many passes go by, which
+    // is what makes a sequencer whose steps run into each other a progression
+    // that sustains from bar to bar.
     bus.note_write(0, on(62));
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(6, out.size());
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(62, out[0].data1);
+    TEST_ASSERT_EQUAL(65, out[1].data1);               // F, not F#: the key decides
+    TEST_ASSERT_EQUAL(69, out[2].data1);
+    for (uint8_t i = 0; i < 4; i++) TEST_ASSERT_EQUAL(0, run_pass(bus, node, 1).size());
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
 
-    // The same root again: three note-offs and the same three notes back.
+    // Re-sent the way a sequencer re-sends it - off, then on - and it strikes
+    // again. There is no parameter deciding this: the input decided it.
+    bus.note_write(0, off(62));
     bus.note_write(0, on(62));
     out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(6, out.size());
     for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(out[i]));
     TEST_ASSERT_EQUAL(62, out[3].data1);
-    TEST_ASSERT_EQUAL(65, out[4].data1);
-    TEST_ASSERT_EQUAL(69, out[5].data1);
     TEST_ASSERT_EQUAL(3, node.sounding_count());
 
-    // And nothing is left sounding when it goes quiet.
-    node.silence(bus);
+    // And its own note-off takes it down, wherever the chord went.
+    bus.note_write(0, off(62));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    for (const MidiEvent& e : out) TEST_ASSERT_TRUE(is_note_off(e));
     TEST_ASSERT_EQUAL(0, node.sounding_count());
 }
 
-// A self-playing chord sits in the key's register until it names one of its
-// own. The root inlet outranks both, because a cable is the most explicit
-// thing a user can say.
+// A self-playing chord sits in the key's register until `octave` names one of
+// its own, so one key setting moves a patch full of them.
 static void test_a_self_playing_chord_follows_the_key_register() {
     BusManager bus;
-    NodeConfig c = free_chord(true);
+    NodeConfig c = free_chord(false);
     Chord node(c);
 
     global_key::set(SCALE_MAJOR, 0);                 // C major, default register
@@ -862,12 +866,6 @@ static void test_a_self_playing_chord_follows_the_key_register() {
     TEST_ASSERT_EQUAL(40, out[4].data1);
     TEST_ASSERT_EQUAL(43, out[5].data1);
 
-    // A root on the inlet is the note to play, register or no register.
-    bus.note_write(0, on(67));
-    out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(6, out.size());
-    TEST_ASSERT_EQUAL(67, out[3].data1);
-
     // A chord that names a register of its own stays in it whatever the key
     // does: one key for the patch, one octave per node.
     NodeConfig lower = free_chord(false);
@@ -882,82 +880,94 @@ static void test_a_self_playing_chord_follows_the_key_register() {
     TEST_ASSERT_EQUAL(0, out.size());                  // nothing moved
 }
 
-// A sequencer on the root inlet is what plays a self-playing chord: the whole
-// note, and the chords stay in the key rather than dragging it around. In C
-// major a root of D is D minor, which is what "diatonic" means and what a
-// fixed semitone stack would have got wrong.
-static void test_a_sequenced_root_walks_a_self_playing_chord_through_the_key() {
+// In C major a note of D is D minor, which is what "diatonic" means and what
+// a fixed semitone stack would have got wrong.
+//
+// **A sequencer plays the chord through `note in`, like anything else that
+// plays it.** Each step names the note, the key names the quality, and the
+// step's own note-off is what releases the chord it asked for.
+static void test_a_sequenced_note_walks_the_chord_through_the_key() {
     BusManager bus;
     NodeConfig c = free_chord(true);
     Chord node(c);
 
     global_key::set(SCALE_MAJOR, 0);
-    run_pass(bus, node, 1);                            // the tonic triad first
-
-    bus.note_write(0, on(62));                         // D, from a sequencer
+    bus.note_write(0, on(60));
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].data1);               // I: C major
+    TEST_ASSERT_EQUAL(64, out[1].data1);
+
+    // The next step: the old chord released by its own note-off, the new one
+    // in the same key - D minor, with nothing anywhere naming it.
+    bus.note_write(0, off(60));
+    bus.note_write(0, on(62));
+    out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(6, out.size());
     for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(out[i]));
     TEST_ASSERT_EQUAL(62, out[3].data1);
     TEST_ASSERT_EQUAL(65, out[4].data1);               // F, not F#
     TEST_ASSERT_EQUAL(69, out[5].data1);
-    TEST_ASSERT_EQUAL(3, node.sounding_count());
 
-    // The same root again changes nothing: the chord is already there.
-    bus.note_write(0, on(62));
-    out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(0, out.size());
-
-    // An octave lower is a different chord, and the old one is released.
+    // An octave lower is a different chord, in the register it was sent in:
+    // the note says where it goes, and this node does not drag it back.
+    bus.note_write(0, off(62));
     bus.note_write(0, on(50));
     out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(6, out.size());
     TEST_ASSERT_EQUAL(50, out[3].data1);
     TEST_ASSERT_EQUAL(53, out[4].data1);
     TEST_ASSERT_EQUAL(57, out[5].data1);
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
 }
 
-// A sequenced chord is held until the next root note-on, and a stopped
-// transport is the one moment the module knows that note-on may never come:
-// pressing stop takes the chord down, nothing brings it back on its own, and
-// the next root note-on does (node/node.h).
-static void test_stopping_the_transport_releases_a_sequenced_chord() {
+// **`octave` says which register a chord sits in, and it is a live control on
+// a played node too.** The note that arrives says which chord; the parameter
+// says where it goes, and left at its default the note keeps the register it
+// was sent in. Like every other voicing control here, it reaches the next
+// chord rather than re-striking the one in the air - the articulation is the
+// input's.
+static void test_the_octave_places_a_chord_somebody_played() {
     BusManager bus;
     NodeConfig c = free_chord(true);
     Chord node(c);
-
     global_key::set(SCALE_MAJOR, 0);
-    bus.note_write(0, on(62));
+
+    // Default: the chord goes where the sequencer put it, register and all.
+    bus.note_write(0, on(48));
     std::vector<MidiEvent> out = run_pass(bus, node, 1);
     TEST_ASSERT_EQUAL(3, out.size());
+    TEST_ASSERT_EQUAL(48, out[0].data1);
+
+    // Named: the same pitch class, in the register the node asks for.
+    TEST_ASSERT_TRUE(node.set_param(Chord::P_OCTAVE, 7));
+    bus.note_write(0, off(48));
+    bus.note_write(0, on(48));
+    out = run_pass(bus, node, 1);
+    uint8_t offs = 0, ons = 0, first = 0;
+    for (const MidiEvent& e : out){
+        if (is_note_off(e)) offs++;
+        else if (is_note_on(e)){ if (!ons) first = e.data1; ons++; }
+    }
+    TEST_ASSERT_EQUAL(3, offs);
+    TEST_ASSERT_EQUAL(3, ons);
+    TEST_ASSERT_EQUAL(84, first);
     TEST_ASSERT_EQUAL(3, node.sounding_count());
 
-    // Stop: the whole chord comes down, at the pitches it was sent at.
-    bus.swap();
-    node.transport_stopped(bus);
-    bus.swap();
-    TEST_ASSERT_EQUAL(3, bus.note_count(1));
-    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_TRUE(is_note_off(bus.note_read(1, i)));
-    TEST_ASSERT_EQUAL(0, node.sounding_count());
-
-    // Told more than once, as the master's settle tells it, and stood down
-    // after it: neither the settle nor a parameter edit plays it again.
-    for (uint8_t i = 0; i < 8; i++) {
-        out = run_pass(bus, node, 1);
-        TEST_ASSERT_EQUAL(0, out.size());
-        node.transport_stopped(bus);
-    }
-    TEST_ASSERT_TRUE(node.set_param(Chord::P_QUALITY, Chord::QUALITY_SEVENTH));
+    // The register it names outlives the next note: a sequencer walking the
+    // chords of one key does not drag them back out of it.
+    bus.note_write(0, off(48));
+    bus.note_write(0, on(55));
     out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(0, out.size());
-    TEST_ASSERT_EQUAL(0, node.sounding_count());
+    for (const MidiEvent& e : out) if (is_note_on(e)){ TEST_ASSERT_EQUAL(91, e.data1); break; }
 
-    // The next root note-on is what plays it again - the edit included.
-    bus.note_write(0, on(62));
+    // And the note that arrived is what releases it, wherever it was put:
+    // the ledger records the source, never the pitch that went out.
+    bus.note_write(0, off(55));
     out = run_pass(bus, node, 1);
-    TEST_ASSERT_EQUAL(4, out.size());
-    TEST_ASSERT_EQUAL(62, out[0].data1);
-    TEST_ASSERT_EQUAL(4, node.sounding_count());
+    TEST_ASSERT_EQUAL(3, out.size());
+    for (const MidiEvent& e : out) TEST_ASSERT_TRUE(is_note_off(e));
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
 }
 
 // A drone is not the transport's to stop. With nothing patched to either
@@ -983,7 +993,7 @@ static void test_stopping_the_transport_leaves_a_drone_alone() {
 static void test_stopping_the_transport_leaves_a_played_chord_alone() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = 0; c.in_bus[1] = 1; c.out_bus[0] = 2;
+    c.in_bus[0] = 0; c.out_bus[0] = 2;
     Chord node(c);
 
     global_key::set(SCALE_MAJOR, 0);
@@ -1921,13 +1931,13 @@ int main() {
     RUN_TEST(test_chord_in_the_chromatic_scale_is_fixed_semitones);
     RUN_TEST(test_a_chord_with_no_note_inlet_plays_itself_and_holds);
     RUN_TEST(test_a_self_playing_chord_takes_its_octave_and_velocity);
-    RUN_TEST(test_a_sequenced_root_walks_a_self_playing_chord_through_the_key);
+    RUN_TEST(test_a_sequenced_note_walks_the_chord_through_the_key);
     RUN_TEST(test_chord_quality_names_a_stack_of_scale_steps);
     RUN_TEST(test_chord_quality_takes_its_flavour_from_the_degree);
     RUN_TEST(test_chord_inversion_moves_the_bass);
     RUN_TEST(test_chord_voicing_opens_the_stack);
-    RUN_TEST(test_a_repeated_root_re_strikes_only_when_asked);
-    RUN_TEST(test_stopping_the_transport_releases_a_sequenced_chord);
+    RUN_TEST(test_the_articulation_belongs_to_whoever_is_playing);
+    RUN_TEST(test_the_octave_places_a_chord_somebody_played);
     RUN_TEST(test_stopping_the_transport_leaves_a_drone_alone);
     RUN_TEST(test_stopping_the_transport_leaves_a_played_chord_alone);
     RUN_TEST(test_editing_a_self_playing_chord_re_voices_it);

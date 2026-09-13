@@ -748,6 +748,11 @@ function paramAt(descriptor, name) {
   return null;
 }
 
+// Tonnetz's fourth cycle. The descriptor numbers its options from its own
+// minimum and the page reads the names from the firmware, so this is the one
+// place a value of that enum is written down.
+const TONNETZ_FREE = 4;
+
 // What a parameter is set to, in the firmware's terms: a stored zero is the
 // descriptor's default everywhere (src/node/param.h).
 function paramValue(app, index, name) {
@@ -770,14 +775,28 @@ function paramValue(app, index, name) {
 // silence: a control marked dead that is not is a control nobody touches.
 function paramInert(app, index, pd) {
   const node = app.patch.nodes[index];
-  if (app.device.byId.get(node.algorithmId)?.name !== 'Harmony') return null;
-  if (pd.name === 'leading') {
-    const mask = scaleMaskById(app.globals?.scale);
-    // Pitch class 11 above the root is the semitone below the tonic an
-    // octave up, which is the firmware's own test for having one.
-    if (!((mask >> 11) & 1)) return 'this key has no leading tone';
+  const algorithm = app.device.byId.get(node.algorithmId)?.name;
+  if (algorithm === 'Harmony') {
+    if (pd.name === 'leading') {
+      const mask = scaleMaskById(app.globals?.scale);
+      // Pitch class 11 above the root is the semitone below the tonic an
+      // octave up, which is the firmware's own test for having one.
+      if (!((mask >> 11) & 1)) return 'this key has no leading tone';
+    }
+    if (pd.name === 'drift' && !paramValue(app, index, 'loop')) return 'nothing is looping';
   }
-  if (pd.name === 'drift' && !paramValue(app, index, 'loop')) return 'nothing is looping';
+  if (algorithm === 'Tonnetz') {
+    // `free` draws all three transforms uniformly, so there is no cycle's
+    // next for a deviation to be a deviation *from*.
+    if (pd.name === 'deviation' && paramValue(app, index, 'cycle') === TONNETZ_FREE) {
+      return 'the free walk has no cycle to leave';
+    }
+    // The refusal is "is every note of this triad in the key", and a
+    // chromatic key holds all twelve.
+    if (pd.name === 'diatonic' && (scaleMaskById(app.globals?.scale) & 0xfff) === 0xfff) {
+      return 'a chromatic key contains every triad';
+    }
+  }
   return null;
 }
 

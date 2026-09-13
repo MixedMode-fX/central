@@ -753,7 +753,7 @@ await test('parameters are filed by what they do, on every node', async () => {
 
   // The same word lands in the same place whichever node it is on - on every
   // node that leaves the editor to guess, which is nearly all of them.
-  for (const name of ['Chord', 'Tonnetz']) {
+  for (const name of ['Chord', 'CvToNote']) {
     const d = named(name);
     assert.ok(d, `${name} is in this firmware`);
     assert.equal(where(d, 'octave'), 'pitch', `${name}: octave`);
@@ -778,8 +778,13 @@ await test('parameters are filed by what they do, on every node', async () => {
   // Runs of one mechanism that the preset order splits are one section again.
   assert.ok(harmony.params.filter((g) => g?.label === 'the walk').length > 1,
             'the walk is more than one run of the parameter order');
-  assert.equal(where(named('Tonnetz'), 'channel'), 'midi');
-  assert.equal(where(named('Tonnetz'), 'seed'), 'chance');
+  // Tonnetz names its own for the same reason: `cycle` and `diatonic` are
+  // behaviour words and `deviation` and `seed` are chance words, so its four
+  // controls over one walk were shown under two headings.
+  assert.deepEqual(paramSections(named('Tonnetz').params).map((section) => section.label),
+                   ['the walk', 'the output']);
+  assert.equal(where(named('GateToNote'), 'channel'), 'midi');
+  assert.equal(where(named('Probability'), 'seed'), 'chance');
   assert.equal(where(named('Arpeggiator'), 'mode'), 'mode');
   assert.equal(where(named('LFO'), 'rate'), 'time');
   assert.equal(paramSection({ name: 'anything at all', kind: P.ParamKind.PARAM_NUMBER }), 'other',
@@ -1097,6 +1102,56 @@ await test('a control the key has made inert says so, and is still a control', a
   node.params[paramNamed(harmony, 'loop').at] = 4;
   await device.sendPatch(patch, globals);
   assert.doesNotMatch(said(), /nothing is looping/, 'a loop gives drift something to do');
+});
+
+// The same argument for the other walk: `deviation` is the chance of leaving
+// the cycle and `free` has no cycle, `diatonic` refuses a triad outside the
+// key and a chromatic key has no outside.
+await test("Tonnetz says which of its controls the walk is ignoring", async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const tonnetz = device.algorithms.find((d) => d?.name === 'Tonnetz');
+  const patch = codec.emptyPatch();
+  const node = codec.emptyNode(tonnetz.id);
+  connectNewNode(device, patch, node, tonnetz);
+  patch.nodes.push(node);
+  const globals = codec.emptyGlobals();
+  globals.scale = P.ScaleId.SCALE_MAJOR;
+  globals.root = 0;
+  await device.sendPatch(patch, globals);
+
+  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
+  const said = () => words(withDom(() => nodeCard(app, 0)));
+
+  // The default cycle is LR, which names a transform on every step, so
+  // deviating from it means something.
+  assert.doesNotMatch(said(), /no cycle to leave/, 'LR has a next transform');
+  node.params[paramNamed(tonnetz, 'cycle').at] = 4;                 // free
+  await device.sendPatch(patch, globals);
+  assert.match(said(), /the free walk has no cycle to leave/);
+
+  // A major key leaves triads outside itself for `diatonic` to refuse; a
+  // chromatic one does not.
+  assert.doesNotMatch(said(), /contains every triad/, 'a major key does not');
+  globals.scale = P.ScaleId.SCALE_CHROMATIC;
+  await device.sendPatch(patch, globals);
+  assert.match(said(), /a chromatic key contains every triad/);
+});
+
+// One mechanism, one heading. The editor sorts parameters by what their names
+// sound like unless the algorithm says otherwise, and `cycle` sounds like
+// behaviour while `deviation` sounds like chance.
+await test("Tonnetz's walk is shown as one section, not scattered by name", async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const tonnetz = device.algorithms.find((d) => d?.name === 'Tonnetz');
+  const sections = paramSections(tonnetz.params);
+  const walk = sections.find((s) => s.label === 'the walk');
+  assert.ok(walk, 'the walk is a section of its own');
+  assert.deepEqual(walk.params.map(({ pd }) => pd.name),
+                   ['cycle', 'deviation', 'diatonic', 'seed']);
+  const output = sections.find((s) => s.label === 'the output');
+  assert.deepEqual(output.params.map(({ pd }) => pd.name), ['octave', 'velocity', 'channel']);
 });
 
 // --- the patch format, as a schema -------------------------------------------

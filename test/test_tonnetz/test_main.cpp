@@ -193,6 +193,59 @@ static void test_deviation_is_what_turns_a_cycle_into_a_walk() {
     TEST_ASSERT_TRUE(differences > 0);
 }
 
+// **A seed reaches the walk that is running.** Seeded in the constructor and
+// on a reset and nowhere else, the one control whose whole purpose is a
+// repeatable walk did nothing whatever until the patch was loaded again: two
+// nodes given different seeds mid-walk played on identically. Nothing
+// sounding moves - only the transforms after it.
+static void test_a_seed_typed_mid_walk_changes_what_comes_next() {
+    BusManager bus_a, bus_b;
+    NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_FREE, 0, 9);
+    Tonnetz a(c), b(c);
+
+    // Identical while they share a seed, which is what makes the divergence
+    // below the seed's doing and not the draw's.
+    std::vector<uint8_t> together;
+    for (uint8_t i = 0; i < 8; i++){
+        advance(a, bus_a); advance(b, bus_b);
+        TEST_ASSERT_EQUAL(a.triad_root(), b.triad_root());
+        together.push_back(a.triad_root());
+    }
+
+    TEST_ASSERT_TRUE(b.set_param(Tonnetz::P_SEED, 77));
+    TEST_ASSERT_EQUAL(77, b.get_param(Tonnetz::P_SEED));
+    // The triad in the air is untouched: this is a control over what the walk
+    // draws next, not a re-strike.
+    TEST_ASSERT_EQUAL(together.back(), b.triad_root());
+    TEST_ASSERT_EQUAL(3, b.sounding_count());
+
+    uint8_t differences = 0;
+    for (uint8_t i = 0; i < 16; i++){
+        advance(a, bus_a); advance(b, bus_b);
+        if (a.triad_root() != b.triad_root()) differences++;
+    }
+    TEST_ASSERT_TRUE(differences > 0);
+}
+
+// A modulation route writes one value per pass, so the value it keeps writing
+// must not re-seed: a walk re-seeded every pass draws the same transform for
+// ever and stands still.
+static void test_rewriting_the_same_seed_does_not_stall_the_walk() {
+    BusManager bus;
+    NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_FREE, 0, 9);
+    Tonnetz node(c);
+
+    std::vector<uint8_t> walk;
+    for (uint8_t i = 0; i < 16; i++){
+        TEST_ASSERT_TRUE(node.set_param(Tonnetz::P_SEED, 9));
+        advance(node, bus);
+        walk.push_back(node.triad_root());
+    }
+    uint8_t moves = 0;
+    for (uint8_t i = 1; i < walk.size(); i++) if (walk[i] != walk[i - 1]) moves++;
+    TEST_ASSERT_TRUE(moves > 0);
+}
+
 // `diatonic` refuses any triad the key does not hold. P is never diatonic, so
 // in practice it leaves the walk with L and R - and every chord it plays is
 // one of the key's own.
@@ -408,6 +461,50 @@ static void test_a_played_root_does_not_drag_the_key_with_it() {
     }
 }
 
+// **`octave` is a live control on a sequenced walk, not one a single root
+// note-on kills.** A played root says which note the walk starts on; the
+// parameter says which register it sits in, and left at its default the
+// played note keeps the one it arrived in.
+static void test_octave_places_a_played_root_and_moves_what_is_sounding() {
+    BusManager bus;
+    NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_LR);
+    c.in_bus[2] = NOTE_ROOT;
+    c.params[Tonnetz::P_OCTAVE] = 0;                   // the key's own register
+    Tonnetz node(c);
+    global_key::set(SCALE_MAJOR, 0);
+
+    // Default: the walk starts on the note that was played, register and all.
+    play_root(node, bus, 48);
+    std::vector<uint8_t> played = notes_on(advance(node, bus));
+    TEST_ASSERT_EQUAL(3, played.size());
+    TEST_ASSERT_EQUAL(48, played[0]);
+
+    // Named: the walk moves there, keeping the pitch class the root named.
+    TEST_ASSERT_TRUE(node.set_param(Tonnetz::P_OCTAVE, 7));
+    const std::vector<uint8_t> on_now = notes_on(advance(node, bus));
+    TEST_ASSERT_EQUAL(3, on_now.size());
+    TEST_ASSERT_TRUE(on_now[0] >= 84 - 6 && on_now[0] <= 84 + 6);
+
+    // And it is heard now rather than at the next transform: the triad that is
+    // sounding is released and struck again in the register just named.
+    TEST_ASSERT_TRUE(node.set_param(Tonnetz::P_OCTAVE, 2));
+    bus.gate_write(GATE_ADVANCE, false);
+    bus.swap();
+    node.process(bus, 0);
+    bus.swap();
+    std::vector<MidiEvent> replaced;
+    const uint8_t n = bus.note_count(NOTE_TRIAD);
+    for (uint8_t i = 0; i < n; i++) replaced.push_back(bus.note_read(NOTE_TRIAD, i));
+    const std::vector<uint8_t> lower = notes_on(replaced);
+    TEST_ASSERT_EQUAL(3, lower.size());
+    TEST_ASSERT_TRUE(lower[0] >= 24 - 6 && lower[0] <= 24 + 6);
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+    // Released before struck, so nothing is stranded a register above.
+    uint8_t offs = 0;
+    for (const MidiEvent& e : replaced) if (is_note_off(e)) offs++;
+    TEST_ASSERT_EQUAL(3, offs);
+}
+
 int main(int, char**){
     UNITY_BEGIN();
     RUN_TEST(test_the_three_transforms_are_what_they_say);
@@ -415,6 +512,8 @@ int main(int, char**){
     RUN_TEST(test_the_lr_cycle_traces_fifths);
     RUN_TEST(test_the_pl_and_pr_cycles_close_where_the_header_says);
     RUN_TEST(test_deviation_is_what_turns_a_cycle_into_a_walk);
+    RUN_TEST(test_a_seed_typed_mid_walk_changes_what_comes_next);
+    RUN_TEST(test_rewriting_the_same_seed_does_not_stall_the_walk);
     RUN_TEST(test_diatonic_keeps_every_triad_inside_the_key);
     RUN_TEST(test_nothing_sounds_before_the_first_advance_and_reset_starts_over);
     RUN_TEST(test_the_triad_stays_in_the_register_it_was_given);
@@ -423,5 +522,6 @@ int main(int, char**){
     RUN_TEST(test_the_first_triad_is_the_one_the_key_holds);
     RUN_TEST(test_the_root_inlet_plays_the_walk);
     RUN_TEST(test_a_played_root_does_not_drag_the_key_with_it);
+    RUN_TEST(test_octave_places_a_played_root_and_moves_what_is_sounding);
     return UNITY_END();
 }

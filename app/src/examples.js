@@ -118,6 +118,20 @@ export const EXAMPLES = {
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
+  'Chord stabs': {
+    about: 'Nothing is plugged in. Chord has nothing on its note inlet, so it plays the tonic of the key and holds it \u2014 a pad, and on its own that is a patch of one chord that never moves. Retrigger is what makes it a part: a Euclidean 7-in-16 off the sixteenth-note metronome drives its trigger, and every edge releases the chord and sends it again at a 1/32, which is a stab. The rhythm is the Euclid\u2019s and the harmony is the Chord\u2019s; neither knows about the other. Jack 1 shows the pattern. Enable audio under play, then move the Euclidean pulses \u2014 or set Retrigger\u2019s release to \u201ctie\u201d and hear the same rhythm re-articulate a chord that never stops.',
+    patch: {
+      globals: { scale: 'minor', root: 2 },
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
+        { algo: 'EuclidianSequencer', in: [0], out: [1], params: [16, 0, 0, 7, 2] },
+        { algo: 'Chord', in: [null], out: [0], params: [1, 0, 0, 4] },
+        { algo: 'Retrigger', in: [0, 1], out: [1], params: [9, 1, 1, 0] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
   'Euclidean drums': {
     about: 'One sixteenth-note metronome advances three Euclidean sequencers in lock-step. Each fires a jack and a note (36, 42, 38). Enable audio under play; jacks 1 to 3 light in turn, and the three note numbers are read as General MIDI \u2014 kick, closed hat, snare \u2014 by the kit under listen \u2192 drums.',
     patch: {

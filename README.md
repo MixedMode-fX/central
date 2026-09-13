@@ -143,7 +143,7 @@ touched.
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
 | Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
-| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay` |
+| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger` |
 | Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz`, `Key` |
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
@@ -240,6 +240,21 @@ is only what a parameter list cannot say.
   could not otherwise do. Repeats are transposed by `interval` **scale steps**.
   Each pending echo carries the pitch it will be released with, so the key and
   the interval can move underneath it, and `dry` copies are owned too.
+- **`Retrigger` is the rhythm of a chord nobody is playing.** A held chord is
+  a pad: one note-on and nothing until the note-off. Every rising edge on its
+  trigger inlet releases what it has sounding and sends the whole chord again,
+  so the pattern driving the trigger is the figure and the keyboard decides
+  only the harmony — `Arpeggiator` is the same input spread across the notes,
+  this is all of them together. It has no rate of its own for the reason no
+  sequencer has one. `length` is a note value rather than a percentage of the
+  gap, because that is how an articulation is written down: one setting is a
+  stab under a slow trigger and legato under a fast one. `release: tie` gives
+  up the length and holds each strike until the next trigger, which
+  re-articulates a chord that never stops. A note added to the chord joins at
+  the next edge and is not heard before it — the trigger owns the timing, and
+  a note that spoke when it was played would put the player's back into it.
+  A note-off is immediate, because a key that has been lifted is not in the
+  strike.
 - **`Voicer`'s ledger is keyed on the note it emitted**, not the note that
   caused it, because it emits a function of the whole held chord rather than of
   one note. Common-tone retention is then the *absence* of code: a shared note

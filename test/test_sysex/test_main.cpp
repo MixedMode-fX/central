@@ -372,6 +372,60 @@ static void test_parameter_descriptors_are_reported_per_group() {
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
 }
 
+// A group's label rides on every field of it, last in the record, and is
+// empty for the algorithms that have no opinion. It is what lets an editor
+// stop guessing at a parameter's meaning from its name: Harmony's five
+// controls over one chord walk are one section because it says so, and are
+// not spread over three because `spread` sounds like a pitch and `smooth`
+// sounds like a level.
+static void test_a_group_carries_the_label_the_algorithm_gave_it() {
+    Rig rig;
+    rig.patches.boot(0);
+    rig.send(SYSEX_PARAM_REQUEST, {ALGO_HARMONY});
+
+    const AlgorithmDescriptor* d = registry::find(ALGO_HARMONY);
+    size_t seen = 0, walked = 0;
+    for (const auto& s : rig.midi.sysex) {
+        if (s.bytes[3] != SYSEX_PARAM_DESC) continue;
+        const uint8_t g = s.bytes[6];
+        TEST_ASSERT_TRUE(g < d->n_param_groups);
+        const ParamGroup& grp = d->param_groups[g];
+
+        // Past the fixed head, the name, and the option names, to the label.
+        // 5 algorithm, 6 group, 7 group count, then four u14 indices, three
+        // u14 ranges and the kind.
+        size_t at = 8 + 2u * 4u + 2u * 3u + 1u;
+        at += 1u + s.bytes[at];                            // the parameter's name
+        const uint8_t options = s.bytes[at++];
+        for (uint8_t o = 0; o < options; o++) at += 1u + s.bytes[at];
+
+        const uint8_t n = s.bytes[at++];
+        char label[64];
+        TEST_ASSERT_TRUE(n < sizeof label);
+        for (uint8_t k = 0; k < n; k++) label[k] = (char)s.bytes[at + k];
+        label[n] = '\0';
+        at += n;
+        TEST_ASSERT_EQUAL_STRING(grp.label, label);
+        // And nothing after it: the label is the end of the record.
+        TEST_ASSERT_EQUAL(s.bytes.size() - 1u, at);
+        if (label[0] != '\0') walked++;
+        seen++;
+    }
+    TEST_ASSERT_EQUAL(d->n_params, seen);
+    TEST_ASSERT_EQUAL_MESSAGE(d->n_params, walked, "Harmony labels every group");
+
+    // An algorithm with nothing to say sends an empty one rather than a
+    // shorter record, so the shape never depends on what is in it.
+    rig.midi.clear();
+    rig.send(SYSEX_PARAM_REQUEST, {ALGO_METRONOME});
+    const AlgorithmDescriptor* m = registry::find(ALGO_METRONOME);
+    TEST_ASSERT_NULL_MESSAGE(m->param_groups[0].label, "this test needs an unlabelled algorithm");
+    for (const auto& s : rig.midi.sysex) {
+        if (s.bytes[3] != SYSEX_PARAM_DESC) continue;
+        TEST_ASSERT_EQUAL_MESSAGE(0, s.bytes[s.bytes.size() - 2u], "an empty label is a zero length");
+    }
+}
+
 // An algorithm with no parameters still answers. Sending nothing at all would
 // be indistinguishable from a module that has gone away, and a host walking
 // the registry to build its panels would stall on the first logic gate.
@@ -1098,6 +1152,7 @@ int main() {
     RUN_TEST(test_capabilities_report_the_real_limits);
     RUN_TEST(test_the_algorithm_dump_matches_the_registry);
     RUN_TEST(test_parameter_descriptors_are_reported_per_group);
+    RUN_TEST(test_a_group_carries_the_label_the_algorithm_gave_it);
     RUN_TEST(test_an_algorithm_with_no_parameters_still_answers);
     RUN_TEST(test_a_patch_round_trips_through_dump_and_load);
     RUN_TEST(test_a_truncated_transfer_leaves_the_active_patch_alone);

@@ -48,7 +48,11 @@ roll of what it read and wrote — in a panel that folds to its title bar and
 closes with its cross. Parameters are sorted onto the same sections on every
 node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in
 the firmware's order, so a hand that has found *root* on one card finds it in
-the same place on the next. Beside each control are two buttons, each opening a
+the same place on the next — unless the algorithm labels its own groups
+(`src/node/param.h`), which is how a node with several controls over one
+mechanism keeps them together rather than having them sorted apart by what
+their names sound like. A control the firmware is currently ignoring is dimmed
+and says why, rather than sweeping and changing nothing. Beside each control are two buttons, each opening a
 menu: **learn** arms a learn when a controller is listening and lists the CC
 numbers either way, and **CV** lists the control buses, with what writes each,
 and routes one onto it. Under the graph is the **mod matrix**: every binding
@@ -59,7 +63,10 @@ the note sequencers — and the step being played is outlined in the grid you
 are editing. `Harmony` gets the **circle of fifths**: the key's chords where
 the circle puts them, and either the moves the walk would make from one of
 them, each arrow weighted by how much it wants it, or the loop it has written
-down as a path through them.
+down as a path through them. Every note on it is spelled the way the key
+spells it — a seven-note scale uses each letter once, in order — because a
+chord called D♯ where E♭ belongs does not read as a spelling slip, it reads as
+the degree being wrong.
 
 **play** — the module running: the LEDs and gate buses, the clock, the jacks,
 an on-screen keyboard and CC sender, and two views that answer questions no

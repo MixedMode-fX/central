@@ -263,7 +263,18 @@ export class Device extends EventTarget {
         options.push(String.fromCharCode(...reply.subarray(at, at + length)));
         at += length;
       }
-      groups[groupIndex] ??= { first, repeat, nFields, fields: [] };
+      // What the algorithm calls this group, appended after the options and
+      // empty for the algorithms with no opinion. Read only if it is there:
+      // this field is newer than the message, and a module that predates it
+      // ends the record at the last option name.
+      const end = reply[reply.length - 1] === 0xf7 ? reply.length - 1 : reply.length;
+      let label = '';
+      if (at < end) {
+        const length = reply[at++];
+        label = String.fromCharCode(...reply.subarray(at, at + length));
+        at += length;
+      }
+      groups[groupIndex] ??= { first, repeat, nFields, label, fields: [] };
       groups[groupIndex].fields[fieldIndex] = { name, min, max, def, kind, options };
     }
     descriptor.params = groups;

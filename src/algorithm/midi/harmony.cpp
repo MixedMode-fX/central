@@ -24,14 +24,30 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"spread",   1, 100, Harmony::DEFAULT_SPREAD,  PARAM_PERCENT, nullptr},
     {"drift",    0, 100,                       0, PARAM_PERCENT, nullptr},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, Harmony::N_PARAMS, PARAMS}};
+// Three mechanisms, and the storage order interleaves them: the parameter
+// order is the preset format and cannot be rearranged, so the groups say what
+// belongs together and the editor puts the runs back in one place. Groups
+// carrying the same label are one section; the array's order is the order
+// they are shown in, which is why the walk leads.
+static const char* const WALK = "the walk";
+static const char* const FORM = "the form";
+static const char* const OUTPUT = "the output";
+static const ParamGroup GROUPS[7] = {
+    {Harmony::P_FIFTHS,  1, 4, &PARAMS[Harmony::P_FIFTHS],  WALK},   // fifths..spread
+    {Harmony::P_GRAVITY, 1, 1, &PARAMS[Harmony::P_GRAVITY], WALK},
+    {Harmony::P_SEED,    1, 1, &PARAMS[Harmony::P_SEED],    WALK},
+    {Harmony::P_PHRASE,  1, 2, &PARAMS[Harmony::P_PHRASE],  FORM},   // phrase, cadence
+    {Harmony::P_LOOP,    1, 1, &PARAMS[Harmony::P_LOOP],    FORM},
+    {Harmony::P_DRIFT,   1, 1, &PARAMS[Harmony::P_DRIFT],   FORM},
+    {Harmony::P_OCTAVE,  1, 3, &PARAMS[Harmony::P_OCTAVE],  OUTPUT}, // octave, velocity, channel
+};
 
 static const char* const IN_NAMES[2] = {"advance", "reset"};
 static const char* const OUT_NAMES[2] = {"root", "degree"};
 
 const AlgorithmDescriptor Harmony::descriptor = {
     ALGO_HARMONY, "Harmony", 2, 1, 2, Harmony::N_PARAMS, IN, OUT, sizeof(Harmony), false,
-    construct_node<Harmony>, GROUPS, 1, IN_NAMES, OUT_NAMES,
+    construct_node<Harmony>, GROUPS, 7, IN_NAMES, OUT_NAMES,
     "A chord progression in the module's key: weighs every move against the scale, plays the root.",
     CATEGORY_MIDI,
     true };   // reads_key: every pitch it plays comes from the key
@@ -206,17 +222,17 @@ uint8_t Harmony::likeliest_from(uint8_t from) const {
     return best;
 }
 
-uint8_t Harmony::choose(){
+uint8_t Harmony::choose(uint8_t from, uint8_t at){
     const uint8_t n = usable_degrees();
     if (n <= 1) return 0;
 
     // The cadence: the phrase's last chord resolves. This is the one thing
     // that turns a walk into a period, and it is checked before the weights
     // so that nothing about the walk can talk it out of a resolution.
-    if (position + 1u == phrase && rng.chance(cadence)) return 0;
+    if (at + 1u == phrase && rng.chance(cadence)) return 0;
 
     uint32_t weight[DEGREES];
-    weigh(current, weight);
+    weigh(from, weight);
     uint32_t total = 0;
     for (uint8_t j = 0; j < n; j++) total += weight[j];
     if (total == 0) return 0;
@@ -241,6 +257,38 @@ void Harmony::strike(BusManager& bus, uint8_t deg){
     // key, so release_all is the only release this node needs.
     sounding.emit(bus, note_out, 0, pitch, velocity, channel);
     started = true;
+}
+
+// A written loop is the piece, so a control that shapes the walk is a rewrite
+// of it - not a request to hear the old one again with new settings that
+// reach nothing. Before this, every control over the walk went quiet the
+// moment a loop was written out, and the only way to hear one again was to
+// set `loop` to zero and back: a length used as a button, which is the
+// clearest sign a control was missing.
+//
+// The new piece is walked from the chord that is sounding, so it follows on
+// from the music rather than cutting to something unrelated, and from the top
+// of a phrase, so its cadence lands on its last chord rather than wherever
+// the old one happened to be. Playback restarts at slot 0 for the same
+// reason: what has just been written is a piece, and a piece is heard from
+// the beginning.
+//
+// It is written in full rather than re-captured one chord per advance,
+// because a chord here is a bar: re-capturing a loop of four would take four
+// bars to say what a knob said instantly, which is the complaint this
+// answers.
+void Harmony::recompose(){
+    if (!loop) return;
+    uint8_t from = started ? current : 0;
+    uint8_t at = 0;
+    for (uint8_t i = 0; i < loop; i++){
+        from = choose(from, at);
+        written[i] = from;
+        at = (uint8_t)((at + 1u) % phrase);
+    }
+    recorded = loop;
+    loop_pos = 0;
+    position = 0;
 }
 
 void Harmony::restart(){
@@ -273,13 +321,13 @@ void Harmony::process(BusManager& bus, uint32_t){
             // on. A loop with a few percent of drift is a piece that is
             // recognisably itself and never quite the same twice.
             if (drift && rng.chance(drift)){
-                deg = choose();
+                deg = choose(current, position);
                 written[loop_pos] = deg;
             }
         } else if (at_first){
             deg = 0;                               // the first advance is the tonic
         } else {
-            deg = choose();
+            deg = choose(current, position);
         }
         at_first = false;
 
@@ -332,18 +380,34 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
             if (value < 2 || value > MAX_PHRASE) return false;
             if (value == phrase) return true;
             // The phrase is how often the music resolves and the loop is how
-            // much of it repeats, so moving one does not throw the other
-            // away: a written loop survives a change of cadence period.
+            // much of it repeats: two different lengths, and moving one does
+            // not resize the other. It does rewrite it, because where the
+            // cadences fall inside a loop is part of what the loop *is*.
             phrase = value;
             if (position >= phrase) position = 0;
+            recompose();
             return true;
-        case P_CADENCE: if (value > 100) return false; cadence = value; return true;
-        case P_GRAVITY: if (value > 100) return false; gravity = value; return true;
+        case P_CADENCE:
+            if (value > 100) return false;
+            if (value == cadence) return true;
+            cadence = value;
+            recompose();
+            return true;
+        case P_GRAVITY:
+            if (value > 100) return false;
+            if (value == gravity) return true;
+            gravity = value;
+            recompose();
+            return true;
         case P_LOOP:
             if (value > MAX_PHRASE) return false;
             if (value == loop) return true;
-            // A loop of a different length is a different piece, so it is
-            // written again from the next top of a phrase. 0 walks on.
+            // A loop of a different length is a different piece. Setting one
+            // does not write it: what a loop holds is what the walk played,
+            // so it is captured from the next top of a phrase, one chord per
+            // advance, and the empty slots filling up are the module saying
+            // so. `recompose` is for the controls that rewrite a piece that
+            // already exists. 0 walks on.
             loop = value;
             recorded = 0;
             loop_pos = 0;
@@ -351,14 +415,57 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
         case P_OCTAVE: if (value > KEY_MAX_OCTAVE) return false; octave = value; return true;
         case P_VELOCITY: if (value == 0 || value > 127) return false; velocity = value; return true;
         case P_CHANNEL: if (value == 0 || value > 16) return false; channel = value; return true;
-        case P_SEED: seed = value; return true;
-        // The walk. None of them re-derives anything: the weights are
-        // computed on the next advance, from whatever these say by then, so a
-        // knob sweep costs nothing until a chord is due.
-        case P_FIFTHS:  if (value > 100) return false; fifths = value ? value : DEFAULT_FIFTHS; return true;
-        case P_SMOOTH:  if (value > 100) return false; smooth = value; return true;
-        case P_LEADING: if (value > 100) return false; leading = value ? value : DEFAULT_LEADING; return true;
-        case P_SPREAD:  if (value > 100) return false; spread = value ? value : DEFAULT_SPREAD; return true;
+        case P_SEED:
+            if (value == seed) return true;
+            seed = value;
+            // The seed has to reach the generator. Storing the byte and
+            // seeding only in the constructor made this the one control that
+            // did nothing whatever until the patch was loaded again - and the
+            // one control whose whole purpose is to make a walk repeatable.
+            // 0 is "draw from the pool", the same as it means at construction.
+            rng.reseed(value ? (uint32_t)(value * 2654435761u) : entropy::seed());
+            recompose();
+            return true;
+        // The walk. Each rewrites a running loop and nothing else: the
+        // weights themselves are computed on the next advance, from whatever
+        // these say by then, so a knob sweep on a node with no loop costs
+        // nothing until a chord is due.
+        case P_FIFTHS: {
+            if (value > 100) return false;
+            // Compared against the value it will *become*, not the byte
+            // that arrived: zero is the descriptor's default here as
+            // everywhere, so writing zero over a parameter already sitting at
+            // its default is not a change and must not rewrite the loop.
+            const uint8_t want = value ? value : DEFAULT_FIFTHS;
+            if (want == fifths) return true;
+            fifths = want;
+            recompose();
+            return true;
+        }
+        case P_SMOOTH:
+            if (value > 100) return false;
+            if (value == smooth) return true;
+            smooth = value;
+            recompose();
+            return true;
+        case P_LEADING: {
+            if (value > 100) return false;
+            const uint8_t want = value ? value : DEFAULT_LEADING;
+            if (want == leading) return true;
+            leading = want;
+            recompose();
+            return true;
+        }
+        case P_SPREAD: {
+            if (value > 100) return false;
+            const uint8_t want = value ? value : DEFAULT_SPREAD;
+            if (want == spread) return true;
+            spread = want;
+            recompose();
+            return true;
+        }
+        // Not the walk: drift says how often a loop is redrawn, not what the
+        // redraw produces, so moving it is not a rewrite of the piece.
         case P_DRIFT:   if (value > 100) return false; drift = value; return true;
         default: return false;
     }

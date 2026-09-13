@@ -339,6 +339,13 @@
   .param-value.dom-CV { color: var(--cv); }
   .param-menu-item.chosen .param-menu-name { color: var(--cv); }
   .param-menu-item.danger { color: var(--bad); }
+  /* A control the firmware is currently ignoring: dimmed, and captioned with
+     the reason. Not disabled - the setting is real, it is stored, and it will
+     do something again the moment the key or the patch says so, so a control
+     the page refuses to let you touch would be a worse lie than one that does
+     nothing. The name keeps full contrast: it is how you find the row. */
+  .param.inert .param-controls, .param.inert .param-value { opacity: .5; }
+  .param-inert { color: var(--dim); font-size: .75rem; margin-top: .25rem; font-style: italic; }
   /* The sections a card's parameters are sorted into: one question each,
      in the same order on every node. */
   .param-sections { display: grid; gap: .7rem; }

@@ -223,7 +223,10 @@ is only what a parameter list cannot say.
   that many chords become the piece, repeated until it is set back to zero —
   the phrase is how often the music resolves and the loop is how much of it
   repeats, so the two are set apart. `gravity` biases the tonic, `drift`
-  redraws one chord of a loop and keeps it.
+  redraws one chord of a loop and keeps it. Every control over the walk
+  **rewrites a running loop where it stands**, so a knob is heard on the next
+  chord rather than after the loop has been switched off and on; `seed`
+  re-seeds it, which is what makes one seed one progression.
   The walk runs over the first seven degrees, or all of them in a smaller
   scale.
 - **`Automaton`'s lanes are neighbours.** A Wolfram elementary rule,

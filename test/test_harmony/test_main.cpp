@@ -602,24 +602,177 @@ static void test_a_loop_length_the_node_has_not_got_is_refused() {
 }
 
 // The phrase is how often the music resolves and the loop is how much of it
-// repeats, so moving the one does not throw the other away.
-static void test_moving_the_phrase_keeps_the_loop() {
+// repeats: two different lengths, so moving the one does not resize the
+// other. It does rewrite it - where the cadences fall inside a loop is part
+// of what the loop is - and what comes back is still a written loop of the
+// same length, playing exactly.
+static void test_moving_the_phrase_rewrites_the_loop_at_its_own_length() {
     BusManager bus;
     NodeConfig c = harmony_config(4, 1, 0, 31);
     c.params[Harmony::P_LOOP] = 4;
     Harmony node(c);
     uint32_t now = 0;
 
-    uint8_t loop[4];
-    for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
+    for (uint8_t i = 0; i < 4; i++) advance(node, bus, now);
     TEST_ASSERT_TRUE(node.set_param(Harmony::P_PHRASE, 8));
-    TEST_ASSERT_EQUAL_UINT8(4, node.recorded_chords());
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, node.recorded_chords(), "the loop was resized by the phrase");
+
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++) loop[i] = node.loop_chord(i);
     for (uint8_t round = 0; round < 4; round++){
         for (uint8_t i = 0; i < 4; i++){
             advance(node, bus, now);
-            TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[i], node.degree(), "a written loop was thrown away");
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[i], node.degree(), "the rewritten loop did not repeat");
         }
     }
+}
+
+// **The complaint this answers.** A written loop is the piece, and every
+// control over the walk used to reach nothing at all while one was playing:
+// the only way to hear another progression was to set `loop` to zero and back
+// - a length used as a button. Moving one now writes a new piece on the spot.
+static void test_a_walk_control_rewrites_a_running_loop() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 91, 20);
+    c.params[Harmony::P_LOOP] = 8;
+    c.params[Harmony::P_FIFTHS] = 95;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    for (uint8_t i = 0; i < 8; i++) advance(node, bus, now);
+    uint8_t before[8];
+    for (uint8_t i = 0; i < 8; i++) before[i] = node.loop_chord(i);
+    advance(node, bus, now);
+    advance(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(2, node.loop_position());
+
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_FIFTHS, 5));
+
+    // Written, all of it, now - not a slot at a time over the next eight bars.
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(8, node.recorded_chords(), "the loop is being captured again");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, node.loop_position(), "a new piece is heard from the top");
+    uint8_t after[8];
+    uint8_t same = 0;
+    for (uint8_t i = 0; i < 8; i++){
+        after[i] = node.loop_chord(i);
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(0xFF, after[i], "a slot was left unwritten");
+        if (after[i] == before[i]) same++;
+    }
+    TEST_ASSERT_LESS_THAN_UINT8_MESSAGE(8, same, "the loop did not change at all");
+
+    // And it is a loop again: what was written is what plays, exactly.
+    for (uint8_t round = 0; round < 3; round++){
+        for (uint8_t i = 0; i < 8; i++){
+            advance(node, bus, now);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(after[i], node.degree(), "the new loop did not repeat");
+        }
+    }
+}
+
+// A write that changes nothing rewrites nothing. The modulation matrix writes
+// one value per route per pass for ever (control/mod_matrix.h), and a loop
+// redrawn on every pass by a knob nobody moved is not a loop.
+static void test_setting_a_walk_control_to_what_it_already_is_keeps_the_loop() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 17, 25);
+    c.params[Harmony::P_LOOP] = 4;
+    c.params[Harmony::P_FIFTHS] = 80;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    for (uint8_t i = 0; i < 4; i++) advance(node, bus, now);
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++) loop[i] = node.loop_chord(i);
+
+    for (uint8_t i = 0; i < 20; i++){
+        TEST_ASSERT_TRUE(node.set_param(Harmony::P_FIFTHS, 80));
+        TEST_ASSERT_TRUE(node.set_param(Harmony::P_SPREAD, 25));
+        TEST_ASSERT_TRUE(node.set_param(Harmony::P_GRAVITY, 0));
+    }
+    for (uint8_t i = 0; i < 4; i++){
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[i], node.loop_chord(i), "an unchanged value rewrote the loop");
+    }
+
+    // And a stored zero is the descriptor's default, so writing zero over a
+    // control already sitting at its default is not a change either.
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_FIFTHS, 0));
+    node.set_param(Harmony::P_FIFTHS, Harmony::DEFAULT_FIFTHS);
+    for (uint8_t i = 0; i < 4; i++) loop[i] = node.loop_chord(i);
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_FIFTHS, 0));
+    for (uint8_t i = 0; i < 4; i++){
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[i], node.loop_chord(i), "zero-means-default rewrote the loop");
+    }
+}
+
+// `drift` says how often a loop is redrawn, not what a redraw produces, so
+// moving it is not a rewrite of the piece.
+static void test_drift_does_not_rewrite_the_loop() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 53, 30);
+    c.params[Harmony::P_LOOP] = 4;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    for (uint8_t i = 0; i < 4; i++) advance(node, bus, now);
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++) loop[i] = node.loop_chord(i);
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_DRIFT, 40));
+    for (uint8_t i = 0; i < 4; i++){
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[i], node.loop_chord(i), "drift rewrote the piece");
+    }
+}
+
+// With nothing written down there is no piece to rewrite, and the walk goes
+// on from where it was: a control moved on a node with no loop changes what
+// the *next* chord is drawn from and nothing else.
+static void test_a_walk_control_with_no_loop_disturbs_nothing() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 61);
+    Harmony node(c);
+    uint32_t now = 0;
+
+    for (uint8_t i = 0; i < 6; i++) advance(node, bus, now);
+    const uint8_t was = node.degree();
+    const uint8_t at = node.phrase_position();
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_SMOOTH, 90));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(was, node.degree(), "the sounding chord changed");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(at, node.phrase_position(), "the phrase was restarted");
+    TEST_ASSERT_EQUAL_UINT8(0xFF, node.loop_position());
+}
+
+// The seed's whole purpose is to make a walk repeatable, and it used to be
+// the one control that did nothing whatever until the patch was loaded again:
+// `set_param` stored the byte and the generator was only ever seeded in the
+// constructor. Setting it now reaches the generator, so two nodes told the
+// same seed play the same thing from there on.
+static void test_setting_the_seed_reseeds_the_walk() {
+    BusManager bus_a, bus_b;
+    NodeConfig c = harmony_config(4, 1, 0, 7);
+    Harmony a(c), b(c);
+    uint32_t now_a = 0, now_b = 0;
+
+    // Walked to different places first, so agreeing afterwards can only be
+    // the re-seed and not the shared history.
+    for (uint8_t i = 0; i < 3; i++) advance(a, bus_a, now_a);
+    for (uint8_t i = 0; i < 11; i++) advance(b, bus_b, now_b);
+
+    TEST_ASSERT_TRUE(a.set_param(Harmony::P_SEED, 200));
+    TEST_ASSERT_TRUE(b.set_param(Harmony::P_SEED, 200));
+    for (uint8_t i = 0; i < 24; i++){
+        advance(a, bus_a, now_a);
+        advance(b, bus_b, now_b);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(a.degree(), b.degree(), "one seed, two progressions");
+    }
+
+    // And a different seed is a different walk, or the control is still inert.
+    TEST_ASSERT_TRUE(b.set_param(Harmony::P_SEED, 201));
+    uint8_t differed = 0;
+    for (uint8_t i = 0; i < 32; i++){
+        advance(a, bus_a, now_a);
+        advance(b, bus_b, now_b);
+        if (a.degree() != b.degree()) differed++;
+    }
+    TEST_ASSERT_GREATER_THAN_UINT8_MESSAGE(0, differed, "the seed changed nothing");
 }
 
 // A written loop is the piece, so a reset asks to hear it from the top rather
@@ -863,7 +1016,12 @@ int main(int, char**) {
     RUN_TEST(test_a_loop_is_as_long_as_it_is_told);
     RUN_TEST(test_a_loop_shorter_than_the_phrase_comes_round_on_its_own_length);
     RUN_TEST(test_a_loop_length_the_node_has_not_got_is_refused);
-    RUN_TEST(test_moving_the_phrase_keeps_the_loop);
+    RUN_TEST(test_moving_the_phrase_rewrites_the_loop_at_its_own_length);
+    RUN_TEST(test_a_walk_control_rewrites_a_running_loop);
+    RUN_TEST(test_setting_a_walk_control_to_what_it_already_is_keeps_the_loop);
+    RUN_TEST(test_drift_does_not_rewrite_the_loop);
+    RUN_TEST(test_a_walk_control_with_no_loop_disturbs_nothing);
+    RUN_TEST(test_setting_the_seed_reseeds_the_walk);
     RUN_TEST(test_reset_plays_the_loop_from_its_first_chord);
     RUN_TEST(test_reset_catches_a_half_written_loop_again);
     RUN_TEST(test_switching_loop_on_waits_for_the_top_of_a_phrase);

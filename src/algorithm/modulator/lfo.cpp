@@ -4,9 +4,6 @@
 static const Domain IN[1] = {Domain::Gate};
 static const Domain OUT[1] = {Domain::CV};
 
-static const char* const SHAPE_NAMES[Lfo::LFO_SHAPES] = {
-    "sine", "triangle", "ramp up", "ramp down", "square", "random step", "random glide",
-};
 static const char* const SYNC_NAMES[Lfo::LFO_SYNCS] = {"free", "clock"};
 static const char* const POLARITY_NAMES[Lfo::LFO_POLARITIES] = {"bipolar", "unipolar"};
 
@@ -14,7 +11,7 @@ static const char* const POLARITY_NAMES[Lfo::LFO_POLARITIES] = {"bipolar", "unip
 // and the fast end - 25.5 Hz, past where a modulation stops being heard as
 // modulation - both fit one byte with useful steps in between.
 static const ParamDescriptor PARAMS[9] = {
-    {"shape",    Lfo::LFO_SINE,   Lfo::LFO_SHAPES, Lfo::LFO_SINE,    PARAM_ENUM,    SHAPE_NAMES},
+    {"shape",    Lfo::LFO_SINE,   Lfo::LFO_SHAPES, Lfo::LFO_SINE,    PARAM_ENUM,    CV_SHAPE_NAMES},
     {"sync",     Lfo::LFO_FREE,   Lfo::LFO_SYNCS,  Lfo::LFO_FREE,    PARAM_ENUM,    SYNC_NAMES},
     {"rate",     1, 255, 20, PARAM_NUMBER,  nullptr},
     {"division", DIV_8_BARS,    DIVISIONS, DIV_BAR,       PARAM_ENUM, DIVISION_NAMES},
@@ -51,31 +48,6 @@ const AlgorithmDescriptor Lfo::descriptor = {
     GROUPS, 4, IN_NAMES, OUT_NAMES,
     "A modulation source on a control bus: seven shapes, free-running or locked to the clock.",
     CATEGORY_MODULATOR };
-
-// A quarter of a sine, 65 points at twelve bits, interpolated between. The
-// other three quarters are this one reflected, so the table is 130 bytes and
-// there is no floating point anywhere in the signal path.
-static const uint16_t SINE_QUARTER[65] = {
-       0,  100,  201,  301,  401,  501,  601,  700,
-     799,  897,  995, 1092, 1189, 1285, 1380, 1474,
-    1567, 1659, 1751, 1841, 1930, 2018, 2105, 2191,
-    2275, 2358, 2439, 2519, 2598, 2675, 2750, 2824,
-    2896, 2966, 3034, 3101, 3165, 3228, 3289, 3348,
-    3405, 3460, 3512, 3563, 3611, 3658, 3702, 3744,
-    3783, 3821, 3856, 3888, 3919, 3947, 3972, 3996,
-    4016, 4035, 4051, 4064, 4075, 4084, 4090, 4094,
-    4095,
-};
-
-// sin(x * pi/2 / 1024) at twelve bits, for x in 0 .. 1024.
-static uint16_t sine_quarter(uint32_t x){
-    if (x >= 1024u) return SINE_QUARTER[64];
-    const uint32_t index = x >> 4;
-    const uint32_t frac = x & 15u;
-    const uint32_t a = SINE_QUARTER[index];
-    const uint32_t b = SINE_QUARTER[index + 1];
-    return (uint16_t)(a + ((b - a) * frac) / 16u);
-}
 
 static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
     if (stored == 0 || stored > max_value) return fallback;
@@ -128,52 +100,6 @@ void Lfo::draw(){
     random_to = (uint16_t)(rng.next() & CV_MAX);
 }
 
-uint16_t Lfo::shape_at(uint16_t p) const {
-    switch (shape){
-        case LFO_TRIANGLE:
-            // Bottom at the start of the cycle, top at the half, which is how
-            // a triangle is drawn on every module that has one.
-            return p < CV_HALF ? (uint16_t)(p * 2u)
-                               : (uint16_t)(CV_FULL * 2u - 1u - (uint32_t)p * 2u);
-        case LFO_RAMP_UP:
-            return p;
-        case LFO_RAMP_DOWN:
-            return (uint16_t)(CV_MAX - p);
-        case LFO_SQUARE:
-            return p < CV_HALF ? (uint16_t)CV_MAX : (uint16_t)0;
-        case LFO_RANDOM_STEP:
-            return random_to;
-        case LFO_RANDOM_GLIDE:
-            return (uint16_t)((int32_t)random_from
-                 + ((int32_t)random_to - (int32_t)random_from) * (int32_t)p / CV_FULL);
-        default: {
-            // Sine, from the quarter table. Starts at the centre going up, so
-            // a bipolar sine leaves zero rising - the shape a musician draws
-            // when they say "sine".
-            const uint32_t quarter = (uint32_t)p >> 10;
-            const uint32_t within = (uint32_t)p & 0x3FFu;
-            int32_t s;
-            switch (quarter){
-                case 0:  s =  (int32_t)sine_quarter(within); break;
-                case 1:  s =  (int32_t)sine_quarter(1024u - within); break;
-                case 2:  s = -(int32_t)sine_quarter(within); break;
-                default: s = -(int32_t)sine_quarter(1024u - within); break;
-            }
-            return (uint16_t)((s + CV_FULL) >> 1);
-        }
-    }
-}
-
-int16_t Lfo::scaled(uint16_t raw) const {
-    // The offset is a signed byte read as a fraction of half of full scale,
-    // so it can move a bipolar shape from one rail to the other.
-    const int32_t offset = (int32_t)(int8_t)offset_param * CV_HALF / 128;
-    if (polarity == LFO_UNIPOLAR){
-        return (int16_t)cv_clamp_unipolar((int32_t)raw * depth / 255 + offset);
-    }
-    return (int16_t)cv_clamp_bipolar(((int32_t)raw - CV_HALF) * depth / 255 + offset);
-}
-
 void Lfo::restart(){
     free_acc = 0;
     sync_origin = last_count;
@@ -205,7 +131,8 @@ void Lfo::process(BusManager& bus, uint32_t now_us){
     // Written once per pass, whichever mode produced the phase. Twice would
     // not be a mistake the bus hides: CV fan-in is a sum, so a second write
     // would double the modulation.
-    last_value = scaled(shape_at(cycle_phase));
+    last_value = cv_shape_scaled(cv_shape_at(shape, cycle_phase, random_from, random_to),
+                                 depth, offset_param, polarity == LFO_UNIPOLAR);
     bus.cv_write(out, last_value);
 }
 

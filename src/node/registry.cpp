@@ -19,6 +19,7 @@
 #include "algorithm/modulator/lfo.h"
 #include "algorithm/modulator/sample_hold.h"
 #include "algorithm/modulator/slew.h"
+#include "algorithm/modulator/step_mod.h"
 #include "algorithm/midi/cv_to_note.h"
 #include "algorithm/util/cv_to_gate.h"
 #include "algorithm/modulator/turing.h"
@@ -81,6 +82,7 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &Key::descriptor,
     &Retrigger::descriptor,
     &Transport::descriptor,
+    &StepMod::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

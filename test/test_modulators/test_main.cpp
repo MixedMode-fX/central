@@ -18,6 +18,7 @@
 #include "algorithm/modulator/lfo.h"
 #include "algorithm/modulator/sample_hold.h"
 #include "algorithm/modulator/slew.h"
+#include "algorithm/modulator/step_mod.h"
 #include "algorithm/clock/clock_div.h"
 
 static size_t g_allocations = 0;
@@ -437,6 +438,207 @@ static void test_steps_quantise_the_held_level_and_requantise_on_edit() {
     // it came from - not on the quantised value, which would compound.
     TEST_ASSERT_TRUE(node.set_param(2, 0));
     TEST_ASSERT_EQUAL_INT16(3000, node.value());
+}
+
+// ---------------------------------------------------------------------------
+// StepMod
+// ---------------------------------------------------------------------------
+
+static NodeConfig step_config(uint8_t shape, uint8_t steps, uint8_t direction,
+                              uint8_t polarity, bool with_reset){
+    NodeConfig c = node_config(ALGO_STEP_MOD);
+    c.in_bus[0] = 0;                                      // trigger, gate bus 0
+    if (with_reset) c.in_bus[1] = 1;                      // reset, gate bus 1
+    c.out_bus[0] = 2;
+    c.params[0] = shape;
+    c.params[1] = steps;
+    c.params[2] = direction;
+    c.params[5] = polarity;
+    return c;
+}
+
+// One pass with the two inlets held at these levels.
+static int16_t run_step(StepMod& node, BusManager& bus, bool trigger, bool reset){
+    bus.gate_write(0, trigger);
+    bus.gate_write(1, reset);
+    bus.swap();
+    node.process(bus, 0);
+    bus.swap();
+    return bus.cv_read(2);
+}
+
+// A whole trigger - up, then down again so the next one is an edge - and the
+// level it moved to.
+static int16_t trig(StepMod& node, BusManager& bus){
+    const int16_t v = run_step(node, bus, true, false);
+    run_step(node, bus, false, false);
+    return v;
+}
+
+static void test_a_step_reads_the_centre_of_its_slice_of_the_shape() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RAMP_UP, 4, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_UNIPOLAR, false);
+    StepMod node(c);
+    // Four steps of a ramp are 12.5, 37.5, 62.5 and 87.5 percent of full
+    // scale. Reading the *start* of each slice would put the first step on
+    // the bottom rail and leave the last one an eighth short of the top.
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16(3 * CV_FULL / 8, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16(5 * CV_FULL / 8, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16(7 * CV_FULL / 8, trig(node, bus));
+    // A period is a number of triggers, so the fifth is the first again.
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, trig(node, bus));
+    TEST_ASSERT_EQUAL_UINT32(5, node.triggers());
+}
+
+static void test_a_bipolar_shape_is_centred_on_zero() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RAMP_UP, 4, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_BIPOLAR, false);
+    StepMod node(c);
+    // The same four centres, read around zero - and symmetric about it,
+    // which is the other half of what sampling centres buys.
+    TEST_ASSERT_EQUAL_INT16(-3 * CV_FULL / 8, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16(-1 * CV_FULL / 8, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16( 1 * CV_FULL / 8, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16( 3 * CV_FULL / 8, trig(node, bus));
+}
+
+static void test_the_level_holds_between_triggers() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RAMP_UP, 4, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_UNIPOLAR, false);
+    StepMod node(c);
+    // Before anything has clocked it, the level of step zero - not silence,
+    // because a CV bus has a value every pass either way.
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, node.value());
+    TEST_ASSERT_EQUAL_UINT32(0, node.triggers());
+
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, trig(node, bus));
+    for (uint8_t i = 0; i < 20; i++){
+        TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, run_step(node, bus, false, false));
+    }
+    // A gate that stays up is one trigger, not one per pass: it is the edge
+    // that moves the step.
+    run_step(node, bus, true, false);
+    run_step(node, bus, true, false);
+    run_step(node, bus, true, false);
+    TEST_ASSERT_EQUAL_INT16(3 * CV_FULL / 8, node.value());
+    TEST_ASSERT_EQUAL_UINT32(2, node.triggers());
+}
+
+static void test_direction_walks_the_steps_backwards_and_bounces() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RAMP_UP, 4, StepEngine::SEQ_REVERSE,
+                               StepMod::STEP_UNIPOLAR, false);
+    StepMod back(c);
+    TEST_ASSERT_EQUAL_INT16(7 * CV_FULL / 8, trig(back, bus));
+    TEST_ASSERT_EQUAL_INT16(5 * CV_FULL / 8, trig(back, bus));
+    TEST_ASSERT_EQUAL_INT16(3 * CV_FULL / 8, trig(back, bus));
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, trig(back, bus));
+    TEST_ASSERT_EQUAL_INT16(7 * CV_FULL / 8, trig(back, bus));
+
+    // The step engine's own rule, which is the point of sharing it: the
+    // endpoints are not repeated.
+    BusManager pbus;
+    NodeConfig pc = step_config(CV_SHAPE_TRIANGLE, 4, StepEngine::SEQ_PINGPONG,
+                                StepMod::STEP_UNIPOLAR, false);
+    StepMod bounce(pc);
+    static const uint8_t WANT[8] = {0, 1, 2, 3, 2, 1, 0, 1};
+    for (uint8_t i = 0; i < 8; i++){
+        trig(bounce, pbus);
+        TEST_ASSERT_EQUAL_UINT8(WANT[i], bounce.step());
+    }
+}
+
+static void test_reset_sends_the_next_trigger_to_the_first_step() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RAMP_UP, 4, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_UNIPOLAR, true);
+    StepMod node(c);
+    trig(node, bus);
+    trig(node, bus);
+    TEST_ASSERT_EQUAL_INT16(5 * CV_FULL / 8, trig(node, bus));
+
+    // Reset alone moves no level: a step is a trigger, and reset means what
+    // it means in every sequencer - the *next* one plays the first step.
+    run_step(node, bus, false, true);
+    TEST_ASSERT_EQUAL_INT16(5 * CV_FULL / 8, node.value());
+    run_step(node, bus, false, false);
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, trig(node, bus));
+}
+
+static void test_steps_cut_the_shape_finer_and_the_edit_is_heard_at_once() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RAMP_UP, 2, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_UNIPOLAR, false);
+    StepMod node(c);
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 4, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16(3 * CV_FULL / 4, trig(node, bus));
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 4, trig(node, bus));
+
+    // Sixteen steps: the step being held re-reads the shape at its new place
+    // straight away rather than waiting for the next trigger (#20).
+    TEST_ASSERT_TRUE(node.set_param(1, 16));
+    TEST_ASSERT_EQUAL_UINT8(16, node.steps());
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 32, node.value());
+}
+
+static void test_depth_and_offset_move_the_level_already_held() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RAMP_UP, 4, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_UNIPOLAR, false);
+    StepMod node(c);
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, trig(node, bus));
+    // Half depth, from the shape rather than from the scaled level, so
+    // coarsening and refining does not compound.
+    TEST_ASSERT_TRUE(node.set_param(3, 128));
+    TEST_ASSERT_EQUAL_INT16(512 * 128 / 255, node.value());
+    TEST_ASSERT_TRUE(node.set_param(3, 255));
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8, node.value());
+    // The offset is a signed byte as a fraction of half of full scale.
+    TEST_ASSERT_TRUE(node.set_param(4, 10));
+    TEST_ASSERT_EQUAL_INT16(1 * CV_FULL / 8 + 10 * CV_HALF / 128, node.value());
+}
+
+static void test_random_step_draws_a_level_on_every_trigger() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RANDOM_STEP, 4, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_UNIPOLAR, false);
+    StepMod node(c);
+    int16_t seen[16];
+    for (uint8_t i = 0; i < 16; i++){
+        seen[i] = trig(node, bus);
+        TEST_ASSERT_TRUE(seen[i] >= 0 && seen[i] <= CV_MAX);
+    }
+    // A shape repeats every period; this does not, because it draws per
+    // trigger rather than per period.
+    uint8_t distinct = 0;
+    for (uint8_t i = 0; i < 16; i++){
+        bool first = true;
+        for (uint8_t j = 0; j < i; j++) if (seen[j] == seen[i]) first = false;
+        if (first) distinct++;
+    }
+    TEST_ASSERT_TRUE(distinct >= 8);
+}
+
+static void test_random_glide_steps_between_two_levels_over_one_period() {
+    BusManager bus;
+    NodeConfig c = step_config(CV_SHAPE_RANDOM_GLIDE, 4, StepEngine::SEQ_FORWARD,
+                               StepMod::STEP_UNIPOLAR, false);
+    StepMod node(c);
+    for (uint8_t period = 0; period < 8; period++){
+        int16_t v[4];
+        for (uint8_t i = 0; i < 4; i++) v[i] = trig(node, bus);
+        // One target per period, stepped towards from the last one, so
+        // inside a period the levels only ever go one way.
+        const bool up = v[3] >= v[0];
+        for (uint8_t i = 1; i < 4; i++){
+            if (up) TEST_ASSERT_TRUE(v[i] >= v[i - 1]);
+            else    TEST_ASSERT_TRUE(v[i] <= v[i - 1]);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1039,6 +1241,16 @@ int main() {
     RUN_TEST(test_track_and_hold_follows_while_the_gate_is_up);
     RUN_TEST(test_an_unpatched_signal_inlet_samples_noise);
     RUN_TEST(test_steps_quantise_the_held_level_and_requantise_on_edit);
+
+    RUN_TEST(test_a_step_reads_the_centre_of_its_slice_of_the_shape);
+    RUN_TEST(test_a_bipolar_shape_is_centred_on_zero);
+    RUN_TEST(test_the_level_holds_between_triggers);
+    RUN_TEST(test_direction_walks_the_steps_backwards_and_bounces);
+    RUN_TEST(test_reset_sends_the_next_trigger_to_the_first_step);
+    RUN_TEST(test_steps_cut_the_shape_finer_and_the_edit_is_heard_at_once);
+    RUN_TEST(test_depth_and_offset_move_the_level_already_held);
+    RUN_TEST(test_random_step_draws_a_level_on_every_trigger);
+    RUN_TEST(test_random_glide_steps_between_two_levels_over_one_period);
 
     RUN_TEST(test_slew_takes_the_first_reading_whole);
     RUN_TEST(test_slew_takes_its_time_and_arrives);

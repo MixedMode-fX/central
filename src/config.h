@@ -32,7 +32,7 @@
 // (#13, #14): a 32-step grid of velocities plus the note-off ledger. Every
 // node class checks itself against it with a static_assert, so raising
 // MAX_SEQUENCE_LEN or NOTE_SEQ_VOICES fails here at compile time rather than
-// on the module. 44 x 640 bytes is 27 KB against 1 MB of RAM.
+// on the module. 45 x 640 bytes is 28 KB against 1 MB of RAM.
 //
 // **The pool is never smaller than the algorithm table.** A patch that could
 // not hold one of every algorithm is a patch a user can be refused for a
@@ -45,15 +45,15 @@
 //
 // The ceiling is not RAM, it is the NRPN address space: node parameters
 // occupy N_NODE x N_PARAM of the fourteen bits an NRPN address has, and the
-// clock, transport and key blocks sit above them (control/nrpn.h). 44 x 336
-// is 14784 and leaves 1552 addresses reserved; 48 would leave 208, which is
-// not enough room to add anything. So 44 is most of what the layout has left,
+// clock, transport and key blocks sit above them (control/nrpn.h). 45 x 336
+// is 15120 and leaves 1216 addresses reserved; 48 would leave 208, which is
+// not enough room to add anything. So 45 is most of what the layout has left,
 // and the next rise is a decision about that address space rather than about
 // memory: N_PARAM has to come down, or the space has to be paged.
 //
 // Raising this moves the NRPN bases, and the protocol version moves with
 // them. control/nrpn.cpp asserts the two agree.
-#define N_NODE 44
+#define N_NODE 45
 #define NODE_SLOT_SIZE 640
 
 // Per-node connection limits (NodeConfig is also the preset format).

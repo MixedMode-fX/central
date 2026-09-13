@@ -156,7 +156,7 @@ touched.
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
 | Utility | `GateHold` |
-| Modulators | `LFO`, `SampleHold`, `Slew`, `Turing` |
+| Modulators | `LFO`, `StepMod`, `SampleHold`, `Slew`, `Turing` |
 | Rhythm | `Automaton` |
 
 Every algorithm reports its own name, summary, category, port names, parameter
@@ -206,6 +206,16 @@ is only what a parameter list cannot say.
   on subtick zero rather than on construction, and changing its rate re-derives
   the period without moving the phase. `Slew` rates are **per full scale**, so
   two different step sizes glide at the same speed.
+- **`StepMod` is a shape with no rate**: each trigger moves one step and a
+  period is `steps` of them, so what clocks it decides how fast it runs and the
+  modulation is locked to the rhythm by construction. A step reads the
+  **centre** of its slice of the shape, which keeps four steps of a ramp off
+  both rails and a triangle symmetric walked either way. It shares
+  `StepEngine` with the sequencers, so its `direction` means what theirs does,
+  and it shares one shape table with `Lfo`
+  (`src/algorithm/modulator/shape.h`), so a shape name is the same curve in
+  both. Only the random shapes differ between them, and deliberately: here
+  `random step` draws on every trigger and `random glide` once a period.
 - **`CvToNote` and `CvToGate` are the doors from the CV bus into the musical
   domains**, and `MidiToCV` is the inverse, which makes the CV bus a round
   trip. `CvToNote` is not `NoteQuantise`: it takes a *level*, with no events at
@@ -527,12 +537,12 @@ inside a node it is CC or NRPN.**
 | SysEx | arbitrary length | structure, patterns, bulk, enumeration |
 
 ```
-0x0000 .. 0x39BF   a node's parameter: node = address / N_PARAM,
+0x0000 .. 0x3B0F   a node's parameter: node = address / N_PARAM,
                                        param = address % N_PARAM
-0x39C0 .. 0x39CF   the master clock (tempo, source, CV PPQN)
-0x39D0 .. 0x39DF   the transport (start, stop, continue, tap)
-0x39E0 .. 0x39EF   the key (root, scale, register)
-0x39F0 .. 0x3FFF   reserved
+0x3B10 .. 0x3B1F   the master clock (tempo, source, CV PPQN)
+0x3B20 .. 0x3B2F   the transport (start, stop, continue, tap)
+0x3B30 .. 0x3B3F   the key (root, scale, register)
+0x3B40 .. 0x3FFF   reserved
 ```
 
 The bases move when `N_NODE` moves, and the protocol version with them. This

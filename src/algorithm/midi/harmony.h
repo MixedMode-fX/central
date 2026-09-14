@@ -104,6 +104,20 @@
 // and not the tail of one, and `reset` puts the loop back to its first chord
 // along with the phrase.
 //
+// **`shift` moves where the loop begins without changing what it is.** A walk
+// that wrote four good chords often wrote them starting in the wrong place -
+// the piece is vi-IV-I-V and it wants to be I-V-vi-IV - and until this the
+// only answer was to draw another loop and hope. So the slots are a *window*
+// onto what the walk played: slot 0 holds the chord `shift` advances into it,
+// and the rest follow round. The chords, their order and the drift that keeps
+// redrawing them are untouched; only the starting point moves, which is why
+// this is not one of the controls that rewrite the piece.
+//
+// It rotates in place rather than restarting playback, so a loop clocked at a
+// bar keeps landing its first chord on the bar it already landed on - which is
+// the alignment the control exists to fix. `reset` is still what says "from
+// the top".
+//
 // **A control over the walk rewrites a running loop, on the spot.** `fifths`,
 // `smooth`, `leading`, `spread`, `gravity`, `cadence`, `phrase` and `seed`
 // all decide what the walk produces, so with a loop written out they write a
@@ -160,6 +174,8 @@
 //                     toward a uniform walk
 // params[12] drift    percent chance a running loop redraws one chord and
 //                     keeps it
+// params[13] shift    how far into what the walk played the loop begins; 0
+//                     starts on the first chord it captured
 class Harmony : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -167,8 +183,8 @@ class Harmony : public Node{
         static constexpr uint16_t P_PHRASE = 0, P_CADENCE = 1, P_GRAVITY = 2, P_LOOP = 3,
                                   P_OCTAVE = 4, P_VELOCITY = 5, P_CHANNEL = 6,
                                   P_SEED = 7, P_FIFTHS = 8, P_SMOOTH = 9, P_LEADING = 10,
-                                  P_SPREAD = 11, P_DRIFT = 12;
-        static constexpr uint8_t N_PARAMS = 13;
+                                  P_SPREAD = 11, P_DRIFT = 12, P_SHIFT = 13;
+        static constexpr uint8_t N_PARAMS = 14;
 
         static constexpr uint8_t DEGREES = 7;        // functional degrees a triad stack means
         static constexpr uint8_t MAX_PHRASE = 16;
@@ -195,17 +211,23 @@ class Harmony : public Node{
         // Diagnostics / tests.
         // The degree being played, 0 = the tonic. 0xFF before the first advance.
         uint8_t degree() const { return started ? current : (uint8_t)0xFF; }
-        // Which slot of the loop the next advance falls on, or 0xFF when
-        // nothing is looping. While the loop is still being captured that is
-        // the slot about to be written, which is the same square either way.
+        // The slot of the loop that is **sounding**, or 0xFF when nothing is
+        // looping or no chord of the loop has played yet.
+        //
+        // The step a display marks is the step you are hearing, which is what
+        // `StepEngine::position` means for every other sequencer here. This
+        // used to report the slot the *next* advance falls on, and a display
+        // reading it ran a chord ahead of the MIDI.
         uint8_t loop_position() const {
-            if (!loop) return 0xFF;
-            return recorded < loop ? recorded : loop_pos;
+            return (loop && played < loop) ? slot_of(played) : (uint8_t)0xFF;
         }
-        // The degree written in a slot of the loop, or 0xFF if that slot has
-        // not been captured yet.
+        // The degree in a slot of the loop, or 0xFF if the walk has not played
+        // that far yet. `shift` is applied here, so a slot means the same
+        // thing to the display as it does to playback.
         uint8_t loop_chord(uint8_t slot) const {
-            return (loop && slot < recorded) ? written[slot] : (uint8_t)0xFF;
+            if (!loop || slot >= loop) return 0xFF;
+            const uint8_t at = written_at(slot);
+            return at < recorded ? written[at] : (uint8_t)0xFF;
         }
         // The triad the key puts on a degree, as a set of the twelve pitch
         // classes. Stacked in scale steps, so the quality is the key's and
@@ -230,6 +252,17 @@ class Harmony : public Node{
         uint8_t weigh(uint8_t from, uint32_t* weight) const;
 
     private:
+        // `written` holds what the walk played, in the order it played it;
+        // the loop's slots are a window onto it that begins `shift` chords in.
+        // These two are that window, each way round, and they are the only
+        // place `shift` is applied.
+        uint8_t written_at(uint8_t slot) const {
+            return loop ? (uint8_t)((slot + shift) % loop) : slot;
+        }
+        uint8_t slot_of(uint8_t at) const {
+            return loop ? (uint8_t)((at + loop - shift % loop) % loop) : (uint8_t)0xFF;
+        }
+
         // The next degree after `from`, drawn from the weights, the tonic
         // pull and the cadence - `at` being where in the phrase it falls, so
         // that the cadence knows whether this is the chord that resolves.
@@ -260,10 +293,12 @@ class Harmony : public Node{
         uint8_t leading;
         uint8_t spread;
         uint8_t drift;
+        uint8_t shift;
         uint8_t current;              // the degree being played
         uint8_t position;             // where in the phrase the next chord falls
-        uint8_t loop_pos;             // where in the loop the next chord falls
+        uint8_t loop_pos;             // which slot of the loop the next chord falls on
         uint8_t recorded;             // chords committed to the loop
+        uint8_t played;               // index into `written` of the chord sounding, 0xFF for none
         bool started;                 // a chord has been played at all
         bool at_first;                // the next advance plays the tonic
         uint8_t written[MAX_PHRASE];  // the phrase, once `loop` is on

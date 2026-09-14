@@ -12,6 +12,7 @@ import { icon, midiIcon } from './icons.js';
 // The port names live with the patch-shape code, because the canvas needs them
 // too and it must not have to reach through the views to get them.
 import { inletName, outletName, modParamName, planJackDirection, CC_MAX } from './graph.js';
+import { paintPlayhead, NO_STEP } from './playhead.js';
 export { inletName, outletName };
 
 const el = (tag, attrs = {}, ...children) => {
@@ -1198,7 +1199,11 @@ function noteLane(app, index, isPoly) {
       const tie = (flags & 0x40) !== 0;
       const pitch = velocity ? root + degreeToSemitone(degree, mask) : null;
       cells.push(el('div', {
-        id: voice === 0 ? `cell-${index}-0-${step}` : null,
+        // Every voice row is addressed, not just the first: the voices share
+        // one step engine, so a poly sequencer's playhead belongs on all of
+        // them, and the id is how the frame loop reaches a square without
+        // rebuilding the card (playhead.js).
+        id: `cell-${index}-${voice}-${step}`,
         class: `note-cell ${velocity ? 'on' : ''} ${step >= length ? 'beyond' : ''}`
              + `${rest ? ' rest' : ''}${tie ? ' tie' : ''}`,
         title: pitch === null ? `step ${step + 1}: silent` : `step ${step + 1}: degree ${degree} → ${noteName(pitch)}`,
@@ -1449,7 +1454,7 @@ function loopSlots(app, index, shape, loopLength) {
 // built with it, because a loop being captured fills one slot per advance and
 // the card is not rebuilt between them.
 function fillSlot(chip, shape, degree, slot) {
-  const chord = degree === 0xFF ? null : shape.chords[degree];
+  const chord = degree === NO_STEP ? null : shape.chords[degree];
   chip.setAttribute('data-degree', String(degree));
   chip.className = `chord-slot ${chord ? '' : 'empty'}`;
   chip.setAttribute('title', chord ? `chord ${slot + 1}: ${chord.roman} (${chord.name})`
@@ -1469,7 +1474,7 @@ function drawHarmony(app, index, fan, caption) {
   const playing = m.harmonyDegree(index);
   const pinned = harmonyFocus.get(index);
   const from = (pinned ?? null) !== null ? Math.min(pinned, shape.n - 1)
-             : (playing === 0xFF ? 0 : Math.min(playing, shape.n - 1));
+             : (playing === NO_STEP ? 0 : Math.min(playing, shape.n - 1));
   const loopLength = m.harmonyLoopLength(index);
   const mode = loopLength ? (harmonyMode.get(index) ?? 'loop') : 'moves';
   fan.setAttribute('data-drawn', `${mode}:${from}:${loopLength}:${m.harmonyLoopPosition(index)}`);
@@ -1504,7 +1509,7 @@ function drawHarmony(app, index, fan, caption) {
     const chords = [];
     for (let slot = 0; slot < loopLength; slot++) {
       const degree = m.harmonyLoopChord(index, slot);
-      if (degree !== 0xFF && degree < shape.n) chords.push({ slot, chord: shape.chords[degree] });
+      if (degree !== NO_STEP && degree < shape.n) chords.push({ slot, chord: shape.chords[degree] });
     }
     for (let i = 0; i + 1 < chords.length; i++) {
       if (chords[i].chord.degree === chords[i + 1].chord.degree) continue;   // a repeat draws nothing
@@ -1561,29 +1566,30 @@ export function paintHarmony(app, node) {
   const degrees = app.module.harmonyDegrees?.(node) ?? 0;
   if (!degrees) return;
   const degree = app.module.harmonyDegree(node);
-  for (let d = 0; d < degrees; d++) {
-    document.getElementById(`harm-${node}-deg-${d}`)?.classList.toggle('playing', d === degree);
-  }
+  paintPlayhead((d) => `harm-${node}-deg-${d}`, degrees, degree);
   const loopLength = app.module.harmonyLoopLength(node);
+  // The slot that is *sounding*. This used to be the slot the next advance
+  // would fall on, so the chip lit up was the chord after the one coming out
+  // of the jack - see playhead.js and `Harmony::loop_position`.
   const at = app.module.harmonyLoopPosition(node);
   let shape = null;
   for (let slot = 0; slot < loopLength; slot++) {
     const chip = document.getElementById(`harm-${node}-slot-${slot}`);
     if (!chip) continue;
-    const degree = app.module.harmonyLoopChord(node, slot);
-    if (chip.getAttribute('data-degree') !== String(degree)) {
+    const written = app.module.harmonyLoopChord(node, slot);
+    if (chip.getAttribute('data-degree') !== String(written)) {
       shape ??= harmonyShape(app, node);
-      if (shape) fillSlot(chip, shape, degree, slot);
+      if (shape) fillSlot(chip, shape, written, slot);
     }
-    chip.classList.toggle('playing', slot === at);
   }
+  paintPlayhead((slot) => `harm-${node}-slot-${slot}`, loopLength, at);
   // Redrawn only when what it would draw has changed, so a card that is
   // merely open costs nothing per frame.
   const fan = document.getElementById(`harm-${node}-fan`);
   if (!fan) return;
   const mode = loopLength ? (harmonyMode.get(node) ?? 'loop') : 'moves';
   const pinned = harmonyFocus.get(node);
-  const from = (pinned ?? null) !== null ? pinned : (degree === 0xFF ? 0 : degree);
+  const from = (pinned ?? null) !== null ? pinned : (degree === NO_STEP ? 0 : degree);
   if (fan.getAttribute('data-drawn') !== `${mode}:${from}:${loopLength}:${at}`) {
     drawHarmony(app, node, fan, document.getElementById(`harm-${node}-caption`));
   }

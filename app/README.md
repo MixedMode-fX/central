@@ -27,10 +27,11 @@ nothing serving it. The build from `main` is live at
 
 ## The shape of it
 
-Five tabs — **patch**, **key**, **MIDI**, **library**, **schema** — and **play** as a
-button at the top beside *connect a module*, because those two answer the same
-question: which module am I listening to, the one in the page or the one on the
-cable.
+Six tabs — **patch**, **key**, **MIDI**, **module**, **library**, **schema** — and
+**play** as a button at the top beside *connect a module*, because those two
+answer the same question: which module am I listening to, the one in the page
+or the one on the cable. Play does not open a tab: it opens the performance
+surface, which is a second shell with no header and no tabs.
 
 **The module runs in the page, always.** The firmware compiled to WebAssembly
 is both the *transport* the editor talks to (`Device` talks to a transport, not
@@ -56,7 +57,14 @@ menu: **learn** arms a learn when a controller is listening and lists the CC
 numbers either way, and **CV** lists the control buses, with what writes each,
 and routes one onto it. Under the graph is the **mod matrix**: every binding
 and every route in the patch, and every field of a binding, so one can be
-built with no controller in the room. Sequencers get purpose-built views — a
+built with no controller in the room. Under that is the **macro bench**, where
+a macro is named and shaped: its destinations are drawn as bands across its
+travel — rising where each one acts and holding past the top of its window,
+with the module's live position marked on the same axis — because four rows of
+numbers do not say what a macro does. A destination that is silent because
+nobody has moved the macro yet, and one pinned against the end of its target's
+range, are drawn apart: they look identical in a table and are two different
+problems. Sequencers get purpose-built views — a
 step grid for the gate and drum sequencers, a note lane over scale degrees for
 the note sequencers — and the step being played is outlined in the grid you
 are editing. **What is outlined is the step that is sounding**, never the one
@@ -71,7 +79,25 @@ spells it — a seven-note scale uses each letter once, in order — because a
 chord called D♯ where E♭ belongs does not read as a spelling slip, it reads as
 the degree being wrong.
 
-**play** — the module running: the LEDs and gate buses, the clock, the jacks,
+**play** — the **performance surface**: sixteen pads, eight pots, the whole
+viewport, and it fits a 360x640 screen with no page scroll. The geometry is
+fixed and the assignment is soft — you cannot move a control, you can change
+everything about what it does, which is what the module's eventual front panel
+will be. A pot sends a CC; a pad sends a note, a CC, or a **Program Change**
+that launches a stored patch on the next bar. A pad is momentary or latching,
+and **a latch is drawn as an outline and says "last sent"**, because it is
+showing what it sent and not what the module holds — the one control here that
+genuinely reads back is a pot on a macro, which follows the module's own
+report of where that macro is. Press to play; hold to ask what a control does,
+which is also where it is bound: picking a target arms the module's own learn,
+and moving the control finishes it. What each control sends, what it is called
+and what colour it is are **yours, not the patch's** — they live in this
+browser beside the canvas arrangement, keyed globally rather than per patch,
+because a pad that changed meaning with every patch load is a pad nobody could
+learn. A **keyboard** is summoned over it: one scrolling row of real keys, six
+octaves, a drag across it playing a glissando.
+
+**module** — the module running: the LEDs and gate buses, the clock, the jacks,
 an on-screen keyboard and CC sender, and two views that answer questions no
 lamp can. The **scope** draws every jack, gate bus and CV bus the patch uses
 against the last few seconds, which is the only way to read a divider, a
@@ -277,7 +303,9 @@ app/
     services/         the app's state and every command on it: state.js,
                       render.js (the coalesced re-render and the per-frame
                       painters), session.js (the device), editor.js (every
-                      edit), patches.js (the library and the files),
+                      edit), play.js (where a note goes: the module in the
+                      page, or one on a cable), surface.js (the pads and
+                      pots), patches.js (the library and the files),
                       arrangement.js (block positions), storage.js, app.js
                       (the composition root)
     ui/
@@ -286,9 +314,12 @@ app/
                       with its stylesheet beside it
       controls/       controls that read the patch: a bus selector, a
                       parameter, the learn and CV menus, a modulation route
-      panels/         the cards and the mod matrix; algorithms.js is the one
-                      table of algorithm-specific views and inert rules
+      panels/         the cards, the mod matrix and the macro bench;
+                      algorithms.js is the one table of algorithm-specific
+                      views and inert rules
       canvas/         the patch as blocks and arrows
+      surface/        the performance surface: the pads, the pots, and the
+                      sheet that says what a control does
       scope/          the scope and the piano rolls
       tabs/           one file per tab
       App.js          the shell

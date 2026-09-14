@@ -53,9 +53,11 @@ env.Append(  # noqa: F821
     ]
 )
 
-# Name the firmware after the version so a downloaded .hex is self-identifying.
-# Only the firmware env: renaming the native test binaries confuses `pio test`.
-if env.subst("$PIOENV") == "teensy41":  # noqa: F821
-    env.Replace(PROGNAME="mmmc-%s" % version)  # noqa: F821
+# Name the firmware after the version and the board, so a downloaded .hex is
+# self-identifying and two boards' builds can sit in one directory. Only the
+# firmware envs: renaming the native test binaries confuses `pio test`.
+pioenv = env.subst("$PIOENV")  # noqa: F821
+if pioenv.startswith("teensy"):
+    env.Replace(PROGNAME="mmmc-%s-%s" % (version, pioenv))  # noqa: F821
 
 print("MMMC build %s+%s" % (version, rev))

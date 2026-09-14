@@ -73,6 +73,12 @@ void setup(){
     // a seed at construction (RandomSequencer, Probability) must not play the
     // same thing on every power cycle. The cycle counter and a floating ADC
     // input are both weak on their own and differ between boots.
+    //
+    // The debug unit's cycle counter is running from reset on a Teensy 4 and
+    // switched off on a 3.6, where reading it would stir a constant zero.
+    // Enabling it is idempotent and costs two register writes at boot.
+    ARM_DEMCR |= ARM_DEMCR_TRCENA;
+    ARM_DWT_CTRL |= ARM_DWT_CTRL_CYCCNTENA;
     entropy::stir(ARM_DWT_CYCCNT);
     entropy::stir(micros());
     for (uint8_t i = 0; i < 8; i++) entropy::stir((uint32_t)analogRead(CV_ADC) << i);

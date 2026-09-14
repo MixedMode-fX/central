@@ -4,37 +4,26 @@
 #include "config.h"
 #include "hal/teensy/teensy_includes.h"
 
-#define BOARD_ID 1
-
-// EEPROM Addresses
-#define BOARD_ID_ADDR 0 
-
-/*
- *
- * SYNC
- *
- * The external clock input. It used to be pin 2, which is also GPIO_PIN_1:
- * boot drove that pin as an output while an external clock could be driving
- * into it. Pin 6 is free on this board revision and supports interrupts.
- * The static_assert below keeps it off the GPIO table.
- */
-
-#define SYNC_CLOCK 6
+// The hardware surface: one board map, selected by the board the framework
+// says it is compiling for, plus the reasoning and the checks the maps share.
+// Only src/hal/teensy/ and main.cpp include this file.
+//
+// A new board is a new header under src/board/ and a line here. Every name a
+// map has to define is used below or by src/hal/teensy/, so a map that misses
+// one does not link.
+#if defined(ARDUINO_TEENSY41)
+#include "board/teensy41.h"
+#elif defined(ARDUINO_TEENSY36)
+#include "board/teensy36.h"
+#else
+#error "no board map for this target - add one under src/board/"
+#endif
 
 /*
  *
  * GPIO
- * 
+ *
  */
-
-#define GPIO_PIN_1 2
-#define GPIO_PIN_2 3
-#define GPIO_PIN_3 4
-#define GPIO_PIN_4 5
-#define GPIO_PIN_5 9
-#define GPIO_PIN_6 10
-#define GPIO_PIN_7 22
-#define GPIO_PIN_8 33
 
 #define GPIO_PINS GPIO_PIN_1,GPIO_PIN_2,GPIO_PIN_3,GPIO_PIN_4,GPIO_PIN_5,GPIO_PIN_6,GPIO_PIN_7,GPIO_PIN_8
 
@@ -62,69 +51,39 @@ namespace hardware_checks {
         return i >= GPIO_N ? true : (gpio_pins[i] != SYNC_CLOCK && sync_clock_is_free(i + 1));
     }
     static_assert(sync_clock_is_free(), "SYNC_CLOCK collides with a GPIO_PIN_n");
+
+    // A pin the chip has not got is a pin nothing on the map may name. The
+    // core reports its own count, so a map written for a bigger part fails
+    // here rather than on the bench.
+    constexpr uint8_t named_pins[] = {
+        GPIO_PINS, SYNC_CLOCK, KEYMECH_BOOT, KEYMECH_RESET,
+        CS_RELAY, SPI_MOSI, SPI_MISO, SPI_SCK,
+        CS_CV_SHIFT, CS_DAC1, CS_DAC2, CV_ADC, GREEN_LED, RED_LED,
+    };
+    constexpr bool pins_exist(uint8_t i = 0) {
+        return i >= sizeof named_pins ? true
+             : (named_pins[i] < CORE_NUM_TOTAL_PINS && pins_exist(i + 1));
+    }
+    static_assert(pins_exist(), "a pin on the board map is not on this chip");
+
+    // Both LEDs are driven with analogWrite() for the dim heartbeat
+    // (hal/teensy/teensy_leds.h), so both have to be on a timer channel.
+    static_assert(digitalPinHasPWM(GREEN_LED) && digitalPinHasPWM(RED_LED),
+                  "an LED pin has no PWM on this chip");
+
+    // Not checked here, because the core publishes no compile-time map of it:
+    // CV_ADC is read with analogRead() for boot entropy (main.cpp), so it has
+    // to reach an ADC channel, and only the part's datasheet says which pins
+    // do. On the MK66, for one, pins 40-48 are digital only.
 }
 #endif
 
 /*
  *
  * Serial ports
- * 
+ *
  */
 
-#define SERIAL_USB SerialUSB
-#define SERIAL_UART Serial6
 #define SERIAL_BAUD_RATE 115200
-
-/*
- *
- * MIDI Ports
- * 
- */
-
-#define SERIAL_MIDI_1 Serial1
-#define SERIAL_MIDI_2 Serial7
-
-/*
- *
- * KeyMech Connector
- * 
- */
-
-#define SERIAL_KEYMECH Serial8
-#define KEYMECH_BOOT 30
-#define KEYMECH_RESET 31
-
-/*
- *
- * Relay control
- * 
- */
-
-#define CS_RELAY 17
-#define SPI_MOSI 11
-#define SPI_MISO 12
-#define SPI_SCK 13
-
-/*
- *
- * CV Expansion
- * 
- */
-
-#define CS_CV_SHIFT 16
-#define CS_DAC1 14
-#define CS_DAC2 15
-#define CV_ADC 40
-
-
-
-/*
- *
- * LEDS
- * 
- */
-
-#define GREEN_LED 36
-#define RED_LED 37
 
 #endif

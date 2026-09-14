@@ -12,7 +12,11 @@
 # same scripts by the same name you do.
 
 PIO := .venv/bin/pio
-FIRMWARE_ENV := teensy41
+# Every board the firmware builds for. `make build` builds them all, because
+# a board that is not built is a board that stops fitting.
+FIRMWARE_ENVS := teensy41 teensy36
+# The board a `make upload` flashes: BOARD=teensy36 for the other.
+BOARD ?= teensy41
 VERSION := $(shell cat VERSION)
 
 .PHONY: help setup ready build test size upload app module emulator editor \
@@ -23,12 +27,12 @@ help:
 	@echo "make ready    - wait for the dev environment to be prepared"
 	@echo ""
 	@echo "make checks   - the commit gate: firmware + app (silence = pass)"
-	@echo "make build    - build firmware for $(FIRMWARE_ENV)"
+	@echo "make build    - build firmware for every board: $(FIRMWARE_ENVS)"
 	@echo "make test     - run the native unit tests"
-	@echo "make size     - report firmware flash and RAM usage"
+	@echo "make size     - report flash and RAM usage for every board"
 	@echo "make module   - compile the firmware to WebAssembly (needs clang + lld) and build the app"
 	@echo "make app      - build the module, then check the app against it"
-	@echo "make upload   - flash an attached Teensy"
+	@echo "make upload   - flash an attached Teensy, built for BOARD ($(BOARD))"
 	@echo ""
 	@echo "make dev      - the app with hot reload, from the source tree"
 	@echo "make preview  - the built single-file page (detached, idempotent)"
@@ -58,16 +62,16 @@ checks:
 	bash scripts/checks.sh $(SCOPE)
 
 build: $(PIO)
-	$(PIO) run -e $(FIRMWARE_ENV)
+	$(PIO) run $(addprefix -e ,$(FIRMWARE_ENVS))
 
 test: $(PIO)
 	$(PIO) test -e native
 
 size: $(PIO)
-	$(PIO) run -e $(FIRMWARE_ENV) -t size
+	$(PIO) run $(addprefix -e ,$(FIRMWARE_ENVS)) -t size
 
 upload: $(PIO)
-	$(PIO) run -e $(FIRMWARE_ENV) -t upload
+	$(PIO) run -e $(BOARD) -t upload
 
 # The firmware core compiled to WebAssembly with the browser as the hardware,
 # and the app that runs it (emulator/README.md, app/README.md). PlatformIO is

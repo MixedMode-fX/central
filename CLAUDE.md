@@ -7,10 +7,10 @@ reference for the machine itself.
 ## Where things live
 
 - `src/` — the firmware core. Freestanding: no heap after boot, no exceptions,
-  no libc. `src/hal/teensy/` and `main.cpp` are the only files that know what
-  a Teensy is.
+  no libc. `src/hal/teensy/`, `src/board/` and `main.cpp` are the only files
+  that know what a Teensy is, or which one.
 - `test/` — the native unit tests, one directory per suite. They build `src/`
-  minus those two.
+  minus those.
 - `emulator/` — the same core compiled to WebAssembly, with the page standing
   in for the hardware. Nothing under `src/` is duplicated to make this work.
 - `app/` — the browser app, a client of the firmware's protocol. A Vite app:
@@ -38,10 +38,10 @@ the app without touching a line of JavaScript, because `app/src/protocol/generat
 generated from those headers and the module is compiled from that core. The
 hook routes it to both; do not talk yourself out of the second one.
 
-**The pre-PR gate**: `bash scripts/checks.sh && make build`. The teensy41 build
-is not in the commit gate — it needs the ARM toolchain, and it is the only
-thing that says the firmware still fits on the board and links against the
-Teensy core.
+**The pre-PR gate**: `bash scripts/checks.sh && make build`. The board builds
+are not in the commit gate — they need the ARM toolchain, and they are the only
+thing that says the firmware still fits on both boards and links against the
+Teensy core. `make build` builds every board in `FIRMWARE_ENVS`, never one.
 
 **Done means seen, not green.** Any change visible in the app gets exercised in
 the running app and shown as screenshots (load the `app-screenshots` skill),
@@ -94,8 +94,10 @@ Breaking changes are the expected cost of getting the shape right.
   because what it forbids compiles perfectly well.
 - No heap allocation after boot. Nodes are placement-new'd into a fixed pool;
   `NODE_SLOT_SIZE` is checked per class with `static_assert`.
-- Sizing constants live in `src/config.h`, pins in `src/hardware.h`. Use the
-  names, never the literals.
+- Sizing constants live in `src/config.h`, pins in `src/hardware.h`, which
+  picks one map per board out of `src/board/`. Use the names, never the
+  literals. A pin that moves between boards moves in its own map, with a
+  comment saying what forced it.
 - Algorithm ids in `src/node/registry.h` are the preset format. Appending is
   free; renumbering invalidates every stored patch, which is allowed — see
   Compatibility.

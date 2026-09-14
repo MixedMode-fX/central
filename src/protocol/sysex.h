@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 10
+#define SYSEX_PROTOCOL_VERSION 11
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.

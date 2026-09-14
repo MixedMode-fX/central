@@ -23,6 +23,9 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
     {"leading",  1, 100, Harmony::DEFAULT_LEADING, PARAM_PERCENT, nullptr},
     {"spread",   1, 100, Harmony::DEFAULT_SPREAD,  PARAM_PERCENT, nullptr},
     {"drift",    0, 100,                       0, PARAM_PERCENT, nullptr},
+    // 0 is "start where the walk started", which is the useful default, so
+    // this one pays none of the zero-means-default price the walk controls do.
+    {"shift",    0, Harmony::MAX_PHRASE - 1,   0, PARAM_NUMBER,  nullptr},
 };
 // Three mechanisms, and the storage order interleaves them: the parameter
 // order is the preset format and cannot be rearranged, so the groups say what
@@ -32,12 +35,13 @@ static const ParamDescriptor PARAMS[Harmony::N_PARAMS] = {
 static const char* const WALK = "the walk";
 static const char* const FORM = "the form";
 static const char* const OUTPUT = "the output";
-static const ParamGroup GROUPS[7] = {
+static const ParamGroup GROUPS[8] = {
     {Harmony::P_FIFTHS,  1, 4, &PARAMS[Harmony::P_FIFTHS],  WALK},   // fifths..spread
     {Harmony::P_GRAVITY, 1, 1, &PARAMS[Harmony::P_GRAVITY], WALK},
     {Harmony::P_SEED,    1, 1, &PARAMS[Harmony::P_SEED],    WALK},
     {Harmony::P_PHRASE,  1, 2, &PARAMS[Harmony::P_PHRASE],  FORM},   // phrase, cadence
     {Harmony::P_LOOP,    1, 1, &PARAMS[Harmony::P_LOOP],    FORM},
+    {Harmony::P_SHIFT,   1, 1, &PARAMS[Harmony::P_SHIFT],   FORM},   // beside the length it shifts
     {Harmony::P_DRIFT,   1, 1, &PARAMS[Harmony::P_DRIFT],   FORM},
     {Harmony::P_OCTAVE,  1, 3, &PARAMS[Harmony::P_OCTAVE],  OUTPUT}, // octave, velocity, channel
 };
@@ -47,7 +51,7 @@ static const char* const OUT_NAMES[2] = {"root", "degree"};
 
 const AlgorithmDescriptor Harmony::descriptor = {
     ALGO_HARMONY, "Harmony", 2, 1, 2, Harmony::N_PARAMS, IN, OUT, sizeof(Harmony), false,
-    construct_node<Harmony>, GROUPS, 7, IN_NAMES, OUT_NAMES,
+    construct_node<Harmony>, GROUPS, 8, IN_NAMES, OUT_NAMES,
     "A chord progression in the module's key: weighs every move against the scale, plays the root.",
     CATEGORY_MIDI,
     true };   // reads_key: every pitch it plays comes from the key
@@ -81,7 +85,9 @@ Harmony::Harmony(const NodeConfig& config) :
                                                                    : config.params[P_SPREAD])
                                    : DEFAULT_SPREAD),
     drift(config.params[P_DRIFT] > 100 ? (uint8_t)100 : config.params[P_DRIFT]),
-    current(0), position(0), loop_pos(0), recorded(0), started(false), at_first(true), written(),
+    shift(config.params[P_SHIFT] < MAX_PHRASE ? config.params[P_SHIFT] : (uint8_t)0),
+    current(0), position(0), loop_pos(0), recorded(0), played(0xFF),
+    started(false), at_first(true), written(),
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
     sounding()
 {
@@ -289,6 +295,9 @@ void Harmony::recompose(){
     recorded = loop;
     loop_pos = 0;
     position = 0;
+    // Nothing of the new piece has played yet, so no slot is sounding: what is
+    // still in the air is the chord the old one left there.
+    played = 0xFF;
 }
 
 void Harmony::restart(){
@@ -304,7 +313,7 @@ void Harmony::restart(){
     // be the tonic the reset is about to play.
     position = 0;
     loop_pos = 0;
-    if (recorded < loop) recorded = 0;
+    if (recorded < loop){ recorded = 0; played = 0xFF; }
     at_first = true;
 }
 
@@ -313,16 +322,19 @@ void Harmony::process(BusManager& bus, uint32_t){
 
     if (advance_in.rising(bus)){
         const bool written_out = loop && recorded >= loop;   // the loop is the piece now
+        // Where in `written` this advance falls, once `shift` has said where
+        // the loop begins. Playback counts slots; `written` holds walk order.
+        const uint8_t at = written_out ? written_at(loop_pos) : (uint8_t)0;
         uint8_t deg;
         if (written_out){
-            deg = written[loop_pos];               // the loop, as written
+            deg = written[at];                     // the loop, as written
             // An accident that happens once is a glitch and one that comes
             // back is a decision, so a redraw *replaces* the chord it landed
             // on. A loop with a few percent of drift is a piece that is
             // recognisably itself and never quite the same twice.
             if (drift && rng.chance(drift)){
                 deg = choose(current, position);
-                written[loop_pos] = deg;
+                written[at] = deg;
             }
         } else if (at_first){
             deg = 0;                               // the first advance is the tonic
@@ -338,7 +350,13 @@ void Harmony::process(BusManager& bus, uint32_t){
         // own, not the cadence's.
         if (loop && recorded < loop && (recorded || position == 0)){
             written[recorded] = deg;
+            played = recorded;
             recorded = (uint8_t)(recorded + 1u);
+        } else {
+            // The chord sounding is in the loop only when the loop put it
+            // there: before capture starts, and with no loop at all, no slot
+            // is playing and the display marks none.
+            played = written_out ? at : (uint8_t)0xFF;
         }
 
         strike(bus, deg);
@@ -411,6 +429,7 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
             loop = value;
             recorded = 0;
             loop_pos = 0;
+            played = 0xFF;
             return true;
         case P_OCTAVE: if (value > KEY_MAX_OCTAVE) return false; octave = value; return true;
         case P_VELOCITY: if (value == 0 || value > 127) return false; velocity = value; return true;
@@ -467,6 +486,12 @@ bool Harmony::set_param(uint16_t index, uint8_t value){
         // Not the walk: drift says how often a loop is redrawn, not what the
         // redraw produces, so moving it is not a rewrite of the piece.
         case P_DRIFT:   if (value > 100) return false; drift = value; return true;
+        // Nor is shift: it moves where the piece begins, not what it is, so it
+        // rewrites nothing and restarts nothing. The window over `written`
+        // turns under the playback counter and the loop comes round somewhere
+        // else from here on - which is what "start it on that chord" means for
+        // a loop that is already in time with something.
+        case P_SHIFT:   if (value >= MAX_PHRASE) return false; shift = value; return true;
         default: return false;
     }
 }
@@ -486,6 +511,7 @@ uint8_t Harmony::get_param(uint16_t index) const {
         case P_LEADING: return leading;
         case P_SPREAD:  return spread;
         case P_DRIFT:   return drift;
+        case P_SHIFT:   return shift;
         default: return 0;
     }
 }

@@ -12,6 +12,7 @@ import { el, classes } from '../../dom.js';
 import { Scroller } from '../../controls/Scroller.js';
 import { outletName } from '../../../core/patch.js';
 import { noteName, degreeToSemitone } from '../../../core/music.js';
+import { paintPlayhead } from './playhead.js';
 import '../Grid.css';
 
 // The box a grid lives in: a title, and the lanes in a remembered scroller.
@@ -25,15 +26,12 @@ const Lane = (name, cells, klass = '') => el('div', { class: 'lane-row' },
   el('span', { class: 'lane-name' }, name),
   el('div', { class: classes('lane', klass) }, cells));
 
-// The running node's position, painted onto the cells of each lane every
-// frame. Nothing is rebuilt: a class moves from one cell to the next.
+// The step each lane is sounding, painted onto its cells every frame.
+// Nothing is rebuilt: a class moves from one cell to the next.
 function playhead(app, index, lanes) {
   app.live?.paint(({ module }) => {
     if (index >= module.nodeCount() || !module.seqKind(index)) return;
-    lanes.forEach((cells, lane) => {
-      const at = module.seqPosition(index, lane);
-      cells.forEach((cell, step) => cell.classList.toggle('playing', step === at));
-    });
+    lanes.forEach((cells, lane) => paintPlayhead(cells, module.seqPosition(index, lane)));
   });
 }
 
@@ -129,8 +127,8 @@ export function NoteLane(app, index, isPoly) {
         }),
         el('span', { class: 'pitch' }, pitch === null ? '·' : noteName(pitch))));
     }
-    // The playhead is one per node, so only the first voice carries it.
-    if (voice === 0) lanes.push(cells);
+    // The voices step together, so every row carries the one playhead.
+    lanes.push(cells);
     rows.push(Lane(isPoly ? `voice ${voice + 1}` : 'notes', cells, 'notes'));
   }
   playhead(app, index, lanes);

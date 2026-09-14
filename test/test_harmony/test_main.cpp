@@ -551,7 +551,7 @@ static void test_a_loop_is_as_long_as_it_is_told() {
         loop[i] = node.degree();
         TEST_ASSERT_EQUAL_UINT8(i + 1u, node.recorded_chords());
     }
-    TEST_ASSERT_EQUAL_UINT8(0, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(5, node.loop_position(), "the sixth chord is not on the sixth slot");
     for (uint8_t i = 0; i < 6; i++) TEST_ASSERT_EQUAL_UINT8(loop[i], node.loop_chord(i));
 
     for (uint8_t round = 0; round < 10; round++){
@@ -586,6 +586,157 @@ static void test_a_loop_shorter_than_the_phrase_comes_round_on_its_own_length() 
         TEST_ASSERT_EQUAL_UINT8(first, node.degree());
         advance(node, bus, now);
         TEST_ASSERT_EQUAL_UINT8(second, node.degree());
+    }
+}
+
+// **The bug this answers.** The editor paints one square of the loop as
+// playing, and it read the slot the *next* advance would fall on - so the
+// picture ran a whole chord ahead of the MIDI coming out of the jack. What a
+// display marks is what you are hearing, which is what `position()` means for
+// every other sequencer in this module (sequencer/step_engine.h).
+static void test_the_slot_it_reports_is_the_chord_it_is_sounding() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 13);
+    c.params[Harmony::P_LOOP] = 4;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    // Nothing has played, so nothing is marked.
+    TEST_ASSERT_EQUAL_UINT8(0xFF, node.loop_position());
+
+    // While it is being captured, and once it is the piece: the slot reported
+    // holds the degree that is sounding, every advance, for ever.
+    for (uint8_t i = 0; i < 4 * 5; i++){
+        advance(node, bus, now);
+        const uint8_t at = node.loop_position();
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(i % 4, at, "the slot marked is not the slot heard");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(node.degree(), node.loop_chord(at),
+                                        "the slot marked holds another chord");
+    }
+}
+
+// **`shift` moves where the loop begins.** The walk writes four chords that
+// are right and start in the wrong place; this turns them round without
+// drawing another loop.
+static void test_shift_starts_the_loop_further_into_what_the_walk_played() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 23);
+    c.params[Harmony::P_LOOP] = 4;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
+
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_SHIFT, 2));
+    // The slots are the piece as it will be played, so the display and the
+    // MIDI move together and neither has to know about the other.
+    for (uint8_t i = 0; i < 4; i++){
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[(i + 2u) % 4u], node.loop_chord(i), "the slots did not turn");
+    }
+    for (uint8_t round = 0; round < 4; round++){
+        for (uint8_t i = 0; i < 4; i++){
+            advance(node, bus, now);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[(i + 2u) % 4u], node.degree(), "the shifted loop did not play");
+            TEST_ASSERT_EQUAL_UINT8(i, node.loop_position());
+        }
+    }
+
+    // And back: it is a window, not a rewrite, so nothing was lost on the way.
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_SHIFT, 0));
+    for (uint8_t i = 0; i < 4; i++) TEST_ASSERT_EQUAL_UINT8(loop[i], node.loop_chord(i));
+}
+
+// It is the same chords in the same order: a shift is not a redraw, and it
+// does not restart the loop either. A loop clocked at a bar keeps landing its
+// first chord on the bar it already landed on - which is the alignment the
+// control exists to fix.
+static void test_shift_rewrites_nothing_and_restarts_nothing() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 47);
+    c.params[Harmony::P_LOOP] = 4;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    uint8_t loop[4];
+    for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
+    advance(node, bus, now);                       // slot 0 is sounding
+    TEST_ASSERT_EQUAL_UINT8(0, node.loop_position());
+
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_SHIFT, 1));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, node.recorded_chords(), "the loop was captured again");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(loop[0], node.degree(), "the sounding chord was restruck");
+    // The window turned under the chord that is in the air, so the same chord
+    // is now the loop's last slot - and the slot marked still holds it, which
+    // is the whole point of the two moving together.
+    TEST_ASSERT_EQUAL_UINT8(3, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8(node.degree(), node.loop_chord(node.loop_position()));
+
+    // The next advance is the *next slot*, not the first: playback did not
+    // jump back to the top.
+    advance(node, bus, now);
+    TEST_ASSERT_EQUAL_UINT8(1, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8(loop[2], node.degree());
+
+    // Every chord the walk drew is still there, and still in order.
+    uint8_t seen = 0;
+    for (uint8_t i = 0; i < 4; i++){
+        for (uint8_t j = 0; j < 4; j++) if (node.loop_chord(i) == loop[j]) { seen++; break; }
+        TEST_ASSERT_EQUAL_UINT8(loop[(i + 1u) % 4u], node.loop_chord(i));
+    }
+    TEST_ASSERT_EQUAL_UINT8(4, seen);
+}
+
+// A shift longer than the loop is the same shift come round, because a loop is
+// a circle: 5 on a loop of four is 1, and the control never dies at the top of
+// its range on a short loop.
+static void test_a_shift_past_the_end_of_the_loop_comes_round() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 71);
+    c.params[Harmony::P_LOOP] = 3;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    uint8_t loop[3];
+    for (uint8_t i = 0; i < 3; i++){ advance(node, bus, now); loop[i] = node.degree(); }
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_SHIFT, 7));       // 7 % 3 == 1
+    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_EQUAL_UINT8(loop[(i + 1u) % 3u], node.loop_chord(i));
+
+    // And a shift the descriptor has no room for is refused outright.
+    TEST_ASSERT_TRUE(node.set_param(Harmony::P_SHIFT, Harmony::MAX_PHRASE - 1));
+    TEST_ASSERT_FALSE(node.set_param(Harmony::P_SHIFT, Harmony::MAX_PHRASE));
+    TEST_ASSERT_EQUAL_UINT8(Harmony::MAX_PHRASE - 1, node.get_param(Harmony::P_SHIFT));
+}
+
+// A loop still being written is shown where it will be *played*, so the slots
+// never say one thing and the jack another.
+static void test_a_shifted_loop_fills_the_slots_it_will_play_from() {
+    BusManager bus;
+    NodeConfig c = harmony_config(4, 1, 0, 83);
+    c.params[Harmony::P_LOOP] = 4;
+    c.params[Harmony::P_SHIFT] = 1;
+    Harmony node(c);
+    uint32_t now = 0;
+
+    advance(node, bus, now);                       // the walk's first chord
+    // It begins one chord in, so what has just been captured is the loop's
+    // last slot, and that is the square marked.
+    TEST_ASSERT_EQUAL_UINT8(3, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8(node.degree(), node.loop_chord(3));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, node.loop_chord(0));
+
+    for (uint8_t i = 1; i < 4; i++) advance(node, bus, now);
+    uint8_t slots[4];
+    for (uint8_t i = 0; i < 4; i++){
+        slots[i] = node.loop_chord(i);
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(0xFF, slots[i], "a slot was left unwritten");
+    }
+    for (uint8_t round = 0; round < 3; round++){
+        for (uint8_t i = 0; i < 4; i++){
+            advance(node, bus, now);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(slots[i], node.degree(), "the slots are not what plays");
+            TEST_ASSERT_EQUAL_UINT8(i, node.loop_position());
+        }
     }
 }
 
@@ -643,13 +794,14 @@ static void test_a_walk_control_rewrites_a_running_loop() {
     for (uint8_t i = 0; i < 8; i++) before[i] = node.loop_chord(i);
     advance(node, bus, now);
     advance(node, bus, now);
-    TEST_ASSERT_EQUAL_UINT8(2, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8(1, node.loop_position());
 
     TEST_ASSERT_TRUE(node.set_param(Harmony::P_FIFTHS, 5));
 
     // Written, all of it, now - not a slot at a time over the next eight bars.
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(8, node.recorded_chords(), "the loop is being captured again");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, node.loop_position(), "a new piece is heard from the top");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0xFF, node.loop_position(),
+                                    "a slot was marked playing before the new piece had played one");
     uint8_t after[8];
     uint8_t same = 0;
     for (uint8_t i = 0; i < 8; i++){
@@ -659,11 +811,13 @@ static void test_a_walk_control_rewrites_a_running_loop() {
     }
     TEST_ASSERT_LESS_THAN_UINT8_MESSAGE(8, same, "the loop did not change at all");
 
-    // And it is a loop again: what was written is what plays, exactly.
+    // And it is a loop again: what was written is what plays, exactly, from
+    // the top.
     for (uint8_t round = 0; round < 3; round++){
         for (uint8_t i = 0; i < 8; i++){
             advance(node, bus, now);
             TEST_ASSERT_EQUAL_UINT8_MESSAGE(after[i], node.degree(), "the new loop did not repeat");
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(i, node.loop_position(), "the slot playing is not the slot heard");
         }
     }
 }
@@ -787,14 +941,18 @@ static void test_reset_plays_the_loop_from_its_first_chord() {
     for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
     advance(node, bus, now);
     advance(node, bus, now);
-    TEST_ASSERT_EQUAL_UINT8(2, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8(1, node.loop_position());
 
+    // A reset does not silence what is sounding, so the slot playing is still
+    // the one that is in the air - the same as a StepEngine, which keeps its
+    // cursor over a reset until the next advance moves it.
     pulse_reset(node, bus, now);
-    TEST_ASSERT_EQUAL_UINT8(0, node.loop_position());
+    TEST_ASSERT_EQUAL_UINT8(1, node.loop_position());
     TEST_ASSERT_EQUAL_UINT8(4, node.recorded_chords());
     for (uint8_t i = 0; i < 4; i++){
         advance(node, bus, now);
         TEST_ASSERT_EQUAL_UINT8(loop[i], node.degree());
+        TEST_ASSERT_EQUAL_UINT8(i, node.loop_position());
     }
 }
 
@@ -813,7 +971,8 @@ static void test_reset_catches_a_half_written_loop_again() {
 
     pulse_reset(node, bus, now);
     TEST_ASSERT_EQUAL_UINT8(0, node.recorded_chords());
-    TEST_ASSERT_EQUAL_UINT8(0, node.loop_position());
+    // Nothing of the loop has been kept, so no slot is playing.
+    TEST_ASSERT_EQUAL_UINT8(0xFF, node.loop_position());
 
     uint8_t loop[4];
     for (uint8_t i = 0; i < 4; i++){ advance(node, bus, now); loop[i] = node.degree(); }
@@ -1014,6 +1173,11 @@ int main(int, char**) {
     RUN_TEST(test_loop_keeps_the_first_chords_and_repeats_them);
     RUN_TEST(test_a_loop_is_as_long_as_it_is_told);
     RUN_TEST(test_a_loop_shorter_than_the_phrase_comes_round_on_its_own_length);
+    RUN_TEST(test_the_slot_it_reports_is_the_chord_it_is_sounding);
+    RUN_TEST(test_shift_starts_the_loop_further_into_what_the_walk_played);
+    RUN_TEST(test_shift_rewrites_nothing_and_restarts_nothing);
+    RUN_TEST(test_a_shift_past_the_end_of_the_loop_comes_round);
+    RUN_TEST(test_a_shifted_loop_fills_the_slots_it_will_play_from);
     RUN_TEST(test_a_loop_length_the_node_has_not_got_is_refused);
     RUN_TEST(test_moving_the_phrase_rewrites_the_loop_at_its_own_length);
     RUN_TEST(test_a_walk_control_rewrites_a_running_loop);

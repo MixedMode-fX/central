@@ -33,6 +33,7 @@ import { paramSections, paramSection, PARAM_SECTIONS } from '../src/ui/controls/
 import { Slider } from '../src/ui/components/Slider.js';
 import { LearnButton } from '../src/ui/controls/LearnButton.js';
 import { NodeCard } from '../src/ui/panels/NodeCard.js';
+import { NO_STEP } from '../src/ui/panels/grids/playhead.js';
 import { describeTarget, RouteTable } from '../src/ui/panels/ModMatrix.js';
 import { KeyTab } from '../src/ui/tabs/KeyTab.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
@@ -1067,7 +1068,7 @@ test('a harmony draws its key on the circle of fifths, and the loop it wrote', a
   module.advance(20_000_000);
   assert.equal(module.harmonyLoopLength(harmonyAt), 4);
   const written = [0, 1, 2, 3].map((slot) => module.harmonyLoopChord(harmonyAt, slot));
-  assert.ok(written.every((d) => d !== 0xFF), `the loop never filled: ${written}`);
+  assert.ok(written.every((d) => d !== NO_STEP), `the loop never filled: ${written}`);
   assert.equal(written[0], 0, 'the first advance is the tonic, so the loop starts on it');
   assert.ok(module.harmonyLoopPosition(harmonyAt) < 4, 'and it is somewhere inside the loop');
 
@@ -1120,6 +1121,94 @@ test('a harmony draws its key on the circle of fifths, and the loop it wrote', a
   // has to stay true while the names move.
   assert.equal(module.harmonyPitch(harmonyAt, 1) % 12, 2, 'D is the second degree of C minor');
   assert.equal(module.harmonyPitch(harmonyAt, 2) % 12, 3, 'E flat is the third');
+});
+
+// **The picture and the jack have to agree.** The loop's chips mark one chord
+// as playing, and the firmware used to be asked for the slot the *next*
+// advance would fall on - so the chip lit up was the chord after the one
+// coming out of the MIDI jack, every bar, for as long as it ran. The rule now
+// lives in one place (app/src/playhead.js) and reads the slot that is
+// sounding, so this drives the real module and checks the two against each
+// other at every sample.
+//
+// `shift` is the other half: a loop the walk wrote well but started in the
+// wrong place, turned round without drawing another one.
+await test('the chip lit is the chord sounding, and shift turns the loop round', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const harmony = device.algorithms.find((d) => d?.name === 'Harmony');
+  const metronome = device.algorithms.find((d) => d?.name === 'Metronome');
+  const patch = codec.emptyPatch();
+
+  const clock = codec.emptyNode(metronome.id);
+  connectNewNode(device, patch, clock, metronome);
+  patch.nodes.push(clock);
+
+  const node = codec.emptyNode(harmony.id);
+  connectNewNode(device, patch, node, harmony);
+  node.params[paramNamed(harmony, 'loop').at] = 4;
+  node.params[paramNamed(harmony, 'seed').at] = 11;
+  patch.nodes.push(node);
+
+  const globals = codec.emptyGlobals();
+  globals.scale = P.ScaleId.SCALE_MAJOR;
+  await device.sendPatch(patch, globals);
+
+  const app = fakeApp({ patch, device, module, globals });
+  const at = patch.nodes.length - 1;
+  const shift = paramNamed(harmony, 'shift');
+  assert.ok(shift, 'Harmony has a start shift');
+  assert.equal(shift.pd.min, 0, 'no shift is the default, so it stores as zero');
+  assert.ok(paramSections(harmony.params).find((section) => section.label === 'the form')
+              ?.params.some((p) => p.pd.name === 'shift'),
+            'shift belongs beside the length it shifts');
+
+  await withDom(async () => {
+    document.body.append(NodeCard(app, at));
+    const slots = [0, 1, 2, 3];
+    const chips = document.body.querySelectorAll('.chord-slot');
+    assert.equal(chips.length, 4, 'a chip per slot of the loop');
+    const chip = (slot) => chips[slot];
+    const lit = () => slots.filter((slot) => chip(slot).classList.contains('playing'));
+    const paint = () => app.live.tick({ module, activity: module.takeActivity() });
+
+    // Twenty seconds of the metronome's default, sampled every quarter of a
+    // second: the invariant has to hold between chords as well as on them.
+    const seen = new Set();
+    for (let i = 0; i < 80; i++) {
+      module.advance(250_000);
+      paint();
+      const on = lit();
+      const degree = module.harmonyDegree(at);
+      if (module.harmonyLoopChord(at, 0) === NO_STEP) continue;   // still writing it down
+      assert.equal(on.length, 1, `${on.length} chips lit at sample ${i}`);
+      assert.equal(module.harmonyLoopChord(at, on[0]), degree,
+                   `the chip lit holds chord ${module.harmonyLoopChord(at, on[0])}, the jack is playing ${degree}`);
+      seen.add(on[0]);
+    }
+    assert.equal(seen.size, 4, `the playhead only ever lit ${[...seen]}`);
+
+    // Turned round: the same four chords, starting two in. The chips are the
+    // piece as it will be played, so they move with it.
+    const written = slots.map((slot) => module.harmonyLoopChord(at, slot));
+    await device.setParam(at, shift.at, 2);
+    paint();
+    for (const slot of slots) {
+      assert.equal(module.harmonyLoopChord(at, slot), written[(slot + 2) % 4],
+                   `slot ${slot} did not turn`);
+      assert.equal(chip(slot).getAttribute('data-degree'), String(written[(slot + 2) % 4]),
+                   `the chip for slot ${slot} was not repainted`);
+    }
+    // And it is still the chord sounding that is lit.
+    for (let i = 0; i < 40; i++) {
+      module.advance(250_000);
+      paint();
+      const on = lit();
+      assert.equal(on.length, 1, `${on.length} chips lit after the shift`);
+      assert.equal(module.harmonyLoopChord(at, on[0]), module.harmonyDegree(at),
+                   'the shift moved the picture off the music');
+    }
+  });
 });
 
 // A control the firmware is currently ignoring says so where it is, because a

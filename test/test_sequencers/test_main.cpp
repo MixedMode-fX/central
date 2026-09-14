@@ -292,6 +292,29 @@ static void test_brownian_direction_walks() {
     TEST_ASSERT_TRUE(moved);
 }
 
+// **What the editor's playhead reads.** The step a display marks is the step
+// you are hearing (app/src/playhead.js), so `position()` has to name the step
+// whose bit is on the outlet *now* - not the one the next edge will play.
+// Every direction, because a walk that reports the step it is about to take
+// would still look right going forwards.
+static void test_the_step_it_reports_is_the_step_it_just_played() {
+    for (uint8_t dir = 0; dir < StepEngine::SEQ_DIRECTIONS; dir++) {
+        NodeConfig c = seq_config(ALGO_STEP_SEQ, 6);
+        c.params[1] = dir;
+        c.params[3] = 0b101101;                  // steps 0, 2, 3 and 5
+        StepSequencer node(c);
+        BusManager bus;
+        uint32_t now = 0;
+        char message[40];
+        snprintf(message, sizeof message, "direction %u", dir);
+        for (uint16_t i = 0; i < 60; i++) {
+            const bool fired = advance_once(bus, node, 0, 1, now);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(i + 1u, node.steps_taken(), message);
+            TEST_ASSERT_EQUAL_MESSAGE(node.on(node.position()), fired, message);
+        }
+    }
+}
+
 // No sequencer allocates after construction, and none names a pin.
 static void test_sequencers_fit_a_pool_slot() {
     TEST_ASSERT_TRUE(sizeof(StepSequencer) <= NODE_SLOT_SIZE);
@@ -461,6 +484,7 @@ int main() {
     RUN_TEST(test_random_sequencer_shred_inlet);
     RUN_TEST(test_per_step_probability);
     RUN_TEST(test_brownian_direction_walks);
+    RUN_TEST(test_the_step_it_reports_is_the_step_it_just_played);
     RUN_TEST(test_sequencers_fit_a_pool_slot);
     RUN_TEST(test_two_sequencers_behind_dividers_stay_locked);
     RUN_TEST(test_sequencer_advanced_by_a_logic_gate);

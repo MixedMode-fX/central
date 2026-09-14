@@ -205,8 +205,16 @@ is only what a parameter list cannot say.
   side counts rising edges and holds the decision for the length of the gate.
   A rising edge on `reset` returns the count to the top, as it does on every
   sequencer.
-- **The `passed` outlet is what a groovebox spends conditions on.** It carries
-  the node's last decision as a gate, latched until the next event. `AND` it
+- **The `dropped` outlet is what the rule took out**, and unlike `decision`
+  it is the signal rather than the answer: the refused notes leave by it
+  unchanged with their note-offs, the refused gates for exactly their own
+  length, so a thinned pattern is split in two rather than holed and a second
+  voice plays where the first does not. On the gate side it is
+  `AND(input, NOT decision)` in one outlet; on the note side nothing
+  downstream can tell a refused note-on from one that was never played, so
+  there is no patch that says it.
+- **The `decision` outlet is what a groovebox spends conditions on.** It
+  carries the node's last answer as a gate, latched until the next event. `AND` it
   with another node's input to play only where this one played, and a `NOT` in
   front gives the complement — a neighbour rule, at any distance and across
   both domains. A fill button is the same shape: a gate, ANDed in. Neither is
@@ -264,7 +272,11 @@ is only what a parameter list cannot say.
   `phrase` and `cadence` make it periodic; `loop` is a **length**, and the next
   that many chords become the piece, repeated until it is set back to zero —
   the phrase is how often the music resolves and the loop is how much of it
-  repeats, so the two are set apart. `gravity` biases the tonic, `drift`
+  repeats, so the two are set apart. `shift` moves where the loop *begins*
+  without changing what it is, because a walk that wrote four good chords often
+  wrote them starting in the wrong place; it turns the slots in place rather
+  than restarting, so a loop already in time with something stays in time with
+  it. `gravity` biases the tonic, `drift`
   redraws one chord of a loop and keeps it. Every control over the walk
   **rewrites a running loop where it stands**, so a knob is heard on the next
   chord rather than after the loop has been switched off and on; `seed`

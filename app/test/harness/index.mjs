@@ -114,10 +114,13 @@ export function fakeDocument() {
     for (const kid of node.children ?? []) { out.push(kid); descendants(kid, out); }
     return out;
   };
+  const adopt = (parent, kids) => {
+    for (const kid of kids) if (kid && kid.nodeType === 1) kid.parent = parent;
+  };
   const make = (tag) => {
     const listeners = new Map();
     const element = {
-      tag, nodeType: 1, className: '', attrs: {}, value: '', children: [],
+      tag, nodeType: 1, className: '', attrs: {}, value: '', children: [], parent: null,
       style: {}, textContent: '', isConnected: true,
       setAttribute(key, value) {
         this.attrs[key] = String(value);
@@ -129,8 +132,10 @@ export function fakeDocument() {
         if (!listeners.has(type)) listeners.set(type, []);
         listeners.get(type).push(fn);
       },
-      append(...kids) { this.children.push(...kids); },
-      replaceChildren(...kids) { this.children = [...kids]; },
+      // A child knows its parent, so it can take itself off the page the
+      // way a menu does when the next one opens.
+      append(...kids) { adopt(this, kids); this.children.push(...kids); },
+      replaceChildren(...kids) { adopt(this, kids); this.children = [...kids]; },
       fire(type, event = {}) { for (const fn of listeners.get(type) ?? []) fn({ type, ...event }); },
       getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 0, right: 0 }),
       querySelector(selector) { return descendants(this).find((kid) => matches(kid, selector)) ?? null; },
@@ -138,8 +143,10 @@ export function fakeDocument() {
       contains: () => false,
       focus() {},
       remove() {
-        const where = document.body.children.indexOf(this);
-        if (where >= 0) document.body.children.splice(where, 1);
+        const from = this.parent ?? document.body;
+        const where = from.children.indexOf(this);
+        if (where >= 0) from.children.splice(where, 1);
+        this.parent = null;
       },
       get firstChild() { return this.children[0] ?? null; },
     };

@@ -395,8 +395,10 @@ EMU_EXPORT uint32_t emu_harmony_weight(uint32_t i, uint32_t from, uint32_t to){
     const uint8_t n = h->weigh((uint8_t)from, weight);
     return to < n ? weight[to] : 0;
 }
-// The loop: its length, the slot the next advance falls on (0xFF when
-// nothing is looping), and the degree written in a slot (0xFF until it is).
+// The loop: its length, the slot that is sounding (0xFF when nothing is
+// looping or no chord of it has played), and the degree in a slot (0xFF until
+// the walk has played that far). The slot is the one being *heard*, the same
+// as `emu_seq_position` above, so the page paints one playhead rule.
 EMU_EXPORT uint32_t emu_harmony_loop_length(uint32_t i){
     Harmony* h = harmony_at(i);
     return h ? h->get_param(Harmony::P_LOOP) : 0;

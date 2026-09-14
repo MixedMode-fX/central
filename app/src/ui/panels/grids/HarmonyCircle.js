@@ -13,9 +13,9 @@ import { el, svg, classes, clear } from '../../dom.js';
 import { Segmented } from '../../components/Segmented.js';
 import { scaleMaskById } from '../../../protocol/names.js';
 import { keySpelling, triadQuality, PITCH_CLASSES, PITCH_CLASSES_FLAT } from '../../../core/music.js';
+import { NO_STEP, paintPlayhead } from './playhead.js';
 import '../Harmony.css';
 
-const NONE = 0xFF;
 const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 const CIRCLE = { mid: 120, ring: 78, label: 105, dot: 15 };
 
@@ -142,22 +142,23 @@ export function HarmonyCircle(app, index) {
     picture, caption,
     slots ? el('div', { class: 'loop-row' },
       el('span', { class: 'lane-name' }, `loop (${loopLength})`),
-      el('div', { class: 'chord-slots' }, slots.chips)) : null);
+      el('div', { class: 'chord-slots' }, slots)) : null);
 }
 
-// The loop as its slots: the chord in each, and which one the next advance
-// falls on. A loop still being captured has empty slots at the end, and they
-// fill one per advance. The same shape as a sequencer's steps, because it is
-// the same thing - a pattern with a playhead in it.
-function LoopSlots(loopLength) {
-  const chips = Array.from({ length: loopLength }, () =>
-    el('div', { class: 'chord-slot' }, el('span', { class: 'roman' }, ''), el('span', { class: 'name' }, '')));
-  return { chips, degrees: new Array(loopLength).fill(undefined) };
-}
+// The loop as its slots: the chord in each, and which one is sounding. A
+// loop still being captured has empty slots at the end, and they fill one
+// per advance. The same shape as a sequencer's steps, because it is the same
+// thing - a pattern with a playhead in it. The chips are filled per frame,
+// because a shift turns the loop round under them without an edit.
+const LoopSlots = (loopLength) => Array.from({ length: loopLength }, () =>
+  el('div', { class: 'chord-slot' }, el('span', { class: 'roman' }, ''), el('span', { class: 'name' }, '')));
 
+// A chip is marked with the degree it holds, so the frame loop can skip the
+// work when it has not changed.
 function fillSlot(chip, shape, degree, slot) {
-  const chord = degree === NONE ? null : shape.chords[degree];
-  chip.className = classes('chord-slot', !chord && 'empty');
+  const chord = degree === NO_STEP ? null : shape.chords[degree];
+  chip.classList.toggle('empty', !chord);
+  chip.setAttribute('data-degree', String(degree));
   chip.setAttribute('title', chord ? `chord ${slot + 1}: ${chord.roman} (${chord.name})`
                                    : `chord ${slot + 1}: not written yet`);
   chip.children[0].textContent = chord ? chord.roman : '·';
@@ -197,7 +198,7 @@ function drawHarmony(app, index, view) {
   const playing = m.harmonyDegree(index);
   const pinned = viewOf(app, index).focus ?? null;
   const from = pinned !== null ? Math.min(pinned, shape.n - 1)
-             : (playing === NONE ? 0 : Math.min(playing, shape.n - 1));
+             : (playing === NO_STEP ? 0 : Math.min(playing, shape.n - 1));
   const loopLength = m.harmonyLoopLength(index);
   const mode = modeOf(app, index, loopLength);
   view.drawn = `${mode}:${from}:${loopLength}:${m.harmonyLoopPosition(index)}`;
@@ -208,7 +209,7 @@ function drawHarmony(app, index, view) {
     const chords = [];
     for (let slot = 0; slot < loopLength; slot++) {
       const degree = m.harmonyLoopChord(index, slot);
-      if (degree !== NONE && degree < shape.n) chords.push(shape.chords[degree]);
+      if (degree !== NO_STEP && degree < shape.n) chords.push(shape.chords[degree]);
     }
     for (let i = 0; i + 1 < chords.length; i++) {
       if (chords[i].degree === chords[i + 1].degree) continue;   // a repeat draws nothing
@@ -251,28 +252,28 @@ function drawHarmony(app, index, view) {
 }
 
 // What the module is doing to the circle, per frame: the chord sounding, the
-// slot the loop is on, and - while the arrows follow rather than being
+// slot of the loop it is sounding in, and - while the arrows follow rather than being
 // pinned - the fan redrawn as each chord lands. Redrawn only when what it
 // would draw has changed, so a card that is merely open costs nothing.
 function paintHarmony(app, index, view) {
   const m = app.module;
   if (index >= m.nodeCount() || !m.harmonyDegrees(index)) return;
   const degree = m.harmonyDegree(index);
-  view.dots.forEach((dot, d) => dot.classList.toggle('playing', d === degree));
+  paintPlayhead(view.dots, degree);
   const loopLength = m.harmonyLoopLength(index);
   const at = m.harmonyLoopPosition(index);
   if (view.slots) {
     let shape = null;
-    view.slots.chips.forEach((chip, slot) => {
+    view.slots.forEach((chip, slot) => {
       const written = m.harmonyLoopChord(index, slot);
-      if (view.slots.degrees[slot] !== written) {
+      if (chip.getAttribute('data-degree') !== String(written)) {
         shape ??= harmonyShape(app, index);
-        if (shape) { fillSlot(chip, shape, written, slot); view.slots.degrees[slot] = written; }
+        if (shape) fillSlot(chip, shape, written, slot);
       }
-      chip.classList.toggle('playing', slot === at);
     });
+    paintPlayhead(view.slots, at);
   }
   const pinned = viewOf(app, index).focus ?? null;
-  const from = pinned !== null ? pinned : (degree === NONE ? 0 : degree);
+  const from = pinned !== null ? pinned : (degree === NO_STEP ? 0 : degree);
   if (view.drawn !== `${modeOf(app, index, loopLength)}:${from}:${loopLength}:${at}`) drawHarmony(app, index, view);
 }

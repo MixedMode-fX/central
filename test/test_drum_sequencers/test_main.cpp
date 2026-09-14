@@ -394,6 +394,30 @@ static void test_gate_variant_drives_jacks_from_a_divider() {
     TEST_ASSERT_EQUAL_UINT32(4, rises1);
 }
 
+// **What the editor's playhead reads**, lane by lane. The lanes run at
+// different lengths - that is the polyrhythm the node exists for - so each one
+// reports its own step, and each has to report the step whose cell is on its
+// gate *now* rather than the one the next edge will play
+// (app/src/playhead.js).
+static void test_each_lane_reports_the_step_it_just_played() {
+    NodeConfig c = gate_config(8);
+    gate_lane(c, 0, 0b10101010, 8);
+    gate_lane(c, 1, 0b110011, 6);        // its own length: a polyrhythm
+    gate_lane(c, 2, 0b10010, 5);
+    DrumSeqGate node(c);
+    Rig rig;
+
+    for (uint16_t i = 0; i < 60; i++) {
+        const uint8_t fired = rig.edge(node);
+        for (uint8_t l = 0; l < 3; l++) {
+            char message[40];
+            snprintf(message, sizeof message, "lane %u, edge %u", l, i);
+            const bool on = node.cell(l, node.lane_position(l)) != 0;
+            TEST_ASSERT_EQUAL_MESSAGE(on, (fired & (1u << l)) != 0, message);
+        }
+    }
+}
+
 static void test_descriptors_and_sizes() {
     TEST_ASSERT_EQUAL(DS::LANES, DrumSeqGate::descriptor.n_out);
     TEST_ASSERT_EQUAL(1, DrumSeqMidi::descriptor.n_out);
@@ -418,6 +442,7 @@ int main() {
     RUN_TEST(test_midi_hangs_nothing);
     RUN_TEST(test_patch_swap_mid_note_releases_every_lane);
     RUN_TEST(test_gate_variant_drives_jacks_from_a_divider);
+    RUN_TEST(test_each_lane_reports_the_step_it_just_played);
     RUN_TEST(test_descriptors_and_sizes);
     return UNITY_END();
 }

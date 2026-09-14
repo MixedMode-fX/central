@@ -21,6 +21,7 @@ import { WAVES } from './audio.js';
 import { KITS, PIECE_LABELS } from './drums.js';
 import { Domain } from './validate.js';
 import { refreshCanvasLive } from './canvas.js';
+import { paintPlayhead } from './playhead.js';
 
 const MIDI_TYPES = {
   0x80: 'note off', 0x90: 'note on', 0xa0: 'poly AT', 0xb0: 'CC', 0xc0: 'program',
@@ -692,20 +693,19 @@ function refreshLog(app) {
 // A playhead on the step grids in the patch tab, read from the running node.
 // This is what "edit it while it plays" means in practice: the step being
 // edited and the step being played are the same square. A harmony's circle of
-// fifths is the same idea in another shape, so it is painted from here too.
+// fifths is the same idea in another shape, so it is painted from here too -
+// and both go through the one rule in playhead.js, which is what stops the two
+// from ever drifting apart about which square that is.
 function refreshPlayheads(app) {
   if (app.tab !== 'patch') return;
-  for (const cell of document.querySelectorAll('.cell.playing, .note-cell.playing')) {
-    cell.classList.remove('playing');
-  }
   const nodes = Math.min(app.patch.nodes.length, app.module.nodeCount());
   for (let node = 0; node < nodes; node++) {
     paintHarmony(app, node);
     if (!app.module.seqKind(node)) continue;
     const lanes = app.module.seqLanes(node);
     for (let lane = 0; lane < lanes; lane++) {
-      const cell = document.getElementById(`cell-${node}-${lane}-${app.module.seqPosition(node, lane)}`);
-      if (cell) cell.classList.add('playing');
+      paintPlayhead((step) => `cell-${node}-${lane}-${step}`,
+                    P.MAX_SEQUENCE_LEN, app.module.seqPosition(node, lane));
     }
   }
 }

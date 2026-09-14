@@ -272,7 +272,11 @@ is only what a parameter list cannot say.
   `phrase` and `cadence` make it periodic; `loop` is a **length**, and the next
   that many chords become the piece, repeated until it is set back to zero —
   the phrase is how often the music resolves and the loop is how much of it
-  repeats, so the two are set apart. `gravity` biases the tonic, `drift`
+  repeats, so the two are set apart. `shift` moves where the loop *begins*
+  without changing what it is, because a walk that wrote four good chords often
+  wrote them starting in the wrong place; it turns the slots in place rather
+  than restarting, so a loop already in time with something stays in time with
+  it. `gravity` biases the tonic, `drift`
   redraws one chord of a loop and keeps it. Every control over the walk
   **rewrites a running loop where it stands**, so a knob is heard on the next
   chord rather than after the loop has been switched off and on; `seed`

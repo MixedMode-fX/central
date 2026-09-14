@@ -60,7 +60,10 @@ and every route in the patch, and every field of a binding, so one can be
 built with no controller in the room. Sequencers get purpose-built views — a
 step grid for the gate and drum sequencers, a note lane over scale degrees for
 the note sequencers — and the step being played is outlined in the grid you
-are editing. `Harmony` gets the **circle of fifths**: the key's chords where
+are editing. **What is outlined is the step that is sounding**, never the one
+the next clock edge will play: one rule, in `src/playhead.js`, for every
+display that lays a pattern out in squares, because a display a step ahead of
+the jack is read as the module being wrong. `Harmony` gets the **circle of fifths**: the key's chords where
 the circle puts them, and either the moves the walk would make from one of
 them, each arrow weighted by how much it wants it, or the loop it has written
 down as a path through them. Every note on it is spelled the way the key

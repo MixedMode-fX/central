@@ -34,7 +34,7 @@ import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/sche
 import { EmbeddedModule } from '../src/module.js';
 import {
   slider, learnButton, paramSections, paramSection, PARAM_SECTIONS, nodeCard, triadQuality,
-  refreshModLive,
+  refreshModLive, paintHarmony,
 } from '../src/views.js';
 import { shade, nodeRollSources, scopeRows } from '../src/scope.js';
 import { ICON_NAMES } from '../src/icons.js';
@@ -1175,6 +1175,91 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
   // has to stay true while the names move.
   assert.equal(module.harmonyPitch(harmonyAt, 1) % 12, 2, 'D is the second degree of C minor');
   assert.equal(module.harmonyPitch(harmonyAt, 2) % 12, 3, 'E flat is the third');
+});
+
+// **The picture and the jack have to agree.** The loop's chips mark one chord
+// as playing, and the firmware used to be asked for the slot the *next*
+// advance would fall on - so the chip lit up was the chord after the one
+// coming out of the MIDI jack, every bar, for as long as it ran. The rule now
+// lives in one place (app/src/playhead.js) and reads the slot that is
+// sounding, so this drives the real module and checks the two against each
+// other at every sample.
+//
+// `shift` is the other half: a loop the walk wrote well but started in the
+// wrong place, turned round without drawing another one.
+await test('the chip lit is the chord sounding, and shift turns the loop round', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const harmony = device.algorithms.find((d) => d?.name === 'Harmony');
+  const metronome = device.algorithms.find((d) => d?.name === 'Metronome');
+  const patch = codec.emptyPatch();
+
+  const clock = codec.emptyNode(metronome.id);
+  connectNewNode(device, patch, clock, metronome);
+  patch.nodes.push(clock);
+
+  const node = codec.emptyNode(harmony.id);
+  connectNewNode(device, patch, node, harmony);
+  node.params[paramNamed(harmony, 'loop').at] = 4;
+  node.params[paramNamed(harmony, 'seed').at] = 11;
+  patch.nodes.push(node);
+
+  const globals = codec.emptyGlobals();
+  globals.scale = P.ScaleId.SCALE_MAJOR;
+  await device.sendPatch(patch, globals);
+
+  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
+  const at = patch.nodes.length - 1;
+  const shift = paramNamed(harmony, 'shift');
+  assert.ok(shift, 'Harmony has a start shift');
+  assert.equal(shift.pd.min, 0, 'no shift is the default, so it stores as zero');
+  assert.ok(paramSections(harmony.params).find((section) => section.label === 'the form')
+              ?.params.some((p) => p.pd.name === 'shift'),
+            'shift belongs beside the length it shifts');
+
+  await withDom(async () => {
+    document.body.append(nodeCard(app, at));
+    const slots = [0, 1, 2, 3];
+    const chip = (slot) => document.getElementById(`harm-${at}-slot-${slot}`);
+    const lit = () => slots.filter((slot) => chip(slot).classList.contains('playing'));
+
+    // Twenty seconds of the metronome's default, sampled every quarter of a
+    // second: the invariant has to hold between chords as well as on them.
+    const seen = new Set();
+    for (let i = 0; i < 80; i++) {
+      module.advance(250_000);
+      paintHarmony(app, at);
+      const on = lit();
+      const degree = module.harmonyDegree(at);
+      if (module.harmonyLoopChord(at, 0) === 0xFF) continue;   // still writing it down
+      assert.equal(on.length, 1, `${on.length} chips lit at sample ${i}`);
+      assert.equal(module.harmonyLoopChord(at, on[0]), degree,
+                   `the chip lit holds chord ${module.harmonyLoopChord(at, on[0])}, the jack is playing ${degree}`);
+      seen.add(on[0]);
+    }
+    assert.equal(seen.size, 4, `the playhead only ever lit ${[...seen]}`);
+
+    // Turned round: the same four chords, starting two in. The chips are the
+    // piece as it will be played, so they move with it.
+    const written = slots.map((slot) => module.harmonyLoopChord(at, slot));
+    await device.setParam(at, shift.at, 2);
+    paintHarmony(app, at);
+    for (const slot of slots) {
+      assert.equal(module.harmonyLoopChord(at, slot), written[(slot + 2) % 4],
+                   `slot ${slot} did not turn`);
+      assert.equal(chip(slot).attrs['data-degree'], String(written[(slot + 2) % 4]),
+                   `the chip for slot ${slot} was not repainted`);
+    }
+    // And it is still the chord sounding that is lit.
+    for (let i = 0; i < 40; i++) {
+      module.advance(250_000);
+      paintHarmony(app, at);
+      const on = lit();
+      assert.equal(on.length, 1, `${on.length} chips lit after the shift`);
+      assert.equal(module.harmonyLoopChord(at, on[0]), module.harmonyDegree(at),
+                   'the shift moved the picture off the music');
+    }
+  });
 });
 
 // A control the firmware is currently ignoring says so where it is, because a
@@ -2529,14 +2614,22 @@ function fakeDocument() {
     const element = {
       // Children are kept rather than dropped, so a test can read the words
       // a panel put on the page. Nothing here lays anything out.
-      tag, nodeType: 1, className: '', attrs: {}, value: '', children: [],
+      tag, nodeType: 1, className: '', attrs: {}, value: '', children: [], parent: null,
       style: {}, textContent: '',
       setAttribute(key, value) { this.attrs[key] = String(value); if (key === 'value') this.value = String(value); },
+      // Read back as a browser does - absent is null, not undefined. The live
+      // views mark an element with what they last drew into it and skip the
+      // work when it has not changed, so this is half of how they stay cheap.
+      getAttribute(key) { return key in this.attrs ? this.attrs[key] : null; },
       addEventListener(type, fn) {
         if (!listeners.has(type)) listeners.set(type, []);
         listeners.get(type).push(fn);
       },
-      append(...kids) { this.children.push(...kids); },
+      append(...kids) {
+        for (const kid of kids) { if (kid && kid.nodeType === 1) kid.parent = this; }
+        this.children.push(...kids);
+      },
+      get firstChild() { return this.children[0] ?? null; },
       fire(type, event = {}) { for (const fn of listeners.get(type) ?? []) fn({ type, ...event }); },
       // Enough of an element for a menu to be opened under it and taken away
       // again: it is anchored on a rectangle, it focuses its first row, and
@@ -2547,8 +2640,10 @@ function fakeDocument() {
       contains: () => false,
       focus() {},
       remove() {
-        const where = document.body.children.indexOf(this);
-        if (where >= 0) document.body.children.splice(where, 1);
+        const from = this.parent ?? document.body;
+        const where = from.children.indexOf(this);
+        if (where >= 0) from.children.splice(where, 1);
+        this.parent = null;
       },
     };
     // `data-mod-slot` reads back as `dataset.modSlot`, as it does in a

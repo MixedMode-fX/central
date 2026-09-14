@@ -66,7 +66,12 @@ export function createApp({ root, view, wasmUrl }) {
   };
 
   session.addEventListener('replaced', (e) => patches.adopt(e.detail));
-  session.addEventListener('learned', () => editor.learned());
+  // The module's learn is the truth about whether one is running: when it
+  // lands, the control that armed it stops saying it is waiting.
+  session.addEventListener('learned', () => {
+    editor.learned();
+    state.ui.surface.armed = null;
+  });
 
   // --- the module, and the module on the cable ------------------------------
 

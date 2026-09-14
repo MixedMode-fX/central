@@ -1,0 +1,54 @@
+/* The macro bench. One card per macro, and the picture first: what a macro
+   does is a shape across its travel, not four rows of numbers. */
+.macro-list { display: grid; gap: .5rem; }
+.macro {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .3rem .6rem;
+}
+.macro > summary { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+.macro-title { font-weight: 600; }
+.macro-live { margin-left: auto; color: var(--dim); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.macro-live.engaged { color: var(--accent); }
+
+/* One lane per destination. The line is what it asks for at each position:
+   nothing below its window, rising across it, held past the top. */
+.windows { margin: .5rem 0 .4rem; }
+.windows svg { width: 100%; display: block; }
+.lane-base { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.lane-window { fill: var(--raised); opacity: .5; }
+.lane-line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.lane-fill { fill: var(--accent); opacity: .16; }
+.axis { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+/* Silent is not broken: a macro nobody has moved holds no position, so its
+   destinations are correct and contributing nothing. Clipped is the one worth
+   seeing - it is assigned, it is writing, and it is pinned against the end of
+   the target's range. */
+.lane.is-silent .lane-line { stroke: var(--dim); stroke-dasharray: 4 3; }
+.lane.is-silent .lane-fill { fill: var(--dim); opacity: .08; }
+.lane.is-clipped .lane-line { stroke: var(--warn); }
+.lane.is-clipped .lane-fill { fill: var(--warn); opacity: .18; }
+.lane.is-no-target .lane-line { stroke: var(--bad); stroke-dasharray: 2 3; }
+.lane.is-no-target .lane-fill { fill: none; }
+
+/* Where the module says the macro actually is, on the same axis. */
+.macro-now { stroke: var(--note); stroke-width: 2; vector-effect: non-scaling-stroke; }
+
+.windows-scale { display: flex; justify-content: space-between; margin: 0; font-size: .7rem; }
+
+.dest-list { display: grid; gap: .5rem; margin-bottom: .5rem; }
+.dest {
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); padding: .5rem .6rem;
+}
+.dest.is-silent { border-left-color: var(--dim); }
+.dest.is-clipped { border-left-color: var(--warn); }
+.dest.is-no-target { border-left-color: var(--bad); }
+.dest-head { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; margin-bottom: .4rem; }
+.dest-what { font-weight: 600; }
+.dest-head .ghost { margin-left: auto; }
+.dest .fields:last-child { margin-bottom: 0; }
+
+@media (min-width: 34rem) {
+  .dest .fields { grid-template-columns: repeat(3, 1fr); }
+}

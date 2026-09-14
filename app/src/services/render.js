@@ -19,12 +19,17 @@ export class Live {
     this.mounted = [];
     // The modulation slots with a meter on screen: what the session polls.
     this.modSlots = new Set();
+    // The macros with a control on screen, for the same reason: a macro's
+    // position is not in the patch, so the only way to draw a pot where the
+    // module has it is to ask - and only about the ones being looked at.
+    this.macroSlots = new Set();
   }
 
   reset() {
     this.painters.length = 0;
     this.mounted.length = 0;
     this.modSlots.clear();
+    this.macroSlots.clear();
   }
 
   // Called every animation frame, and once after every render, with what the
@@ -35,6 +40,8 @@ export class Live {
   onMount(fn) { this.mounted.push(fn); }
 
   watchMod(slot) { this.modSlots.add(slot); }
+
+  watchMacro(index) { this.macroSlots.add(index); }
 
   tick(frame) {
     for (const painter of this.painters) painter(frame);

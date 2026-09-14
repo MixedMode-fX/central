@@ -61,7 +61,7 @@ struct Rig {
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum), nrpn(patches, cc),
-            sysex(patches, master, store, leds, midi, cc, mod) {}
+            sysex(patches, master, store, leds, midi, cc, mod, macros, sum) {}
 
     // The whole input path, as main.cpp runs it.
     bool feed_cc(uint8_t number, uint8_t value, uint8_t channel = 1,

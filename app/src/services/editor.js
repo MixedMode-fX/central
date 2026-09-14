@@ -14,7 +14,9 @@ import {
   connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
   planJackDirection, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation, planCcBinding,
 } from '../core/graph.js';
-import { isBinding, isRoute, renumberTargets, shiftNodeIndex, targetParamName } from '../core/patch.js';
+import {
+  isBinding, isRoute, destsOfMacro, freeMacroDestSlot, renumberTargets, shiftNodeIndex, targetParamName,
+} from '../core/patch.js';
 import { ENDPOINTS } from '../core/catalogue.js';
 import { selectBlock } from './state.js';
 
@@ -179,6 +181,54 @@ export class Editor {
     this.render();
   }
 
+  // --- macros ----------------------------------------------------------------
+  // A macro is a target, not a source (src/control/macros.h): the app writes
+  // its name and its destinations, and whatever moves it - a knob through the
+  // binding table, a CV bus through the matrix - is bound like anything else.
+
+  // The name, which is what makes a macro a macro. It is a fixed-width field
+  // in the patch, so it is cut to length here rather than refused: a name
+  // that does not fit is a name the module cannot hold.
+  setMacro(index, name) {
+    const limit = this.caps?.macroNameBytes ?? P.MACRO_NAME_BYTES;
+    const text = String(name ?? '').slice(0, limit);
+    this.patch.macros ??= Array.from({ length: P.N_MACRO }, () => null);
+    this.patch.macros[index] = text ? { name: text } : null;
+    this.edit(() => this.device.setMacro(index, text), 'macro name');
+    this.render();
+  }
+
+  // One destination, in the pool slot it already occupies. `null` clears the
+  // slot: a destination with no macro is not a destination.
+  setMacroDest(slot, dest) {
+    this.patch.macroDest ??= Array.from({ length: P.N_MACRO_DEST }, () => null);
+    this.patch.macroDest[slot] = dest;
+    this.edit(() => this.device.setMacroDest(slot, dest), 'macro destination');
+    this.render();
+  }
+
+  clearMacroDest(slot) { this.setMacroDest(slot, null); }
+
+  // A destination onto the first free pool entry. Both ways this can fail are
+  // about capacity rather than about the destination, so both are said here
+  // rather than arriving as a NAK: the pool is shared across every macro, and
+  // one macro may not take more than its share of it.
+  addMacroDest(dest) {
+    const pool = this.caps?.macroDests ?? P.N_MACRO_DEST;
+    const perMacro = this.caps?.macroDestsPerMacro ?? P.N_MACRO_DEST_PER_MACRO;
+    if (destsOfMacro(this.patch, dest.macro).length >= perMacro) {
+      this.fail(`a macro holds ${perMacro} destinations`);
+      return null;
+    }
+    const slot = freeMacroDestSlot(this.patch, pool);
+    if (slot === null) {
+      this.fail(`all ${pool} macro destinations are in use`);
+      return null;
+    }
+    this.setMacroDest(slot, dest);
+    return slot;
+  }
+
   // --- blocks ----------------------------------------------------------------
 
   // "add", for anything that can be on the canvas: an algorithm by its id, or
@@ -220,6 +270,7 @@ export class Editor {
     }
     this.patch.ccMap = renumberTargets(this.patch.ccMap, index);
     this.patch.modMap = renumberTargets(this.patch.modMap ?? [], index);
+    this.patch.macroDest = renumberTargets(this.patch.macroDest ?? [], index);
     this.sendWhole();
   }
 

@@ -52,7 +52,7 @@ struct Rig {
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
-            sysex(patches, master, store, leds, midi, cc, mod) {}
+            sysex(patches, master, store, leds, midi, cc, mod, macros, sum) {}
 
     // One CC through the whole input path: offered to the mapping table, and
     // delivered to the graph only if it was not consumed. This is exactly

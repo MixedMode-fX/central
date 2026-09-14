@@ -20,9 +20,10 @@ static constexpr uint16_t HEADER_BYTES = 4;
 
 SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
                            PatchStore& patch_store, StatusLeds& status, IMidiOut& midi_out,
-                           CcMapper& mapper, ModMatrix& matrix) :
+                           CcMapper& mapper, ModMatrix& matrix,
+                           const Macros& macro_table, const ControlSum& control_sum) :
     patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out), cc(mapper),
-    mod(matrix),
+    mod(matrix), macros(macro_table), sum(control_sum),
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
     pending_patch(empty_patch()), pending_globals(default_globals()),
@@ -346,6 +347,77 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             reply_cc_map(source, args[0]);
             return;
 
+        // One macro's name (control/macros.h). A macro exists because it has
+        // a name, so an all-zero name is how one is cleared - and the name is
+        // fixed-width rather than length-prefixed, because patch_codec.cpp is
+        // mirrored by hand in the app and a memcpy is the one shape the two
+        // cannot disagree about.
+        case SYSEX_SET_MACRO: {
+            if (n < 1u + MACRO_NAME_BYTES){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (args[0] >= N_MACRO){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            patches.begin_edit();
+            MacroDef& m = patches.staging().macros[args[0]];
+            for (uint8_t i = 0; i < MACRO_NAME_BYTES; i++){
+                const uint8_t c = args[1 + i];
+                // Printable or nothing: a control character in a name would
+                // reach a console and a browser alike as something neither
+                // of them can draw.
+                m.name[i] = (char)((c == 0 || (c >= 32 && c <= 126)) ? c : '?');
+            }
+            if (patches.commit_macro(args[0], now_us) != APPLY_OK){
+                nak(source, SYSEX_ERR_REJECTED);
+                return;
+            }
+            ack(source);
+            return;
+        }
+
+        case SYSEX_GET_MACRO:
+            if (n < 1 || args[0] >= N_MACRO){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_macro(source, args[0]);
+            return;
+
+        // One destination of one macro: a window of its travel reaching a
+        // target, as a signed offset (node/patch.h). MACRO_NONE does not fit
+        // a data byte, so a macro index that is not a macro is what clears
+        // the slot - the same trick a bus index that is not a bus plays for
+        // a modulation route.
+        case SYSEX_SET_MACRO_DEST: {
+            if (n < 14){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (args[0] >= N_MACRO_DEST){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            MacroDest dest = unused_dest();
+            if (args[1] < N_MACRO){
+                const uint16_t magnitude = (uint16_t)(args[10] | ((uint16_t)args[11] << 7));
+                const int32_t depth = args[12] ? -(int32_t)magnitude : (int32_t)magnitude;
+                dest.macro = args[1];
+                dest.target_kind = args[2];
+                dest.target_index = args[3];
+                dest.param = (uint16_t)(args[4] | ((uint16_t)args[5] << 7));
+                dest.src_lo = (uint8_t)(args[6] | ((uint16_t)args[7] << 7));
+                dest.src_hi = (uint8_t)(args[8] | ((uint16_t)args[9] << 7));
+                dest.depth = (int16_t)(depth > 32767 ? 32767 : (depth < -32768 ? -32768 : depth));
+                dest.flags = args[13];
+            }
+            patches.begin_edit();
+            patches.staging().macro_dest[args[0]] = dest;
+            if (patches.commit_macro_dest(args[0], now_us) != APPLY_OK){
+                nak(source, SYSEX_ERR_REJECTED);
+                return;
+            }
+            ack(source);
+            return;
+        }
+
+        case SYSEX_GET_MACRO_DEST:
+            if (n < 1 || args[0] >= N_MACRO_DEST){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_macro_dest(source, args[0]);
+            return;
+
+        case SYSEX_GET_MACRO_STATE:
+            if (n < 1 || args[0] >= N_MACRO){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_macro_state(source, args[0]);
+            return;
+
         // Learn, without a panel: the host says "the next CC you see binds to
         // this target", and the module answers with what it bound.
         case SYSEX_CC_LEARN: {
@@ -520,6 +592,13 @@ void SysexHandler::reply_capabilities(uint8_t source){
     put(N_CC_MAP);
     put(N_MOD_ROUTE);
     put_u14(CV_FULL);
+    // The macro table and the pool it shares. An editor draws a budget from
+    // these rather than from eight and thirty-two written into a panel, so
+    // cutting the pool is a firmware change and not two.
+    put(N_MACRO);
+    put(N_MACRO_DEST);
+    put(N_MACRO_DEST_PER_MACRO);
+    put(MACRO_NAME_BYTES);
     send_reply(source);
 }
 
@@ -810,6 +889,78 @@ void SysexHandler::reply_cc_map(uint8_t source, uint8_t slot){
     put_u14(m.min);
     put((uint8_t)(m.flags | ((m.source_mask & 0x80) ? 0x40u : 0u)));
     put_u14(m.max);
+    send_reply(source);
+}
+
+void SysexHandler::reply_macro(uint8_t source, uint8_t index){
+    const MacroDef& m = patches.active().macros[index];
+    begin_reply(SYSEX_MACRO);
+    put(index);
+    // Fixed-width, exactly as the patch image holds it: a name that fills
+    // the field is not NUL-terminated, so the count is the field and not
+    // something the reader has to find.
+    for (uint8_t i = 0; i < MACRO_NAME_BYTES; i++) put((uint8_t)m.name[i]);
+    send_reply(source);
+}
+
+void SysexHandler::reply_macro_dest(uint8_t source, uint8_t slot){
+    const MacroDest& d = patches.active().macro_dest[slot];
+    begin_reply(SYSEX_MACRO_DEST);
+    put(slot);
+    // An unused slot answers with a macro index that is not a macro, which
+    // is what SYSEX_SET_MACRO_DEST reads as "clear it": a host can echo a
+    // reply straight back and change nothing.
+    put(d.macro == MACRO_NONE ? (uint8_t)0x7F : d.macro);
+    put(d.target_kind);
+    put(d.target_index);
+    put_u14(d.param);
+    put_u14(d.src_lo);
+    put_u14(d.src_hi);
+    put_s14(d.depth);
+    put(d.flags);
+    send_reply(source);
+}
+
+// Where a macro *is*, and what each of its destinations is doing about it.
+//
+// None of this is in the patch, and none of it can be worked out from the
+// patch either: a macro holds no position across a load, so an editor drawing
+// a pot has nothing to draw until it asks. The per-destination part answers
+// the question the bench exists for - a destination that looks assigned and
+// is silent because nobody has moved the macro is a different problem from
+// one pinned against its target's ceiling, and they look identical in a table
+// of numbers.
+void SysexHandler::reply_macro_state(uint8_t source, uint8_t index){
+    const Patch& patch = patches.active();
+    const bool engaged = macros.engaged(index);
+    begin_reply(SYSEX_MACRO_STATE);
+    put(index);
+    put(engaged ? 1u : 0u);
+    put_u14(macros.value(index));
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < N_MACRO_DEST; i++){
+        if (patch.macro_dest[i].macro == index) n++;
+    }
+    put(n);
+    for (uint8_t i = 0; i < N_MACRO_DEST; i++){
+        const MacroDest& d = patch.macro_dest[i];
+        if (d.macro != index) continue;
+        const int32_t offset = engaged ? Macros::contribution(d, macros.value(index)) : 0;
+        uint16_t anchor = 0;
+        uint16_t value = 0;
+        bool clipped = false;
+        const bool summed = sum.lookup(d.target_kind, d.target_index, d.param, anchor, value, clipped);
+        uint8_t status = MOD_STATUS_ACTIVE;
+        if (d.depth == 0) status = MOD_STATUS_SILENT;
+        else if (!engaged) status = MOD_STATUS_SILENT;      // untouched, not broken
+        else if (!summed) status = MOD_STATUS_NO_TARGET;    // nothing wrote it this pass
+        else if (clipped) status = MOD_STATUS_CLIPPED;
+        put(i);
+        put(status);
+        put_s14(offset);
+        put_u14(anchor);
+        put_u14(value);
+    }
     send_reply(source);
 }
 

@@ -95,6 +95,16 @@ class PatchManager {
         // route already owns - is refused rather than silently doing nothing
         // when the modulator moves.
         ApplyError commit_mod_route(uint8_t slot, uint32_t now_us);
+        // One macro's name (control/macros.h). A name is what makes a macro a
+        // macro rather than several bindings that happen to share a number,
+        // and it names nothing else in the patch, so there is nothing here to
+        // validate against the graph.
+        ApplyError commit_macro(uint8_t index, uint32_t now_us);
+        // One destination of one macro. Validated against the running patch,
+        // and against the shared pool's per-macro cap, so a destination that
+        // would make the whole image refuse to load is refused here instead -
+        // where the host asked for it, one record at a time.
+        ApplyError commit_macro_dest(uint8_t slot, uint32_t now_us);
         // Globals only: no node is reconstructed, so a tempo change cannot
         // restart a sequencer. `persist` is false for a write that will be
         // made again next pass - see modulate_param below for why that

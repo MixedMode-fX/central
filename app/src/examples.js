@@ -167,11 +167,24 @@ export const EXAMPLES = {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 3 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/8' } },
-        { algo: 'GateProbability', in: [0], out: [1, 2], params: [0, 4, 0] },
+        { algo: 'GateProbability', in: [0], out: [1, null, 2], params: [0, 4, 0] },
         { algo: 'NOT', in: [2], out: [4] },
         { algo: 'AND', in: [0, 4], out: [3] },
         { algo: 'GateToNote', in: [1], out: [0], params: [36, 120, 10] },
         { algo: 'GateToNote', in: [3], out: [0], params: [42, 90, 10] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+    },
+  },
+  'Call and response': {
+    about: 'The same eighth-note pulse into one GateProbability at even odds, played twice: the gates it passes are the kick on jack 1, and the gates it refused leave by its "dropped" outlet and play the hat on jack 2 \u2014 two interlocking patterns off one node, no NOT and no AND. Probability has the same outlet for notes, which no cable can build. Enable audio under play and move "chance": the hits cross from one voice to the other instead of leaving holes.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 2 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/8' } },
+        { algo: 'GateProbability', in: [0], out: [1, 2], params: [50, 1, 0] },
+        { algo: 'GateToNote', in: [1], out: [0], params: [36, 120, 10] },
+        { algo: 'GateToNote', in: [2], out: [0], params: [42, 90, 10] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
     },

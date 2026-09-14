@@ -39,11 +39,26 @@
 // did not", across both domains and any distance in the graph. There is no
 // neighbour rule here because there is no neighbour - there is a cable.
 //
+// **`dropped` is what the rule took out**, and it is not the decision but the
+// notes themselves: every refused note-on leaves by it unchanged, with its
+// own note-off, so a thinned line is a split line rather than a line with
+// holes in it. That is a second voice playing exactly where the first does
+// not - a ghost part on another channel, the hits the snare refused sent to
+// a hat - and it is the one thing here no cable can build. `passed` only
+// reports the decision; a second Probability at the same odds would take its
+// own decisions rather than the complement of these, and nothing downstream
+// can tell a note that was dropped from a note that was never played.
+//
+// A message that is not a note leaves by `notes out` alone. It was never
+// refused, so a copy of it on `dropped` would be a second stream of it, not
+// the other half of a rule that was never asked about it.
+//
 // Inlet 0 (note): notes in.
 // Inlet 1 (gate, optional): reset. A rising edge returns the count to the
 //         top, exactly as it does on every sequencer in the module.
 // Outlet 0 (note): notes out.
-// Outlet 1 (gate): passed - this node's last decision, latched.
+// Outlet 1 (note): dropped - the notes the rule refused, note-offs included.
+// Outlet 2 (gate): passed - this node's last decision, latched.
 //
 // params[0..2] are TrigCondition's block: chance, condition, seed.
 class Probability : public Node{
@@ -56,15 +71,18 @@ class Probability : public Node{
         uint8_t get_param(uint16_t index) const override;
 
         uint8_t sounding_count() const { return sounding.count(); }
+        uint8_t dropped_count() const { return refused.count(); }
         bool passed() const { return condition.passed(); }
 
     private:
         uint8_t in;
         uint8_t out;
+        uint8_t dropped_out;
         uint8_t passed_out;
         EdgeIn reset_in;
         TrigCondition condition;
         SoundingNotes sounding;
+        SoundingNotes refused;      // what left by `dropped`, and still owes its note-off
 };
 
 #endif

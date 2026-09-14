@@ -294,6 +294,11 @@ is only what a parameter list cannot say.
   could not otherwise do. Repeats are transposed by `interval` **scale steps**.
   Each pending echo carries the pitch it will be released with, so the key and
   the interval can move underneath it, and `dry` copies are owned too.
+- **`Transpose`'s `diatonic` moves a part in the key's steps, not in
+  semitones**, so one setting plays the key's own third — major in C major,
+  minor in C minor. The semitone control is read as the nearest interval the
+  scale has. Snapping the shifted pitch instead is `NoteQuantise`, and it
+  costs the line a step: two notes a semitone apart land on one degree.
 - **`Retrigger` is the rhythm of a chord nobody is playing.** A held chord is
   a pad: one note-on and nothing until the note-off. Every rising edge on its
   trigger inlet releases what it has sounding and sends the whole chord again,

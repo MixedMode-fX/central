@@ -24,15 +24,17 @@ import { Library, toBase64, fromBase64, ago } from '../src/services/storage.js';
 import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/core/patchjson.js';
 import { validate } from '../src/core/validate.js';
 import {
-  SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS, ALL_MUSICAL,
+  SCALES, scaleMaskOf, scaleIdOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS, ALL_MUSICAL,
 } from '../src/protocol/names.js';
-import { keySpelling, triadQuality } from '../src/core/music.js';
+import { keySpelling, triadQuality, degreeOf, scaleTriad, romanNumeral,
+         fifthsFrom } from '../src/core/music.js';
 import { EXAMPLES } from '../src/core/examples.js';
 import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/core/schema.js';
 import { paramSections, paramSection, PARAM_SECTIONS } from '../src/ui/controls/ParamSections.js';
 import { Slider } from '../src/ui/components/Slider.js';
 import { LearnButton } from '../src/ui/controls/LearnButton.js';
 import { NodeCard } from '../src/ui/panels/NodeCard.js';
+import { KeyBadge, rootInlet } from '../src/ui/components/KeyBadge.js';
 import { NO_STEP } from '../src/ui/panels/grids/playhead.js';
 import { describeTarget, RouteTable } from '../src/ui/panels/ModMatrix.js';
 import { KeyTab } from '../src/ui/tabs/KeyTab.js';
@@ -904,6 +906,74 @@ test('a modulation route shows what it is doing, and says why when it is doing n
     assert.equal(quiet.state.status, P.ModStatus.MOD_STATUS_ACTIVE, 'the matrix is running it');
     assert.match(quiet.said, new RegExp(`nothing writes CV bus ${empty}`));
   });
+});
+
+// --- the key, on the node that plays in it -----------------------------------
+
+// Which algorithms play in the key is the module's answer, not a list here:
+// the descriptor carries `reads_key` and the registry message brings it over.
+test('the module says which algorithms play in the key', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const named = (name) => device.algorithms.find((d) => d?.name === name);
+  for (const name of ['Transpose', 'NoteSequencer', 'Note Quantise', 'Chord', 'Harmony', 'Mirror']) {
+    assert.equal(named(name).readsKey, true, `${name} plays in the key`);
+  }
+  // The clock does not, and neither does the node that *writes* the key.
+  for (const name of ['Metronome', 'ClockDiv', 'Key']) {
+    assert.equal(named(name).readsKey, false, `${name} does not play in the key`);
+  }
+});
+
+// The badge names the key, and a cable on a node's root inlet outranks it -
+// the rule the firmware itself follows, said in the words a player uses.
+test('the key badge names the key, and names the chord a cable roots a node on', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const seq = device.algorithms.find((d) => d?.name === 'NoteSequencer');
+  const transpose = device.algorithms.find((d) => d?.name === 'Transpose');
+
+  const sequencer = codec.emptyNode(seq.id);
+  sequencer.inBus[rootInlet(seq)] = 3;               // a cable on the root inlet
+  sequencer.outBus[0] = 1;
+  const shifter = codec.emptyNode(transpose.id);
+  shifter.inBus[0] = 1;
+  shifter.outBus[0] = 2;
+  patch.nodes.push(sequencer, shifter);
+
+  const globals = { ...codec.emptyGlobals(), root: 2, scale: scaleIdOf('minor') };
+  // D minor, not C anything: a key rooted on pitch class zero cannot tell a
+  // degree from a pitch class.
+  const played = { busNote: () => 67 };              // G4 on the root bus
+  const app = fakeApp({ patch, device, module: played, globals });
+
+  // A node with no root inlet is in the key and nothing else.
+  const plain = withDom(() => KeyBadge(app, { index: 1 }));
+  assert.match(words(plain), /D minor/);
+  assert.equal(plain.getAttribute('title'), 'the key: D minor');
+
+  // One with a cable on it is named by what the cable is playing: G minor,
+  // which is the fourth degree of D minor and sits one fifth below its tonic.
+  const rooted = withDom(() => KeyBadge(app, { index: 0 }));
+  assert.match(words(rooted), /Gm/);
+  assert.match(words(rooted), /\biv\b/);
+  assert.match(rooted.getAttribute('title'),
+               /G4: degree 4 of the key, 1 fifth below it on the circle, on the root inlet/);
+
+  // The same chord the Harmony circle would draw, worked out the same way.
+  const mask = scaleMaskOf('minor');
+  const degree = degreeOf(7, 2, mask);
+  assert.equal(degree, 3);
+  assert.equal(romanNumeral(degree, triadQuality(scaleTriad(degree, 2, mask), 7)), 'iv');
+  assert.equal(fifthsFrom(7, 2), 11);                // one fifth counter-clockwise
+
+  // Nothing has played yet on a patched root: the badge says so rather than
+  // falling back to the key, because the key is not what that node is hearing.
+  const silent = fakeApp({ patch, device, module: { busNote: () => 0xff }, globals });
+  const waiting = withDom(() => KeyBadge(silent, { index: 0 }));
+  assert.match(words(waiting), /D minor/);
+  assert.match(waiting.getAttribute('title'), /the root inlet has played nothing yet/);
 });
 
 // A control that is stored, real, and reaching nothing until another control

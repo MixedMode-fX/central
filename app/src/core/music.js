@@ -8,9 +8,13 @@ import * as P from '../protocol/generated.js';
 export const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const PITCH_CLASSES_FLAT = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
 
+// The octave a MIDI note is in, as a keyboard numbers them: middle C, note
+// 60, is C4 here as it is everywhere else in the app.
+export const octaveOf = (pitch) => Math.floor(pitch / 12) - 1;
+
 export function noteName(pitch) {
   if (pitch < 0 || pitch > 127) return '—';
-  return `${PITCH_CLASSES[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+  return `${PITCH_CLASSES[pitch % 12]}${octaveOf(pitch)}`;
 }
 
 // Mirrors midi/scale.h so a displayed pitch is the one the module will play.
@@ -28,6 +32,46 @@ export function degreeToSemitone(degree, mask) {
   let index = degree % n;
   if (index < 0) index += n;
   return octave * 12 + intervals[index];
+}
+
+// --- where a note sits in a key ----------------------------------------------
+
+// Where a pitch class sits on the circle of fifths, counted in fifths from a
+// tonic, so the tonic is always position 0. Seven is its own inverse mod
+// twelve, which is why the same multiplication maps both ways.
+export const fifthsFrom = (pc, tonicPc) => ((((pc - tonicPc) * 7) % 12) + 12) % 12;
+
+// Which degree of the key a pitch class is, counted from the root, or -1 when
+// the key does not contain it at all.
+export function degreeOf(pc, root, mask) {
+  const step = ((((pc - root) % 12) + 12) % 12);
+  if (!((mask >> step) & 1)) return -1;
+  let degree = 0;
+  for (let i = 0; i < step; i++) if ((mask >> i) & 1) degree += 1;
+  return degree;
+}
+
+// The triad the key stacks on one of its degrees, as a set of pitch classes.
+// Thirds counted in scale steps rather than in semitones, which is what makes
+// the key decide the quality - the same stack Harmony plays.
+export function scaleTriad(degree, root, mask) {
+  let set = 0;
+  for (const step of [0, 2, 4]) {
+    set |= 1 << ((((root + degreeToSemitone(degree + step, mask)) % 12) + 12) % 12);
+  }
+  return set;
+}
+
+// A chord is named twice: the note name is what you would call it (Dm) and
+// the numeral is what it does in this key (ii). The numeral's case is already
+// the minor mark, so only the other three qualities add one.
+export const QUALITY_MARK = { min: 'm', dim: '°', aug: '+', maj: '', other: '' };
+const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+
+export function romanNumeral(degree, quality) {
+  const word = NUMERALS[degree] ?? String(degree + 1);
+  const lower = quality === 'min' || quality === 'dim';
+  return (lower ? word.toLowerCase() : word) + (quality === 'min' ? '' : QUALITY_MARK[quality] ?? '');
 }
 
 // The quality of a triad, read off the pitch classes the firmware reports for

@@ -6,6 +6,7 @@
 
 import { el } from '../dom.js';
 import { IconButton } from '../components/IconButton.js';
+import { KeyBadge } from '../components/KeyBadge.js';
 import { BusSelect } from '../controls/BusSelect.js';
 import { BusNeighbours } from '../controls/BusNeighbours.js';
 import { ParamSections } from '../controls/ParamControl.js';
@@ -53,6 +54,10 @@ export function NodeCard(app, index, { header = true } = {}) {
       d.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null,
       IconButton({ icon: 'trash', label: `remove ${d.name} ${index}`, class: 'ghost danger',
                    onclick: () => app.editor.removeNode(index) })) : null,
+    // Which key this node is playing in, which is the one musical decision it
+    // does not carry itself (src/midi/global_key.h) - and, where a cable has
+    // rooted it, what that cable is playing instead.
+    d.readsKey ? el('div', { class: 'node-key' }, KeyBadge(app, { index })) : null,
     d.summary ? el('p', { class: 'hint summary' }, d.summary) : null,
     el('div', { class: 'ports' },
       ports(false, d.nIn, 'reads', 'reads nothing'),

@@ -158,6 +158,7 @@ export class Device extends EventTarget {
         summary: null,
         category: P.AlgorithmCategory.CATEGORY_NONE,
         singleton: false,
+        readsKey: false,
         name: '',
         params: null,                          // filled in lazily by readParams
       };
@@ -188,6 +189,10 @@ export class Device extends EventTarget {
       // Whether the patch may hold more than one of it. Only the key is one
       // so far (src/algorithm/midi/key.h).
       if (at < end) descriptor.singleton = reply[at++] !== 0;
+      // Whether it plays in the key, which is what puts the key on its card:
+      // the module says so, so an algorithm that starts reading the key says
+      // it once, in its own descriptor.
+      if (at < end) descriptor.readsKey = reply[at++] !== 0;
       this.algorithms[index] = descriptor;
       this.byId.set(descriptor.id, descriptor);
     }

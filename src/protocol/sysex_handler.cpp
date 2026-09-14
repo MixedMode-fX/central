@@ -558,6 +558,12 @@ void SysexHandler::reply_algorithms(uint8_t source){
         // can grey the second one out rather than offer a patch the module
         // will refuse (MixedModeMaster::validate).
         put(d->singleton ? 1 : 0);
+        // Whether it plays in the key (midi/global_key.h). An editor that
+        // knows this can say which key a node is in on the node itself,
+        // instead of leaving the one musical decision in the patch two tabs
+        // away from every node it governs - and it is the descriptor's own
+        // flag, so an algorithm that starts reading the key says so once.
+        put(d->reads_key ? 1 : 0);
         send_reply(source);
     }
 }

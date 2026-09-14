@@ -375,7 +375,9 @@ static void test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_o
     TEST_ASSERT_EQUAL(Transpose::MAX_SEMITONES, node.offset());      // the refused ones did nothing
     TEST_ASSERT_TRUE(node.set_param(1, param_centred_byte(-Transpose::MAX_OCTAVES)));
     TEST_ASSERT_FALSE(node.set_param(1, param_centred_byte(-Transpose::MAX_OCTAVES - 1)));
-    TEST_ASSERT_FALSE(node.set_param(2, PARAM_CENTRE));               // no such parameter
+    TEST_ASSERT_TRUE(node.set_param(2, 1));                           // diatonic is a flag
+    TEST_ASSERT_FALSE(node.set_param(2, 2));                          // and only ever 0 or 1
+    TEST_ASSERT_FALSE(node.set_param(3, PARAM_CENTRE));               // no such parameter
 
     NodeConfig wide = node_config(ALGO_TRANSPOSE);
     wide.in_bus[0] = 0; wide.out_bus[0] = 1;
@@ -383,6 +385,137 @@ static void test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_o
     wide.params[1] = param_centred_byte(-9);
     Transpose stored(wide);
     TEST_ASSERT_EQUAL(Transpose::MAX_SEMITONES - Transpose::MAX_OCTAVES * 12, stored.offset());
+}
+
+// ---------------------------------------------------------------------------
+// Transpose, diatonic: the same interval read in the key
+// ---------------------------------------------------------------------------
+
+static Transpose diatonic_transpose(int8_t semitones, int8_t octaves) {
+    NodeConfig c = node_config(ALGO_TRANSPOSE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.params[Transpose::P_SEMITONES] = param_centred_byte(semitones);
+    c.params[Transpose::P_OCTAVES] = param_centred_byte(octaves);
+    c.params[Transpose::P_DIATONIC] = 1;
+    return Transpose(c);
+}
+
+// The point of the toggle: one setting, and the third it plays is the third
+// the key has. C D G up a third is E F B in C major and E flat F B flat in C
+// minor, from the same +4 on the knob.
+static void test_transpose_diatonic_plays_the_key_s_own_third() {
+    const uint8_t played[3] = {60, 62, 67};
+    global_key::set(SCALE_MAJOR, 0);
+    Transpose major = diatonic_transpose(4, 0);
+    const uint8_t in_major[3] = {64, 65, 71};
+    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_EQUAL(in_major[i], major.shift_note(played[i]));
+
+    global_key::set(SCALE_NATURAL_MINOR, 0);
+    Transpose minor = diatonic_transpose(4, 0);
+    const uint8_t in_minor[3] = {63, 65, 70};
+    for (uint8_t i = 0; i < 3; i++) TEST_ASSERT_EQUAL(in_minor[i], minor.shift_note(played[i]));
+}
+
+// A line keeps its shape: every note moves the same number of scale steps,
+// where snapping a chromatic shift would pull two of these onto one degree.
+static void test_transpose_diatonic_keeps_the_shape_of_the_line() {
+    global_key::set(SCALE_MAJOR, 0);
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_TRANSPOSE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.params[Transpose::P_SEMITONES] = param_centred_byte(2);      // up a second
+    c.params[Transpose::P_DIATONIC] = 1;
+    Transpose node(c);
+
+    const uint8_t line[4] = {60, 62, 64, 65};                      // C D E F
+    const uint8_t expected[4] = {62, 64, 65, 67};                  // D E F G
+    for (uint8_t i = 0; i < 4; i++) bus.note_write(0, on(line[i]));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(4, out.size());
+    for (uint8_t i = 0; i < 4; i++) TEST_ASSERT_EQUAL(expected[i], out[i].data1);
+}
+
+// The interval is read as the nearest one the scale has, and a shift that was
+// asked for is never rounded away to nothing.
+static void test_transpose_diatonic_reads_the_nearest_interval_of_the_scale() {
+    global_key::set(SCALE_MAJOR, 0);
+    TEST_ASSERT_EQUAL(62, diatonic_transpose(1, 0).shift_note(60));    // a semitone: the second
+    TEST_ASSERT_EQUAL(59, diatonic_transpose(-1, 0).shift_note(60));   // and down, the seventh below
+    TEST_ASSERT_EQUAL(65, diatonic_transpose(6, 0).shift_note(60));    // the tritone: the fourth
+    TEST_ASSERT_EQUAL(67, diatonic_transpose(7, 0).shift_note(60));    // the fifth, which it has
+
+    // An octave is a whole scale's worth of degrees, so it is still an octave,
+    // and it adds to the interval rather than replacing it.
+    TEST_ASSERT_EQUAL(72, diatonic_transpose(0, 1).shift_note(60));
+    TEST_ASSERT_EQUAL(76, diatonic_transpose(4, 1).shift_note(60));
+    TEST_ASSERT_EQUAL(52, diatonic_transpose(4, -1).shift_note(60));
+}
+
+// A note the key does not contain is put in the key before it moves, so
+// nothing this node plays is out of the key.
+static void test_transpose_diatonic_puts_a_foreign_note_in_the_key_first() {
+    global_key::set(SCALE_MAJOR, 0);
+    Transpose node = diatonic_transpose(2, 0);
+    TEST_ASSERT_EQUAL(64, node.shift_note(61));    // C sharp: nearest is D, up a second is E
+    TEST_ASSERT_EQUAL(69, node.shift_note(66));    // F sharp: nearest is G, up a second is A
+}
+
+// A chromatic key has a degree for every semitone, so the toggle changes
+// nothing there - which is the check that the two paths agree where they can.
+static void test_transpose_diatonic_is_the_plain_shift_in_a_chromatic_key() {
+    global_key::set(SCALE_CHROMATIC, 0);
+    for (int8_t semitones = -12; semitones <= 12; semitones++) {
+        Transpose node = diatonic_transpose(semitones, 0);
+        TEST_ASSERT_EQUAL((uint8_t)(60 + semitones), node.shift_note(60));
+    }
+}
+
+// The key may move under a held note: the release is the pitch that was sent,
+// as it is when a control moves.
+static void test_transpose_diatonic_releases_what_it_sent_after_the_key_moves() {
+    global_key::set(SCALE_MAJOR, 0);
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_TRANSPOSE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.params[Transpose::P_SEMITONES] = param_centred_byte(4);
+    c.params[Transpose::P_DIATONIC] = 1;
+    Transpose node(c);
+
+    bus.note_write(0, on(60));
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(64, out[0].data1);
+
+    global_key::set(SCALE_NATURAL_MINOR, 0);      // the whole patch changes key
+    bus.note_write(0, off(60));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(MIDI_NOTE_OFF, out[0].type);
+    TEST_ASSERT_EQUAL(64, out[0].data1);          // as sent, not 63
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
+// A note that leaves the keyboard is dropped here too, note-off and all.
+static void test_transpose_diatonic_drops_out_of_range_notes() {
+    global_key::set(SCALE_MAJOR, 0);
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_TRANSPOSE);
+    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.params[Transpose::P_OCTAVES] = param_centred_byte(4);
+    c.params[Transpose::P_DIATONIC] = 1;
+    Transpose node(c);
+
+    bus.note_write(0, on(96));                    // 144: gone
+    bus.note_write(0, on(60));                    // 108: fine
+    std::vector<MidiEvent> out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(108, out[0].data1);
+
+    bus.note_write(0, off(96));
+    bus.note_write(0, off(60));
+    out = run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
 }
 
 // ---------------------------------------------------------------------------
@@ -2013,6 +2146,13 @@ int main() {
     RUN_TEST(test_transpose_left_alone_shifts_nothing);
     RUN_TEST(test_transpose_releases_what_it_sent_after_the_octave_moves);
     RUN_TEST(test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_one);
+    RUN_TEST(test_transpose_diatonic_plays_the_key_s_own_third);
+    RUN_TEST(test_transpose_diatonic_keeps_the_shape_of_the_line);
+    RUN_TEST(test_transpose_diatonic_reads_the_nearest_interval_of_the_scale);
+    RUN_TEST(test_transpose_diatonic_puts_a_foreign_note_in_the_key_first);
+    RUN_TEST(test_transpose_diatonic_is_the_plain_shift_in_a_chromatic_key);
+    RUN_TEST(test_transpose_diatonic_releases_what_it_sent_after_the_key_moves);
+    RUN_TEST(test_transpose_diatonic_drops_out_of_range_notes);
     RUN_TEST(test_note_priority_modes);
     RUN_TEST(test_note_priority_falls_back_on_release);
     RUN_TEST(test_velocity_curves_never_reach_zero);

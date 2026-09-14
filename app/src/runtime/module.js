@@ -47,6 +47,9 @@ const NOTE_OFF = 0x80, NOTE_ON = 0x90, CONTROL_CHANGE = 0xb0, PROGRAM_CHANGE = 0
 
 const MIDI_LOG_MAX = 200;
 
+// No note-on has been seen on a bus. Not a pitch: MIDI notes stop at 127.
+export const NO_NOTE = 0xff;
+
 // What the scope draws: one column per millisecond of *simulated* time, four
 // seconds of them, with levels OR-accumulated into the column so a pulse
 // shorter than a column still shows. A gate is a 1 ms edge on this machine,
@@ -78,6 +81,12 @@ export class EmbeddedModule {
     // is listening to it: reading all eight every pass is eight calls into the
     // module a millisecond for buses nobody is monitoring.
     this.noteBusWatch = new Map();     // bus -> how many listeners want it
+    // The last note-on each note bus carried, or NO_NOTE where it has carried
+    // none. "Last note-on wins" is the rule every node with a root inlet
+    // follows, so this is what such a node is rooted on - read off the bus
+    // itself rather than out of the node, which is what makes it one answer
+    // for every algorithm that has a root rather than one export apiece.
+    this.busNotes = new Uint8Array(P.N_NOTE_BUS).fill(NO_NOTE);
     this.midiLog = [];
     // The log is a ring: once it is full its *length* stops changing, so
     // anything deciding "has anything happened?" from the length would decide
@@ -222,6 +231,14 @@ export class EmbeddedModule {
   // sixteen and drop the rest on the floor.
   onNoteBus(fn) { this.noteBusListeners.add(fn); return () => this.noteBusListeners.delete(fn); }
 
+  // The note a bus is rooted on: the last note-on it carried, or NO_NOTE.
+  // Only a watched bus is read at all (App.js watches every bus the patch
+  // writes), so a bus nobody is listening to answers NO_NOTE rather than
+  // something stale.
+  busNote(bus) {
+    return bus >= 0 && bus < this.busNotes.length ? this.busNotes[bus] : NO_NOTE;
+  }
+
   watchNoteBus(bus) {
     this.noteBusWatch.set(bus, (this.noteBusWatch.get(bus) ?? 0) + 1);
   }
@@ -229,7 +246,12 @@ export class EmbeddedModule {
   unwatchNoteBus(bus) {
     const held = this.noteBusWatch.get(bus);
     if (!held) return;
-    if (held <= 1) this.noteBusWatch.delete(bus); else this.noteBusWatch.set(bus, held - 1);
+    if (held > 1) { this.noteBusWatch.set(bus, held - 1); return; }
+    this.noteBusWatch.delete(bus);
+    // Nobody is reading it any more, which in the patch means nothing writes
+    // it: the note it was rooted on is history, not the answer to the next
+    // question about it.
+    this.busNotes[bus] = NO_NOTE;
   }
 
   advance(microseconds) {
@@ -289,6 +311,7 @@ export class EmbeddedModule {
           d1: (packed >>> 8) & 0xff,
           d2: packed & 0xff,
         };
+        if (event.type === NOTE_ON && event.d2) this.busNotes[bus] = event.d1;
         this.rollNote('bus', event);
         for (const listener of this.noteBusListeners) listener(event);
       }

@@ -9,7 +9,7 @@
 
 // Where a patch lives between power cycles (#7).
 //
-// **EEPROM only, for now.** The Teensy 4.1's EEPROM is flash-emulated,
+// **EEPROM only, for now.** The Teensy's EEPROM is flash-emulated,
 // EEPROM_BYTES of it, with limited write endurance. That budgets the current
 // patch plus PATCH_SLOTS preset slots for Program Change recall (#11) - enough
 // for recall to be useful, not a library. The microSD socket would hold
@@ -33,9 +33,13 @@
 // that restarts on every edit - a controller that never stops moving still
 // gets its patch saved.
 
-// The Teensy 4.1's emulated EEPROM. Stated here rather than taken from the
-// library so the native tests size their fake the same way.
-#define EEPROM_BYTES 4284
+// The EEPROM budget, stated here rather than taken from the library so the
+// native tests size their fake the same way - and so one figure serves every
+// board. It is the smallest emulated EEPROM the firmware builds for (the
+// Teensy 3.6's 4 KB; the 4.1 has 4284 bytes and leaves the difference unused),
+// because a slot layout that moved with the board would put a patch's address
+// on the wire in place of the patch, and the app is one client of one protocol.
+#define EEPROM_BYTES 4096
 
 // Presets, including slot 0 (the current patch). Four slots of ~1 KB each is
 // what EEPROM_BYTES affords; see the static_assert in the .cpp.

@@ -1,6 +1,6 @@
 # MixedMode Modular Central (MMMC)
 
-An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
+An expandable Eurorack CV & MIDI processor on a Teensy 4.1 or a Teensy 3.6.
 
 - `GPIO_N` configurable gate jacks, each an input or an output.
 - MIDI over two DIN ports (3.5 mm TRS), a class-compliant USB device with four
@@ -8,18 +8,19 @@ An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
 - No encoder, no switches, no display. The module is configured from a host:
   the serial console, the SysEx protocol, or the browser app.
 
-Sizing constants are in `src/config.h`, pins in `src/hardware.h`. This file
-names them rather than repeating their values.
+Sizing constants are in `src/config.h`, pins in `src/hardware.h`, which
+selects one map per board from `src/board/`. This file names them rather than
+repeating their values.
 
 ## Build
 
 ```
 make setup     # install PlatformIO into .venv/ and pre-fetch toolchains
 make checks    # everything fast: the tests, the module, the app. Silence is the pass
-make build     # firmware for the Teensy 4.1
+make build     # firmware for every board
 make test      # native unit tests, no hardware
 make size      # flash and RAM usage
-make upload    # flash an attached Teensy
+make upload    # flash an attached Teensy; BOARD=teensy36 for the other one
 make app       # the WebAssembly build and the browser app (clang, lld, node)
 make dev       # the app with hot reload; make preview serves the built page
 ```
@@ -27,6 +28,17 @@ make dev       # the app with hot reload; make preview serves the built page
 `make` bootstraps PlatformIO on first use, so a fresh clone needs only
 `python3`. The Teensy platform version in `platformio.ini` is pinned so the
 core's MIDI Library and USBHost_t36 versions are reproducible.
+
+### Boards
+
+One firmware, one env per board, and `make build` builds them all - a board
+that is not built is a board that stops fitting. `src/board/<env>.h` is that
+board's pin and port map, and the map is the only file that differs: the 3.6's
+says where the smaller part forced a pin to move, and `src/hardware.h` checks
+what a map can be checked on. The 3.6 has a quarter of the RAM, a sixth of the
+clock and six UARTs to the 4.1's eight; the module needs four of them, so it
+fits, with the gate ISR and the subtick timer the only things on the schedule
+that care about the clock rate at all.
 
 Sources build with `-Wall -Wextra -Weffc++ -Wshadow -Werror`; framework
 includes are passed as `-isystem` (`scripts/project_warnings.py`) so `-Werror`
@@ -47,8 +59,8 @@ Hardware sits behind `IGpio` (`src/hal/igpio.h`) and `IMidiOut`
 (`src/hal/imidi_out.h`). Teensy implementations are in `src/hal/teensy/`,
 fakes in `test/fakes/`. Everything else is framework-free and builds on the
 host: `pio test -e native`. Nothing under `src/algorithm/` includes
-`Arduino.h`. CI builds firmware and runs the native tests on every push and
-pull request.
+`Arduino.h`. CI builds every board's firmware and runs the native tests on
+every push and pull request.
 
 ## Signal bus model
 

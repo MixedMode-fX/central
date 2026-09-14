@@ -30,7 +30,7 @@ void mm_clock_setup(MasterClock& clock){
     bound_clock = &clock;
     pinMode(SYNC_CLOCK, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(SYNC_CLOCK), sync_isr, SYNC_EDGE);
-    NVIC_SET_PRIORITY(IRQ_GPIO6789, CLOCK_IRQ_PRIORITY);
+    NVIC_SET_PRIORITY(SYNC_CLOCK_IRQ, CLOCK_IRQ_PRIORITY);
     mm_clock_service();
 }
 

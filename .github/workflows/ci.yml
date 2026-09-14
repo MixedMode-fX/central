@@ -65,5 +65,7 @@ jobs:
           path: |
             .pio/build/teensy41/*.hex
             .pio/build/teensy41/*.elf
+            .pio/build/teensy36/*.hex
+            .pio/build/teensy36/*.elf
           if-no-files-found: error
           retention-days: 14

@@ -28,7 +28,7 @@ fi
 if [ "${1:-}" = "--warm" ]; then
     # Roughly 600 MB of toolchain. Not fatal if the network is unavailable:
     # the first build will fetch it instead.
-    .venv/bin/pio pkg install -e teensy41 -e native >/dev/null 2>&1 ||
+    .venv/bin/pio pkg install -e teensy41 -e teensy36 -e native >/dev/null 2>&1 ||
         echo "bootstrap: could not pre-fetch platforms; the first build will fetch them" >&2
 fi
 

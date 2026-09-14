@@ -57,8 +57,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp .pio/build/teensy41/*.hex "dist/mmmc-${GITHUB_REF_NAME}-teensy41.hex"
-          cp .pio/build/teensy41/*.elf "dist/mmmc-${GITHUB_REF_NAME}-teensy41.elf"
+          for board in teensy41 teensy36; do
+            cp ".pio/build/$board"/*.hex "dist/mmmc-${GITHUB_REF_NAME}-$board.hex"
+            cp ".pio/build/$board"/*.elf "dist/mmmc-${GITHUB_REF_NAME}-$board.elf"
+          done
           cd dist
           sha256sum mmmc-* > SHA256SUMS
           cat SHA256SUMS

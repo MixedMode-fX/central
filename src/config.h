@@ -45,15 +45,15 @@
 //
 // The ceiling is not RAM, it is the NRPN address space: node parameters
 // occupy N_NODE x N_PARAM of the fourteen bits an NRPN address has, and the
-// clock, transport and key blocks sit above them (control/nrpn.h). 45 x 336
-// is 15120 and leaves 1216 addresses reserved; 48 would leave 208, which is
-// not enough room to add anything. So 45 is most of what the layout has left,
+// clock, transport and key blocks sit above them (control/nrpn.h). 46 x 336
+// is 15456 and leaves 880 addresses reserved; 48 would leave 208, which is
+// not enough room to add anything. So 46 is most of what the layout has left,
 // and the next rise is a decision about that address space rather than about
 // memory: N_PARAM has to come down, or the space has to be paged.
 //
 // Raising this moves the NRPN bases, and the protocol version moves with
 // them. control/nrpn.cpp asserts the two agree.
-#define N_NODE 45
+#define N_NODE 46
 #define NODE_SLOT_SIZE 640
 
 // Per-node connection limits (NodeConfig is also the preset format).

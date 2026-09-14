@@ -2,7 +2,7 @@
 // apart.
 //
 // The library starts empty, and an empty library in front of a machine with
-// thirty-six algorithms is not a blank page - it is a wall. These are the patches
+// this many algorithms is not a blank page - it is a wall. These are the patches
 // the emulator page used to open with: each exercises one part of the machine,
 // says what to do and what to expect, and is small enough to read.
 //
@@ -159,6 +159,23 @@ export const EXAMPLES = {
         { algo: 'Probability', in: [0], out: [1], params: [70, 0] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
+  'Trig conditions': {
+    about: 'One eighth-note pulse, asked three different questions. The first GateProbability is set to the ratio 1:2, so jack 1 takes every other eighth \u2014 the kick. The second reads the first\u2019s "passed" outlet into its "nei" inlet at the condition "not nei", so jack 2 gets exactly the eighths the first did not \u2014 the hat, interlocked by construction rather than by a divider. The third is at the condition "fill" with jack 8 patched to its "fill" inlet: hold jack 8 high under play and the snare arrives. Enable audio under play, then change the first node\u2019s ratio to 1:4 or 3:4 and watch both patterns move together.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 3 },
+                   { port: 3, dir: 'out', bus: 6 }, { port: 8, dir: 'in', bus: 5 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/8' } },
+        { algo: 'GateProbability', in: [0], out: [1, 2], params: [0, 2, 0, 0] },
+        { algo: 'GateProbability', in: [0, null, 2], out: [3], params: [0, 0, 7, 0] },
+        { algo: 'GateProbability', in: [0, 5], out: [6], params: [0, 0, 8, 0] },
+        { algo: 'GateToNote', in: [1], out: [0], params: [36, 120, 10] },
+        { algo: 'GateToNote', in: [3], out: [0], params: [42, 90, 10] },
+        { algo: 'GateToNote', in: [6], out: [0], params: [38, 110, 10] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Note sequencer': {

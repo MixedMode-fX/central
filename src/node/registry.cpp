@@ -16,6 +16,7 @@
 #include "algorithm/sequencer/note_sequencer.h"
 #include "algorithm/sequencer/drum_sequencer.h"
 #include "algorithm/util/gate_hold.h"
+#include "algorithm/util/gate_probability.h"
 #include "algorithm/modulator/lfo.h"
 #include "algorithm/modulator/sample_hold.h"
 #include "algorithm/modulator/slew.h"
@@ -64,6 +65,7 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &DrumSeqGate::descriptor,
     &DrumSeqMidi::descriptor,
     &GateHold::descriptor,
+    &GateProbability::descriptor,
     &Lfo::descriptor,
     &SampleHold::descriptor,
     &Slew::descriptor,

@@ -27,17 +27,17 @@ export const N_GATE_BUS = 16;
 export const N_MIDI_IN_NODES = 4;
 export const N_MIDI_OUT_NODES = 4;
 export const N_MOD_ROUTE = 16;
-export const N_NODE = 45;
+export const N_NODE = 46;
 export const N_NOTE_BUS = 8;
 export const N_PARAM = 336;
 export const NO_BUS = 255;
 export const NOTE_SEQ_VOICES = 4;
-export const NRPN_CLOCK_BASE = 15120;
-export const NRPN_KEY_BASE = 15152;
-export const NRPN_RESERVED_BASE = 15168;
-export const NRPN_TRANSPORT_BASE = 15136;
+export const NRPN_CLOCK_BASE = 15456;
+export const NRPN_KEY_BASE = 15488;
+export const NRPN_RESERVED_BASE = 15504;
+export const NRPN_TRANSPORT_BASE = 15472;
 export const PARAM_CENTRE = 128;
-export const PATCH_FORMAT_VERSION = 5;
+export const PATCH_FORMAT_VERSION = 6;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
 export const PATCH_SLOTS = 4;
@@ -52,7 +52,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 8;
+export const SYSEX_PROTOCOL_VERSION = 9;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 320;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -278,6 +278,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_RETRIGGER: 43,
   ALGO_TRANSPORT: 44,
   ALGO_STEP_MOD: 45,
+  ALGO_GATE_PROBABILITY: 46,
 });
 
 export const AlgorithmCategory = Object.freeze({

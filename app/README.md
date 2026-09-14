@@ -162,6 +162,14 @@ beside the cables and the clock, which outlive any patch. A CC is bound from
 the same two places a route is made: the button beside the control, and the
 matrix under the graph.
 
+**A node wears the key it plays in.** The key is one setting for the whole
+patch and lives on a page of its own — the right place to change it and the
+wrong place to have to look it up. So a node whose descriptor says it reads the
+key carries a badge naming it, and a cable on that node's root inlet renames it
+after the chord the cable is playing: what it is called, what degree it is, and
+where it sits on the circle of fifths. Which algorithms those are is the
+module's own answer (`reads_key`), never a list in the app.
+
 **A picture of an algorithm is the algorithm's own numbers.** The arrows on
 the circle of fifths are `Harmony::weigh`, read off the running node through
 `module.js` — not the same rule written a second time in JavaScript, which

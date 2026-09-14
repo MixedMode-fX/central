@@ -1,0 +1,35 @@
+/* The key, at the size of a word: a circle-of-fifths dial, the key's name,
+   and - when a cable roots the node - the chord that cable is playing. One
+   line, so it can sit in a card's header without pushing anything down. */
+.kbadge {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .1rem .5rem .1rem .25rem; border-radius: 999px;
+  background: var(--raised); border: 1px solid var(--line);
+  font-size: .74rem; color: var(--dim); line-height: 1.6;
+  max-width: 100%; overflow-wrap: anywhere; text-align: left; cursor: pointer;
+}
+.kbadge:hover, .kbadge:focus-visible { border-color: var(--accent); }
+.kbadge-key { color: var(--ink); }
+.kbadge-dial { width: 1.15rem; height: 1.15rem; flex: none; overflow: visible; }
+/* A tick the key has no note on is still drawn, faintly: that is what makes
+   the dial a circle of fifths rather than a ring of seven dots. */
+.kbadge-tick { fill: var(--dim); opacity: .28; }
+.kbadge-tick.in { fill: var(--note); opacity: 1; }
+.kbadge-tick.tonic { fill: var(--ink); }
+.kbadge-mark { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+.kbadge .off { display: none; }
+
+/* The chord half: what a patched root is called, and what it does in the key.
+   Separated by a rule rather than a bullet, because the two halves are two
+   different facts - the key, and the node's own root within it. */
+.kbadge-chord {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding-left: .4rem; border-left: 1px solid var(--line);
+}
+.kbadge-note { color: var(--accent); }
+.kbadge-note.waiting { color: var(--dim); }
+.kbadge-roman {
+  padding: 0 .3rem; border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--ink);
+}
+.kbadge-chord.foreign .kbadge-note { color: var(--warn); }

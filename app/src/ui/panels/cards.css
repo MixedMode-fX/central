@@ -59,3 +59,6 @@
   .routes { grid-template-columns: 1fr 1fr; align-items: start; }
   .port-head { grid-template-columns: 8rem 1fr; }
 }
+
+/* The key a node plays in, under its name. */
+.node-key { margin-bottom: .5rem; }

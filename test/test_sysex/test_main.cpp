@@ -343,6 +343,7 @@ static void test_the_algorithm_dump_matches_the_registry() {
         TEST_ASSERT_EQUAL_STRING(d->summary, text);
         TEST_ASSERT_EQUAL(d->category, s.bytes[at++]);
         TEST_ASSERT_EQUAL(d->singleton ? 1 : 0, s.bytes[at++]);
+        TEST_ASSERT_EQUAL(d->reads_key ? 1 : 0, s.bytes[at++]);
         // Nothing but the terminator is left: the record is exactly this
         // shape, which is what lets an editor parse it without guessing.
         TEST_ASSERT_EQUAL(s.bytes.size() - 1u, at);

@@ -12,17 +12,13 @@
 import { el, svg, classes, clear } from '../../dom.js';
 import { Segmented } from '../../components/Segmented.js';
 import { scaleMaskById } from '../../../protocol/names.js';
-import { keySpelling, triadQuality, PITCH_CLASSES, PITCH_CLASSES_FLAT } from '../../../core/music.js';
+import { keySpelling, triadQuality, fifthsFrom, romanNumeral, QUALITY_MARK,
+         PITCH_CLASSES, PITCH_CLASSES_FLAT } from '../../../core/music.js';
 import { NO_STEP, paintPlayhead } from './playhead.js';
 import '../Harmony.css';
 
-const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 const CIRCLE = { mid: 120, ring: 78, label: 105, dot: 15 };
 
-// Where a pitch class sits on the circle, counted in fifths from the tonic,
-// so the key's own tonic is always at the top. Seven is its own inverse mod
-// twelve, which is why the same multiplication maps both ways.
-const fifthsFrom = (pc, tonicPc) => (((pc - tonicPc) * 7) % 12 + 12) % 12;
 const circlePoint = (k, r) => {
   const a = (k * 30 - 90) * Math.PI / 180;
   return [CIRCLE.mid + r * Math.cos(a), CIRCLE.mid + r * Math.sin(a)];
@@ -30,14 +26,9 @@ const circlePoint = (k, r) => {
 
 // A chord is named twice on the circle: the note name outside the ring is
 // what you would call it (Dm), and the numeral inside is what it does in this
-// key (ii). The numeral's case is already the minor mark. Named the way the
-// key spells it (`keySpelling`), not off a list of sharps.
-const QUALITY_MARK = { min: 'm', dim: '°', aug: '+', maj: '', other: '' };
-function numeral(degree, quality) {
-  const word = NUMERALS[degree] ?? String(degree + 1);
-  const lower = quality === 'min' || quality === 'dim';
-  return (lower ? word.toLowerCase() : word) + (quality === 'min' ? '' : QUALITY_MARK[quality] ?? '');
-}
+// key (ii). Both spellings are the key's own (`keySpelling`, `romanNumeral`),
+// not off a list of sharps - and they are shared with the key badge, so a
+// chord is called the same thing wherever it is shown.
 
 // Which chord the arrows come from, and which picture is up, per node:
 // where you are looking, not part of the patch. An absent focus means
@@ -60,7 +51,7 @@ function harmonyShape(app, index) {
     const pc = pitch % 12;
     const quality = triadQuality(m.harmonyTriad(index, d), pc);
     chords.push({ degree: d, pitch, pc, quality,
-                  name: `${spelling[pc]}${QUALITY_MARK[quality] ?? ''}`, roman: numeral(d, quality) });
+                  name: `${spelling[pc]}${QUALITY_MARK[quality] ?? ''}`, roman: romanNumeral(d, quality) });
   }
   const tonicPc = chords[0].pc;
   for (const chord of chords) chord.k = fifthsFrom(chord.pc, tonicPc);

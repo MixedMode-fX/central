@@ -50,9 +50,15 @@ prepare() {
 
   if [[ ! -x .venv/bin/pio ]]; then
     log "installing PlatformIO (.venv/) and the toolchains"
+    # `exit $status` rather than letting the timing write be the last command:
+    # a subshell's status is its last command's, so a failed bootstrap would
+    # wait 0, pass the check below, touch the prepared marker and leave the
+    # container claiming to be ready with no pio in it.
     ( t=$SECONDS
       scripts/bootstrap.sh --warm >>"$run_dir/setup.log" 2>&1
-      echo $((SECONDS - t)) >"$run_dir/.pio_time" ) &
+      status=$?
+      echo $((SECONDS - t)) >"$run_dir/.pio_time"
+      exit $status ) &
     pio_pid=$!
   fi
 
@@ -62,7 +68,9 @@ prepare() {
     log "building the WebAssembly module"
     ( t=$SECONDS
       emulator/build.sh >>"$run_dir/setup.log" 2>&1
-      echo $((SECONDS - t)) >"$run_dir/.module_time" ) &
+      status=$?
+      echo $((SECONDS - t)) >"$run_dir/.module_time"
+      exit $status ) &
     module_pid=$!
   else
     log "no clang/lld: skipping the module (the app checks will say so)"

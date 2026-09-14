@@ -55,6 +55,11 @@ export function createState() {
       schemaWithPatch: true,
       // What the on-screen keyboard sends.
       play: { port: P.MidiPort.mmMIDI_USB_0, channel: 1, velocity: 100, octave: 4, cc: 74, ccValue: 64 },
+      // The performance surface: which control is being assigned, which one
+      // is waiting for the module's learn, and whether the keyboard is
+      // summoned over it. None of it is the surface *document* - that is the
+      // performer's and lives in localStorage (services/surface.js).
+      surface: { editing: null, armed: null, keyboard: false },
       // The canvas: where it is looked at from, what is selected on it, and
       // whether the view should be fitted to the patch on the next render.
       canvas: { view: { x: 0, y: 0, k: 1 }, selected: null, fit: true, positions: {} },

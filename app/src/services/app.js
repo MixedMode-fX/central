@@ -17,6 +17,7 @@ import { Arrangement } from './arrangement.js';
 import { Session } from './session.js';
 import { Editor } from './editor.js';
 import { Play } from './play.js';
+import { Surface } from './surface.js';
 import { Patches } from './patches.js';
 
 export function createApp({ root, view, wasmUrl }) {
@@ -47,7 +48,10 @@ export function createApp({ root, view, wasmUrl }) {
     refresh: () => app.refreshLive(),
   });
   const patches = new Patches({ state, library, editor, arrangement, render });
-  Object.assign(app, { render, arrangement, session, editor, patches, play });
+  // The pads and pots: the performer's own controller, kept in this browser
+  // rather than in the patch (services/surface.js).
+  const surface = new Surface({ state, library, play, editor, session, render });
+  Object.assign(app, { render, arrangement, session, editor, patches, play, surface });
 
   app.say = (message) => editor.say(message);
   app.fail = (message) => editor.fail(message);

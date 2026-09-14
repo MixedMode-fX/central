@@ -19,6 +19,11 @@ const LIBRARY_KEY = 'mmmc.library.v1';
 const WORKING_KEY = 'mmmc.working.v1';
 const LISTEN_KEY = 'mmmc.listen.v1';
 const CANVAS_KEY = 'mmmc.canvas.v1';
+// The performance surface: what each pad and pot does, what it is called and
+// what colour it is. **Not keyed per patch** - it is your controller, not part
+// of the instrument, and a pad that changed meaning with every patch load
+// would be a pad nobody could learn (services/surface.js).
+const SURFACE_KEY = 'mmmc.surface.v1';
 
 // How many patches keep hand-placed blocks. A layout is a few hundred bytes
 // and only exists for a patch somebody arranged by hand, but the store must
@@ -184,6 +189,25 @@ export class Library {
     } catch {
       return null;
     }
+  }
+
+  // The performance surface. One document for the browser, not one per
+  // patch: see SURFACE_KEY.
+  readSurface() {
+    if (!this.available) return null;
+    try {
+      const raw = this.storage.getItem(SURFACE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  writeSurface(doc) {
+    if (!this.available) return;
+    try {
+      this.storage.setItem(SURFACE_KEY, JSON.stringify(doc));
+    } catch { /* a full quota must never stop a pad being pressed */ }
   }
 
   // Where a block was dragged to. Not part of a patch - a `.syx` file and the

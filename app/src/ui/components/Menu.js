@@ -36,6 +36,16 @@ export function openMenu({ at, kind = '', head, items }) {
     el('div', { class: 'menu-head' }, head),
     el('div', { class: 'menu-list' }, ...items));
   document.body.append(menu);
+  // Opened from a control near the bottom of the screen - a sheet over the
+  // performance surface, a row at the end of a long table - a menu hung below
+  // its button is a menu off the screen. Once it is in the document its
+  // height is known, so it flips above the control rather than being clipped.
+  const height = menu.getBoundingClientRect().height;
+  const bottom = globalThis.innerHeight ?? 0;
+  if (bottom && box.y + height > bottom - 8) {
+    const above = (at.top !== undefined ? at.top : box.y) - height - 4;
+    menu.style.top = `${Math.max(8, above > 8 ? above : bottom - height - 8)}px`;
+  }
   menu.querySelector('.menu-item')?.focus();
 
   const dismiss = (e) => {

@@ -32,6 +32,13 @@ export const PAD_COLUMNS = 4;
 const FIRST_POT_CC = 20;
 const FIRST_PAD_NOTE = 36;
 
+// The cable a control arrives on, which is as much a part of where it lands
+// as the channel: a MIDI input takes one port mask, and `CcMapping` filters
+// by source port, so two pads on the same CC and different cables reach two
+// different places in one patch. The first USB cable is the factory answer
+// because it is the one a browser can always reach.
+const FIRST_PORT = P.MidiPort.mmMIDI_USB_0;
+
 export const PadKind = { NOTE: 'note', CC: 'cc', PROGRAM: 'program' };
 export const PadMode = { MOMENTARY: 'momentary', TOGGLE: 'toggle' };
 
@@ -43,7 +50,7 @@ export const COLOURS = ['accent', 'gate', 'note', 'cv', 'warn'];
 const clamp7 = (v) => Math.max(0, Math.min(127, Math.round(v)));
 
 const emptyPot = (i) => ({
-  cc: FIRST_POT_CC + i, channel: 1, label: '', colour: COLOURS[0], value: 0,
+  cc: FIRST_POT_CC + i, port: FIRST_PORT, channel: 1, label: '', colour: COLOURS[0], value: 0,
 });
 
 const emptyPad = (i) => ({
@@ -52,6 +59,7 @@ const emptyPad = (i) => ({
   cc: 40 + i,
   program: 1,
   velocity: 100,
+  port: FIRST_PORT,
   channel: 1,
   mode: PadMode.MOMENTARY,
   label: '',
@@ -112,7 +120,7 @@ export class Surface {
   turn(index, value, { commit = false } = {}) {
     const pot = this.pot(index);
     pot.value = clamp7(value);
-    this.play.cc(pot.cc, pot.value);
+    this.play.cc(pot.cc, pot.value, pot);
     if (commit) this.save();
     return pot.value;
   }
@@ -120,7 +128,7 @@ export class Surface {
   press(index) {
     const pad = this.pad(index);
     if (pad.kind === PadKind.PROGRAM) {
-      this.play.programChange(pad.program);
+      this.play.programChange(pad.program, pad);
       this.state.status = this.launchSaid(pad);
       this.render();
       return;
@@ -146,11 +154,11 @@ export class Surface {
 
   emit(pad, on) {
     if (pad.kind === PadKind.NOTE) {
-      if (on) this.play.noteOn(pad.note, pad.velocity);
-      else this.play.noteOff(pad.note);
+      if (on) this.play.noteOn(pad.note, pad.velocity, pad);
+      else this.play.noteOff(pad.note, pad);
       return;
     }
-    this.play.cc(pad.cc, on ? 127 : 0);
+    this.play.cc(pad.cc, on ? 127 : 0, pad);
   }
 
   // What hitting a launch pad does, in words, including the part that is not
@@ -166,10 +174,15 @@ export class Surface {
   // --- what a control reaches -------------------------------------------------
 
   // The binding this control's CC would move, if any. Matched the way the
-  // firmware matches it: the number, and a channel that is this one or omni.
+  // firmware matches it (src/control/cc_mapper.cpp): the cable, the number,
+  // and a channel that is this one or omni. The cable is in it because the
+  // module's own learn writes the single port the CC arrived on, so a control
+  // moved to another cable stops reaching what it learned - and a sheet that
+  // said otherwise would be describing a control nobody could hear.
   bindingOf(control) {
     const map = this.state.patch.ccMap ?? [];
     const slot = map.findIndex((m) => isBinding(m) && m.cc === control.cc
+      && (m.sourceMask & control.port) !== 0
       && (m.channel === 0 || m.channel === control.channel));
     return slot < 0 ? null : { slot, mapping: map[slot] };
   }

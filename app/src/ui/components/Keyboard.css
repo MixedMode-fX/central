@@ -15,6 +15,11 @@
 
 .pk-track {
   --pk-w: 2.4rem;
+  /* A black key's width and how far down the keyboard it reaches, in one
+     place: the notch in the white keys under it is cut from the same two
+     numbers, so the two cannot drift apart. */
+  --pk-black-w: calc(var(--pk-w) * .62);
+  --pk-black-h: 62%;
   position: relative;
   display: flex;
   flex-wrap: nowrap;
@@ -40,12 +45,27 @@
   flex: 0 0 var(--pk-w);
   background: var(--pk-white); color: var(--pk-white-ink);
   border-radius: 0 0 6px 6px;
+  /* The shape of a white key: full width below the black keys, and narrowed
+     to either side of them above. Without it a white key is a rectangle
+     under the black ones, and a held key lights a slab of colour that reads
+     as a rendering fault rather than a note. Cut from the *same* half-width
+     a black key is offset by, so the two meet exactly and the black key's
+     edge is the white key's edge. The clip takes nothing away at the bottom,
+     so the rounded corners survive it. */
+  --cut-l: 0px; --cut-r: 0px;
+  clip-path: polygon(
+    var(--cut-l) 0, calc(100% - var(--cut-r)) 0,
+    calc(100% - var(--cut-r)) var(--pk-black-h), 100% var(--pk-black-h),
+    100% 100%, 0 100%,
+    0 var(--pk-black-h), var(--cut-l) var(--pk-black-h));
 }
+.pk-white.pk-cut-l { --cut-l: calc(var(--pk-black-w) / 2); }
+.pk-white.pk-cut-r { --cut-r: calc(var(--pk-black-w) / 2); }
 .pk-white.pk-c { box-shadow: inset 2px 0 0 var(--line); }
 
 .pk-black {
   position: absolute; top: 0; z-index: 1;
-  width: calc(var(--pk-w) * .62); height: 62%;
+  width: var(--pk-black-w); height: var(--pk-black-h);
   transform: translateX(-50%);
   background: #14161d; color: var(--dim);
   border-radius: 0 0 5px 5px;
@@ -67,7 +87,12 @@
   padding: .5rem .6rem calc(.5rem + env(safe-area-inset-bottom, 0px));
   display: grid; gap: .4rem;
 }
-.pk-overlay-bar { display: flex; justify-content: space-between; align-items: center; }
+.pk-overlay-bar { display: flex; gap: .4rem; justify-content: space-between; align-items: center; }
+/* Which cable and channel the keys play on, in the bar: the surface has no
+   other room for it, and a keyboard nobody can aim is a keyboard that plays
+   into whichever cable was last chosen somewhere else. */
+.pk-overlay-controls { display: flex; gap: .3rem; align-items: center; min-width: 0; }
+.pk-overlay-controls select { max-width: 6.5rem; }
 
 @media (min-width: 34rem) {
   .pk-track { --pk-w: 2.8rem; height: 9rem; }

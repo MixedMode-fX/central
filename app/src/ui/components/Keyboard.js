@@ -21,6 +21,10 @@
 //   * **Enter and Space play a note.** The keys were buttons with pointer
 //     handlers and no click handler, so the whole keyboard was silent to
 //     anyone not using a pointer.
+//   * **A white key is the shape of a white key.** It is notched at the top
+//     wherever a black key stands over it, so a held one lights the part of
+//     it a finger can actually reach - and not a slab of colour behind the
+//     black keys, which is what a plain rectangle lit under them looks like.
 //
 // **It does not know where notes go.** It takes callbacks; the caller decides
 // whether that is the module in the page or one on a cable (services/play.js).
@@ -75,10 +79,20 @@ export function Keyboard({
   const keys = new Map();                 // pitch -> element, for the glide
   const held = new Set();
 
+  // Which side of a white key a black key stands over, and so which side of
+  // its top is cut away. Asked of the range rather than of a table of note
+  // names: the key at either end of the keyboard has no neighbour to hide
+  // behind, and its top is whole.
+  const cuts = (pitch) => [
+    isBlackKey(pitch - 1) && pitch - 1 >= from && 'pk-cut-l',
+    isBlackKey(pitch + 1) && pitch + 1 <= to && 'pk-cut-r',
+  ];
+
   const makeKey = (pitch, black, after) => {
     const key = el('button', {
       type: 'button',
-      class: classes('pk', black ? 'pk-black' : 'pk-white', pitch % 12 === 0 && 'pk-c'),
+      class: classes('pk', black ? 'pk-black' : 'pk-white', pitch % 12 === 0 && 'pk-c',
+                     ...(black ? [] : cuts(pitch))),
       style: black ? `left: calc(${after + 1} * var(--pk-w))` : null,
       'aria-label': noteName(pitch),
       'data-pitch': String(pitch),
@@ -177,11 +191,13 @@ export function Keyboard({
 
 // The overlay: the keyboard summoned over whatever is on screen, owning the
 // full width because that is the width a keyboard needs and a one-column
-// panel cannot give it.
-export function KeyboardOverlay({ onClose, ...options }) {
+// panel cannot give it. `controls` goes in its bar - where the notes are
+// going is part of playing them, and the surface has no other room for it.
+export function KeyboardOverlay({ onClose, controls = null, ...options }) {
   return el('div', { class: 'pk-overlay', role: 'dialog', 'aria-label': 'keyboard' },
     el('div', { class: 'pk-overlay-bar' },
       el('span', { class: 'field-name' }, 'keyboard'),
+      controls ? el('div', { class: 'pk-overlay-controls' }, controls) : null,
       el('button', { class: 'ghost', onclick: () => onClose() }, 'close')),
     Keyboard(options));
 }

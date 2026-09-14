@@ -20,6 +20,11 @@
 //     one cable does not fire when it claims another. The choice is therefore
 //     visible rather than a default nobody is told about - the same control
 //     `Controller.setPort` gives an external controller.
+//
+// A message may name its own cable and channel. The keyboard plays on the one
+// the play panel is set to; a surface control carries its own, because a pad
+// launching a preset and a pad playing a drum are two different inputs of the
+// module as far as the patch is concerned (services/surface.js).
 
 import * as P from '../protocol/generated.js';
 import { MUSICAL_PORTS } from '../protocol/names.js';
@@ -84,19 +89,19 @@ export class Play {
   // inside a browser tab is the failure this exists to prevent, so this is
   // never a guess: `kind` is 'module' when the page's own firmware is
   // running, 'device' when a cable is, and 'nothing' when neither can hear.
-  machine() {
+  machine(port = this.port) {
     const module = this.moduleOf();
     if (this.session.usingModule) {
       return module
         ? { kind: 'module', name: 'the built-in module', reaches: 'this page', ok: true }
         : { kind: 'nothing', name: 'no module', reaches: 'nothing is running', ok: false };
     }
-    const output = this.output();
+    const output = this.output(port);
     if (!output) {
       return {
         kind: 'device',
         name: this.deviceName || this.session.transportName,
-        reaches: this.whyNot(),
+        reaches: this.whyNot(port),
         ok: false,
       };
     }
@@ -107,8 +112,8 @@ export class Play {
   // is the enumeration order of the module's own outputs, which is how a host
   // lists a multi-cable device; a cable with no port behind it is said rather
   // than silently dropped.
-  output() {
-    const cable = USB_CABLES.indexOf(this.port);
+  output(port = this.port) {
+    const cable = USB_CABLES.indexOf(port);
     if (cable < 0) return null;
     const ports = this.ports();
     const chosen = ports[cable] ?? null;
@@ -127,10 +132,10 @@ export class Play {
     return mine.length ? mine : all;
   }
 
-  whyNot() {
+  whyNot(port = this.port) {
     if (!this.access) return 'the page is not connected to a module';
-    const cable = USB_CABLES.indexOf(this.port);
-    const named = MUSICAL_PORTS.find((p) => p.value === this.port)?.label ?? 'that cable';
+    const cable = USB_CABLES.indexOf(port);
+    const named = MUSICAL_PORTS.find((p) => p.value === port)?.label ?? 'that cable';
     if (cable < 0) return `${named} is one of the module's own sockets: no browser port reaches it`;
     if (this.ports()[cable] === this.control) return `${named} is carrying the protocol`;
     return `this computer has no port for ${named}`;
@@ -138,14 +143,21 @@ export class Play {
 
   // --- playing ---------------------------------------------------------------
 
-  noteOn(pitch, velocity = this.ui.velocity) { this.send(NOTE_ON, pitch, velocity); }
-  noteOff(pitch) { this.send(NOTE_OFF, pitch, 0); }
-  cc(number, value) { this.send(CONTROL_CHANGE, number, value); }
+  // `where` is anything carrying a `port` and a `channel` - a pad, a pot -
+  // and each is taken on its own: a control that names a cable and not a
+  // channel plays on the panel's channel.
+  cable(where) {
+    return { port: where?.port ?? this.port, channel: where?.channel ?? this.channel };
+  }
+
+  noteOn(pitch, velocity = this.ui.velocity, where = null) { this.send(NOTE_ON, pitch, velocity, where); }
+  noteOff(pitch, where = null) { this.send(NOTE_OFF, pitch, 0, where); }
+  cc(number, value, where = null) { this.send(CONTROL_CHANGE, number, value, where); }
 
   // A Program Change recalls a preset on the module, quantised to wherever
   // `pc_quantise` says (src/protocol/sysex_handler.h). It is one data byte,
   // not two.
-  programChange(program) { this.send(PROGRAM_CHANGE, program, 0); }
+  programChange(program, where = null) { this.send(PROGRAM_CHANGE, program, 0, where); }
 
   allNotesOff() {
     this.cc(ALL_NOTES_OFF, 0);
@@ -156,19 +168,20 @@ export class Play {
   // of it when that can be known - how many of its ports took the event, or
   // null when the control plane consumed it - and null on a cable, where the
   // only honest answer is that nobody said.
-  send(type, d1 = 0, d2 = 0) {
+  send(type, d1 = 0, d2 = 0, where = null) {
+    const { port, channel } = this.cable(where);
     const module = this.moduleOf();
     if (this.session.usingModule) {
       if (!module) return null;
-      const accepted = module.deliverMidi(this.port, type, this.channel, d1, d2);
+      const accepted = module.deliverMidi(port, type, channel, d1, d2);
       // The lights, the roll and the meters are painted off the module's own
       // frames; a note played between two of them has to show at once.
       this.refresh();
       return accepted;
     }
-    const output = this.output();
+    const output = this.output(port);
     if (!output) return null;
-    const status = (type & 0xf0) | ((this.channel - 1) & 0x0f);
+    const status = (type & 0xf0) | ((channel - 1) & 0x0f);
     try {
       output.send(type === PROGRAM_CHANGE ? [status, d1 & 0x7f] : [status, d1 & 0x7f, d2 & 0x7f]);
     } catch {

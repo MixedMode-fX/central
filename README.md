@@ -21,7 +21,7 @@ make test      # native unit tests, no hardware
 make size      # flash and RAM usage
 make upload    # flash an attached Teensy
 make app       # the WebAssembly build and the browser app (clang, lld, node)
-make dev       # serve app/ at http://127.0.0.1:8080/app/
+make dev       # the app with hot reload; make preview serves the built page
 ```
 
 `make` bootstraps PlatformIO on first use, so a fresh clone needs only

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # One entry point to a running app, on a laptop or a fresh Claude container.
 #
-#   bash scripts/start_app.sh                 prepare + serve app/ as it is
+#   bash scripts/start_app.sh                 prepare, then serve the built page
+#   bash scripts/start_app.sh --dev           prepare, then the Vite dev server
 #   bash scripts/start_app.sh --prepare-only  build the toolchain and the module, then stop
-#   bash scripts/start_app.sh --build         serve the single-file build instead
 #
-# The app has no build step — it is ES modules, served as they are — so the
-# dev server is a static server over the repository root and the page is at
-# /app/. It has to be *served*: a browser will not load a module from file://,
-# and Web MIDI needs a secure context. --build serves emulator/dist instead,
-# which is the one-file page CI uploads and Pages publishes.
+# The built page is emulator/dist/index.html - one file with the module
+# inlined, the same page CI uploads and Pages publishes - served by a static
+# server. It has to be *served*: Web MIDI needs a secure context, and a
+# screenshot needs a URL. --dev serves the source tree instead, with hot
+# reload, from Vite's own server on its own port.
 #
 # Idempotent: a server already answering is reused, not restarted. Runtime
 # state lives in .dev/ (gitignored): logs, pids, the prepared marker, the
@@ -23,16 +23,17 @@ run_dir="$repo_root/.dev"
 mkdir -p "$run_dir"
 
 PREPARE_ONLY=0
-BUILD=0
+DEV=0
 for arg in "$@"; do
   case "$arg" in
     --prepare-only) PREPARE_ONLY=1 ;;
-    --build) BUILD=1 ;;
+    --dev) DEV=1 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
 
 PORT="${APP_PORT:-8080}"
+DEV_PORT="${APP_DEV_PORT:-5173}"
 
 log() { echo "[start_app] $*"; }
 
@@ -40,8 +41,8 @@ log() { echo "[start_app] $*"; }
 
 # Everything a checkout needs before any check can run. The two halves of this
 # repository are independent — PlatformIO is pip and a platform download, the
-# module is clang — so they run at once and the summary says which one the
-# wait was actually for.
+# module and the page are clang and npm — so they run at once and the summary
+# says which one the wait was actually for.
 prepare() {
   local t0=$SECONDS
 
@@ -63,9 +64,10 @@ prepare() {
   fi
 
   # The module is what the page loads and what every app check drives, so a
-  # prepared checkout has one. It is seconds; it is not worth a marker.
+  # prepared checkout has one - and the page built beside it, which is where
+  # the app's dependencies get installed.
   if command -v clang++ >/dev/null && command -v wasm-ld >/dev/null; then
-    log "building the WebAssembly module"
+    log "building the WebAssembly module and the page"
     ( t=$SECONDS
       emulator/build.sh >>"$run_dir/setup.log" 2>&1
       status=$?
@@ -120,21 +122,19 @@ spawn() {
   log "$name started (log: .dev/$name.log)"
 }
 
-if [[ $BUILD -eq 1 ]]; then
-  log "emulator/build.sh"
-  emulator/build.sh >>"$run_dir/setup.log" 2>&1 || { tail -30 "$run_dir/setup.log"; exit 1; }
-  # The one-file page is its own root: index.html plus mmmc.wasm beside it.
-  spawn app python3 -m http.server "$PORT" --bind 127.0.0.1 --directory emulator/dist
-  path=""
+if [[ $DEV -eq 1 ]]; then
+  # The source tree, with hot reload. The module is reached at
+  # emulator/dist/mmmc.wasm through the alias in app/vite.config.js.
+  spawn dev npm --prefix app run --silent dev -- --port "$DEV_PORT" --strictPort --host 127.0.0.1
+  base="http://127.0.0.1:$DEV_PORT"
 else
-  # From the repository root, because app/src/module.js reaches the module at
-  # ../../emulator/dist/mmmc.wasm — serving app/ alone leaves the page with no
-  # module and no useful error.
-  spawn app python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$repo_root"
-  path="/app"
+  # The one-file page is its own root, already built by prepare: index.html
+  # plus mmmc.wasm beside it. A page that was already being served is served
+  # again as it is now - the build wrote over the file the server reads.
+  [[ -f "$run_dir/prepared" ]] && emulator/build.sh >>"$run_dir/setup.log" 2>&1
+  spawn app python3 -m http.server "$PORT" --bind 127.0.0.1 --directory emulator/dist
+  base="http://127.0.0.1:$PORT"
 fi
-
-base="http://127.0.0.1:$PORT$path"
 
 # --noproxy: a container's HTTPS_PROXY must not be consulted for localhost.
 for _ in $(seq 1 30); do

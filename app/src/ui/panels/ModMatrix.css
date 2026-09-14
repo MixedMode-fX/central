@@ -1,0 +1,10 @@
+/* The two halves of the mod matrix, one panel: a knob's CC and a control
+   signal, read one under the other. */
+.matrix-half + .matrix-half { margin-top: 1.1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.bindings-detail { margin-top: .8rem; }
+.binding {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .3rem .6rem; margin-bottom: .5rem;
+}
+.binding.active > summary { color: var(--ink); }
+.binding-list { margin-top: .5rem; }

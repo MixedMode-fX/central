@@ -54,8 +54,8 @@ jobs:
       - name: Build and check the app
         run: bash scripts/checks.sh app
 
-      # index.html plus mmmc.wasm: the page fetches the module from next to
-      # itself when served and falls back to its embedded copy otherwise.
+      # index.html carries the module inlined; mmmc.wasm sits beside it for
+      # anything that wants the bare module.
       - name: Upload the site
         uses: actions/upload-pages-artifact@v3
         with:

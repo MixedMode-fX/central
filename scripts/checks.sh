@@ -82,24 +82,27 @@ fi
 
 if has app; then
   missing=()
-  for tool in clang++ wasm-ld node; do
+  for tool in clang++ wasm-ld node npm; do
     command -v "$tool" >/dev/null || missing+=("$tool")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
-    echo "Checks failed: missing ${missing[*]} — the module needs clang, lld and node (apt install clang lld nodejs)."
+    echo "Checks failed: missing ${missing[*]} — the module needs clang, lld, node and npm (apt install clang lld nodejs npm)."
     exit 1
   fi
 
-  # The module first, and nothing after it if it failed: every check below
-  # loads emulator/dist/mmmc.wasm, so a broken build reports itself once here
-  # instead of four times as a stale or absent module.
+  # The module and the page first, and nothing after them if they failed:
+  # every check below loads emulator/dist/mmmc.wasm, so a broken build
+  # reports itself once here instead of three times as a stale or absent
+  # module.
   if run "emulator/build.sh" emulator/build.sh; then
     run "module smoke test" node emulator/test/smoke.mjs
-    # app/src/protocol.js is generated from the firmware headers. This is what
-    # catches it having been hand-edited, or the headers having moved under it.
+    # app/src/protocol/generated.js is generated from the firmware headers.
+    # This is what catches it having been hand-edited, or the headers having
+    # moved under it.
     run "protocol matches the firmware" node app/tools/generate-protocol.mjs --check
-    run "app protocol tests" node app/test/protocol.test.mjs
-    run "app tests" node app/test/app.test.mjs
+    # Both suites, against the module just built: the app's protocol client
+    # over real SysEx, and the library, the runtime seam, the panels.
+    run "app tests" npm --prefix app test --silent
   fi
 fi
 

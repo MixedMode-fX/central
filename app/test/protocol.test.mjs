@@ -14,25 +14,23 @@
 //   * an algorithm added to the firmware appears in the editor with no editor
 //     change, because the editor reads the registry.
 //
-//   node app/test/protocol.test.mjs [path/to/mmmc.wasm]
+//   npm test -- protocol      (vitest; MMMC_WASM names another module)
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 
-import * as P from '../src/protocol.js';
-import * as codec from '../src/codec.js';
-import { Device } from '../src/device.js';
-import { validate } from '../src/validate.js';
+import * as P from '../src/protocol/generated.js';
+import * as codec from '../src/protocol/codec.js';
+import { Device } from '../src/protocol/device.js';
+import { validate } from '../src/core/validate.js';
 import { connectNewNode, patchBlocks, connectionsOf, isModPort,
-         modulationChoices, planModulation } from '../src/graph.js';
-import { toPatchJson, toPatchJsonText, fromPatchJson } from '../src/patchjson.js';
-import { layoutOf, socketPoint, blockHeight } from '../src/layout.js';
-import { ALGORITHM_CATEGORIES } from '../src/names.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const wasmPath = process.argv[2] || join(here, '..', '..', 'emulator', 'dist', 'mmmc.wasm');
+         modulationChoices, planModulation } from '../src/core/graph.js';
+import { toPatchJson, toPatchJsonText, fromPatchJson } from '../src/core/patchjson.js';
+import { layoutOf, socketPoint, blockHeight } from '../src/core/layout.js';
+import { ALGORITHM_CATEGORIES } from '../src/protocol/names.js';
+import { loadWasm } from '../src/runtime/wasm.js';
+import { wasmPath } from './harness/index.mjs';
 
 const { instance } = await WebAssembly.instantiate(readFileSync(wasmPath), {
   env: { mmmc_midi_send: () => {} },
@@ -58,32 +56,12 @@ function wasmTransport() {
       E.emu_sysex_in(E.emu_const_control_port(), scratch, bytes.length, 0);
       const out = new Uint8Array(E.memory.buffer,
                                  E.emu_sysex_out_ptr(), E.emu_sysex_out_len());
-      // The buffer is a run of complete messages; split it on F0/F7.
-      const replies = [];
-      let start = -1;
-      for (let i = 0; i < out.length; i++) {
-        if (out[i] === 0xf0) start = i;
-        else if (out[i] === 0xf7 && start >= 0) {
-          replies.push(out.slice(start, i + 1));
-          start = -1;
-        }
-      }
+      // The buffer is a run of complete messages, copied out before the
+      // next call overwrites it.
+      const replies = codec.splitSysex(out).map((reply) => reply.slice());
       queueMicrotask(() => { for (const r of replies) onMessage(r); });
     },
   };
-}
-
-let tests = 0;
-const failures = [];
-async function test(name, fn) {
-  try {
-    await fn();
-    tests++;
-    console.log(`ok - ${name}`);
-  } catch (error) {
-    failures.push({ name, error });
-    console.log(`not ok - ${name}\n    ${error.message}`);
-  }
 }
 
 const device = new Device(wasmTransport());
@@ -91,13 +69,13 @@ E.emu_boot(0);
 
 // --- Discovery ------------------------------------------------------------
 
-await test('the module answers the standard identity request', async () => {
+test('the module answers the standard identity request', async () => {
   const identity = await device.identify();
   assert.equal(identity.family, 1);
   assert.equal(identity.member, 1);
 });
 
-await test('capabilities match the firmware constants', async () => {
+test('capabilities match the firmware constants', async () => {
   const caps = await device.readCapabilities();
   assert.equal(caps.nodes, E.emu_const_n_node());
   assert.equal(caps.maxIn, E.emu_const_max_in());
@@ -117,7 +95,7 @@ await test('capabilities match the firmware constants', async () => {
   assert.equal(P.N_CC_MAP, E.emu_const_n_cc_map());
 });
 
-await test('the registry dump names every algorithm the firmware has', async () => {
+test('the registry dump names every algorithm the firmware has', async () => {
   const algorithms = await device.readAlgorithms();
   assert.equal(algorithms.length, E.emu_algo_count());
   const mem = () => new Uint8Array(E.memory.buffer);
@@ -137,7 +115,7 @@ await test('the registry dump names every algorithm the firmware has', async () 
 // on a timeout rather than resolving with a partial answer, so an offset that
 // never recognises the last field fails here instead of stalling for two
 // seconds per algorithm and building half a panel.
-await test('every algorithm answers a parameter request, completely', async () => {
+test('every algorithm answers a parameter request, completely', async () => {
   for (const descriptor of device.algorithms) {
     const groups = await device.readParams(descriptor.id);
     if (descriptor.nParams === 0) {
@@ -161,17 +139,17 @@ await test('every algorithm answers a parameter request, completely', async () =
   }
 });
 
-// The wasm module is fetched relative to app/src/module.js, which is one level
-// deeper than the page - the kind of thing that is obvious in a browser and
-// invisible in a unit test, so it is pinned here.
-await test('the embedded module resolves next to the page it is served with', async () => {
-  const { CANDIDATE_PATHS } = await import('../src/module.js');
-  const from = 'https://example.test/app/src/module.js';
-  const resolved = CANDIDATE_PATHS.map((c) => new URL(c, from).pathname);
-  assert.ok(resolved.includes('/mmmc.wasm'),
-            `the Pages layout is not covered: ${resolved.join(', ')}`);
-  assert.ok(resolved.includes('/app/mmmc.wasm'), 'a copy beside the page is not covered');
-  assert.ok(resolved.includes('/emulator/dist/mmmc.wasm'), 'the repository layout is not covered');
+// The built page carries the module inlined as a data URL, so it opens from
+// a download with nothing serving it - and a data URL is decoded rather than
+// fetched, because a page opened from file:// cannot rely on fetch at all.
+test('the embedded module is read back out of the page that carries it', async () => {
+  const bytes = readFileSync(wasmPath);
+  const url = `data:application/wasm;base64,${bytes.toString('base64')}`;
+  const back = await loadWasm(url);
+  assert.equal(back.length, bytes.length);
+  assert.deepEqual([...back.subarray(0, 8)], [...bytes.subarray(0, 8)], 'the wasm magic survives');
+  const { instance } = await WebAssembly.instantiate(back, { env: { mmmc_midi_send: () => {} } });
+  assert.ok(instance.exports.emu_boot, 'what came back is the module');
 });
 
 // Every field of every descriptor, against the firmware's own table. A
@@ -180,7 +158,7 @@ await test('the embedded module resolves next to the page it is served with', as
 // cannot reach a legal value and a validator that refuses a legal patch - as
 // a max of 255 did, arriving as 127 and making step 8 of every pattern
 // unreachable.
-await test('every descriptor field survives the wire intact', async () => {
+test('every descriptor field survives the wire intact', async () => {
   const mem = () => new Uint8Array(E.memory.buffer);
   const cstr = (p) => { let s = ''; while (mem()[p]) s += String.fromCharCode(mem()[p++]); return s; };
   let widest = 0;
@@ -204,7 +182,7 @@ await test('every descriptor field survives the wire intact', async () => {
                         + 'so this check would not catch one being truncated');
 });
 
-await test('parameter descriptors match the firmware, ranges and enum names', async () => {
+test('parameter descriptors match the firmware, ranges and enum names', async () => {
   const euclid = device.algorithms.find((a) => a.name === 'EuclidianSequencer');
   await device.readParams(euclid.id);
   const length = device.describeParam(euclid.id, 0);
@@ -225,7 +203,7 @@ await test('parameter descriptors match the firmware, ranges and enum names', as
 // Every inlet, every outlet and every algorithm arrives described. Without
 // this the editor can only say "in 0" and "in 1", and a user has to read the
 // firmware to find out which one resets the sequencer.
-await test('the registry describes every inlet, outlet and algorithm', async () => {
+test('the registry describes every inlet, outlet and algorithm', async () => {
   for (const descriptor of device.algorithms) {
     assert.equal(descriptor.inName.length, descriptor.nIn, `${descriptor.name} inlet names`);
     assert.equal(descriptor.outName.length, descriptor.nOut, `${descriptor.name} outlet names`);
@@ -246,7 +224,7 @@ await test('the registry describes every inlet, outlet and algorithm', async () 
 // off the module with everything else it says about itself. An algorithm that
 // arrives without one would land under "other", which is the wall of thirty
 // names that categories were meant to remove.
-await test('every algorithm arrives on a shelf the app has a name for', async () => {
+test('every algorithm arrives on a shelf the app has a name for', async () => {
   const known = new Set(ALGORITHM_CATEGORIES.map((c) => c.value));
   for (const descriptor of device.algorithms) {
     assert.ok(known.has(descriptor.category),
@@ -298,7 +276,7 @@ function samplePatch() {
   return patch;
 }
 
-await test('a patch built offline round-trips through the module byte for byte', async () => {
+test('a patch built offline round-trips through the module byte for byte', async () => {
   const patch = samplePatch();
   const globals = codec.emptyGlobals();
   globals.bpm = 143;
@@ -328,7 +306,7 @@ await test('a patch built offline round-trips through the module byte for byte',
   assert.deepEqual(Array.from(again), Array.from(codec.encodePatch(dumped.patch, dumped.globals)));
 });
 
-await test('a patch the editor accepts is never rejected by the firmware', async () => {
+test('a patch the editor accepts is never rejected by the firmware', async () => {
   const patch = samplePatch();
   assert.deepEqual(validate(device, patch), [], 'the editor should accept its own sample');
   await device.sendPatch(patch, codec.emptyGlobals());   // throws if the module refuses
@@ -346,7 +324,7 @@ await test('a patch the editor accepts is never rejected by the firmware', async
   }
 });
 
-await test('the editor refuses what the firmware would refuse', async () => {
+test('the editor refuses what the firmware would refuse', async () => {
   const cases = [
     ['a bus that does not exist', (p) => { p.nodes[0].inBus[0] = 200; }],
     ['a required inlet left unconnected', (p) => { p.nodes[0].inBus[0] = P.NO_BUS; }],
@@ -369,7 +347,7 @@ await test('the editor refuses what the firmware would refuse', async () => {
 
 // --- Incremental edits ----------------------------------------------------
 
-await test('dragging a connection is one message, not a full dump', async () => {
+test('dragging a connection is one message, not a full dump', async () => {
   await device.sendPatch(samplePatch(), codec.emptyGlobals());
   await device.setConnection(1, true, 0, 3);
   const dumped = await device.dump();
@@ -381,7 +359,7 @@ await test('dragging a connection is one message, not a full dump', async () => 
   await assert.rejects(() => device.setConnection(9, false, 0, 1));
 });
 
-await test('a parameter edit takes effect and reads back', async () => {
+test('a parameter edit takes effect and reads back', async () => {
   await device.sendPatch(samplePatch(), codec.emptyGlobals());
   await device.setParam(0, 3, 9);
   assert.equal(await device.getParam(0, 3), 9);
@@ -389,7 +367,7 @@ await test('a parameter edit takes effect and reads back', async () => {
   assert.equal(await device.getParam(0, 3), 9, 'a refused write must change nothing');
 });
 
-await test('pattern data reads and writes in runs', async () => {
+test('pattern data reads and writes in runs', async () => {
   const poly = device.algorithms.find((a) => a.name === 'PolySequencer');
   const patch = codec.emptyPatch();
   const node = codec.emptyNode(poly.id);
@@ -410,7 +388,7 @@ await test('pattern data reads and writes in runs', async () => {
 // (the inverter's inlet was unconnected) and then refusing every edit
 // afterwards with SYSEX_ERR_BAD_ARGUMENT, because those edits addressed a node
 // the module had never taken.
-await test('nodes added the way the editor adds them build a patch the module takes', async () => {
+test('nodes added the way the editor adds them build a patch the module takes', async () => {
   const patch = codec.emptyPatch();
   const add = (name) => {
     const d = device.algorithms.find((a) => a.name === name);
@@ -453,7 +431,7 @@ await test('nodes added the way the editor adds them build a patch the module ta
 // A parameter byte reaches 255 and a SysEx data byte holds seven bits. Step 8
 // of a step sequencer *is* bit 7 of a pattern byte, so a truncated write did
 // not round the value - it cleared the whole byte.
-await test('a parameter above 127 survives the round trip', async () => {
+test('a parameter above 127 survives the round trip', async () => {
   const seq = device.algorithms.find((a) => a.name === 'StepSequencer');
   const patch = codec.emptyPatch();
   const node = codec.emptyNode(seq.id);
@@ -475,7 +453,7 @@ await test('a parameter above 127 survives the round trip', async () => {
 
 // --- The emulator's JSON --------------------------------------------------
 
-await test('a patch exports as the emulator JSON and comes back unchanged', async () => {
+test('a patch exports as the emulator JSON and comes back unchanged', async () => {
   const patch = samplePatch();
   const globals = { ...codec.emptyGlobals(), bpm: 96, pcEnabled: 1 };
   patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 2, bus: 0 };
@@ -510,7 +488,7 @@ await test('a patch exports as the emulator JSON and comes back unchanged', asyn
   await device.sendPatch(back.patch, back.globals);
 });
 
-await test('the JSON importer refuses what it cannot resolve', () => {
+test('the JSON importer refuses what it cannot resolve', () => {
   assert.throws(() => fromPatchJson({ nodes: [{ algo: 'Nonexistent' }] }, device),
                 /no algorithm "Nonexistent"/);
   assert.throws(() => fromPatchJson({ gate_ports: [{ port: 99, dir: 'in', bus: 0 }] }, device),
@@ -521,7 +499,7 @@ await test('the JSON importer refuses what it cannot resolve', () => {
 
 // --- Presets --------------------------------------------------------------
 
-await test('preset slots can be written, listed and recalled', async () => {
+test('preset slots can be written, listed and recalled', async () => {
   await device.sendPatch(samplePatch(), codec.emptyGlobals());
   await device.saveSlot(2);
 
@@ -540,7 +518,7 @@ await test('preset slots can be written, listed and recalled', async () => {
   await assert.rejects(() => device.loadSlot(2), /SLOT_EMPTY/);
 });
 
-await test('controller bindings can be written and read back', async () => {
+test('controller bindings can be written and read back', async () => {
   await device.sendPatch(samplePatch(), codec.emptyGlobals());
   await device.setCcMap(3, {
     sourceMask: 0x90, channel: 4, cc: 41,
@@ -580,7 +558,7 @@ function modulationPatch() {
   return patch;
 }
 
-await test('the module reports how much modulation it holds', () => {
+test('the module reports how much modulation it holds', () => {
   const caps = device.capabilities;
   assert.equal(caps.modRoutes, P.N_MOD_ROUTE,
                'the editor cannot offer a route the module has no slot for');
@@ -590,7 +568,7 @@ await test('the module reports how much modulation it holds', () => {
             'a modulator resolved to seven bits would step audibly on a fine control');
 });
 
-await test('a modulation route can be written and read back', async () => {
+test('a modulation route can be written and read back', async () => {
   await device.sendPatch(modulationPatch(), codec.emptyGlobals());
   const route = {
     bus: 0,
@@ -610,7 +588,7 @@ await test('a modulation route can be written and read back', async () => {
   assert.equal(dumped.patch.modMap[0], null);
 });
 
-await test('a route can be cleared, and the module says so', async () => {
+test('a route can be cleared, and the module says so', async () => {
   await device.sendPatch(modulationPatch(), codec.emptyGlobals());
   await device.setModRoute(2, {
     bus: 1, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
@@ -621,7 +599,7 @@ await test('a route can be cleared, and the module says so', async () => {
   assert.equal(await device.getModRoute(2), null);
 });
 
-await test('the module refuses two routes on one parameter', async () => {
+test('the module refuses two routes on one parameter', async () => {
   await device.sendPatch(modulationPatch(), codec.emptyGlobals());
   const route = (bus) => ({
     bus, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
@@ -633,7 +611,7 @@ await test('the module refuses two routes on one parameter', async () => {
   await assert.rejects(() => device.setModRoute(1, route(1)), /REJECTED/);
 });
 
-await test('the editor refuses a route the firmware would refuse', async () => {
+test('the editor refuses a route the firmware would refuse', async () => {
   const patch = modulationPatch();
   await device.readParams(patch.nodes[1].algorithmId);
   const bad = (route) => {
@@ -666,7 +644,7 @@ await test('the editor refuses a route the firmware would refuse', async () => {
   }
 });
 
-await test('a modulated parameter is a socket, and the rest are not', async () => {
+test('a modulated parameter is a socket, and the rest are not', async () => {
   const patch = modulationPatch();
   patch.modMap[0] = {
     bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
@@ -700,7 +678,7 @@ await test('a modulated parameter is a socket, and the rest are not', async () =
             `the modulation socket is drawn at y=${point.y}, outside its block`);
 });
 
-await test('dragging a control signal onto a block plans a route', async () => {
+test('dragging a control signal onto a block plans a route', async () => {
   const patch = modulationPatch();
   await device.readParams(patch.nodes[1].algorithmId);
   const blocks = patchBlocks(device, patch);
@@ -730,7 +708,7 @@ await test('dragging a control signal onto a block plans a route', async () => {
   assert.ok(!modulationChoices(device, patch, 1).some((c) => c.param === amount.param));
 });
 
-await test('a note bus cannot be pointed at a parameter', async () => {
+test('a note bus cannot be pointed at a parameter', async () => {
   const patch = modulationPatch();
   const arp = device.algorithms.find((a) => a.name === 'Arpeggiator');
   const node = codec.emptyNode(arp.id);
@@ -748,7 +726,7 @@ await test('a note bus cannot be pointed at a parameter', async () => {
   assert.match(plan.why, /not a control signal/);
 });
 
-await test('modulation survives the JSON dialect', async () => {
+test('modulation survives the JSON dialect', async () => {
   const patch = modulationPatch();
   patch.modMap[1] = {
     bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
@@ -767,7 +745,7 @@ await test('modulation survives the JSON dialect', async () => {
 
 // --- The offline path -----------------------------------------------------
 
-await test('an exported image loads back with no module attached', () => {
+test('an exported image loads back with no module attached', () => {
   const patch = samplePatch();
   const globals = codec.emptyGlobals();
   globals.bpm = 96;
@@ -787,15 +765,9 @@ await test('an exported image loads back with no module attached', () => {
   assert.throws(() => codec.decodePatch(image.subarray(0, 6)), /too short/);
 });
 
-await test('seven-bit packing survives every byte value', () => {
+test('seven-bit packing survives every byte value', () => {
   const original = Uint8Array.from({ length: 256 }, (_, i) => i);
   const packed = codec.pack(original);
   for (const b of packed) assert.ok(b <= 0x7f, 'a SysEx data byte cannot have bit 7 set');
   assert.deepEqual(Array.from(codec.unpack(packed)), Array.from(original));
 });
-
-console.log(`\n${tests} checks passed against ${wasmPath}`);
-if (failures.length) {
-  console.error(`${failures.length} failed`);
-  process.exit(1);
-}

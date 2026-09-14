@@ -1,0 +1,37 @@
+/* A menu under the control that asked for it. Fixed to the viewport because it
+   is opened at a client rectangle: the canvas may be panned and zoomed under
+   it and the menu must not be. */
+.menu {
+  position: fixed; z-index: 60;
+  min-width: 13rem; max-width: 18rem; max-height: 60vh;
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.menu-head {
+  padding: .45rem .6rem; font-size: .7rem; color: var(--dim);
+  border-bottom: 1px solid var(--line);
+}
+.menu-list { overflow-y: auto; }
+.menu-item {
+  display: flex; width: 100%; gap: .6rem; align-items: baseline;
+  justify-content: space-between; padding: .4rem .6rem; min-height: 2rem;
+  background: none; border: none; border-radius: 0; text-align: left;
+  font-size: .8rem; cursor: pointer;
+}
+/* What a menu binds to is the colour it highlights in: the accent for a CC,
+   the CV colour for a control signal. */
+.menu-item:hover, .menu-item:focus {
+  background: color-mix(in srgb, var(--menu-key, var(--accent)) 22%, transparent); outline: none;
+}
+.menu.cv { --menu-key: var(--cv); }
+.menu-item.chosen .menu-name { color: var(--menu-key, var(--accent)); }
+.menu-item.danger { color: var(--bad); }
+.menu-hint { flex: none; font-size: .68rem; color: var(--dim); }
+/* A row that is a control rather than a choice: the CC number, which is 120
+   of them and a list nobody should scroll. */
+.menu-field {
+  display: flex; gap: .6rem; align-items: center; padding: .45rem .6rem;
+  border-top: 1px solid var(--line);
+}
+.menu-field select { flex: 1 1 auto; }

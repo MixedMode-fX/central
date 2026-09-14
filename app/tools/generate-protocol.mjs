@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generates app/src/protocol.js from the firmware headers.
+// Generates app/src/protocol/generated.js from the firmware headers.
 //
 // The message layout is defined once, in C++, and the firmware and the editor
 // must agree byte for byte. Two hand-maintained copies drift, and the failure
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
-const out = join(here, '..', 'src', 'protocol.js');
+const out = join(here, '..', 'src', 'protocol', 'generated.js');
 
 const read = (p) => readFileSync(join(root, p), 'utf8');
 
@@ -189,11 +189,11 @@ const text = lines.join('\n');
 if (process.argv.includes('--check')) {
   const existing = readFileSync(out, 'utf8');
   if (existing !== text) {
-    console.error('app/src/protocol.js is out of date with the firmware headers.');
+    console.error('app/src/protocol/generated.js is out of date with the firmware headers.');
     console.error('Run: node app/tools/generate-protocol.mjs');
     process.exit(1);
   }
-  console.log('ok - app/src/protocol.js matches the firmware headers');
+  console.log('ok - app/src/protocol/generated.js matches the firmware headers');
 } else {
   writeFileSync(out, text);
   console.log(`wrote ${out}`);

@@ -1,0 +1,125 @@
+/* The patch as blocks. The canvas is a picture of the patch, not a second
+   model of it: an arrow is drawn wherever a writer and a reader are on one
+   bus, so everything here is presentation.
+
+   The block geometry comes from core/layout.js as custom properties on
+   .canvas-panel (--blk-w, --blk-head, --blk-row, --blk-pad), because the
+   arrows are drawn by arithmetic rather than by measuring the DOM. */
+.canvas-panel {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-panel); padding: .6rem; margin-bottom: 1rem;
+}
+.canvas-bar {
+  display: flex; gap: .5rem; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; margin-bottom: .5rem;
+}
+.add-row { display: flex; gap: .5rem; align-items: center; flex: 1 1 16rem; }
+.canvas-zoom { display: flex; gap: .25rem; margin-left: auto; }
+.canvas-foot {
+  display: flex; gap: .5rem .9rem; align-items: center; flex-wrap: wrap;
+  justify-content: space-between; margin-top: .6rem;
+}
+.canvas-legend { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.canvas-legend .chip { min-height: 1.9rem; font-size: .75rem; }
+.canvas-legend .merge { color: var(--dim); }
+
+/* The details panel: one bar, then the card. The bar stays when the body is
+   folded, so a folded panel is a line saying what is selected. */
+.details-bar { display: flex; gap: .4rem; align-items: center; margin-bottom: .8rem; flex-wrap: wrap; }
+.details.folded .details-bar { margin-bottom: 0; }
+.details-title {
+  margin: 0; flex: 1 1 6rem; color: var(--ink); font-size: .95rem;
+  text-transform: none; letter-spacing: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.details-close { margin-left: auto; }
+
+/* A fixed window onto a world as big as the patch needs. touch-action: none
+   is what makes a one-finger drag pan the canvas instead of scrolling the
+   page - which is also why the canvas has a bounded height. */
+.canvas-view {
+  position: relative; overflow: hidden; height: clamp(19rem, 58vh, 38rem);
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+  background-image: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0);
+  background-size: 24px 24px;
+  touch-action: none; cursor: grab;
+  user-select: none; -webkit-user-select: none;
+}
+.canvas-view.panning { cursor: grabbing; }
+.canvas-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+svg.wires { position: absolute; top: 0; left: 0; overflow: visible; }
+
+.wire { fill: none; stroke: var(--wire); stroke-width: 2; stroke-linecap: round; opacity: .8; pointer-events: none; }
+.wire.selected { stroke-width: 3.5; opacity: 1; }
+/* Two sources on one bus is a merge, worth seeing without counting heads. */
+.wire.merged { stroke-dasharray: 8 4; }
+/* A gate bus that is high right now, sampled once per pass. */
+.wire.lit { opacity: 1; stroke-width: 4; }
+.wire.ghost { stroke-dasharray: 5 5; opacity: .7; }
+.wire.ghost.over { stroke-width: 3.5; opacity: 1; stroke-dasharray: none; }
+/* A two-pixel curve is not something a finger can hit. */
+.wire-hit { stroke: transparent; stroke-width: 20; fill: none; pointer-events: stroke; cursor: pointer; }
+.wire-cut {
+  position: absolute; transform: translate(-50%, -50%);
+  height: 2rem; width: 2rem; border-radius: 999px;
+  border-color: var(--bad); color: var(--bad); background: var(--panel);
+}
+.wire-cut .icon { width: 1.1rem; height: 1.1rem; }
+
+.blk {
+  position: absolute; width: var(--blk-w);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  cursor: grab; touch-action: none;
+}
+.blk.moving { cursor: grabbing; opacity: .92; z-index: 3; }
+.blk.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); z-index: 2; }
+.blk.bad { border-color: var(--bad); }
+.blk.kind-jack, .blk.kind-midiIn, .blk.kind-midiOut { background: var(--raised); }
+.blk-head {
+  height: var(--blk-head); display: flex; align-items: center; gap: .35rem;
+  padding: 0 .2rem 0 .5rem; border-bottom: 1px solid var(--line);
+}
+.blk-head .index { padding: 0 .35rem; font-size: .72rem; border-radius: 4px; }
+.blk-title { flex: 1 1 auto; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blk-clocked { color: var(--accent); font-size: .8rem; }
+.blk-remove { height: 1.75rem; width: 1.75rem; background: none; border-color: transparent; color: var(--dim); }
+.blk-remove .icon { width: .95rem; height: .95rem; }
+.blk-remove:hover { color: var(--bad); border-color: var(--bad); }
+
+.blk-body { display: flex; padding: var(--blk-pad) 0; }
+.blk-col { flex: 1 1 50%; }
+.blk-port { position: relative; height: var(--blk-row); display: flex; align-items: center; gap: .25rem; padding: 0 .5rem; }
+.blk-port.out { justify-content: flex-end; }
+.blk-port-name { font-size: .72rem; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blk-port-bus {
+  flex: none; font-size: .65rem; color: var(--wire);
+  border: 1px solid var(--wire); border-radius: 4px; padding: 0 .25rem;
+  font-variant-numeric: tabular-nums; opacity: .8;
+}
+/* A modulated parameter is a socket the patch grew: a square dot says "this
+   is a parameter, not a port" without a second colour to learn. */
+.blk-port.mod .blk-port-name { font-style: italic; }
+.socket.mod .dot { border-radius: 3px; }
+
+/* The socket is a 26px target around an 11px dot. */
+.socket {
+  position: absolute; width: 26px; height: 26px; min-height: 0; padding: 0;
+  background: none; border: none; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  cursor: crosshair; touch-action: none;
+}
+.blk-port.in .socket { left: -13px; }
+.blk-port.out .socket { right: -13px; }
+.socket:hover { background: color-mix(in srgb, var(--wire) 22%, transparent); }
+.socket .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--wire); background: var(--bg); }
+.socket.on .dot { background: var(--wire); }
+.socket.needed .dot { border-color: var(--warn); }
+/* Mid-drag, only the sockets that could take this connection are lit. */
+.canvas-view.linking .socket { opacity: .25; }
+.canvas-view.only-gate .socket.dom-gate,
+.canvas-view.only-note .socket.dom-note,
+.canvas-view.only-CV .socket.dom-CV { opacity: 1; }
+
+@media (min-width: 52rem) {
+  .canvas-view { height: clamp(24rem, 62vh, 44rem); }
+}

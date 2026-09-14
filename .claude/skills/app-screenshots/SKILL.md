@@ -21,14 +21,16 @@ bash scripts/start_app.sh
 ```
 
 Idempotent — reuses whatever is already answering. It builds the WebAssembly
-module first, because the page without one is a shell with `connect` and
-nothing behind it. Prints the base URL and writes it to `.dev/base_url`, where
+module and the page first, because the page without a module is a shell with
+`connect` and nothing behind it, and serves the built single-file page from
+`emulator/dist`. Prints the base URL and writes it to `.dev/base_url`, where
 the screenshot script looks for it. Logs land in `.dev/app.log`; stop with
 `bash scripts/stop_app.sh`.
 
-Two 404s for `mmmc.wasm` in that log are not a fault: `CANDIDATE_PATHS` in
-`app/src/module.js` tries the Pages layout and a copy beside the page before
-the one this server has. The one that answers 200 is the third.
+A change to `app/src` is not on the served page until it is built again:
+`emulator/build.sh` (or `bash scripts/start_app.sh` again, which rebuilds).
+`bash scripts/start_app.sh --dev` serves the source tree with hot reload
+instead, on its own port.
 
 ## 2. Photograph it
 
@@ -88,8 +90,10 @@ empty grid, and it looks exactly like a scope that is broken.
 
 - **Nothing answering** → `bash scripts/start_app.sh` first; check `.dev/app.log`.
 - **A page with no module** — `connect` offered and no `connected · built-in`
-  under the title — means `emulator/dist/mmmc.wasm` is missing or stale. Run
+  under the title — means the page was built without a module. Run
   `emulator/build.sh`, or `bash scripts/await_ready.sh --refresh`.
+- **A change that is not on the page** → the served page is a build; run
+  `emulator/build.sh` again, or start the dev server with `--dev`.
 - **A blank or half-drawn page** → the script prints console and page errors it
   saw; read those before re-shooting.
 - **No browser** → it falls back through `PLAYWRIGHT_CHROMIUM_EXECUTABLE`,

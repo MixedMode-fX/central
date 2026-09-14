@@ -1,0 +1,3 @@
+/* A row of chips, one of which is on: a choice small enough that every option
+   is on screen at once. */
+.segmented { display: flex; flex-wrap: wrap; gap: .35rem; }

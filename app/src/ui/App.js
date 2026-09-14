@@ -1,0 +1,129 @@
+// The shell: the header, the tabs, what went wrong, and the tab on screen.
+//
+// Five tabs - patch, key, MIDI, library, schema - in the order the work
+// happens, and **play** as a button at the top beside *connect a module*,
+// because those two answer the same question: which module am I listening
+// to, the one in the page or the one on the cable.
+
+import { el, classes } from './dom.js';
+import { icon } from './components/icons.js';
+import { IconButton } from './components/IconButton.js';
+import { Notice } from './components/Panel.js';
+import { closeMenu } from './components/Menu.js';
+import { validate, advise } from '../core/validate.js';
+import { Domain } from '../core/validate.js';
+import { busPeers } from '../core/patch.js';
+import { drumSources } from '../runtime/audio/drums.js';
+import { PatchTab } from './tabs/PatchTab.js';
+import { PlayTab } from './tabs/PlayTab.js';
+import { KeyTab } from './tabs/KeyTab.js';
+import { MidiTab } from './tabs/MidiTab.js';
+import { LibraryTab } from './tabs/LibraryTab.js';
+import { SchemaTab } from './tabs/SchemaTab.js';
+
+const TABS = [
+  { key: 'patch', label: 'patch', icon: 'patch', view: PatchTab },
+  { key: 'key', label: 'key', icon: 'key', view: KeyTab },
+  { key: 'midi', label: 'MIDI', icon: 'midi', view: MidiTab },
+  { key: 'library', label: 'library', icon: 'library', view: LibraryTab },
+  { key: 'schema', label: 'schema', icon: 'schema', view: SchemaTab },
+];
+
+export function App(app) {
+  const { state } = app;
+  // A menu belongs to the page that opened it, and the page is about to be
+  // replaced.
+  closeMenu();
+  syncNoteBuses(app);
+  syncDrums(app);
+
+  const checked = app.device?.capabilities;
+  const problems = checked ? validate(app.device, state.patch) : [];
+  const notes = checked ? advise(app.device, state.patch) : [];
+  const said = (list) => list.map((p) => `${p.where}: ${p.message}`);
+  const tab = state.ui.tab === 'play' ? PlayTab : TABS.find((t) => t.key === state.ui.tab)?.view ?? PatchTab;
+
+  return el('div', { class: 'shell' },
+    Header(app),
+    Tabs(app),
+    state.error ? Notice({ kind: 'error', text: state.error, onClick: app.dismissError }) : null,
+    problems.length ? Notice({ kind: 'problems', title: state.diverged ? 'not sent' : 'rejected', items: said(problems) }) : null,
+    notes.length ? Notice({ kind: 'notes', title: 'notes', items: said(notes) }) : null,
+    tab(app));
+}
+
+function Header(app) {
+  const { state, session } = app;
+  const playing = state.ui.tab === 'play';
+  return el('header', { class: 'top' },
+    el('div', { class: 'title' },
+      el('h1', {}, 'MMMC'),
+      el('span', { class: 'patch-name' }, state.current.name, state.current.dirty ? ' •' : '')),
+    el('div', { class: 'top-buttons' },
+      IconButton({
+        icon: playing ? 'edit' : 'play', text: playing ? 'edit' : 'play',
+        label: playing ? 'back to editing' : 'play the module',
+        class: classes(playing && 'active'), 'aria-pressed': playing ? 'true' : 'false',
+        onclick: () => app.togglePlay(),
+      }),
+      IconButton({
+        icon: 'plug', text: session.usingModule ? 'connect' : 'reconnect',
+        label: session.usingModule ? 'connect a module over MIDI' : 'reconnect the module',
+        onclick: () => app.connect(),
+      })),
+    el('p', { class: classes('status', session.offline ? 'offline' : 'online', state.diverged && 'warn') },
+      state.status, el('span', { class: 'hint' }, ` · ${session.transportName}`)));
+}
+
+function Tabs(app) {
+  const current = app.state.ui.tab;
+  return el('nav', { class: 'tabs', role: 'tablist' },
+    TABS.map((t) => el('button', {
+      class: classes('tab', current === t.key && 'active'),
+      role: 'tab', 'aria-selected': current === t.key ? 'true' : 'false',
+      onclick: () => app.showTab(t.key),
+    }, icon(t.icon), el('span', { class: 'tab-label' }, t.label))));
+}
+
+// Keep the roll's note-bus watches in step with the patch, on every render,
+// which is every edit: a connection dragged onto a new bus is a new bus to
+// show, and one dragged off is one to stop reading. A bus is only read when
+// something asks for it, and what the roll asks for is "every bus this
+// patch writes".
+function syncNoteBuses(app) {
+  const wanted = new Set();
+  app.watchedBuses ??= new Set();
+  if (app.module && app.session.usingModule && app.device?.capabilities) {
+    for (let bus = 0; bus < app.device.capabilities.noteBuses; bus++) {
+      if (busPeers(app.device, app.state.patch, Domain.Note, bus).writers.length) wanted.add(bus);
+    }
+  }
+  for (const bus of [...app.watchedBuses]) {
+    if (wanted.has(bus)) continue;
+    app.module?.unwatchNoteBus(bus);
+    app.watchedBuses.delete(bus);
+  }
+  for (const bus of wanted) {
+    if (app.watchedBuses.has(bus)) continue;
+    app.module.watchNoteBus(bus);
+    app.watchedBuses.add(bus);
+  }
+}
+
+// Keep the drum voices in step with the patch, for the same reason: a drum
+// machine is heard because it is *in the patch*, whichever tab is on screen.
+// The mask is the other half: one patched to a MIDI output sends every hit
+// twice as far as this page is concerned, and two of them is a flam nobody
+// programmed.
+function syncDrums(app) {
+  if (!app.listener) return;
+  const sources = app.module && app.session.usingModule && app.device
+    ? drumSources(app.device, app.state.patch) : [];
+  app.listener.setDrumSources(sources);
+  const buses = new Set(sources.filter((s) => s.kind === 'note').map((s) => s.bus));
+  let mask = 0;
+  for (const port of app.state.patch.midiOut) {
+    if (port.targetMask && buses.has(port.bus)) mask |= port.targetMask;
+  }
+  app.listener.setDrumOutMask(mask);
+}

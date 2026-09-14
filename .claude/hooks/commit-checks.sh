@@ -35,7 +35,7 @@ changed=$(git diff --cached --name-only --diff-filter=ACMR; git diff --name-only
 # Which half of the repository this commit touches — a routing decision, not a
 # skip. src/ is in both lists deliberately and that is the whole point of the
 # routing: the firmware core is also what the WebAssembly module is compiled
-# from and what app/src/protocol.js is generated against, so a change to a
+# from and what app/src/protocol/generated.js is generated against, so a change to a
 # header under src/protocol/ breaks the app without touching a line of
 # JavaScript.
 scopes=()

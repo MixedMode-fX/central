@@ -1,0 +1,52 @@
+/* A sequencer's pattern. On a phone a lane wraps, eight steps to a row - two
+   beats of sixteenths, so a wrap falls where a bar line would - and its name
+   goes above it. On a screen wide enough for the whole pattern on one line
+   it scrolls instead, every lane in one scroller so they stay in step. */
+.grid { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .8rem; }
+.grid-title { color: var(--dim); font-size: .8rem; margin-bottom: .4rem; }
+.lanes { display: grid; gap: .55rem; }
+.lane-row { display: grid; gap: .2rem; }
+.lane-name { color: var(--dim); font-size: .72rem; line-height: 1.25; }
+.lane {
+  --per-row: 8;
+  display: grid; grid-template-columns: repeat(var(--per-row), minmax(0, 1fr)); gap: 3px;
+}
+.lane.notes { --per-row: 4; }
+.cell {
+  height: 30px; min-height: 0; padding: 0; border-radius: 3px;
+  background: var(--raised); border: 1px solid var(--line);
+}
+.cell.on { background: var(--gate); border-color: var(--gate); }
+.cell.beyond { opacity: .3; }
+/* The step being edited and the step being played are the same square. */
+.cell.playing, .note-cell.playing { outline: 2px solid var(--accent); outline-offset: 1px; }
+.note-cell {
+  display: grid; gap: 1px; text-align: center;
+  border: 1px solid var(--line); border-radius: 3px; padding: 2px; background: var(--raised);
+}
+.note-cell.on { border-color: var(--note); }
+.note-cell.beyond { opacity: .35; }
+.note-cell.rest { border-style: dashed; }
+.note-cell.tie { border-color: var(--note); border-style: double; }
+.note-cell input {
+  width: 100%; min-height: 1.6rem; background: none; border: none; color: var(--ink);
+  font: inherit; font-size: .85rem; text-align: center; padding: 0;
+}
+.note-cell .pitch { font-size: .65rem; color: var(--dim); }
+
+@media (min-width: 34rem) {
+  .lane-name { font-size: .8rem; }
+  .lane { --per-row: 16; }
+  .lane.notes { --per-row: 8; }
+}
+@media (min-width: 52rem) {
+  .lanes { width: max-content; min-width: 100%; }
+  .lane-row { display: flex; gap: .4rem; align-items: center; width: max-content; }
+  .lane-name {
+    position: sticky; left: 0; z-index: 1; flex: none;
+    width: 8rem; padding-right: .3rem; background: var(--panel);
+  }
+  .lane { display: flex; gap: 3px; width: max-content; padding-bottom: 2px; }
+  .cell { width: 26px; flex: none; }
+  .note-cell { width: 52px; flex: none; }
+}

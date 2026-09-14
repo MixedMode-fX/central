@@ -1,0 +1,65 @@
+/* A parameter: its name and what it currently is on one line, the control on
+   the next - or on the same line where the control says what it is set to. */
+.params { display: grid; gap: .5rem; }
+/* A choice is one line: the select or the switch says what it is set to, so
+   the name sits beside the control. An amount keeps two lines. */
+.param.inline {
+  display: grid; grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
+  gap: .5rem; align-items: center;
+}
+.param-head { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+.param-name { color: var(--dim); font-size: .85rem; margin-right: auto; }
+.param-cc {
+  color: var(--accent); font-size: .7rem; letter-spacing: .04em; font-variant-numeric: tabular-nums;
+}
+.param-cc.dom-CV { color: var(--cv); }
+.param-value { font-variant-numeric: tabular-nums; font-size: .85rem; text-align: right; }
+.param-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.param-controls > .grow { flex: 1 1 4rem; }
+/* One row: slider, value, learn, CV. The slider takes everything a number
+   field three digits wide and two icon buttons leave it. */
+.param-controls .slider { flex: 1 1 6rem; }
+.param-controls .number { width: 3.75rem; -moz-appearance: textfield; appearance: textfield; }
+.param-controls .number::-webkit-inner-spin-button,
+.param-controls .number::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* A square button around a square icon, the height of the field beside it. */
+button.learn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--tap); height: var(--tap); min-height: 0; padding: 0;
+  border-color: var(--line); color: var(--dim);
+}
+button.learn .icon { width: 1.35rem; height: 1.35rem; }
+button.learn:hover { color: var(--ink); border-color: var(--accent); }
+.learn.bound { color: var(--accent); border-color: var(--accent); }
+/* An armed learn is the one thing on the card that is waiting, and where
+   motion is welcome it breathes: nothing else on the page does. */
+.learn.armed {
+  color: var(--accent); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+button.learn.cv.bound { color: var(--cv); border-color: var(--cv); }
+
+/* A control the firmware is currently ignoring: dimmed and captioned with the
+   reason. Not disabled - the setting is real and stored. */
+.param.inert .param-controls, .param.inert .param-value { opacity: .5; }
+.param-inert { color: var(--dim); font-size: .75rem; margin-top: .25rem; font-style: italic; }
+/* Where modulation has taken a parameter, beside the set point. */
+.param-live { color: var(--cv); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.param-live.empty { display: none; }
+
+/* The sections a card's parameters are sorted into. */
+.param-sections { display: grid; gap: .7rem; }
+.param-section h4 { margin-bottom: .35rem; padding-bottom: .2rem; border-bottom: 1px solid var(--line); }
+
+@media (min-width: 34rem) {
+  /* Two parameters to a row only where a row can hold two whole ones. */
+  .params { grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: .6rem 1.5rem; }
+}
+@media (min-width: 52rem) {
+  .param.inline { grid-template-columns: 8rem 1fr; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .learn.armed { animation: waiting 1.1s ease-in-out infinite; }
+  @keyframes waiting { 50% { opacity: .4; } }
+}

@@ -30,8 +30,8 @@ help:
 	@echo "make app      - build the module, then check the app against it"
 	@echo "make upload   - flash an attached Teensy"
 	@echo ""
-	@echo "make dev      - serve app/ as it is (detached, idempotent)"
-	@echo "make preview  - serve the single-file build instead"
+	@echo "make dev      - the app with hot reload, from the source tree"
+	@echo "make preview  - the built single-file page (detached, idempotent)"
 	@echo "make stop     - stop what dev/preview started"
 	@echo "make shots    - photograph the app at phone and desktop widths"
 	@echo ""
@@ -90,10 +90,10 @@ editor: app
 # --- Run it ------------------------------------------------------------------
 
 dev:
-	bash scripts/start_app.sh
+	bash scripts/start_app.sh --dev
 
 preview:
-	bash scripts/start_app.sh --build
+	bash scripts/start_app.sh
 
 stop:
 	bash scripts/stop_app.sh

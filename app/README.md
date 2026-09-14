@@ -7,24 +7,23 @@ the module gets configured — a shipping deliverable, not a companion app.
 
 ## Running it
 
-No build step and no dependencies: ES modules and one HTML file. Serve it
-rather than opening it from disk — a browser will not load a module from
-`file://` and Web MIDI needs a secure context.
+A Vite app with no framework: plain ES modules building the DOM, a stylesheet
+per component, and `vite build` folding all of it and the WebAssembly module
+into one HTML file.
 
 ```sh
-make dev                          # builds the module and serves /app/ on 8080
+make dev                          # the source tree with hot reload, on Vite's port
+make preview                      # the built single-file page (what CI ships)
 make app                          # the checks below, against the module
-make stop                         # stop the server
+make stop                         # stop whichever is running
 ```
 
-`make dev` is `scripts/start_app.sh`: idempotent, detached, and it serves the
-repository root rather than `app/`, because the page reaches the module at
-`../../emulator/dist/mmmc.wasm`. `make preview` serves the single-file build
-instead.
-
-`make module` also writes `emulator/dist/index.html`, the whole app as one file
-with the module embedded, which opens from a download. The build from `main` is
-live at <https://mixedmode-fx.github.io/central/>.
+Both are `scripts/start_app.sh`: idempotent, detached, and they build the
+module first. The dev server reaches it at `emulator/dist/mmmc.wasm` through
+the `@module` alias in `vite.config.js`; the built page carries it inlined,
+which is what lets `emulator/dist/index.html` open from a download with
+nothing serving it. The build from `main` is live at
+<https://mixedmode-fx.github.io/central/>.
 
 ## The shape of it
 
@@ -214,7 +213,7 @@ box between a 32-step lane and the page needs `min-width: 0` or the lane's
 width propagates out past the screen; and a native range input takes any touch
 that lands on it, so a touch has to claim a slider (drag along it, or press and
 hold) before it may move it, and a gesture the browser takes for scrolling puts
-the value back (`slider`, in `src/views.js`).
+the value back (`Slider`, in `src/ui/components/`).
 
 ## How it stays honest
 
@@ -226,60 +225,67 @@ the value back (`slider`, in `src/views.js`).
   algorithm added to the firmware appears here with a working panel and no
   change to any file in this directory. The only words not read from the device
   are the ones the protocol defines by enum — MIDI port names, clock sources,
-  takeover modes — which live in `src/names.js`, keyed by the generated enum's
-  identifiers and checked against them on import.
-- **The message layout is generated, not copied.** `src/protocol.js` comes from
-  the firmware headers via `tools/generate-protocol.mjs`; `make app` fails if
-  the checked-in copy has drifted. That is why the app lives in this repository.
-- **Client-side validation uses the firmware's rules** (`src/validate.js`
+  takeover modes — which live in `src/protocol/names.js`, keyed by the
+  generated enum's identifiers and checked against them on import.
+- **The message layout is generated, not copied.** `src/protocol/generated.js`
+  comes from the firmware headers via `tools/generate-protocol.mjs`; `make app`
+  fails if the checked-in copy has drifted. That is why the app lives in this
+  repository.
+- **Client-side validation uses the firmware's rules** (`src/core/validate.js`
   against `registry::validate` and `MixedModeMaster::validate`), so an error
   surfaces while editing rather than on send.
 - **It is tested against the real firmware.** `test/protocol.test.mjs` drives
   the WebAssembly module through this app's own `Device` and codec over the
   actual SysEx protocol; `test/app.test.mjs` covers the library, the runtime
   seam, the drag planning, the schema both ways round, every example patch and
-  the single-file build.
+  the panels, built against a fake document.
 
 ## Layout
 
+Four layers, each allowed to reach only the ones below it: the protocol, the
+core, the runtime and the services are plain JavaScript with no DOM in them,
+and the UI is functions that take the app and return elements.
+
 ```
 app/
-  index.html          the page: one file, all the styling
+  index.html          the page: a root element and the entry script
+  vite.config.js      the build, the dev server and the tests
   src/
-    app.js            the shell: tabs, state, the library's commands
-    module.js         the firmware in the page: transport and running machine
-    device.js         the protocol client, over any transport
-    protocol.js       GENERATED from the firmware headers
-    codec.js          the patch image and the SysEx framing
-    validate.js       the firmware's own rules, client side
-    graph.js          the patch's shape: connections, drags, port direction
-    layout.js         where a block sits, and where its sockets are
-    canvas.js         the patch drawn: blocks, arrows, dragging, the details panel
-    picker.js         the add list, shelved by category
-    views.js          node and jack cards: parameters, sections, sequencer grids
-    icons.js          the icons, one inline SVG each
-    key.js            the key: one scale, one root, one register, on a keyboard
-    midi.js           routing, the clock, the external controller
-    modmatrix.js      the mod matrix: what a CC moves, what a CV bus moves
-    perform.js        the play surface, and everything that updates live
-    scope.js          the scope and the piano roll
-    library.js        the library tab
-    schema.js         the patch format as a JSON Schema, read from the module
-    storage.js        localStorage: the library, the working patch, the monitor
-    examples.js       the example patches
-    controller.js     a MIDI controller plugged into this computer
-    audio.js          the players, the drum voices and the gate listener
-    drums.js          the drum kits, which nodes are drums, and which drum a
-                      lane or a note means
-    webmidi.js        Web MIDI: support, discovery, the hardware transport
-    names.js          the words for what the protocol carries as numbers
-    patchjson.js      the patch as readable JSON, both ways
+    main.js           the entry point: the styles, the module, the app
+    styles/           tokens, the base sheet, the layout primitives
+    protocol/         the firmware's protocol: generated.js (GENERATED from
+                      the headers), codec.js, device.js, names.js
+    core/             the patch, with no DOM: patch.js (what more than one
+                      panel asks of a patch), graph.js (blocks, arrows,
+                      drags), layout.js, validate.js, patchjson.js,
+                      schema.js, catalogue.js, music.js, examples.js
+    runtime/          the machine and its peripherals: module.js (the
+                      firmware in the page), wasm.js, webmidi.js,
+                      controller.js, audio/ (the listener and the drum kits)
+    services/         the app's state and every command on it: state.js,
+                      render.js (the coalesced re-render and the per-frame
+                      painters), session.js (the device), editor.js (every
+                      edit), patches.js (the library and the files),
+                      arrangement.js (block positions), storage.js, app.js
+                      (the composition root)
+    ui/
+      dom.js          el and svg
+      components/     reusable widgets that know nothing about a patch, each
+                      with its stylesheet beside it
+      controls/       controls that read the patch: a bus selector, a
+                      parameter, the learn and CV menus, a modulation route
+      panels/         the cards and the mod matrix; algorithms.js is the one
+                      table of algorithm-specific views and inert rules
+      canvas/         the patch as blocks and arrows
+      scope/          the scope and the piano rolls
+      tabs/           one file per tab
+      App.js          the shell
   test/
+    harness/          the real module, and the fakes for what Node lacks
     protocol.test.mjs the app against the real firmware, over SysEx
-    app.test.mjs      the library, the runtime seam, the schema, the build
+    app.test.mjs      the library, the runtime seam, the schema, the panels
   tools/
-    generate-protocol.mjs   src/protocol.js, from the firmware headers
-    bundle.mjs              the single-file build
+    generate-protocol.mjs   src/protocol/generated.js, from the headers
 ```
 
 ## Browser support

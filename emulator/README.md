@@ -25,7 +25,7 @@ implementation of the hardware seam, next to the Teensy one:
 |---|---|---|
 | `IGpio` (the jacks) | `src/hal/teensy/teensy_gpio.cpp` | `emulator/src/web_hal.h` `WebGpio`: bytes the page reads and writes |
 | `IMidiOut` | `src/hal/teensy/teensy_midi.cpp` | `WebMidiOut`: one call into JavaScript |
-| main loop | `src/main.cpp` | `app/src/module.js`: passes on simulated time |
+| main loop | `src/main.cpp` | `app/src/runtime/module.js`: passes on simulated time |
 | clock timer and sync pin | `src/hal/teensy/teensy_clock.cpp` | `module.js`: `advance()` every `subtick_interval_us()`, `sync_edge()` from a simulated jack |
 | MIDI input | `mm_midi_read()` and the input queue | `deliver_midi()` from the page |
 | the control plane | `main.cpp`'s loop tail | `emu_control_service()`, the same calls in the same order |
@@ -59,7 +59,7 @@ The page never sees a struct. It builds a patch through `emu_patch_*`, reads
 the registry through `emu_algo_*` and the sizing constants through
 `emu_const_*`, so a change to `config.h`, the registry or the preset format is
 picked up by rebuilding. The only firmware values written into JavaScript are
-enum names, and those are generated into `app/src/protocol.js`.
+enum names, and those are generated into `app/src/protocol/generated.js`.
 
 ## What it can and cannot verify
 
@@ -85,7 +85,7 @@ It does not model:
 
 ```
 emulator/
-  build.sh          clang + wasm-ld, then app/tools/bundle.mjs for the page
+  build.sh          clang + wasm-ld, then `vite build` in app/ for the page
   shim/new          placement new, the one thing <new> is needed for
   src/web_hal.h     WebGpio and WebMidiOut: the seam, browser side
   src/emu_api.cpp   the C ABI the page calls; owns one MixedModeMaster

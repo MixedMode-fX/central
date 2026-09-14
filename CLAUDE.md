@@ -13,8 +13,8 @@ reference for the machine itself.
   minus those two.
 - `emulator/` — the same core compiled to WebAssembly, with the page standing
   in for the hardware. Nothing under `src/` is duplicated to make this work.
-- `app/` — the browser app, a client of the firmware's protocol. ES modules,
-  no build step; `emulator/build.sh` also emits it as one file.
+- `app/` — the browser app, a client of the firmware's protocol. A Vite app:
+  `emulator/build.sh` builds it into one file beside the module.
 - `scripts/` — provisioning and the checks, reached by path from the hooks,
   from CI and from `make`.
 
@@ -34,7 +34,7 @@ before every `git commit`, scoped to what the commit touches, so a red branch
 cannot be committed by accident.
 
 **`src/` is both scopes.** A change to a header under `src/protocol/` breaks
-the app without touching a line of JavaScript, because `app/src/protocol.js` is
+the app without touching a line of JavaScript, because `app/src/protocol/generated.js` is
 generated from those headers and the module is compiled from that core. The
 hook routes it to both; do not talk yourself out of the second one.
 
@@ -102,8 +102,12 @@ Breaking changes are the expected cost of getting the shape right.
 - A node that emits a note-on owns its note-off, released with the
   transformation originally applied. Use `SoundingNotes`.
 - Builds are `-Wall -Wextra -Weffc++ -Wshadow -Werror`. Warnings are errors.
-- `app/src/protocol.js` is generated from the firmware headers. Do not hand-edit
-  it; run `node app/tools/generate-protocol.mjs`.
+- `app/src/protocol/generated.js` is generated from the firmware headers. Do
+  not hand-edit it; run `node app/tools/generate-protocol.mjs`.
+- In the app, a view reads `app.state` and calls a service to change anything
+  (`app/src/services/`); it never touches the device or mutates state itself.
+  Anything that repeats across two panels is a component under
+  `app/src/ui/components/`, with its CSS beside it.
 - The app is a client of the protocol in `src/protocol/sysex.h`. If it needs
   something the protocol has not got, add a message — never a side channel.
 - `.dev/` is the only runtime directory, and it is gitignored: logs, pids, the

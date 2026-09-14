@@ -1,0 +1,11 @@
+.saved-list { display: grid; gap: .5rem; }
+.saved { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
+.saved.current { border-color: var(--accent); }
+.slots { display: grid; gap: .5rem; }
+.slot { display: flex; gap: .4rem; align-items: center; }
+.slot span { width: 4rem; color: var(--dim); }
+.slot button { flex: 1 1 auto; }
+
+@media (min-width: 34rem) {
+  .slots { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+}

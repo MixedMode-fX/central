@@ -155,7 +155,7 @@ touched.
 | Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz`, `Key` |
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
-| Utility | `GateHold` |
+| Utility | `GateHold`, `GateProbability` |
 | Modulators | `LFO`, `StepMod`, `SampleHold`, `Slew`, `Turing` |
 | Rhythm | `Automaton` |
 
@@ -196,6 +196,21 @@ is only what a parameter list cannot say.
   own length**, which is polyrhythm for free. `DrumSeqGate` has a gate per
   lane (accent is a second lane); `DrumSeqMidi` has one note outlet with a note
   number and channel per lane and a velocity per cell.
+- **`Probability` and `GateProbability` are one rule asked of two signals.**
+  Both carry a `TrigCondition` (`src/algorithm/util/trig_condition.h`): a
+  percentage, and a condition on the count of events that have reached the
+  node — `first`, `not first`, or `X:Y`, the Xth of every Y. Those are the two
+  things a cable cannot do, because both are the node's own state. The note
+  side counts note-ons and pairs each note-off with its own note-on; the gate
+  side counts rising edges and holds the decision for the length of the gate.
+  A rising edge on `reset` returns the count to the top, as it does on every
+  sequencer.
+- **The `passed` outlet is what a groovebox spends conditions on.** It carries
+  the node's last decision as a gate, latched until the next event. `AND` it
+  with another node's input to play only where this one played, and a `NOT` in
+  front gives the complement — a neighbour rule, at any distance and across
+  both domains. A fill button is the same shape: a gate, ANDed in. Neither is
+  a setting here, because the module already has the nodes that say it.
 - **`GateHold` turns a trigger into a gate** — `latch`, `toggle`, `extend`
   (minimum length), `limit` (maximum length). **Reset wins** over `set` in
   every mode, and a mode change is not a reset. Both inlets are optional: the
@@ -537,12 +552,12 @@ inside a node it is CC or NRPN.**
 | SysEx | arbitrary length | structure, patterns, bulk, enumeration |
 
 ```
-0x0000 .. 0x3B0F   a node's parameter: node = address / N_PARAM,
+0x0000 .. 0x3C5F   a node's parameter: node = address / N_PARAM,
                                        param = address % N_PARAM
-0x3B10 .. 0x3B1F   the master clock (tempo, source, CV PPQN)
-0x3B20 .. 0x3B2F   the transport (start, stop, continue, tap)
-0x3B30 .. 0x3B3F   the key (root, scale, register)
-0x3B40 .. 0x3FFF   reserved
+0x3C60 .. 0x3C6F   the master clock (tempo, source, CV PPQN)
+0x3C70 .. 0x3C7F   the transport (start, stop, continue, tap)
+0x3C80 .. 0x3C8F   the key (root, scale, register)
+0x3C90 .. 0x3FFF   reserved
 ```
 
 The bases move when `N_NODE` moves, and the protocol version with them. This

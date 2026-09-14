@@ -2,7 +2,7 @@
 // apart.
 //
 // The library starts empty, and an empty library in front of a machine with
-// thirty-six algorithms is not a blank page - it is a wall. These are the patches
+// this many algorithms is not a blank page - it is a wall. These are the patches
 // the emulator page used to open with: each exercises one part of the machine,
 // says what to do and what to expect, and is small enough to read.
 //
@@ -159,6 +159,21 @@ export const EXAMPLES = {
         { algo: 'Probability', in: [0], out: [1], params: [70, 0] },
       ],
       midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+    },
+  },
+  'Trig conditions': {
+    about: 'One eighth-note pulse, thinned by a condition rather than by dice. The first GateProbability is set to 1:2, so jack 1 takes every other eighth \u2014 the kick. Its "passed" outlet carries that decision as a gate, so a NOT and an AND give the second one exactly the eighths the first refused \u2014 the hat, interlocked by construction. That patch is why there is no "neighbour" setting to find: the decision is a cable, and it reaches anything. Enable audio under play, then set the first node\u2019s condition to 1:4 or 3:4 and watch both patterns move together.',
+    patch: {
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 3 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/8' } },
+        { algo: 'GateProbability', in: [0], out: [1, 2], params: [0, 4, 0] },
+        { algo: 'NOT', in: [2], out: [4] },
+        { algo: 'AND', in: [0, 4], out: [3] },
+        { algo: 'GateToNote', in: [1], out: [0], params: [36, 120, 10] },
+        { algo: 'GateToNote', in: [3], out: [0], params: [42, 90, 10] },
+      ],
+      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Note sequencer': {

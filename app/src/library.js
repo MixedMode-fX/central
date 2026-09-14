@@ -82,7 +82,7 @@ function libraryPanel(app) {
                    : el('p', { class: 'hint' }, 'nothing saved'));
 }
 
-// Somewhere to start. An empty library in front of a machine with thirty
+// Somewhere to start. An empty library in front of a machine with this many
 // algorithms is a wall, not a blank page.
 function examplesPanel(app) {
   const names = Object.keys(EXAMPLES);

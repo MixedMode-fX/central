@@ -106,9 +106,14 @@ export class Surface {
 
   // --- playing ---------------------------------------------------------------
 
-  // A pot moved. The page is not re-rendered for it: a render replaces the
-  // element the finger is on, so the knob paints itself and the document is
-  // written once, when the gesture ends.
+  // **Nothing here re-renders the page.** A control is played with a finger
+  // on it, and rebuilding the tree under that finger drops the gesture and
+  // flashes every other control on the surface. So a move or a press writes
+  // the state, sends the MIDI and returns what the display should say; the
+  // view writes that and the one class that changed straight into the DOM.
+  //
+  // A pot moved. The document is written once, when the gesture ends: a
+  // sweep is a hundred values and localStorage is not a fader.
   turn(index, value, { commit = false } = {}) {
     const pot = this.pot(index);
     pot.value = clamp7(value);
@@ -117,23 +122,23 @@ export class Surface {
     return pot.value;
   }
 
+  // Returns the reading for the display: what this press did, which for a
+  // launch pad is the part that is not the pad's own business.
   press(index) {
     const pad = this.pad(index);
     if (pad.kind === PadKind.PROGRAM) {
       this.play.programChange(pad.program);
-      this.state.status = this.launchSaid(pad);
-      this.render();
-      return;
+      return this.launchSaid(pad);
     }
     if (pad.mode === PadMode.TOGGLE) {
       pad.on = !pad.on;
       this.emit(pad, pad.on);
       this.save();
-      this.render();
-      return;
+      return pad.on ? 'on' : 'off';
     }
     pad.on = true;
     this.emit(pad, true);
+    return pad.kind === PadKind.NOTE ? String(pad.velocity) : '127';
   }
 
   release(index) {
@@ -158,9 +163,8 @@ export class Surface {
   // setting for the whole patch.
   launchSaid(pad) {
     const g = this.state.globals;
-    if (!g.pcEnabled) return `preset ${pad.program}: the module is not recalling Program Change`;
-    const when = ['at once', 'on the next beat', 'on the next bar'][g.pcQuantise] ?? 'at once';
-    return `preset ${pad.program} ${when}`;
+    if (!g.pcEnabled) return 'not recalling';
+    return ['now', 'next beat', 'next bar'][g.pcQuantise] ?? 'now';
   }
 
   // --- what a control reaches -------------------------------------------------

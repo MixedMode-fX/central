@@ -19,6 +19,7 @@ import { Domain } from '../../core/validate.js';
 import { noteName } from '../../core/music.js';
 import { portNames } from '../../protocol/names.js';
 import { MachineBadge, PortSelect } from '../components/Machine.js';
+import { Keyboard } from '../components/Keyboard.js';
 import { WAVES } from '../../runtime/audio/listener.js';
 import { KITS, PIECE_LABELS } from '../../runtime/audio/drums.js';
 import './Play.css';
@@ -29,7 +30,6 @@ const MIDI_TYPES = {
 };
 const LOG_SHOWN = 40;
 const LOG_MS = 60;
-const WHITE_KEYS = [0, 2, 4, 5, 7, 9, 11];
 
 const peers = (app, domain, bus) => busPeers(app.device, app.state.patch, domain, bus);
 
@@ -129,28 +129,6 @@ function KeyboardPanel(app) {
       accepted.textContent = m.accepted === null ? '' : `taken by ${m.accepted} port(s)`;
     });
   }
-
-  const base = (play.octave + 1) * 12;
-  const keys = [];
-  for (let n = base; n <= base + 12 && n <= 127; n++) {
-    const key = el('button', { class: classes('key', !WHITE_KEYS.includes(n % 12) && 'black'), type: 'button' }, noteName(n));
-    const down = (e) => {
-      e.preventDefault();
-      if (key.classList.contains('held')) return;
-      key.classList.add('held');
-      app.play.noteOn(n);
-    };
-    const up = (e) => {
-      e?.preventDefault();
-      if (!key.classList.contains('held')) return;
-      key.classList.remove('held');
-      app.play.noteOff(n);
-    };
-    key.addEventListener('pointerdown', down);
-    for (const type of ['pointerup', 'pointercancel', 'pointerleave']) key.addEventListener(type, up);
-    key.addEventListener('contextmenu', (e) => e.preventDefault());
-    keys.push(key);
-  }
   const number = (key, min, max, label) => NumberField({
     value: play[key], min, max, 'aria-label': label, onChange: (v) => { play[key] = v; },
   });
@@ -164,10 +142,16 @@ function KeyboardPanel(app) {
         ...Labelled('channel', number('channel', 1, 16, 'channel')),
         ...Labelled('velocity', number('velocity', 1, 127, 'velocity')),
         accepted),
-    Row(el('button', { class: 'ghost', onclick: () => { play.octave = Math.max(-1, play.octave - 1); app.render(); } }, 'oct −'),
-        el('span', { class: 'field-name' }, `C${play.octave}`),
-        el('button', { class: 'ghost', onclick: () => { play.octave = Math.min(8, play.octave + 1); app.render(); } }, 'oct +')),
-    el('div', { class: 'keys' }, keys),
+    // The one keyboard component (ui/components/Keyboard.js). It takes
+    // callbacks and knows nothing about where a note goes.
+    Keyboard({
+      octave: play.octave, velocity: play.velocity,
+      mounted: (fn) => app.live.onMount(fn),
+      onOctave: (octave) => { play.octave = octave; },
+      onNoteOn: (pitch, velocity) => app.play.noteOn(pitch, velocity),
+      onNoteOff: (pitch) => app.play.noteOff(pitch),
+    }),
+    Hint('a key is louder towards its bottom edge; the velocity above is its loud end'),
     Row(...Labelled('CC', number('cc', 0, 127, 'CC number')),
         ...Labelled('value', number('ccValue', 0, 127, 'CC value')),
         el('button', { onclick: () => app.play.cc(play.cc, play.ccValue) }, 'send'),

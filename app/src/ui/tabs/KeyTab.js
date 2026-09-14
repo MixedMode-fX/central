@@ -11,15 +11,17 @@ import { Panel, Hint } from '../components/Panel.js';
 import { Field, Fields } from '../components/Field.js';
 import { Select, range } from '../components/Select.js';
 import { SCALES, scaleMaskById } from '../../protocol/names.js';
-import { keySpelling, noteName, registerNote, DEFAULT_KEY_OCTAVE, MAX_KEY_OCTAVE } from '../../core/music.js';
+import {
+  keySpelling, noteName, registerNote, hasSharpAbove, WHITE_PITCH_CLASSES,
+  DEFAULT_KEY_OCTAVE, MAX_KEY_OCTAVE,
+} from '../../core/music.js';
 import './Key.css';
 
 // Two octaves from C, which is enough for the shape of any scale to repeat
-// and short enough to fit a phone. A black key sits above every white one
-// that is not E or B.
-const WHITE = [0, 2, 4, 5, 7, 9, 11];
+// and short enough to fit a phone. Which notes are white, and which of them a
+// black key sits above, are the keyboard arithmetic every drawing of one
+// shares (core/music.js).
 const OCTAVES = 2;
-const SHARP_ABOVE = new Set([0, 2, 5, 7, 9]);
 
 // Where each pitch class sits in the scale: 0 when it is not in it, otherwise
 // its degree counted from the root.
@@ -39,7 +41,7 @@ function degrees(mask, root) {
 // the rest of the notes before you commit to it.
 function Keyboard({ root, mask, spelling, setRoot }) {
   const degree = degrees(mask, root);
-  const step = 100 / (OCTAVES * WHITE.length);
+  const step = 100 / (OCTAVES * WHITE_PITCH_CLASSES.length);
   const key = (pitchClass, black, left) => {
     const d = degree[pitchClass];
     const name = spelling[pitchClass];
@@ -56,10 +58,10 @@ function Keyboard({ root, mask, spelling, setRoot }) {
   const keys = [];
   let index = 0;
   for (let octave = 0; octave < OCTAVES; octave++) {
-    for (const pitchClass of WHITE) {
+    for (const pitchClass of WHITE_PITCH_CLASSES) {
       keys.push(key(pitchClass, false, 0));
       // The black key above this one, centred on the border it straddles.
-      if (SHARP_ABOVE.has(pitchClass)) keys.push(key((pitchClass + 1) % 12, true, (index + 1) * step));
+      if (hasSharpAbove(pitchClass)) keys.push(key((pitchClass + 1) % 12, true, (index + 1) * step));
       index += 1;
     }
   }

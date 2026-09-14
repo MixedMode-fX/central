@@ -7,14 +7,6 @@
 }
 .gate-dot.lit { background: var(--gate); border-color: var(--gate); }
 
-/* One octave, playable with a thumb: the black keys are in the row, named,
-   because a 26px key on a phone cannot be hit between two others. A key holds
-   `touch-action: none` so a drag across the keyboard plays a glissando. */
-.keys { display: flex; flex-wrap: wrap; gap: 3px; padding-bottom: .3rem; }
-.key { flex: 1 1 3rem; max-width: 8rem; min-height: 3.5rem; font-size: .75rem; touch-action: none; }
-.key.black { background: var(--raised); color: var(--dim); }
-.key.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-
 /* One player per box: on a phone the controls wrap, and two players' worth
    of wrapped controls in one list is unreadable. */
 .players { display: grid; gap: .6rem; margin-bottom: .6rem; }

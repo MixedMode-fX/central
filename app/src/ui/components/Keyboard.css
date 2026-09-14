@@ -1,0 +1,74 @@
+/* One row of keys, however narrow the viewport is. The row scrolls sideways
+   and never wraps: a keyboard that breaks onto a second line is not a
+   keyboard, which is what the old thirteen-key flex row became at 360px.
+
+   A key holds `touch-action: none` so a drag across the keyboard plays a
+   glissando rather than scrolling the page under it - the track hit-tests the
+   pointer's position, so the note follows the finger. The register is reached
+   by the octave strip above, which is why the keys need not pan. */
+.pk { display: grid; gap: .35rem; }
+
+.pk-octaves { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.pk-octaves .hint { display: flex; }
+
+.pk-scroll { overscroll-behavior-x: contain; }
+
+.pk-track {
+  --pk-w: 2.4rem;
+  position: relative;
+  display: flex;
+  flex-wrap: nowrap;
+  height: 8rem;
+  width: max-content;
+  touch-action: none;
+}
+
+.pk {
+  --pk-white: #e9ecf3;
+  --pk-white-ink: #3a4050;
+}
+
+.pk-white, .pk-black {
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 0 0 .35rem; margin: 0; min-height: 0;
+  font-size: .7rem; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line); cursor: pointer; touch-action: none;
+  -webkit-user-select: none; user-select: none;
+}
+
+.pk-white {
+  flex: 0 0 var(--pk-w);
+  background: var(--pk-white); color: var(--pk-white-ink);
+  border-radius: 0 0 6px 6px;
+}
+.pk-white.pk-c { box-shadow: inset 2px 0 0 var(--line); }
+
+.pk-black {
+  position: absolute; top: 0; z-index: 1;
+  width: calc(var(--pk-w) * .62); height: 62%;
+  transform: translateX(-50%);
+  background: #14161d; color: var(--dim);
+  border-radius: 0 0 5px 5px;
+}
+
+.pk-white.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.pk-black.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.pk-white:focus-visible, .pk-black:focus-visible { outline: 2px solid var(--note); outline-offset: -2px; }
+
+.pk-name { pointer-events: none; }
+
+/* Summoned over whatever is on screen, pinned to the bottom edge where a
+   thumb is, and owning the full width - which is the width a keyboard needs
+   and a one-column panel cannot give it. */
+.pk-overlay {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--panel); border-top: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: .5rem .6rem calc(.5rem + env(safe-area-inset-bottom, 0px));
+  display: grid; gap: .4rem;
+}
+.pk-overlay-bar { display: flex; justify-content: space-between; align-items: center; }
+
+@media (min-width: 34rem) {
+  .pk-track { --pk-w: 2.8rem; height: 9rem; }
+}

@@ -12,6 +12,16 @@ export const PITCH_CLASSES_FLAT = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', '
 // 60, is C4 here as it is everywhere else in the app.
 export const octaveOf = (pitch) => Math.floor(pitch / 12) - 1;
 
+// Where the black keys are. The app draws a keyboard in more than one place -
+// the playable one, the key page's scale display, the piano roll's gutter -
+// and they have to agree about which notes are white and which border a black
+// key straddles, so the arithmetic is here rather than in each of them.
+export const WHITE_PITCH_CLASSES = [0, 2, 4, 5, 7, 9, 11];
+export const isBlackKey = (pitch) => !WHITE_PITCH_CLASSES.includes(((pitch % 12) + 12) % 12);
+// E and B have no black key above them, which is the whole shape of a
+// keyboard in one line.
+export const hasSharpAbove = (pitchClass) => isBlackKey(pitchClass + 1);
+
 export function noteName(pitch) {
   if (pitch < 0 || pitch > 127) return '—';
   return `${PITCH_CLASSES[pitch % 12]}${octaveOf(pitch)}`;

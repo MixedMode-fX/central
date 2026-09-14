@@ -25,10 +25,10 @@
 //   FILL      is `AND(input, the fill gate)`. The fill button is a jack, a
 //             latched GateHold, a sequencer lane - anything that writes a
 //             gate - and AND is a node.
-//   NEI       is `AND(input, the neighbour's passed)`, and NOT NEI the same
-//             through a NOT. It exists on a groovebox because track N can
-//             only ever read track N-1; here `passed` is an outlet and any
-//             node can read it, at any distance, across both domains.
+//   NEI       is `AND(input, the neighbour's decision)`, and NOT NEI the
+//             same through a NOT. It exists on a groovebox because track N
+//             can only ever read track N-1; here `decision` is an outlet and
+//             any node can read it, at any distance, across both domains.
 //   PRE       chains several conditional trigs on one track. A node is one
 //             trig, not a track, so "the previous conditional trig" is the
 //             previous *node*, which is NEI again - the outlet, not a rule.
@@ -89,14 +89,14 @@ class TrigCondition {
         bool set_param(uint16_t index, uint8_t value);
         uint8_t get_param(uint16_t index) const;
 
-        // Decide one event, and remember the answer for the `passed` outlet.
+        // Decide one event, and remember the answer for the `decision` outlet.
         bool evaluate();
 
         // A rising edge on `reset`: back to the top of the count.
         void reset();
 
-        // The last decision, latched: what the `passed` outlet carries.
-        bool passed() const { return last_pass; }
+        // The last answer, latched: what the `decision` outlet carries.
+        bool decision() const { return last_decision; }
 
         // Diagnostics / tests.
         uint16_t position() const { return at; }
@@ -110,7 +110,7 @@ class TrigCondition {
         uint8_t seed_offset;
         uint16_t at;            // events since the last reset, mod RATIO_CYCLE
         bool seen;              // any event since the last reset
-        bool last_pass;
+        bool last_decision;
         Xorshift32 rng;
 };
 

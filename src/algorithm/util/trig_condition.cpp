@@ -50,7 +50,7 @@ TrigCondition::TrigCondition(const uint8_t* params) :
     percent(params[0] ? params[0] : (uint8_t)100),
     condition(clamp_enum(params[1], COND_COUNT, (uint8_t)COND_ALWAYS)),
     seed_offset(params[2]),
-    at(0), seen(false), last_pass(false),
+    at(0), seen(false), last_decision(false),
     rng(entropy::seed() + params[2])
 {}
 
@@ -87,7 +87,7 @@ uint8_t TrigCondition::get_param(uint16_t index) const {
 void TrigCondition::reset(){
     at = 0;
     seen = false;
-    last_pass = false;
+    last_decision = false;
 }
 
 bool TrigCondition::evaluate(){
@@ -119,6 +119,6 @@ bool TrigCondition::evaluate(){
     // rejected does not spend one.
     if (ok) ok = rng.chance(percent);
 
-    last_pass = ok;
+    last_decision = ok;
     return ok;
 }

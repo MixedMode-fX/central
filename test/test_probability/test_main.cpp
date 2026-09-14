@@ -6,8 +6,8 @@
 // stopped agreeing.
 //
 // It also asserts the conditions that were *not* imported are reachable
-// without them - a neighbour rule and a fill button are `passed`, an AND and
-// a NOT - because that is the whole argument for leaving them out.
+// without them - a neighbour rule and a fill button are `decision`, an AND
+// and a NOT - because that is the whole argument for leaving them out.
 
 #include <unity.h>
 #include <vector>
@@ -27,8 +27,9 @@ void tearDown() {}
 
 // Buses, shared by every test here.
 //   note 0 in, note 1 out
-//   gate 0 in, gate 1 out, gate 2 passed, gate 3 reset, gate 4..7 spare
-enum : uint8_t { B_IN = 0, B_OUT = 1, B_PASSED = 2, B_RESET = 3 };
+//   note 0 in, note 1 out, note 2 dropped
+//   gate 0 in, gate 1 out, gate 2 decision, gate 3 reset, gate 4..7 spare
+enum : uint8_t { B_IN = 0, B_OUT = 1, B_DECISION = 2, B_RESET = 3, B_NOTE_DROPPED = 2 };
 
 static MidiEvent on(uint8_t note, uint8_t velocity = 100, uint8_t channel = 1) {
     return MidiEvent{MIDI_NOTE_ON, channel, note, velocity};
@@ -45,14 +46,23 @@ static void publish(BusManager& bus, uint8_t gate, uint8_t note = 0xFF) {
 }
 
 // One pass around a node, exactly as the master runs it.
-static std::vector<MidiEvent> note_pass(BusManager& bus, Node& node) {
+static void pass(BusManager& bus, Node& node) {
     bus.swap();
     node.process(bus, 0);
     bus.swap();
+}
+
+// What reached one note bus this pass.
+static std::vector<MidiEvent> drain(BusManager& bus, uint8_t note_bus) {
     std::vector<MidiEvent> out;
-    const uint8_t n = bus.note_count(B_OUT);
-    for (uint8_t i = 0; i < n; i++) out.push_back(bus.note_read(B_OUT, i));
+    const uint8_t n = bus.note_count(note_bus);
+    for (uint8_t i = 0; i < n; i++) out.push_back(bus.note_read(note_bus, i));
     return out;
+}
+
+static std::vector<MidiEvent> note_pass(BusManager& bus, Node& node) {
+    pass(bus, node);
+    return drain(bus, B_OUT);
 }
 
 // A trigger: high for one pass, low for the next. Returns whether the node
@@ -232,7 +242,7 @@ static NodeConfig probability_config() {
     NodeConfig c = node_config(ALGO_PROBABILITY);
     c.in_bus[0] = B_IN;
     c.out_bus[0] = B_OUT;
-    c.out_bus[1] = B_PASSED;
+    c.out_bus[2] = B_DECISION;
     return c;
 }
 
@@ -299,6 +309,120 @@ static void test_the_reset_inlet_returns_the_count_to_the_top() {
     TEST_ASSERT_EQUAL(0, note_pass(bus, node).size());
 }
 
+
+// The other half of the rule: a refused note-on leaves by `dropped` rather
+// than nowhere, unchanged, and its note-off follows it there. Nothing is
+// lost - the line is split, not holed.
+static void test_refused_notes_leave_by_the_dropped_outlet() {
+    BusManager bus;
+    NodeConfig c = probability_config();
+    c.out_bus[1] = B_NOTE_DROPPED;
+    c.params[P_CONDITION] = C_1_2;
+    Probability node(c);
+
+    for (uint8_t i = 0; i < 8; i++) {
+        const uint8_t note = (uint8_t)(60 + i);
+        const bool kept = (i % 2) == 0;
+
+        bus.note_write(B_IN, on(note, 99, 3));
+        pass(bus, node);
+        const std::vector<MidiEvent> kept_on = drain(bus, B_OUT);
+        const std::vector<MidiEvent> lost_on = drain(bus, B_NOTE_DROPPED);
+        TEST_ASSERT_EQUAL(kept ? 1 : 0, kept_on.size());
+        TEST_ASSERT_EQUAL(kept ? 0 : 1, lost_on.size());
+        if (!kept) {
+            // The node routes; it does not modify. Pitch, velocity and
+            // channel arrive as they were sent.
+            TEST_ASSERT_TRUE(is_note_on(lost_on[0]));
+            TEST_ASSERT_EQUAL(note, lost_on[0].data1);
+            TEST_ASSERT_EQUAL(99, lost_on[0].data2);
+            TEST_ASSERT_EQUAL(3, lost_on[0].channel);
+        }
+
+        bus.note_write(B_IN, off(note, 3));
+        pass(bus, node);
+        const std::vector<MidiEvent> kept_off = drain(bus, B_OUT);
+        const std::vector<MidiEvent> lost_off = drain(bus, B_NOTE_DROPPED);
+        TEST_ASSERT_EQUAL(kept ? 1 : 0, kept_off.size());
+        TEST_ASSERT_EQUAL(kept ? 0 : 1, lost_off.size());
+        if (!kept) {
+            TEST_ASSERT_TRUE(is_note_off(lost_off[0]));
+            TEST_ASSERT_EQUAL(note, lost_off[0].data1);
+            TEST_ASSERT_EQUAL(3, lost_off[0].channel);
+        }
+    }
+    TEST_ASSERT_EQUAL(0, node.sounding_count());         // neither side hangs
+    TEST_ASSERT_EQUAL(0, node.dropped_count());
+}
+
+// A CC was never refused, so it is not on the other half of a rule that was
+// never asked about it: it leaves by `notes out` alone.
+static void test_other_events_are_not_copied_to_dropped() {
+    BusManager bus;
+    NodeConfig c = probability_config();
+    c.out_bus[1] = B_NOTE_DROPPED;
+    c.params[P_CHANCE] = 1;
+    c.params[P_CONDITION] = C_2_2;                       // the 2nd of every 2
+    Probability node(c);
+
+    for (uint8_t i = 0; i < 4; i++) {
+        bus.note_write(B_IN, MidiEvent{MIDI_CONTROL_CHANGE, 1, 74, (uint8_t)i});
+        pass(bus, node);
+        TEST_ASSERT_EQUAL(1, drain(bus, B_OUT).size());
+        TEST_ASSERT_EQUAL(0, drain(bus, B_NOTE_DROPPED).size());
+    }
+}
+
+// Nothing patched there is nothing recorded: a ledger filling up with notes
+// no bus carries would start refusing the ones that are heard.
+static void test_an_unpatched_dropped_outlet_records_nothing() {
+    BusManager bus;
+    NodeConfig c = probability_config();                 // out_bus[1] is NO_BUS
+    c.params[P_CONDITION] = TrigCondition::COND_FIRST;   // one passes, the rest do not
+    Probability node(c);
+
+    for (uint8_t i = 0; i < SoundingNotes::CAPACITY * 2; i++) {
+        const uint8_t note = (uint8_t)(40 + i % 40);
+        bus.note_write(B_IN, on(note));
+        const size_t played = note_pass(bus, node).size();
+        TEST_ASSERT_EQUAL(i == 0 ? 1 : 0, played);
+        bus.note_write(B_IN, off(note));
+        TEST_ASSERT_EQUAL(played, note_pass(bus, node).size());
+        TEST_ASSERT_EQUAL(0, node.dropped_count());      // never recorded, never refused
+    }
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
+// A handover releases both ledgers, because a note held on the dropped side
+// hangs a synth exactly as one held on the other (node/node.h).
+static void test_a_handover_releases_both_sides() {
+    BusManager bus;
+    NodeConfig c = probability_config();
+    c.out_bus[1] = B_NOTE_DROPPED;
+    c.params[P_CONDITION] = C_1_2;
+    Probability node(c);
+
+    bus.note_write(B_IN, on(60));
+    TEST_ASSERT_EQUAL(1, note_pass(bus, node).size());   // the 1st of 2: kept
+    bus.note_write(B_IN, on(61));
+    pass(bus, node);
+    TEST_ASSERT_EQUAL(1, drain(bus, B_NOTE_DROPPED).size());   // the 2nd: dropped
+    TEST_ASSERT_EQUAL(1, node.sounding_count());
+    TEST_ASSERT_EQUAL(1, node.dropped_count());
+
+    bus.swap();
+    node.silence(bus);
+    bus.swap();
+    const std::vector<MidiEvent> kept = drain(bus, B_OUT);
+    const std::vector<MidiEvent> lost = drain(bus, B_NOTE_DROPPED);
+    TEST_ASSERT_EQUAL(1, kept.size());
+    TEST_ASSERT_TRUE(is_note_off(kept[0]));
+    TEST_ASSERT_EQUAL(60, kept[0].data1);
+    TEST_ASSERT_EQUAL(1, lost.size());
+    TEST_ASSERT_TRUE(is_note_off(lost[0]));
+    TEST_ASSERT_EQUAL(61, lost[0].data1);
+}
+
 // ---------------------------------------------------------------------------
 // GateProbability: the gate side
 // ---------------------------------------------------------------------------
@@ -307,7 +431,7 @@ static NodeConfig gate_probability_config() {
     NodeConfig c = node_config(ALGO_GATE_PROBABILITY);
     c.in_bus[0] = B_IN;
     c.out_bus[0] = B_OUT;
-    c.out_bus[1] = B_PASSED;
+    c.out_bus[2] = B_DECISION;
     return c;
 }
 
@@ -383,16 +507,91 @@ static void test_the_gate_reset_inlet_returns_the_count_to_the_top() {
     TEST_ASSERT_TRUE(gate_trigger(bus, node));
 }
 
+
+// The same split, said in levels: `gate out` and `dropped` are one pulse
+// train cut in two. Exactly one of them is up while the input is, neither is
+// up between two gates, and both hold for the whole of the gate they were
+// decided on.
+static void test_refused_gates_leave_by_the_dropped_outlet() {
+    BusManager bus;
+    enum : uint8_t { B_DROPPED = 4 };
+    NodeConfig c = gate_probability_config();
+    c.out_bus[1] = B_DROPPED;
+    c.params[P_CONDITION] = C_1_2;                       // pass, drop, pass...
+    GateProbability node(c);
+
+    for (uint8_t edge = 0; edge < 4; edge++) {
+        const bool kept = (edge % 2) == 0;
+        for (uint8_t held = 0; held < 5; held++) {       // one long gate
+            bus.gate_write(B_IN, true);
+            bus.swap(); node.process(bus, 0); bus.swap();
+            TEST_ASSERT_EQUAL(kept, bus.gate_read(B_OUT));
+            TEST_ASSERT_EQUAL(!kept, bus.gate_read(B_DROPPED));
+            TEST_ASSERT_EQUAL(!kept, node.blocked());
+        }
+        bus.swap(); node.process(bus, 0); bus.swap();    // the input falls
+        TEST_ASSERT_FALSE(bus.gate_read(B_OUT));
+        TEST_ASSERT_FALSE(bus.gate_read(B_DROPPED));     // never between two gates
+        TEST_ASSERT_FALSE(node.blocked());
+    }
+}
+
+// What the outlet is worth, stated as the patch it replaces: `dropped` is
+// `AND(this node's input, NOT decision)`, pass for pass. The note side has
+// no such patch - nothing downstream can tell a refused note-on from one
+// that was never played - which is why the pair carries the outlet on both.
+static void test_a_dropped_gate_is_the_patch_it_saves() {
+    BusManager bus;
+    enum : uint8_t { B_DROPPED = 4, B_NOT = 5, B_ANDED = 6 };
+
+    NodeConfig c = gate_probability_config();
+    c.out_bus[1] = B_DROPPED;
+    c.params[P_CHANCE] = 50;
+    c.params[P_SEED] = 7;
+    GateProbability node(c);
+
+    NodeConfig invert = node_config(ALGO_LOGIC_NOT);
+    invert.in_bus[0] = B_DECISION; invert.out_bus[0] = B_NOT;
+    LogicNot inverter(invert);
+
+    NodeConfig conjoin = node_config(ALGO_LOGIC_AND);
+    conjoin.in_bus[0] = B_IN; conjoin.in_bus[1] = B_NOT; conjoin.out_bus[0] = B_ANDED;
+    LogicAND conjunction(conjoin);
+
+    uint16_t dropped = 0;
+    for (uint16_t i = 0; i < 100; i++) {
+        bus.gate_write(B_IN, true);
+        bus.swap();
+        node.process(bus, 0);
+        publish(bus, B_OUT); publish(bus, B_DECISION); publish(bus, B_DROPPED);
+        inverter.process(bus, 0);    publish(bus, B_NOT);
+        conjunction.process(bus, 0); publish(bus, B_ANDED);
+        bus.swap();
+        TEST_ASSERT_EQUAL(bus.gate_read(B_ANDED), bus.gate_read(B_DROPPED));
+        TEST_ASSERT_TRUE(bus.gate_read(B_OUT) != bus.gate_read(B_DROPPED));
+        if (bus.gate_read(B_DROPPED)) dropped++;
+
+        bus.swap();                                      // everything falls
+        node.process(bus, 0);
+        publish(bus, B_OUT); publish(bus, B_DECISION); publish(bus, B_DROPPED);
+        inverter.process(bus, 0);    publish(bus, B_NOT);
+        conjunction.process(bus, 0); publish(bus, B_ANDED);
+        bus.swap();
+    }
+    TEST_ASSERT_TRUE(dropped > 20 && dropped < 80);      // the coin was actually tossed
+}
+
 // ---------------------------------------------------------------------------
 // What was left out, and why
 // ---------------------------------------------------------------------------
 
 // A groovebox spends a condition on "play where the neighbouring track
-// played" because its tracks cannot be wired to each other. Here `passed` is
-// an outlet: AND it with a second node's input and that is the rule, with a
-// NOT in front for its complement, at any distance and across both domains.
+// played" because its tracks cannot be wired to each other. Here `decision`
+// is an outlet: AND it with a second node's input and that is the rule, with
+// a NOT in front for its complement, at any distance and across both
+// domains.
 // This is the test that says the omission is a saving rather than a loss.
-static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
+static void test_a_neighbour_rule_is_the_decision_an_and_and_a_not() {
     BusManager bus;
     enum : uint8_t { B_NOT = 4, B_ANDED = 5, B_FOLLOW_OUT = 6 };
 
@@ -401,7 +600,7 @@ static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
     GateProbability first(lead);
 
     NodeConfig invert = node_config(ALGO_LOGIC_NOT);
-    invert.in_bus[0] = B_PASSED; invert.out_bus[0] = B_NOT;
+    invert.in_bus[0] = B_DECISION; invert.out_bus[0] = B_NOT;
     LogicNot inverter(invert);
 
     NodeConfig conjoin = node_config(ALGO_LOGIC_AND);
@@ -411,13 +610,13 @@ static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
     NodeConfig follow = gate_probability_config();
     follow.in_bus[0] = B_ANDED;
     follow.out_bus[0] = B_FOLLOW_OUT;
-    follow.out_bus[1] = NO_BUS;                          // a latch it does not need
+    follow.out_bus[2] = NO_BUS;                          // a latch it does not need
     GateProbability second(follow);
 
     for (uint8_t i = 0; i < 8; i++) {
         bus.gate_write(B_IN, true);
         bus.swap();
-        first.process(bus, 0);       publish(bus, B_PASSED, B_OUT); publish(bus, B_OUT);
+        first.process(bus, 0);       publish(bus, B_DECISION, B_OUT); publish(bus, B_OUT);
         inverter.process(bus, 0);    publish(bus, B_NOT);
         conjunction.process(bus, 0); publish(bus, B_ANDED);
         second.process(bus, 0);
@@ -427,7 +626,7 @@ static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
         TEST_ASSERT_TRUE(bus.gate_read(B_OUT) != bus.gate_read(B_FOLLOW_OUT));
 
         bus.swap();                                      // everything falls
-        first.process(bus, 0);       publish(bus, B_PASSED, B_OUT); publish(bus, B_OUT);
+        first.process(bus, 0);       publish(bus, B_DECISION, B_OUT); publish(bus, B_OUT);
         inverter.process(bus, 0);    publish(bus, B_NOT);
         conjunction.process(bus, 0); publish(bus, B_ANDED);
         second.process(bus, 0);
@@ -488,13 +687,24 @@ static void test_both_nodes_expose_one_block() {
     // The reset inlet and the latch outlet are on both, by the same name,
     // and only the signal inlet is required.
     TEST_ASSERT_EQUAL_STRING("reset", notes->in_name[1]);
-    TEST_ASSERT_EQUAL_STRING("passed", notes->out_name[1]);
+    TEST_ASSERT_EQUAL_STRING("decision", notes->out_name[2]);
     TEST_ASSERT_EQUAL_STRING("reset", gates->in_name[1]);
-    TEST_ASSERT_EQUAL_STRING("passed", gates->out_name[1]);
+    TEST_ASSERT_EQUAL_STRING("decision", gates->out_name[2]);
     TEST_ASSERT_EQUAL(1, notes->min_in);
     TEST_ASSERT_EQUAL(1, gates->min_in);
     TEST_ASSERT_EQUAL(2, notes->n_in);
     TEST_ASSERT_EQUAL(2, gates->n_in);
+
+    // Three outlets on both, in the same order: the two halves of the signal
+    // first, each in the domain its node works in, and the decision last.
+    TEST_ASSERT_EQUAL(3, notes->n_out);
+    TEST_ASSERT_EQUAL(3, gates->n_out);
+    TEST_ASSERT_EQUAL_STRING("dropped", notes->out_name[1]);
+    TEST_ASSERT_EQUAL_STRING("dropped", gates->out_name[1]);
+    TEST_ASSERT_TRUE(notes->out_domain[0] == Domain::Note);
+    TEST_ASSERT_TRUE(notes->out_domain[1] == Domain::Note);
+    TEST_ASSERT_TRUE(notes->out_domain[2] == Domain::Gate);
+    TEST_ASSERT_TRUE(gates->out_domain[1] == Domain::Gate);
 }
 
 // Two nodes at the same odds and different seeds must not agree, or a patch
@@ -507,7 +717,7 @@ static void test_two_nodes_at_the_same_odds_can_be_made_to_disagree() {
     NodeConfig b = a;
     b.params[P_SEED] = 200;
     b.out_bus[0] = 5;
-    b.out_bus[1] = 6;
+    b.out_bus[2] = 6;
     GateProbability left(a);
     GateProbability right(b);
 
@@ -536,14 +746,20 @@ int main() {
     RUN_TEST(test_a_ratio_thins_notes_and_keeps_their_note_offs);
     RUN_TEST(test_other_events_pass_and_do_not_advance_the_count);
     RUN_TEST(test_the_reset_inlet_returns_the_count_to_the_top);
+    RUN_TEST(test_refused_notes_leave_by_the_dropped_outlet);
+    RUN_TEST(test_other_events_are_not_copied_to_dropped);
+    RUN_TEST(test_an_unpatched_dropped_outlet_records_nothing);
+    RUN_TEST(test_a_handover_releases_both_sides);
 
     RUN_TEST(test_gate_ratio_counts_rising_edges);
     RUN_TEST(test_the_decision_is_held_for_the_length_of_the_gate);
     RUN_TEST(test_a_held_gate_is_one_event);
     RUN_TEST(test_a_gate_node_defaults_to_passing_everything);
     RUN_TEST(test_the_gate_reset_inlet_returns_the_count_to_the_top);
+    RUN_TEST(test_refused_gates_leave_by_the_dropped_outlet);
+    RUN_TEST(test_a_dropped_gate_is_the_patch_it_saves);
 
-    RUN_TEST(test_a_neighbour_rule_is_passed_an_and_and_a_not);
+    RUN_TEST(test_a_neighbour_rule_is_the_decision_an_and_and_a_not);
     RUN_TEST(test_a_fill_button_is_a_gate_and_an_and);
 
     RUN_TEST(test_both_nodes_expose_one_block);

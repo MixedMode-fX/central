@@ -162,7 +162,7 @@ export const EXAMPLES = {
     },
   },
   'Trig conditions': {
-    about: 'One eighth-note pulse, thinned by a condition rather than by dice. The first GateProbability is set to 1:2, so jack 1 takes every other eighth \u2014 the kick. Its "passed" outlet carries that decision as a gate, so a NOT and an AND give the second one exactly the eighths the first refused \u2014 the hat, interlocked by construction. That patch is why there is no "neighbour" setting to find: the decision is a cable, and it reaches anything. Enable audio under play, then set the first node\u2019s condition to 1:4 or 3:4 and watch both patterns move together.',
+    about: 'One eighth-note pulse, thinned by a condition rather than by dice. The first GateProbability is set to 1:2, so jack 1 takes every other eighth \u2014 the kick. Its "decision" outlet carries that answer as a gate, so a NOT and an AND give the second one exactly the eighths the first refused \u2014 the hat, interlocked by construction. That patch is why there is no "neighbour" setting to find: the decision is a cable, and it reaches anything. Enable audio under play, then set the first node\u2019s condition to 1:4 or 3:4 and watch both patterns move together.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 3 }],
       nodes: [

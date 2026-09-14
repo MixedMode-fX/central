@@ -9,7 +9,7 @@ static const ParamGroup GROUPS[1] = {
 };
 
 static const char* const IN_NAMES[2] = {"gate in", "reset"};
-static const char* const OUT_NAMES[3] = {"gate out", "dropped", "passed"};
+static const char* const OUT_NAMES[3] = {"gate out", "dropped", "decision"};
 
 const AlgorithmDescriptor GateProbability::descriptor = {
     ALGO_GATE_PROBABILITY, "GateProbability", 2, 1, 3, TrigCondition::N_PARAMS, IN, OUT,
@@ -30,7 +30,7 @@ GateProbability::GateProbability(const NodeConfig& config) :
     in(config.in_bus[0]),
     out(config.out_bus[0]),
     dropped_out(config.out_bus[1]),
-    passed_out(config.out_bus[2]),
+    decision_out(config.out_bus[2]),
     reset_in(config.in_bus[1]),
     condition(config.params),
     last_in(false),
@@ -55,5 +55,5 @@ void GateProbability::process(BusManager& bus, uint32_t){
     if (dropped_out != NO_BUS && level && !passing) bus.gate_write(dropped_out, true);
     // Latched, not a pulse: a reader clocked in some other pass has to see
     // the last decision rather than nothing.
-    if (passed_out != NO_BUS && condition.passed()) bus.gate_write(passed_out, true);
+    if (decision_out != NO_BUS && condition.decision()) bus.gate_write(decision_out, true);
 }

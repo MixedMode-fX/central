@@ -17,7 +17,7 @@
 //
 // The rule is TrigCondition (algorithm/util/trig_condition.h), the same
 // object Probability carries, so a hat and a melody set to 2:4 fall on the
-// same beats and either one's `passed` can be read by the other.
+// same beats and either one's `decision` can be read by the other.
 //
 // **What an event is here is a rising edge**, and the decision is held for
 // the whole of the gate it was taken on: a gate that was passed stays up for
@@ -30,21 +30,21 @@
 // difference: the module's 5 ms triggers pass through whole or not at all.
 //
 // **`dropped` is what the rule took out**, the gate side of Probability's
-// third outlet: it is high for exactly as long as an input gate whose edge
+// own: it is high for exactly as long as an input gate whose edge
 // was refused, and low for one that was passed, so `gate out` and `dropped`
 // are the same pulse train split in two. A kick on one and a hat on the
 // other interlock by construction, and raising the chance moves the hits
 // from one to the other rather than making holes.
 //
-// It says in one outlet what `NOT(passed)` and an `AND` with this node's own
-// input already say in two nodes and a bus, which is normally the argument
-// against having it. It is here because the pair is one rule asked of two
-// signals (algorithm/util/trig_condition.h): the note side cannot be built
-// from cables at all - nothing downstream can tell a dropped note-on from
-// one that was never played - and an outlet that exists on one half and not
-// the other would make the two nodes two algorithms. `passed` is untouched
-// and is still what a *neighbour* rule reads: it is another node's decision
-// that no outlet here can carry.
+// It says in one outlet what `NOT(decision)` and an `AND` with this node's
+// own input already say in two nodes and a bus, which is normally the
+// argument against having it. It is here because the pair is one rule asked
+// of two signals (algorithm/util/trig_condition.h): the note side cannot be
+// built from cables at all - nothing downstream can tell a dropped note-on
+// from one that was never played - and an outlet that exists on one half and
+// not the other would make the two nodes two algorithms. `decision` is
+// untouched and is still what a *neighbour* rule reads: it is another node's
+// answer, which no outlet here can carry.
 //
 // Inlet 0 (gate): gate in.
 // Inlet 1 (gate, optional): reset. A rising edge returns the count to the
@@ -52,7 +52,7 @@
 // Outlet 0 (gate): gate out.
 // Outlet 1 (gate): dropped - the gates the rule refused, held for their
 //         own length.
-// Outlet 2 (gate): passed - this node's last decision, latched. `AND` it
+// Outlet 2 (gate): decision - this node's last answer, latched. `AND` it
 //         with another node's input to play only where this one played, and
 //         put a `NOT` in front to play only where it did not.
 //
@@ -68,13 +68,13 @@ class GateProbability : public Node{
         // Diagnostics / tests
         bool open() const { return passing; }
         bool blocked() const { return last_in && !passing; }
-        bool passed() const { return condition.passed(); }
+        bool decision() const { return condition.decision(); }
 
     private:
         uint8_t in;
         uint8_t out;
         uint8_t dropped_out;
-        uint8_t passed_out;
+        uint8_t decision_out;
         EdgeIn reset_in;
         TrigCondition condition;
         bool last_in;

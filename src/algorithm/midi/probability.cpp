@@ -13,7 +13,7 @@ static const ParamGroup GROUPS[1] = {
 };
 
 static const char* const IN_NAMES[2] = {"notes in", "reset"};
-static const char* const OUT_NAMES[3] = {"notes out", "dropped", "passed"};
+static const char* const OUT_NAMES[3] = {"notes out", "dropped", "decision"};
 
 const AlgorithmDescriptor Probability::descriptor = {
     ALGO_PROBABILITY, "Probability", 2, 1, 3, TrigCondition::N_PARAMS, IN, OUT,
@@ -34,7 +34,7 @@ Probability::Probability(const NodeConfig& config) :
     in(config.in_bus[0]),
     out(config.out_bus[0]),
     dropped_out(config.out_bus[1]),
-    passed_out(config.out_bus[2]),
+    decision_out(config.out_bus[2]),
     reset_in(config.in_bus[1]),
     condition(config.params),
     sounding(),
@@ -74,7 +74,7 @@ void Probability::process(BusManager& bus, uint32_t){
 
     // Latched, not a pulse: a reader clocked in some other pass has to see
     // the last decision rather than nothing.
-    if (passed_out != NO_BUS && condition.passed()) bus.gate_write(passed_out, true);
+    if (decision_out != NO_BUS && condition.decision()) bus.gate_write(decision_out, true);
 }
 
 void Probability::silence(BusManager& bus){

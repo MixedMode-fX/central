@@ -6,8 +6,8 @@
 // stopped agreeing.
 //
 // It also asserts the conditions that were *not* imported are reachable
-// without them - a neighbour rule and a fill button are `passed`, an AND and
-// a NOT - because that is the whole argument for leaving them out.
+// without them - a neighbour rule and a fill button are `decision`, an AND
+// and a NOT - because that is the whole argument for leaving them out.
 
 #include <unity.h>
 #include <vector>
@@ -28,8 +28,8 @@ void tearDown() {}
 // Buses, shared by every test here.
 //   note 0 in, note 1 out
 //   note 0 in, note 1 out, note 2 dropped
-//   gate 0 in, gate 1 out, gate 2 passed, gate 3 reset, gate 4..7 spare
-enum : uint8_t { B_IN = 0, B_OUT = 1, B_PASSED = 2, B_RESET = 3, B_NOTE_DROPPED = 2 };
+//   gate 0 in, gate 1 out, gate 2 decision, gate 3 reset, gate 4..7 spare
+enum : uint8_t { B_IN = 0, B_OUT = 1, B_DECISION = 2, B_RESET = 3, B_NOTE_DROPPED = 2 };
 
 static MidiEvent on(uint8_t note, uint8_t velocity = 100, uint8_t channel = 1) {
     return MidiEvent{MIDI_NOTE_ON, channel, note, velocity};
@@ -242,7 +242,7 @@ static NodeConfig probability_config() {
     NodeConfig c = node_config(ALGO_PROBABILITY);
     c.in_bus[0] = B_IN;
     c.out_bus[0] = B_OUT;
-    c.out_bus[2] = B_PASSED;
+    c.out_bus[2] = B_DECISION;
     return c;
 }
 
@@ -431,7 +431,7 @@ static NodeConfig gate_probability_config() {
     NodeConfig c = node_config(ALGO_GATE_PROBABILITY);
     c.in_bus[0] = B_IN;
     c.out_bus[0] = B_OUT;
-    c.out_bus[2] = B_PASSED;
+    c.out_bus[2] = B_DECISION;
     return c;
 }
 
@@ -537,9 +537,9 @@ static void test_refused_gates_leave_by_the_dropped_outlet() {
 }
 
 // What the outlet is worth, stated as the patch it replaces: `dropped` is
-// `AND(this node's input, NOT passed)`, pass for pass. The note side has no
-// such patch - nothing downstream can tell a refused note-on from one that
-// was never played - which is why the pair carries the outlet on both.
+// `AND(this node's input, NOT decision)`, pass for pass. The note side has
+// no such patch - nothing downstream can tell a refused note-on from one
+// that was never played - which is why the pair carries the outlet on both.
 static void test_a_dropped_gate_is_the_patch_it_saves() {
     BusManager bus;
     enum : uint8_t { B_DROPPED = 4, B_NOT = 5, B_ANDED = 6 };
@@ -551,7 +551,7 @@ static void test_a_dropped_gate_is_the_patch_it_saves() {
     GateProbability node(c);
 
     NodeConfig invert = node_config(ALGO_LOGIC_NOT);
-    invert.in_bus[0] = B_PASSED; invert.out_bus[0] = B_NOT;
+    invert.in_bus[0] = B_DECISION; invert.out_bus[0] = B_NOT;
     LogicNot inverter(invert);
 
     NodeConfig conjoin = node_config(ALGO_LOGIC_AND);
@@ -563,7 +563,7 @@ static void test_a_dropped_gate_is_the_patch_it_saves() {
         bus.gate_write(B_IN, true);
         bus.swap();
         node.process(bus, 0);
-        publish(bus, B_OUT); publish(bus, B_PASSED); publish(bus, B_DROPPED);
+        publish(bus, B_OUT); publish(bus, B_DECISION); publish(bus, B_DROPPED);
         inverter.process(bus, 0);    publish(bus, B_NOT);
         conjunction.process(bus, 0); publish(bus, B_ANDED);
         bus.swap();
@@ -573,7 +573,7 @@ static void test_a_dropped_gate_is_the_patch_it_saves() {
 
         bus.swap();                                      // everything falls
         node.process(bus, 0);
-        publish(bus, B_OUT); publish(bus, B_PASSED); publish(bus, B_DROPPED);
+        publish(bus, B_OUT); publish(bus, B_DECISION); publish(bus, B_DROPPED);
         inverter.process(bus, 0);    publish(bus, B_NOT);
         conjunction.process(bus, 0); publish(bus, B_ANDED);
         bus.swap();
@@ -586,11 +586,12 @@ static void test_a_dropped_gate_is_the_patch_it_saves() {
 // ---------------------------------------------------------------------------
 
 // A groovebox spends a condition on "play where the neighbouring track
-// played" because its tracks cannot be wired to each other. Here `passed` is
-// an outlet: AND it with a second node's input and that is the rule, with a
-// NOT in front for its complement, at any distance and across both domains.
+// played" because its tracks cannot be wired to each other. Here `decision`
+// is an outlet: AND it with a second node's input and that is the rule, with
+// a NOT in front for its complement, at any distance and across both
+// domains.
 // This is the test that says the omission is a saving rather than a loss.
-static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
+static void test_a_neighbour_rule_is_the_decision_an_and_and_a_not() {
     BusManager bus;
     enum : uint8_t { B_NOT = 4, B_ANDED = 5, B_FOLLOW_OUT = 6 };
 
@@ -599,7 +600,7 @@ static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
     GateProbability first(lead);
 
     NodeConfig invert = node_config(ALGO_LOGIC_NOT);
-    invert.in_bus[0] = B_PASSED; invert.out_bus[0] = B_NOT;
+    invert.in_bus[0] = B_DECISION; invert.out_bus[0] = B_NOT;
     LogicNot inverter(invert);
 
     NodeConfig conjoin = node_config(ALGO_LOGIC_AND);
@@ -615,7 +616,7 @@ static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
     for (uint8_t i = 0; i < 8; i++) {
         bus.gate_write(B_IN, true);
         bus.swap();
-        first.process(bus, 0);       publish(bus, B_PASSED, B_OUT); publish(bus, B_OUT);
+        first.process(bus, 0);       publish(bus, B_DECISION, B_OUT); publish(bus, B_OUT);
         inverter.process(bus, 0);    publish(bus, B_NOT);
         conjunction.process(bus, 0); publish(bus, B_ANDED);
         second.process(bus, 0);
@@ -625,7 +626,7 @@ static void test_a_neighbour_rule_is_passed_an_and_and_a_not() {
         TEST_ASSERT_TRUE(bus.gate_read(B_OUT) != bus.gate_read(B_FOLLOW_OUT));
 
         bus.swap();                                      // everything falls
-        first.process(bus, 0);       publish(bus, B_PASSED, B_OUT); publish(bus, B_OUT);
+        first.process(bus, 0);       publish(bus, B_DECISION, B_OUT); publish(bus, B_OUT);
         inverter.process(bus, 0);    publish(bus, B_NOT);
         conjunction.process(bus, 0); publish(bus, B_ANDED);
         second.process(bus, 0);
@@ -686,9 +687,9 @@ static void test_both_nodes_expose_one_block() {
     // The reset inlet and the latch outlet are on both, by the same name,
     // and only the signal inlet is required.
     TEST_ASSERT_EQUAL_STRING("reset", notes->in_name[1]);
-    TEST_ASSERT_EQUAL_STRING("passed", notes->out_name[2]);
+    TEST_ASSERT_EQUAL_STRING("decision", notes->out_name[2]);
     TEST_ASSERT_EQUAL_STRING("reset", gates->in_name[1]);
-    TEST_ASSERT_EQUAL_STRING("passed", gates->out_name[2]);
+    TEST_ASSERT_EQUAL_STRING("decision", gates->out_name[2]);
     TEST_ASSERT_EQUAL(1, notes->min_in);
     TEST_ASSERT_EQUAL(1, gates->min_in);
     TEST_ASSERT_EQUAL(2, notes->n_in);
@@ -758,7 +759,7 @@ int main() {
     RUN_TEST(test_refused_gates_leave_by_the_dropped_outlet);
     RUN_TEST(test_a_dropped_gate_is_the_patch_it_saves);
 
-    RUN_TEST(test_a_neighbour_rule_is_passed_an_and_and_a_not);
+    RUN_TEST(test_a_neighbour_rule_is_the_decision_an_and_and_a_not);
     RUN_TEST(test_a_fill_button_is_a_gate_and_an_and);
 
     RUN_TEST(test_both_nodes_expose_one_block);

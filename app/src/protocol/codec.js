@@ -92,6 +92,13 @@ export function emptyGlobals() {
   };
 }
 
+// The unused marker in a MacroDest's `macro` field (src/node/patch.h).
+export const MACRO_NONE = 0xff;
+
+// A macro destination's depth is signed: one macro opening a filter while
+// closing a delay is the move macros exist for.
+function signed16(v) { return v >= 0x8000 ? v - 0x10000 : v; }
+
 export function emptyPatch() {
   return {
     gatePorts: Array.from({ length: P.GPIO_N }, () => ({ direction: 0, bus: P.NO_BUS })),
@@ -102,6 +109,14 @@ export function emptyPatch() {
     // Modulation routes: a CV bus reaching a parameter
     // (src/control/mod_matrix.h). Null is an unused slot, exactly as ccMap.
     modMap: Array.from({ length: P.N_MOD_ROUTE }, () => null),
+    // Macros: one performance control moving several parameters at once
+    // (src/node/patch.h). A macro exists when it has a name; its position is
+    // deliberately not here, because a macro does not store where it was.
+    macros: Array.from({ length: P.N_MACRO }, () => null),
+    // The destination pool, shared across every macro rather than fixed per
+    // macro, so one sweeping control with six destinations and three with one
+    // each all fit. Null is an unused slot, exactly as ccMap.
+    macroDest: Array.from({ length: P.N_MACRO_DEST }, () => null),
   };
 }
 
@@ -238,6 +253,33 @@ export function encodePatch(patch, globals = emptyGlobals()) {
     w.u8(m.flags);
   }
 
+  // The name is a fixed-width field, not length-prefixed: this has to agree
+  // byte for byte with src/patch/patch_codec.cpp, which is hand-rolled, and a
+  // fixed field is the one shape the two cannot disagree about.
+  const macros = (patch.macros ?? []).map((m, slot) => ({ m, slot }))
+    .filter(({ m }) => m && m.name);
+  w.u8(macros.length);
+  for (const { m, slot } of macros) {
+    w.u8(slot);
+    const name = String(m.name).slice(0, P.MACRO_NAME_BYTES);
+    for (let i = 0; i < P.MACRO_NAME_BYTES; i++) w.u8(i < name.length ? name.charCodeAt(i) & 0x7f : 0);
+  }
+
+  const dests = (patch.macroDest ?? []).map((d, slot) => ({ d, slot }))
+    .filter(({ d }) => d && d.macro !== null && d.macro !== undefined && d.macro !== MACRO_NONE);
+  w.u8(dests.length);
+  for (const { d, slot } of dests) {
+    w.u8(slot);
+    w.u8(d.macro);
+    w.u8(d.targetKind);
+    w.u8(d.targetIndex);
+    w.u16(d.param);
+    w.u8(d.srcLo);
+    w.u8(d.srcHi);
+    w.u16(d.depth & 0xffff);        // two's complement; signed again on the way back
+    w.u8(d.flags ?? 0);
+  }
+
   const payload = w.bytes.length - payloadStart;
   w.bytes[6] = payload & 0xff;
   w.bytes[7] = (payload >> 8) & 0xff;
@@ -319,6 +361,35 @@ export function decodePatch(image) {
       flags: r.u8(),
     };
     if (slot < P.N_MOD_ROUTE) patch.modMap[slot] = route;
+  }
+
+  const nMacros = r.u8();
+  if (nMacros > P.N_MACRO) throw new Error('more macros than the module holds');
+  for (let i = 0; i < nMacros; i++) {
+    const slot = r.u8();
+    let name = '';
+    for (let c = 0; c < P.MACRO_NAME_BYTES; c++) {
+      const byte = r.u8();
+      if (byte !== 0) name += String.fromCharCode(byte);
+    }
+    if (slot < P.N_MACRO) patch.macros[slot] = { name };
+  }
+
+  const nDests = r.u8();
+  if (nDests > P.N_MACRO_DEST) throw new Error('more macro destinations than the module holds');
+  for (let i = 0; i < nDests; i++) {
+    const slot = r.u8();
+    const dest = {
+      macro: r.u8(),
+      targetKind: r.u8(),
+      targetIndex: r.u8(),
+      param: r.u16(),
+      srcLo: r.u8(),
+      srcHi: r.u8(),
+      depth: signed16(r.u16()),
+      flags: r.u8(),
+    };
+    if (slot < P.N_MACRO_DEST) patch.macroDest[slot] = dest;
   }
 
   return { patch, globals };

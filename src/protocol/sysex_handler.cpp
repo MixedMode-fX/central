@@ -726,6 +726,10 @@ void SysexHandler::receive_chunk(uint8_t source, const uint8_t* args, uint16_t n
         nak(source, SYSEX_ERR_REJECTED);
         return;
     }
+    // A whole new patch: every knob position and every macro position
+    // belonged to the one that just went away, and asserting them against
+    // this one is the thing "silent until moved" exists to prevent.
+    cc.reset();
     ack(source);
 }
 

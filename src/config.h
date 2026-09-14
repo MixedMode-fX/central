@@ -150,6 +150,31 @@
 // on the wire or in EEPROM.
 #define N_MOD_ROUTE 16
 
+// Macros a patch can carry, and the destinations they share.
+//
+// A macro is one performance control that moves several parameters at once,
+// each over its own window of the macro's travel (node/patch.h,
+// control/macros.h). Eight is this machine's idiom - GPIO_N, N_CV_BUS and
+// N_NOTE_BUS are all 8 - and one pot row on every controller worth copying.
+//
+// The destinations are a **shared pool**, not a fixed array per macro,
+// because real macros are lopsided: one sweeping control with six
+// destinations and three with one each. A fixed array would charge the
+// one-destination macro the same as the six. Thirty-two matches N_CC_MAP and
+// caps the per-pass cost at 32 contributions; N_MACRO_DEST_PER_MACRO stops
+// one macro eating the pool. Unused entries are not stored or transmitted
+// (patch_codec trims them).
+#define N_MACRO 8
+#define N_MACRO_DEST 32
+#define N_MACRO_DEST_PER_MACRO 8
+
+// A macro's name, fixed width and not length-prefixed. The patch codec is a
+// hand-rolled byte reader mirrored by hand in app/src/protocol/codec.js, and
+// a memcpy is the one form that cannot disagree between the two. Eight
+// characters is also about what a panel display will give you, so the limit
+// is real rather than arbitrary.
+#define MACRO_NAME_BYTES 8
+
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per
 // second, so ~350 messages/s; five transports at once and a 1 kHz pass rate

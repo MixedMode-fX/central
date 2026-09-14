@@ -146,6 +146,7 @@ export const CC_TARGET_KINDS = labelled(P.CcTargetKind, {
   CC_TARGET_TRANSPORT: 'the transport',
   CC_TARGET_PORT: 'a MIDI port (not built yet)',
   CC_TARGET_KEY: 'the key',
+  CC_TARGET_MACRO: 'a macro',
   CC_TARGET_KINDS: '',
 }, 'CcTargetKind').filter((k) => k.label && k.key !== 'CC_TARGET_KINDS');
 

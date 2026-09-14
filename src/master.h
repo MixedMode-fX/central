@@ -32,6 +32,7 @@ enum LoadError : uint8_t {
     LOAD_DUPLICATE_SINGLETON,  // two nodes of an algorithm there may only be one of
     LOAD_CC_MAPPING_INVALID,   // see last_mapping_index() (#21)
     LOAD_MOD_ROUTE_INVALID,    // see last_route_index()
+    LOAD_MACRO_DEST_INVALID,   // see last_dest_index() - a macro destination
 };
 
 // Owns the master clock, the buses, the reserved hardware port nodes and the
@@ -145,6 +146,7 @@ class MixedModeMaster {
         uint8_t last_node_index() const { return node_error_index; }
         uint8_t last_mapping_index() const { return mapping_error_index; }
         uint8_t last_route_index() const { return route_error_index; }
+        uint8_t last_dest_index() const { return dest_error_index; }
         // Range-checks one controller binding against the patch it belongs
         // to: unknown target, a node index beyond n_nodes, a parameter index
         // beyond the descriptor, min > max. A patch with a bad mapping is
@@ -163,6 +165,18 @@ class MixedModeMaster {
         // an incremental edit be checked against the running patch **without
         // copying it** - a Patch is 12 KB and has no business on the stack.
         static bool route_valid(const Patch& patch, uint8_t slot, const ModRoute& candidate);
+        // Range-checks one macro destination against the patch it belongs
+        // to: a macro that exists, a target that exists, and **not another
+        // macro**. A macro reaching a macro would be a table that writes
+        // itself every pass, and no depth of nesting is worth the rule that
+        // would need. A transport target is refused for the same reason a
+        // route refuses one: it fires, it does not hold a value.
+        //
+        // Unlike a route, two destinations on one target are **allowed** and
+        // expected - a destination that rises and then falls back is two
+        // windows on one parameter. What stops them racing is that neither
+        // writes: they contribute, and ControlSum sums and writes once.
+        static bool dest_valid(const Patch& patch, const MacroDest& candidate);
         uint8_t node_count() const { return pool.count(); }
         Node* node(uint8_t index) const { return pool.node(index); }
         const AlgorithmDescriptor* node_descriptor(uint8_t index) const { return pool.descriptor(index); }
@@ -197,6 +211,7 @@ class MixedModeMaster {
         uint8_t node_error_index;
         uint8_t mapping_error_index;
         uint8_t route_error_index;
+        uint8_t dest_error_index;
 };
 
 #endif

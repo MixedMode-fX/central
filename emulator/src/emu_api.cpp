@@ -47,8 +47,10 @@ static MixedModeMaster master(gpio, midi);
 static StatusLeds leds(led_driver);
 static PatchStore store(eeprom);
 static PatchManager patches(master, store, leds);
-static CcMapper cc_map(patches, master);
-static ModMatrix mod_matrix(patches, cc_map);
+static Macros macros;
+static CcMapper cc_map(patches, master, macros);
+static ControlSum control_sum(cc_map);
+static ModMatrix mod_matrix(patches, cc_map, control_sum);
 static NrpnDecoder nrpn(patches, cc_map);
 static SysexHandler protocol(patches, master, store, leds, midi, cc_map, mod_matrix);
 
@@ -486,7 +488,14 @@ static bool have_beat = false;
 // for itself when to flash would be showing something the module does not do.
 EMU_EXPORT void emu_control_service(uint32_t now_us){
     cc_map.apply(now_us);
+    // The same order main.cpp's loop uses, and for the same reasons: the
+    // offsets are gathered rather than written, the matrix fills the gather
+    // before the macros expand because a route may target a macro, and the
+    // sum is clipped and written once per target.
+    control_sum.begin();
     mod_matrix.apply(master.buses(), now_us);
+    macros.expand(patches.active(), control_sum);
+    control_sum.commit(now_us);
     protocol.service(now_us);
     nrpn.service(now_us);
     patches.service(now_us);
@@ -508,6 +517,8 @@ EMU_EXPORT uint32_t emu_const_patch_slots(){ return PATCH_SLOTS; }
 EMU_EXPORT uint32_t emu_const_patch_slot_bytes(){ return PATCH_SLOT_BYTES; }
 EMU_EXPORT uint32_t emu_const_n_cc_map(){ return N_CC_MAP; }
 EMU_EXPORT uint32_t emu_const_n_mod_route(){ return N_MOD_ROUTE; }
+EMU_EXPORT uint32_t emu_const_n_macro(){ return N_MACRO; }
+EMU_EXPORT uint32_t emu_const_n_macro_dest(){ return N_MACRO_DEST; }
 // What a node parameter is *running*, which is not always what the patch was
 // loaded with: a modulation route or a mapped CC moves it between passes.
 EMU_EXPORT int32_t emu_get_param(uint32_t node, uint32_t param){

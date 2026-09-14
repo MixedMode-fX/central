@@ -8,7 +8,9 @@
 #include "../fakes/fake_leds.h"
 #include "../fakes/recording_midi_out.h"
 #include "master.h"
+#include "control/macros.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 #include "control/nrpn.h"
 #include "control/mod_matrix.h"
 #include "patch/patch_manager.h"
@@ -259,11 +261,13 @@ struct ControlRig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    Macros macros;
     CcMapper cc;
+    ControlSum sum;
 
     ControlRig() : gpio(), midi(), eeprom(), driver(),
                    master(gpio, midi), leds(driver), store(eeprom),
-                   patches(master, store, leds), cc(patches, master) {}
+                   patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc) {}
 };
 
 // A knob on the key: the thing the module could not do at all while the key
@@ -355,7 +359,7 @@ static void test_the_key_has_an_nrpn_address() {
 // switched off.
 static void test_a_modulation_route_moves_the_key_without_wearing_the_store() {
     ControlRig rig;
-    ModMatrix matrix(rig.patches, rig.cc);
+    ModMatrix matrix(rig.patches, rig.cc, rig.sum);
 
     Patch p = empty_patch();
     p.mod_map[0] = unused_route();

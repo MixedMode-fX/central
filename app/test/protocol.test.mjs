@@ -599,16 +599,20 @@ test('a route can be cleared, and the module says so', async () => {
   assert.equal(await device.getModRoute(2), null);
 });
 
-test('the module refuses two routes on one parameter', async () => {
+test('the module accepts two routes on one parameter', async () => {
   await device.sendPatch(modulationPatch(), codec.emptyGlobals());
   const route = (bus) => ({
     bus, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
     param: 1, min: 0, max: 0, depth: 255, flags: 0,
   });
   await device.setModRoute(0, route(0));
-  // Two writers racing over one value has no defined result. Two modulators
-  // on one parameter is two writers on one CV bus, which the bus sums.
-  await assert.rejects(() => device.setModRoute(1, route(1)), /REJECTED/);
+  // This used to be refused, because two writers racing over one value has no
+  // defined result. They no longer race: an offset route contributes to the
+  // sum, which adds every contribution on a target, clips once and writes
+  // once (src/control/control_sum.h). Macros forced it - a destination that
+  // rises and then falls back is two windows on one parameter.
+  await device.setModRoute(1, route(1));
+  assert.equal((await device.getModRoute(1)).bus, 1);
 });
 
 test('the editor refuses a route the firmware would refuse', async () => {

@@ -3,8 +3,8 @@
 #include "midi/global_key.h"
 #include "hal/midi_types.h"
 
-CcMapper::CcMapper(PatchManager& manager, MixedModeMaster& master) :
-    patches(manager), mm(master), knobs(),
+CcMapper::CcMapper(PatchManager& manager, MixedModeMaster& master, Macros& macro_bank) :
+    patches(manager), mm(master), macros(macro_bank), knobs(),
     write_count(0), refuse_count(0),
     learn_template(unused_mapping()), learn_armed_us(0),
     learn_slot(0), learn_result_slot(0), learn_armed(false), learn_result(false)
@@ -16,6 +16,12 @@ void CcMapper::reset(){
     for (uint8_t i = 0; i < N_CC_MAP; i++){
         knobs[i] = Knob{0, 0, 0, false, false, false, false, 0, 0, 0, false};
     }
+    // A macro position belongs to a destination list, and this is called
+    // exactly where that list may have changed underneath it - a patch
+    // applied, a slot recalled, the defaults restored. A macro that kept its
+    // position across a load would assert it against whatever the new patch
+    // dialled in, which is the one thing "silent until moved" exists to stop.
+    macros.reset();
 }
 
 // Ranges come from #20's descriptors wherever there is one, so "the sub-range
@@ -48,6 +54,13 @@ bool CcMapper::target_range(uint8_t target_kind, uint8_t target_index, uint16_t 
             // Momentary: there is no range to sweep, only a threshold.
             lo = 0; hi = 1;
             return param < CC_TRANSPORT_TARGETS;
+        case CC_TARGET_MACRO:
+            // A macro's travel is a byte, like a parameter's, so a knob
+            // bound to one sweeps it exactly as it would sweep anything
+            // else. `param` names nothing: a macro has one value.
+            if (target_index >= N_MACRO) return false;
+            lo = 0; hi = 255;
+            return true;
         case CC_TARGET_KEY:
             switch (param){
                 case CC_KEY_ROOT:   lo = 0; hi = 11; return true;
@@ -370,6 +383,17 @@ bool CcMapper::write_control(uint8_t kind, uint8_t index, uint16_t param,
             return true;
         }
 
+        case CC_TARGET_MACRO:
+            // Moving a macro engages it; what its destinations then do is
+            // decided by Macros::expand and ControlSum, not here. This is a
+            // write to the macro, never to anything the macro reaches.
+            if (!macros.set(index, (uint8_t)value)){
+                refuse_count++;
+                return false;
+            }
+            write_count++;
+            return true;
+
         case CC_TARGET_TRANSPORT:
             switch (param){
                 case CC_TRANSPORT_START:    mm.clock().start(); break;
@@ -402,6 +426,12 @@ bool CcMapper::read_control(uint8_t kind, uint8_t index, uint16_t param, uint16_
                 case CC_CLOCK_PPQN:   value_out = mm.clock().cv_ppqn(); return true;
                 default: return false;
             }
+        case CC_TARGET_MACRO:
+            // An untouched macro reads as zero, which is where it will act
+            // from when somebody first moves it.
+            if (index >= N_MACRO) return false;
+            value_out = macros.value(index);
+            return true;
         case CC_TARGET_TRANSPORT:
             if (param >= CC_TRANSPORT_TARGETS) return false;
             value_out = mm.clock().running() ? 1u : 0u;

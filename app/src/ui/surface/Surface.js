@@ -19,6 +19,12 @@
 // surface that read one as a question could not play a whole note. So the bar
 // has a toggle, and while it is on every control is a button that opens its
 // sheet instead of playing.
+//
+// **One lead for the whole surface**, chosen in the bar while edit is on, the
+// way a controller has one. The keyboard summoned over it is a separate
+// instrument with a cable and a channel of its own, because playing a part
+// into one input of the patch while the pads drive another is the ordinary
+// case, not a trick.
 
 import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
@@ -68,9 +74,15 @@ function TopBar(app) {
       class: 'ghost', onclick: () => app.togglePlay(),
     }),
     el('div', { class: 'surface-say' },
+      // Editing, the bar is where the surface's own lead is chosen; playing,
+      // it says which machine that lead is reaching, which is the question a
+      // stage view has to answer without being asked.
       ui.edit
-        ? el('span', { class: 'field-name' }, 'pick a control')
-        : MachineBadge(app, { compact: true }),
+        ? PortSelect(app, {
+            label: 'on', said: 'the module input this surface plays into',
+            value: app.surface.port, onChange: (port) => app.surface.setPort(port),
+          })
+        : MachineBadge(app, { compact: true, port: app.surface.port }),
       el('span', { class: classes('hint', !b.free && 'spent') },
         `CC ${b.bindings}/${b.bindingSlots} · macros ${b.macros}/${b.macroSlots} · pool ${b.dests}/${b.destSlots}`)),
     ui.armed
@@ -95,8 +107,9 @@ function TopBar(app) {
 }
 
 // Where the keys play: the cable first, because a channel on the wrong cable
-// is heard by nothing. The pads and pots each carry their own (the sheet);
-// this pair is the keyboard's, and it is the one the play panel shows too.
+// is heard by nothing. This pair is the keyboard's own - the pads and pots are
+// on the surface's lead, chosen in the bar - and it is the same pair the play
+// panel on the module tab shows.
 function Cable(app) {
   const play = app.state.ui.play;
   return [

@@ -92,14 +92,16 @@ report of where that macro is. Press to play, and hold for as long as the note
 lasts: **edit** is a toggle in the bar, not a gesture, and while it is on a
 press asks what a control does instead of playing it. That sheet is also where
 a control is bound — picking a target arms the module's own learn, and moving
-the control finishes it — and where it is given a **cable and a channel**,
-because a port mask is half of where a message lands. What each control sends,
-what it is called and what colour it is are **yours, not the patch's** — they
+the control finishes it. The whole surface is on **one lead**, the way a
+controller has one: which of the module's inputs it plays into is chosen in the
+bar while edit is on, and each control keeps its own channel. What each control
+sends, what it is called and what colour it is are **yours, not the patch's** — they
 live in this browser beside the canvas arrangement, keyed globally rather than
 per patch, because a pad that changed meaning with every patch load is one
 nobody could learn. A **keyboard** is summoned over it: one scrolling row of
-real keys, six octaves, a drag across it playing a glissando, and its own cable
-and channel in its bar.
+real keys, six octaves, a drag across it playing a glissando, and **a cable and
+channel of its own** — playing a part into one input of the patch while the
+pads drive another is the ordinary case.
 
 **module** — the module running: the LEDs and gate buses, the clock, the jacks,
 an on-screen keyboard and CC sender, and two views that answer questions no

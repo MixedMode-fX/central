@@ -2,11 +2,12 @@
 // does.
 //
 // **The surface belongs to the performer; the bindings belong to the patch.**
-// A pad's caption, its colour, its CC number and whether it latches are *your
-// controller* - they live in this browser, beside the canvas arrangement, and
-// they are keyed globally rather than per patch, because a pad that changed
-// meaning with every patch load would be a pad nobody could learn. What the
-// CC reaches is the patch's business and travels in the patch image.
+// A pad's caption, its colour, its CC number, whether it latches and the one
+// cable the whole surface is plugged into are *your controller* - they live in
+// this browser, beside the canvas arrangement, and they are keyed globally
+// rather than per patch, because a pad that changed meaning with every patch
+// load would be a pad nobody could learn. What the CC reaches is the patch's
+// business and travels in the patch image.
 //
 // **Fixed geometry, soft assignment.** You cannot move a control; you can
 // change everything about what it does. That is what makes a surface a
@@ -32,11 +33,14 @@ export const PAD_COLUMNS = 4;
 const FIRST_POT_CC = 20;
 const FIRST_PAD_NOTE = 36;
 
-// The cable a control arrives on, which is as much a part of where it lands
-// as the channel: a MIDI input takes one port mask, and `CcMapping` filters
-// by source port, so two pads on the same CC and different cables reach two
-// different places in one patch. The first USB cable is the factory answer
-// because it is the one a browser can always reach.
+// The cable the surface is plugged into. **One for the whole surface**, the
+// way a controller has one lead: a MIDI input takes a port mask and
+// `CcMapping` filters by source port, so the cable decides what in the patch
+// can hear this thing at all - and a box of sixteen pads each on a different
+// lead is not a controller anybody could reason about. The on-screen keyboard
+// is a separate instrument and keeps its own (state.ui.play). The first USB
+// cable is the factory answer because it is the one a browser can always
+// reach.
 const FIRST_PORT = P.MidiPort.mmMIDI_USB_0;
 
 export const PadKind = { NOTE: 'note', CC: 'cc', PROGRAM: 'program' };
@@ -50,7 +54,7 @@ export const COLOURS = ['accent', 'gate', 'note', 'cv', 'warn'];
 const clamp7 = (v) => Math.max(0, Math.min(127, Math.round(v)));
 
 const emptyPot = (i) => ({
-  cc: FIRST_POT_CC + i, port: FIRST_PORT, channel: 1, label: '', colour: COLOURS[0], value: 0,
+  cc: FIRST_POT_CC + i, channel: 1, label: '', colour: COLOURS[0], value: 0,
 });
 
 const emptyPad = (i) => ({
@@ -59,7 +63,6 @@ const emptyPad = (i) => ({
   cc: 40 + i,
   program: 1,
   velocity: 100,
-  port: FIRST_PORT,
   channel: 1,
   mode: PadMode.MOMENTARY,
   label: '',
@@ -71,7 +74,7 @@ const emptyPad = (i) => ({
 // for that control rather than an optional field the rest of the app has to
 // keep testing for.
 function normalise(stored) {
-  const doc = { pots: [], pads: [] };
+  const doc = { port: stored?.port ?? FIRST_PORT, pots: [], pads: [] };
   for (let i = 0; i < POTS; i++) doc.pots.push({ ...emptyPot(i), ...(stored?.pots?.[i] ?? {}) });
   for (let i = 0; i < PADS; i++) doc.pads.push({ ...emptyPad(i), ...(stored?.pads?.[i] ?? {}) });
   return doc;
@@ -89,6 +92,18 @@ export class Surface {
   }
 
   save() { this.library.writeSurface(this.doc); }
+
+  // The one cable, and what a control sends on: the surface's lead, and the
+  // control's own channel.
+  get port() { return this.doc.port; }
+
+  setPort(port) {
+    this.doc.port = port;
+    this.save();
+    this.render();
+  }
+
+  wire(control) { return { port: this.doc.port, channel: control.channel }; }
 
   pot(index) { return this.doc.pots[index]; }
   pad(index) { return this.doc.pads[index]; }
@@ -120,7 +135,7 @@ export class Surface {
   turn(index, value, { commit = false } = {}) {
     const pot = this.pot(index);
     pot.value = clamp7(value);
-    this.play.cc(pot.cc, pot.value, pot);
+    this.play.cc(pot.cc, pot.value, this.wire(pot));
     if (commit) this.save();
     return pot.value;
   }
@@ -128,7 +143,7 @@ export class Surface {
   press(index) {
     const pad = this.pad(index);
     if (pad.kind === PadKind.PROGRAM) {
-      this.play.programChange(pad.program, pad);
+      this.play.programChange(pad.program, this.wire(pad));
       this.state.status = this.launchSaid(pad);
       this.render();
       return;
@@ -154,11 +169,11 @@ export class Surface {
 
   emit(pad, on) {
     if (pad.kind === PadKind.NOTE) {
-      if (on) this.play.noteOn(pad.note, pad.velocity, pad);
-      else this.play.noteOff(pad.note, pad);
+      if (on) this.play.noteOn(pad.note, pad.velocity, this.wire(pad));
+      else this.play.noteOff(pad.note, this.wire(pad));
       return;
     }
-    this.play.cc(pad.cc, on ? 127 : 0, pad);
+    this.play.cc(pad.cc, on ? 127 : 0, this.wire(pad));
   }
 
   // What hitting a launch pad does, in words, including the part that is not
@@ -176,13 +191,14 @@ export class Surface {
   // The binding this control's CC would move, if any. Matched the way the
   // firmware matches it (src/control/cc_mapper.cpp): the cable, the number,
   // and a channel that is this one or omni. The cable is in it because the
-  // module's own learn writes the single port the CC arrived on, so a control
-  // moved to another cable stops reaching what it learned - and a sheet that
-  // said otherwise would be describing a control nobody could hear.
+  // module's own learn writes the single port the CC arrived on, so moving
+  // the surface's lead leaves every binding learned on the old one behind -
+  // and a sheet that said otherwise would be describing a control nobody
+  // could hear.
   bindingOf(control) {
     const map = this.state.patch.ccMap ?? [];
     const slot = map.findIndex((m) => isBinding(m) && m.cc === control.cc
-      && (m.sourceMask & control.port) !== 0
+      && (m.sourceMask & this.doc.port) !== 0
       && (m.channel === 0 || m.channel === control.channel));
     return slot < 0 ? null : { slot, mapping: map[slot] };
   }

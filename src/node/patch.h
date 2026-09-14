@@ -47,6 +47,7 @@ enum CcTargetKind : uint8_t {
     CC_TARGET_TRANSPORT = 2,   // param selects start / stop / continue / tap
     CC_TARGET_PORT      = 3,   // reserved: a MidiInPort / MidiOutPort field
     CC_TARGET_KEY       = 4,   // param selects root / scale / octave
+    CC_TARGET_MACRO     = 5,   // target_index is a macro; param unused
     CC_TARGET_KINDS,
 };
 
@@ -192,6 +193,72 @@ inline ModRoute unused_route(){
     return r;
 }
 
+// A macro: one performance control moving several parameters at once.
+//
+// **A macro is a target, not a source.** It has no source_mask, no channel
+// and no CC of its own: CC_TARGET_MACRO puts it in the same target space a
+// CcMapping and a ModRoute already reach, so a knob drives one through
+// CcMapper - inheriting takeover, the relative encodings and 14-bit pairing
+// without a line of new source-matching code - and a CV bus drives one
+// through the modulation matrix. Giving a macro its own source would mean a
+// second copy of CcMapper's Knob, and a macro pot that behaved differently
+// from an ordinary one.
+//
+// **A macro holds; it does not store.** Its position is runtime state and is
+// deliberately absent from this struct: a macro is a performance control, not
+// a saved value to be reproduced. It is silent until first moved, and holds
+// its destinations every pass afterwards (control/macros.h).
+//
+// The name is what makes it a macro rather than several bindings that happen
+// to share a number. With no browser attached the module can still say which
+// gesture this is, which is the whole reason it lives in the patch.
+struct MacroDef {
+    char name[MACRO_NAME_BYTES];   // not NUL-terminated when full; name[0] == 0 is unused
+};
+
+// The macro index a destination pool entry belongs to; this one means unused.
+static constexpr uint8_t MACRO_NONE = 0xFF;
+
+// One destination of one macro: a window of the macro's travel reaching a
+// target, as a signed offset from wherever that target is set.
+//
+// **Offset, not takeover.** The parameter's own dialled value stays the
+// sound; the macro is a hand on top of it. This is what every synthesiser
+// that has macros means by the word, and it reuses the anchor discipline
+// MOD_OFFSET already has.
+//
+// **The window clamps; it does not release.** Below src_lo the destination
+// contributes nothing. Above src_hi it holds full depth rather than falling
+// back, so sweeping a macro up builds: the filter opens and stays open while
+// the delay comes in. A destination that rises and falls back is two entries
+// with adjacent windows and opposite depths, which is why holding is the
+// primitive and releasing is not - the other behaviour can be built from
+// this one, and not the reverse.
+struct MacroDest {
+    uint8_t  macro;         // 0..N_MACRO-1; MACRO_NONE = unused slot
+    uint8_t  target_kind;   // CcTargetKind, never CC_TARGET_MACRO: no recursion
+    uint8_t  target_index;  // node index, or unused
+    uint16_t param;         // parameter index, or a clock / key target
+    uint8_t  src_lo;        // the window over the macro's 0..255 travel.
+    uint8_t  src_hi;        // src_lo == src_hi is a step, not an error
+    int16_t  depth;         // signed offset at full travel, in the target's own units
+    uint8_t  flags;         // reserved, zero
+};
+
+inline MacroDest unused_dest(){
+    MacroDest d = {};
+    d.macro = MACRO_NONE;
+    return d;
+}
+
+inline MacroDef unused_macro(){
+    MacroDef m = {};
+    return m;
+}
+
+// True when this macro slot carries a name, and so exists.
+inline bool macro_used(const MacroDef& m){ return m.name[0] != 0; }
+
 struct Patch {
     GatePortConfig gate_ports[GPIO_N];
     MidiInConfig   midi_in[N_MIDI_IN_NODES];
@@ -199,6 +266,8 @@ struct Patch {
     NodeConfig     nodes[N_NODE];
     CcMapping      cc_map[N_CC_MAP];
     ModRoute       mod_map[N_MOD_ROUTE];
+    MacroDef       macros[N_MACRO];
+    MacroDest      macro_dest[N_MACRO_DEST];
     uint8_t        n_nodes;
 };
 
@@ -219,6 +288,8 @@ inline Patch empty_patch(){
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) p.midi_out[i] = MidiOutConfig{0, 0, NO_BUS};
     for (uint8_t i = 0; i < N_CC_MAP; i++) p.cc_map[i] = unused_mapping();
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++) p.mod_map[i] = unused_route();
+    for (uint8_t i = 0; i < N_MACRO; i++) p.macros[i] = unused_macro();
+    for (uint8_t i = 0; i < N_MACRO_DEST; i++) p.macro_dest[i] = unused_dest();
     p.n_nodes = 0;
     return p;
 }

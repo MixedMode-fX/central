@@ -10,7 +10,9 @@
 #include "master.h"
 #include "node/patch.h"
 #include "node/registry.h"
+#include "control/macros.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 #include "control/mod_matrix.h"
 #include "patch/patch_manager.h"
 #include "patch/patch_codec.h"
@@ -726,18 +728,26 @@ struct Rig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    Macros macros;
     CcMapper cc;
+    ControlSum sum;
     ModMatrix mod;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master), mod(patches, cc) {}
+            patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum) {}
 
     // One main-loop turn, in main.cpp's order: the controllers, then the
-    // modulation, then the pass.
+    // offsets gathered and summed, then the pass. An offset route does not
+    // write on its own any more - it contributes, and the commit is what
+    // reaches the parameter - so a turn that skipped the commit would test
+    // nothing.
     void turn(uint32_t now_us){
         cc.apply(now_us);
+        sum.begin();
         mod.apply(master.buses(), now_us);
+        macros.expand(patches.active(), sum);
+        sum.commit(now_us);
         master.pass(now_us);
     }
 };
@@ -984,14 +994,47 @@ static void test_a_route_says_why_it_is_doing_nothing() {
     TEST_ASSERT_EQUAL_UINT16(s.range_lo, s.value);
 }
 
-static void test_two_routes_on_one_parameter_are_refused() {
+// The top of one LFO cycle, as the parameter saw it.
+static uint8_t highest_over_a_cycle(Rig& rig){
+    uint8_t highest = 0;
+    for (uint32_t t = 0; t <= 1000000u; t += 1000u){
+        rig.turn(t);
+        uint8_t v = 0;
+        TEST_ASSERT_TRUE(rig.master.get_node_param(1, 1, v));
+        if (v > highest) highest = v;
+    }
+    return highest;
+}
+
+// Two routes on one parameter used to be refused, because two writers racing
+// over one value has no defined result. They no longer race: an offset route
+// contributes to ControlSum, which sums every contribution on a target and
+// writes once. Macros forced the change - a destination that rises and then
+// falls back is two windows on one parameter - and once a parameter can take
+// a sum, refusing a second route would be an inconsistency rather than a
+// discipline.
+static void test_two_offset_routes_on_one_parameter_sum() {
     Rig rig;
     Patch p = modulation_patch();
-    p.mod_map[0] = route_to(1, 1, MOD_ABSOLUTE);
-    p.mod_map[1] = route_to(1, 1, MOD_ABSOLUTE);
-    p.mod_map[1].bus = 1;
-    TEST_ASSERT_EQUAL(APPLY_INVALID, rig.patches.apply(p, default_globals(), 0));
-    TEST_ASSERT_EQUAL(LOAD_MOD_ROUTE_INVALID, rig.master.last_error());
+    // Both read the same bus, so each contributes the same swing and the
+    // parameter should end up twice as far from its set point as one alone.
+    p.nodes[1].params[1] = 100;                            // a set point to swing around
+    p.mod_map[0] = route_to(1, 1, MOD_OFFSET, 40);
+    TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(p, default_globals(), 0));
+    const uint8_t one = highest_over_a_cycle(rig);
+
+    Rig both;
+    Patch q = modulation_patch();
+    q.nodes[1].params[1] = 100;
+    q.mod_map[0] = route_to(1, 1, MOD_OFFSET, 40);
+    q.mod_map[1] = route_to(1, 1, MOD_OFFSET, 40);
+    TEST_ASSERT_EQUAL(APPLY_OK, both.patches.apply(q, default_globals(), 0));
+    const uint8_t two = highest_over_a_cycle(both);
+
+    // Accepted, not refused - and the second route pushed it further than the
+    // first alone, which is what summing means.
+    TEST_ASSERT_GREATER_THAN_UINT8(100, one);
+    TEST_ASSERT_GREATER_THAN_UINT8(one, two);
 }
 
 static void test_a_route_to_a_parameter_that_does_not_exist_is_refused() {
@@ -1266,7 +1309,7 @@ int main() {
     RUN_TEST(test_an_unchanged_value_costs_no_write);
     RUN_TEST(test_a_route_says_what_it_is_doing);
     RUN_TEST(test_a_route_says_why_it_is_doing_nothing);
-    RUN_TEST(test_two_routes_on_one_parameter_are_refused);
+    RUN_TEST(test_two_offset_routes_on_one_parameter_sum);
     RUN_TEST(test_a_route_to_a_parameter_that_does_not_exist_is_refused);
     RUN_TEST(test_a_route_cannot_press_the_transport);
     RUN_TEST(test_a_route_can_drive_the_tempo);

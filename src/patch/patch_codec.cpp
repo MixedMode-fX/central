@@ -47,6 +47,24 @@
 //                          depth             1
 //                          flags             1
 //                      }
+//   n_macros           1   (named macros; unnamed slots are not stored)
+//   macros             n_macros x {
+//                          slot              1   which macros[] entry it is
+//                          name              MACRO_NAME_BYTES, space padded,
+//                                                not NUL-terminated when full
+//                      }
+//   n_macro_dest       1   (the shared destination pool; unused not stored)
+//   macro_dest         n_macro_dest x {
+//                          slot              1   which macro_dest[] entry it is
+//                          macro             1
+//                          target_kind       1
+//                          target_index      1
+//                          param             2
+//                          src_lo            1
+//                          src_hi            1
+//                          depth             2   signed, two's complement
+//                          flags             1
+//                      }
 
 static constexpr size_t HEADER_BYTES = 8;
 static constexpr size_t CRC_BYTES = 2;
@@ -55,6 +73,8 @@ static constexpr size_t PORT_BYTES =
 static constexpr size_t NODE_FIXED_BYTES = 1u + MAX_IN + MAX_OUT + 2u;
 static constexpr size_t MAPPING_BYTES = 13u;
 static constexpr size_t ROUTE_BYTES = 12u;
+static constexpr size_t MACRO_BYTES = 1u + MACRO_NAME_BYTES;
+static constexpr size_t MACRO_DEST_BYTES = 11u;
 
 uint16_t patch_codec::crc16(const uint8_t* data, size_t length){
     uint16_t crc = 0xFFFF;
@@ -71,7 +91,9 @@ size_t patch_codec::max_encoded_size(){
     return HEADER_BYTES + sizeof(GlobalSettings) + PORT_BYTES
          + (size_t)N_NODE * (NODE_FIXED_BYTES + N_PARAM)
          + 1u + (size_t)N_CC_MAP * MAPPING_BYTES
-         + 1u + (size_t)N_MOD_ROUTE * ROUTE_BYTES + CRC_BYTES;
+         + 1u + (size_t)N_MOD_ROUTE * ROUTE_BYTES
+         + 1u + (size_t)N_MACRO * MACRO_BYTES
+         + 1u + (size_t)N_MACRO_DEST * MACRO_DEST_BYTES + CRC_BYTES;
 }
 
 // A small append-only writer, so every put is bounds-checked in one place.
@@ -195,6 +217,39 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
         w.u8(r.flags);
     }
 
+    // Macros. A macro exists because it has a name - an unnamed slot holds
+    // nothing a player could be told about - so the name is what decides
+    // whether it is stored. Fixed width and not length-prefixed: this reader
+    // is mirrored by hand in app/src/protocol/codec.js, and a fixed field is
+    // the one shape that cannot disagree between the two.
+    uint8_t n_macros = 0;
+    for (uint8_t i = 0; i < N_MACRO; i++) if (macro_used(patch.macros[i])) n_macros++;
+    w.u8(n_macros);
+    for (uint8_t i = 0; i < N_MACRO; i++){
+        const MacroDef& m = patch.macros[i];
+        if (!macro_used(m)) continue;
+        w.u8(i);
+        w.bytes((const uint8_t*)m.name, MACRO_NAME_BYTES);
+    }
+
+    // The destination pool, shared across every macro.
+    uint8_t n_dest = 0;
+    for (uint8_t i = 0; i < N_MACRO_DEST; i++) if (patch.macro_dest[i].macro != MACRO_NONE) n_dest++;
+    w.u8(n_dest);
+    for (uint8_t i = 0; i < N_MACRO_DEST; i++){
+        const MacroDest& d = patch.macro_dest[i];
+        if (d.macro == MACRO_NONE) continue;
+        w.u8(i);
+        w.u8(d.macro);
+        w.u8(d.target_kind);
+        w.u8(d.target_index);
+        w.u16(d.param);
+        w.u8(d.src_lo);
+        w.u8(d.src_hi);
+        w.u16((uint16_t)d.depth);   // two's complement; signed on the way back
+        w.u8(d.flags);
+    }
+
     if (w.overflowed) return CODEC_NO_ROOM;
 
     const size_t payload = w.at - payload_start;
@@ -302,6 +357,37 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
         if (r.underflowed) return CODEC_TRUNCATED;
         if (slot >= N_MOD_ROUTE) return CODEC_TOO_MANY_ROUTES;
         patch.mod_map[slot] = route;
+    }
+
+    const uint8_t n_macros = r.u8();
+    if (r.underflowed) return CODEC_TRUNCATED;
+    if (n_macros > N_MACRO) return CODEC_TOO_MANY_MACROS;
+    for (uint8_t i = 0; i < n_macros; i++){
+        const uint8_t slot = r.u8();
+        MacroDef m = unused_macro();
+        r.bytes((uint8_t*)m.name, MACRO_NAME_BYTES);
+        if (r.underflowed) return CODEC_TRUNCATED;
+        if (slot >= N_MACRO) return CODEC_TOO_MANY_MACROS;
+        patch.macros[slot] = m;
+    }
+
+    const uint8_t n_dest = r.u8();
+    if (r.underflowed) return CODEC_TRUNCATED;
+    if (n_dest > N_MACRO_DEST) return CODEC_TOO_MANY_MACRO_DEST;
+    for (uint8_t i = 0; i < n_dest; i++){
+        const uint8_t slot = r.u8();
+        MacroDest d = unused_dest();
+        d.macro = r.u8();
+        d.target_kind = r.u8();
+        d.target_index = r.u8();
+        d.param = r.u16();
+        d.src_lo = r.u8();
+        d.src_hi = r.u8();
+        d.depth = (int16_t)r.u16();
+        d.flags = r.u8();
+        if (r.underflowed) return CODEC_TRUNCATED;
+        if (slot >= N_MACRO_DEST) return CODEC_TOO_MANY_MACRO_DEST;
+        patch.macro_dest[slot] = d;
     }
     return r.underflowed ? CODEC_TRUNCATED : CODEC_OK;
 }

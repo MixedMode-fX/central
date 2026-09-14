@@ -6,7 +6,7 @@ MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
     gate_in(), gate_out(), midi_in(), midi_out(),
     tick_pending(false), was_running(clk.running()), stop_settle(0), tick_count(0),
     error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0),
-    route_error_index(0)
+    route_error_index(0), dest_error_index(0)
 {}
 
 LoadError MixedModeMaster::validate(const Patch& patch){
@@ -59,6 +59,22 @@ LoadError MixedModeMaster::validate(const Patch& patch){
             return LOAD_MOD_ROUTE_INVALID;
         }
     }
+    // The destination pool is shared, so one macro must not be able to eat
+    // it: the per-macro cap is what keeps eight macros usable rather than
+    // one macro deep and seven empty.
+    uint8_t per_macro[N_MACRO] = {};
+    for (uint8_t i = 0; i < N_MACRO_DEST; i++){
+        const MacroDest& d = patch.macro_dest[i];
+        if (d.macro == MACRO_NONE) continue;
+        if (!dest_valid(patch, d)){
+            dest_error_index = i;
+            return LOAD_MACRO_DEST_INVALID;
+        }
+        if (++per_macro[d.macro] > N_MACRO_DEST_PER_MACRO){
+            dest_error_index = i;
+            return LOAD_MACRO_DEST_INVALID;
+        }
+    }
     return LOAD_OK;
 }
 
@@ -78,6 +94,10 @@ static bool target_exists(const Patch& patch, uint8_t kind, uint8_t index, uint1
         // The key exists whatever the patch holds, so unlike a node
         // parameter there is nothing here to check it against.
         case CC_TARGET_KEY:       return param < CC_KEY_TARGETS;
+        // A macro exists because the table has that many slots, not because
+        // the patch put anything in it; `param` names nothing, since a macro
+        // has one value.
+        case CC_TARGET_MACRO:     return index < N_MACRO;
         default:                  return false;         // CC_TARGET_PORT is reserved
     }
 }
@@ -91,16 +111,26 @@ bool MixedModeMaster::route_valid(const Patch& patch, uint8_t slot, const ModRou
     // so there is nothing for a continuous signal to set. A modulator that
     // pressed "start" once a cycle is not a thing to build by accident.
     if (r.target_kind == CC_TARGET_TRANSPORT) return false;
-    if (!target_exists(patch, r.target_kind, r.target_index, r.param)) return false;
-    for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
-        if (i == slot) continue;
-        const ModRoute& other = patch.mod_map[i];
-        if (other.bus == NO_BUS) continue;
-        if (other.target_kind == r.target_kind
-         && other.target_index == r.target_index
-         && other.param == r.param) return false;       // two writers, one value
-    }
-    return true;
+    // Two routes on one target used to be refused here, because two writers
+    // racing over one value has no defined result. They no longer race: an
+    // offset route contributes to ControlSum, which sums every contribution
+    // on a target and writes once (control/control_sum.h). Macros forced the
+    // change - a destination that rises and falls back is two windows on one
+    // parameter - and once a parameter can take a sum, refusing a second
+    // route is an inconsistency rather than a discipline.
+    return target_exists(patch, r.target_kind, r.target_index, r.param);
+}
+
+bool MixedModeMaster::dest_valid(const Patch& patch, const MacroDest& d){
+    if (d.macro == MACRO_NONE) return true;             // an unused slot is fine
+    if (d.macro >= N_MACRO) return false;
+    // No recursion: a macro reaching a macro would be a table that writes
+    // its own inputs every pass.
+    if (d.target_kind == CC_TARGET_MACRO) return false;
+    // Momentary, so there is nothing for a swept window to set - the same
+    // reason a route refuses one.
+    if (d.target_kind == CC_TARGET_TRANSPORT) return false;
+    return target_exists(patch, d.target_kind, d.target_index, d.param);
 }
 
 bool MixedModeMaster::mapping_valid(const Patch& patch, const CcMapping& m){

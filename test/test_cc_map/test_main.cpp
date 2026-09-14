@@ -7,7 +7,9 @@
 #include "../fakes/fake_leds.h"
 #include "../fakes/recording_midi_out.h"
 #include "master.h"
+#include "control/macros.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 #include "patch/patch_manager.h"
 #include "patch/patch_codec.h"
 #include "patch/default_patch.h"
@@ -41,13 +43,15 @@ struct Rig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    Macros macros;
     CcMapper cc;
+    ControlSum sum;
     ModMatrix mod;
     SysexHandler sysex;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master), mod(patches, cc),
+            patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
             sysex(patches, master, store, leds, midi, cc, mod) {}
 
     // One CC through the whole input path: offered to the mapping table, and

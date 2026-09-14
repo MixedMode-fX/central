@@ -6,6 +6,7 @@
 #include "master.h"
 #include "patch/patch_manager.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 
 // Modulation: a control signal reaching a parameter.
 //
@@ -40,16 +41,20 @@
 // the signal is the value. Offset keeps the parameter's own setting as a
 // centre and swings around it, which is what makes a CC and an LFO on one
 // target *cooperate* - the knob moves the centre, the LFO moves around it.
-// That only works if the matrix can tell "the user moved the set point" from
-// "this is what I wrote last pass", so every offset lane remembers what it
-// wrote: a target that is not where the matrix left it has been moved by
-// somebody else, and the centre is re-taken from it. That is the same anchor
-// discipline CcMapper's scale takeover uses, for the same reason.
 //
-// **Two routes may not share a target.** The validator refuses it
-// (MixedModeMaster::route_valid), because two writers racing over one value
-// has no defined result - and because the module already has a place to mix
-// two modulators, which is the CV bus itself: fan-in there is a sum.
+// **Offset routes do not write; they contribute.** Two routes used to be
+// refused on one target because two writers racing over one value has no
+// defined result. Macros made a parameter able to take more than one
+// contribution - a destination that rises and falls back is two windows on
+// one parameter - so the answer is no longer to refuse the second writer but
+// to stop writing separately: an offset route hands its swing to ControlSum,
+// which sums every contribution on a target, clips once and writes once
+// (control/control_sum.h). The anchor moved there with it, because with
+// several contributors there is only one set point to be away from.
+//
+// **Absolute routes still write.** Absolute means the signal replaces the
+// value rather than moving it, so there is nothing to sum and nothing to
+// anchor on; such a route takes its target over exactly as it always did.
 
 // Why a route is doing nothing, when it is doing nothing.
 //
@@ -70,6 +75,7 @@ enum ModStatus : uint8_t {
     MOD_STATUS_REFUSED = 3,   // the target would not give or take a value
     MOD_STATUS_PINNED = 4,    // the range it may write is one value wide
     MOD_STATUS_ACTIVE = 5,    // it is writing
+    MOD_STATUS_CLIPPED = 6,   // it is writing, and the sum did not fit
 };
 
 // What one route is doing, as of the last pass. Everything here is read off
@@ -87,7 +93,7 @@ struct ModState {
 
 class ModMatrix {
     public:
-        ModMatrix(PatchManager& patches, CcMapper& mapper);
+        ModMatrix(PatchManager& patches, CcMapper& mapper, ControlSum& sum);
         ModMatrix(const ModMatrix&) = delete;
         ModMatrix& operator=(const ModMatrix&) = delete;
 
@@ -122,8 +128,10 @@ class ModMatrix {
             // catches all of those in one place without anybody having to
             // remember to call reset().
             ModRoute tracked;
-            uint16_t centre;        // offset mode's set point
-            uint16_t written;       // what this lane last wrote
+            // What this lane last wrote. Absolute mode only: an offset route
+            // does not write, it contributes, and the anchor and the write
+            // both belong to ControlSum.
+            uint16_t written;
             bool have_written;
             ModState reported;      // what apply_one() saw, for an editor
         };
@@ -139,6 +147,7 @@ class ModMatrix {
 
         PatchManager& patches;
         CcMapper& cc;
+        ControlSum& sum;
         Lane lanes[N_MOD_ROUTE];
         uint32_t write_count;
         uint32_t refuse_count;

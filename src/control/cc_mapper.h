@@ -5,6 +5,7 @@
 #include "config.h"
 #include "master.h"
 #include "patch/patch_manager.h"
+#include "control/macros.h"
 
 // Bind a controller knob to any parameter (#21).
 //
@@ -45,7 +46,7 @@ class CcMapper {
         // cannot sit armed for ever waiting for a controller nobody touched.
         static constexpr uint32_t LEARN_TIMEOUT_US = 20000000u;
 
-        CcMapper(PatchManager& patches, MixedModeMaster& master);
+        CcMapper(PatchManager& patches, MixedModeMaster& master, Macros& macros);
         CcMapper(const CcMapper&) = delete;
         CcMapper& operator=(const CcMapper&) = delete;
 
@@ -138,6 +139,10 @@ class CcMapper {
 
         PatchManager& patches;
         MixedModeMaster& mm;
+        // A macro is a target like any other (node/patch.h), so the one
+        // applier has to be able to reach one. Nothing else here knows what
+        // a macro is.
+        Macros& macros;
         Knob knobs[N_CC_MAP];
 
         uint32_t write_count;

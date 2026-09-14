@@ -1,14 +1,14 @@
 #include "control/mod_matrix.h"
 
-ModMatrix::ModMatrix(PatchManager& manager, CcMapper& mapper) :
-    patches(manager), cc(mapper), lanes(), write_count(0), refuse_count(0)
+ModMatrix::ModMatrix(PatchManager& manager, CcMapper& mapper, ControlSum& totals) :
+    patches(manager), cc(mapper), sum(totals), lanes(), write_count(0), refuse_count(0)
 {
     reset();
 }
 
 void ModMatrix::reset(){
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
-        lanes[i] = Lane{unused_route(), 0, 0, false, idle_state()};
+        lanes[i] = Lane{unused_route(), 0, false, idle_state()};
     }
 }
 
@@ -83,7 +83,7 @@ void ModMatrix::apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us
         // The route changed under us. Whatever centre this lane was holding
         // belonged to a different binding, so it goes rather than being
         // applied to the new one.
-        lane = Lane{route, 0, 0, false, idle_state()};
+        lane = Lane{route, 0, false, idle_state()};
     }
     // Every return below says what it decided before it takes it. The reasons
     // a route does nothing are these early exits and nothing else, so an
@@ -134,28 +134,36 @@ void ModMatrix::apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us
 
     int32_t want;
     if ((route.flags & MOD_MODE_MASK) == MOD_OFFSET){
-        uint16_t current = 0;
-        if (!cc.read_control(route.target_kind, route.target_index, route.param, current)){
-            refuse_count++;
-            said.status = MOD_STATUS_REFUSED;
-            return;
-        }
-        // A target that is not where this lane left it has been moved by
-        // something else - a knob, the editor, a preset recall - and that new
-        // value is the centre from here on. Re-reading it unconditionally
-        // instead would compound: the modulation would walk the parameter
-        // away in whichever direction it happened to be pushing.
-        if (!lane.have_written || current != lane.written) lane.centre = current;
-
         // A signal that really is centred on zero covers half the range each
         // way at full depth, so a bipolar modulator reaches both ends of the
         // range and no further. A signal that only ever goes one way - a
         // unipolar LFO, a sample and hold - covers that half in that
         // direction, which is the honest reading of it and not a clip.
         const int32_t delta = (swing * route.depth / 255) * span / CV_FULL;
-        want = (int32_t)lane.centre + delta;
-        said.centre = lane.centre;
-    } else {
+        // Offered, not written. Several routes and several macro destinations
+        // may be pushing this one parameter, and the sum is what gets clipped
+        // and written - once - by ControlSum. The anchor lives there too,
+        // because there is only one set point for all of them to be away from.
+        sum.add(route.target_kind, route.target_index, route.param, delta);
+
+        // What the sum settled on last pass, which is what "as of the last
+        // pass" in ModState means. A route that has only just started
+        // contributing has nothing to report yet and says so.
+        uint16_t anchor = 0, settled = 0;
+        bool clipped = false;
+        if (said.status != MOD_STATUS_PINNED){
+            if (sum.lookup(route.target_kind, route.target_index, route.param,
+                           anchor, settled, clipped)){
+                said.centre = anchor;
+                said.value = settled;
+                said.status = clipped ? MOD_STATUS_CLIPPED : MOD_STATUS_ACTIVE;
+            } else {
+                said.status = MOD_STATUS_ACTIVE;
+            }
+        }
+        return;
+    }
+    {
         // Absolute: the position *is* the value, depth scaling how much of
         // the range it reaches. Rounded rather than truncated, so the top of
         // the signal reaches range_hi.

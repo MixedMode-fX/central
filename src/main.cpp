@@ -16,7 +16,9 @@
 #include "patch/patch_manager.h"
 #include "console/console.h"
 #include "protocol/sysex_handler.h"
+#include "control/macros.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 #include "control/mod_matrix.h"
 #include "control/nrpn.h"
 #include "control/midi_dispatch.h"
@@ -42,12 +44,14 @@ static PatchManager patches(master, store, leds);
 // Controller bindings (#21). Not a node: a parameter is not a bus signal, so
 // mapping applies at the MIDI input layer and writes through the same
 // validated entry point the protocol and the console use.
-static CcMapper cc_map(patches, master);
+static Macros macros;
+static CcMapper cc_map(patches, master, macros);
+static ControlSum control_sum(cc_map);
 
 // Modulation (control/mod_matrix.h). Also not a node, and for the same
 // reasons: it reads the CV buses the modulators wrote last pass and turns
 // them into parameter writes through the very same applier a mapped CC uses.
-static ModMatrix mod_matrix(patches, cc_map);
+static ModMatrix mod_matrix(patches, cc_map, control_sum);
 
 static NrpnDecoder nrpn(patches, cc_map);
 static Console console(console_io, patches, master, store, leds, cc_map);
@@ -120,7 +124,19 @@ void loop(){
     //    reads a value that is finished rather than one a pass is still
     //    accumulating.
     cc_map.apply(now);
+    //    Then the offsets, in one place. A macro destination and an offset
+    //    route are both asking to push a parameter away from where it is set,
+    //    and several of them may be asking about the same parameter at once,
+    //    so they are collected rather than written: begin() opens the
+    //    gather, the matrix and the macros fill it, commit() sums each
+    //    target, clips once and writes once (control/control_sum.h). The
+    //    matrix goes first because a route may target a macro, and a macro
+    //    that is about to expand should expand from the position the route
+    //    just gave it rather than from last pass's.
+    control_sum.begin();
     mod_matrix.apply(master.buses(), now);
+    macros.expand(patches.active(), control_sum);
+    control_sum.commit(now);
     master.pass(now);
 
     // 4. reprogram the subtick timer if the tempo or the external period moved.

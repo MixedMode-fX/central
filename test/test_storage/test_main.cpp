@@ -15,7 +15,9 @@
 #include "patch/patch_manager.h"
 #include "patch/default_patch.h"
 #include "console/console.h"
+#include "control/macros.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 #include "led/status_leds.h"
 #include "node/registry.h"
 #include "hal/midi_types.h"
@@ -45,12 +47,14 @@ struct Rig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    Macros macros;
     CcMapper cc;
+    ControlSum sum;
     Console console;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(), io(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master),
+            patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc),
             console(io, patches, master, store, leds, cc) {}
 };
 

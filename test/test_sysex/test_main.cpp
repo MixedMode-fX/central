@@ -11,7 +11,9 @@
 #include "protocol/sysex.h"
 #include "protocol/sysex_handler.h"
 #include "patch/patch_manager.h"
+#include "control/macros.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 #include "patch/default_patch.h"
 #include "node/registry.h"
 #include "hal/midi_types.h"
@@ -46,7 +48,9 @@ struct Rig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    Macros macros;
     CcMapper cc;
+    ControlSum sum;
     ModMatrix mod;
     SysexHandler sysex;
     // The time every message is delivered at. Zero by default; a test that
@@ -56,7 +60,7 @@ struct Rig {
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master), mod(patches, cc),
+            patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
             sysex(patches, master, store, leds, midi, cc, mod), now(0) {}
 
     // One command, framed the way the wire carries it.

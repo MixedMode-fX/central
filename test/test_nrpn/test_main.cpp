@@ -10,7 +10,9 @@
 #include "../fakes/recording_midi_out.h"
 #include "master.h"
 #include "control/midi_dispatch.h"
+#include "control/macros.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
 #include "control/nrpn.h"
 #include "protocol/sysex_handler.h"
 #include "patch/patch_manager.h"
@@ -49,14 +51,16 @@ struct Rig {
     StatusLeds leds;
     PatchStore store;
     PatchManager patches;
+    Macros macros;
     CcMapper cc;
+    ControlSum sum;
     ModMatrix mod;
     NrpnDecoder nrpn;
     SysexHandler sysex;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
-            patches(master, store, leds), cc(patches, master), mod(patches, cc), nrpn(patches, cc),
+            patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum), nrpn(patches, cc),
             sysex(patches, master, store, leds, midi, cc, mod) {}
 
     // The whole input path, as main.cpp runs it.

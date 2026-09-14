@@ -16,6 +16,7 @@ export const EEPROM_BYTES = 4284;
 export const GPIO_N = 8;
 export const KEY_DEFAULT_OCTAVE = 5;
 export const KEY_MAX_OCTAVE = 10;
+export const MACRO_NAME_BYTES = 8;
 export const MASTER_PPQN = 24;
 export const MAX_IN = 5;
 export const MAX_OUT = 8;
@@ -24,6 +25,9 @@ export const MIDI_CONTROL_PORT = 8;
 export const N_CC_MAP = 32;
 export const N_CV_BUS = 8;
 export const N_GATE_BUS = 16;
+export const N_MACRO = 8;
+export const N_MACRO_DEST = 32;
+export const N_MACRO_DEST_PER_MACRO = 8;
 export const N_MIDI_IN_NODES = 4;
 export const N_MIDI_OUT_NODES = 4;
 export const N_MOD_ROUTE = 16;
@@ -37,7 +41,7 @@ export const NRPN_KEY_BASE = 15488;
 export const NRPN_RESERVED_BASE = 15504;
 export const NRPN_TRANSPORT_BASE = 15472;
 export const PARAM_CENTRE = 128;
-export const PATCH_FORMAT_VERSION = 7;
+export const PATCH_FORMAT_VERSION = 8;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
 export const PATCH_SLOTS = 4;
@@ -143,7 +147,8 @@ export const CcTargetKind = Object.freeze({
   CC_TARGET_TRANSPORT: 2,
   CC_TARGET_PORT: 3,
   CC_TARGET_KEY: 4,
-  CC_TARGET_KINDS: 5,
+  CC_TARGET_MACRO: 5,
+  CC_TARGET_KINDS: 6,
 });
 
 export const CcClockTarget = Object.freeze({
@@ -194,6 +199,7 @@ export const ModStatus = Object.freeze({
   MOD_STATUS_REFUSED: 3,
   MOD_STATUS_PINNED: 4,
   MOD_STATUS_ACTIVE: 5,
+  MOD_STATUS_CLIPPED: 6,
 });
 
 export const ModFlags = Object.freeze({

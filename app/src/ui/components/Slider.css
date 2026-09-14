@@ -1,0 +1,25 @@
+/* A slider a finger can use: a tall, obvious thumb over a thin track, with
+   room around it so a tap near the line still lands. */
+input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  height: var(--tap); background: none; margin: 0; padding: 0;
+  /* A drag down the page is the page's, not the slider's. This is half of
+     it; the other half is `Slider.js`, because the browser hands the gesture
+     over only after the input has already moved. */
+  touch-action: pan-y;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px; background: var(--raised); border: 1px solid var(--line);
+}
+input[type=range]::-moz-range-track {
+  height: 6px; border-radius: 3px; background: var(--raised); border: 1px solid var(--line);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 26px; height: 26px; margin-top: -11px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg); cursor: pointer;
+}
+input[type=range]::-moz-range-thumb {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg); cursor: pointer;
+}

@@ -1,0 +1,41 @@
+/* The play tab: the module running. */
+.meter-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+.clock-readout { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 10rem; }
+.gate-dots { display: flex; gap: 3px; flex-wrap: wrap; }
+.gate-dot {
+  width: 9px; height: 16px; border-radius: 2px; background: var(--raised); border: 1px solid var(--line);
+}
+.gate-dot.lit { background: var(--gate); border-color: var(--gate); }
+
+/* One octave, playable with a thumb: the black keys are in the row, named,
+   because a 26px key on a phone cannot be hit between two others. A key holds
+   `touch-action: none` so a drag across the keyboard plays a glissando. */
+.keys { display: flex; flex-wrap: wrap; gap: 3px; padding-bottom: .3rem; }
+.key { flex: 1 1 3rem; max-width: 8rem; min-height: 3.5rem; font-size: .75rem; touch-action: none; }
+.key.black { background: var(--raised); color: var(--dim); }
+.key.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+/* One player per box: on a phone the controls wrap, and two players' worth
+   of wrapped controls in one list is unreadable. */
+.players { display: grid; gap: .6rem; margin-bottom: .6rem; }
+.player { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
+.player > .row { margin-bottom: .3rem; }
+.player p { margin: .2rem 0 0; overflow-wrap: anywhere; }
+
+.log-scroll {
+  max-height: 16rem; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.log { display: grid; font-size: .8rem; font-variant-numeric: tabular-nums; }
+.log-line {
+  display: grid; grid-template-columns: 3.5rem 4.5rem 1fr; gap: .4rem;
+  padding: .3rem .5rem; border-bottom: 1px solid var(--line);
+}
+.log-line:last-child { border-bottom: none; }
+.log-time, .log-where { color: var(--dim); }
+.log-where { grid-column: 1 / -1; font-size: .75rem; }
+
+@media (min-width: 34rem) {
+  .log-line { grid-template-columns: 4rem 5rem 1fr auto; }
+  .log-where { grid-column: auto; }
+}

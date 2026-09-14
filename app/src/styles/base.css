@@ -1,0 +1,134 @@
+/* Mobile first, and not as a courtesy: the module runs in this page, so a
+   phone with no cable and no Web MIDI is a fully working editor and the only
+   one an iPhone can have. The wide layout is the enhancement. */
+
+/* Every flex and grid item may be narrower than its contents. A grid or flex
+   item is `min-width: auto` by default - "at least as wide as what is inside
+   me" - and a 32-step lane is 925px of inside, which propagates out through
+   the card and past the screen. Set once, here, for everything. */
+* { box-sizing: border-box; min-width: 0; }
+
+/* Nothing may make the page itself scroll sideways: an overflowing lane
+   scrolls in its own box or it is a bug. */
+html, body { max-width: 100%; overflow-x: hidden; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+h1 { font-size: 1.15rem; margin: 0; }
+h2 {
+  font-size: .8rem; margin: 0 0 .6rem; color: var(--dim);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+h2.spaced { margin-top: 1.4rem; }
+h3 { font-size: 1rem; margin: 0; }
+h4 {
+  margin: 0 0 .3rem; font-size: .8rem; color: var(--dim);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+h4.spaced { margin-top: 1rem; }
+p { margin: 0 0 .6rem; }
+
+.hint { color: var(--dim); font-size: .85rem; }
+.hint.summary { margin-bottom: .6rem; font-size: .8rem; }
+.tag {
+  font-size: .7rem; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 4px; padding: 0 .35rem;
+}
+.index {
+  background: var(--line); border-radius: 5px; padding: .05rem .5rem;
+  color: var(--dim); font-variant-numeric: tabular-nums;
+}
+
+/* --- controls --- */
+button, select, input, textarea { font: inherit; color: var(--ink); }
+button {
+  min-height: var(--tap); background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: .4rem .9rem; cursor: pointer;
+  touch-action: manipulation;
+}
+button:hover { border-color: var(--accent); }
+button:active { background: var(--raised); }
+button.ghost {
+  background: none; border-color: transparent; color: var(--dim);
+  min-height: 2.25rem; padding: .2rem .6rem;
+}
+button.ghost:hover { color: var(--ink); border-color: var(--line); }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+button.active { border-color: var(--gate); color: var(--gate); }
+button.primary { border-color: var(--accent); color: var(--accent); }
+
+select {
+  min-height: var(--tap); max-width: 100%;
+  background: var(--raised); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: .35rem .5rem;
+}
+input[type=number], input[type=text], textarea {
+  min-height: var(--tap); background: var(--raised); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: .35rem .5rem;
+}
+input.number { width: 4.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+input.number.wide { width: 6rem; }
+input[type=checkbox].switch { width: 1.4rem; height: 1.4rem; accent-color: var(--accent); }
+.bool { display: inline-flex; gap: .5rem; align-items: center; min-height: var(--tap); }
+.grow { flex: 1 1 8rem; }
+
+label.file {
+  display: inline-flex; align-items: center; min-height: var(--tap);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .4rem .9rem; cursor: pointer;
+}
+label.file input { display: none; }
+
+textarea.json {
+  width: 100%; font-family: var(--mono); font-size: .8rem; line-height: 1.45;
+  resize: vertical; white-space: pre;
+}
+/* Text that is one line long - the schema, and the prompt carrying it - wraps
+   instead of scrolling sideways past the edge of the screen. */
+textarea.json.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.chip {
+  min-height: 2.4rem; padding: .25rem .7rem; border-radius: 999px;
+  background: var(--raised); border: 1px solid var(--line); color: var(--dim);
+  font-size: .85rem;
+}
+.chip.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent); color: var(--ink);
+}
+.chip.dom-gate, .chip.dom-note, .chip.dom-CV {
+  color: var(--wire); border-color: color-mix(in srgb, var(--wire) 55%, transparent);
+}
+
+/* An icon button: square, the icon in `currentColor`, its word in the tooltip
+   and the accessible name - or beside the icon where `.with-text` says there
+   is room for it. */
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  width: var(--tap); height: var(--tap); min-height: 0; padding: 0; flex: 0 0 auto;
+}
+.icon-btn.with-text { width: auto; padding: 0 .8rem 0 .6rem; }
+.icon-btn.ghost { color: var(--dim); }
+.icon-btn.ghost:hover { color: var(--ink); }
+.icon-btn.primary { color: var(--accent); }
+.icon { width: 1.3rem; height: 1.3rem; display: block; flex: none; }
+
+/* A lamp: off unless `.lit` or an opacity is written on it. */
+.led { width: 14px; height: 14px; border-radius: 50%; flex: none; opacity: .08; }
+.led.green { background: var(--gate); box-shadow: 0 0 8px var(--gate); }
+.led.red { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+.led.lit { opacity: 1; }
+
+.fallback {
+  display: block; padding: 1rem; border: 1px solid var(--warn); border-radius: var(--radius);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button, .chip { transition: border-color .12s ease, background .12s ease, color .12s ease; }
+}

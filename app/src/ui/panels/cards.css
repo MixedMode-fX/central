@@ -1,0 +1,61 @@
+/* The cards: a node, a jack, a MIDI port. */
+.node header { display: flex; gap: .5rem; align-items: center; margin-bottom: .6rem; flex-wrap: wrap; }
+.node header .icon-btn { margin-left: auto; }
+
+/* A port is one line: its name, and the bus it is on. What it says about its
+   bus goes under it in the smaller type of an aside. */
+.ports { display: grid; gap: .7rem; margin-bottom: .7rem; }
+.port-group { display: grid; gap: .35rem; align-content: start; }
+.port { padding-left: .55rem; border-left: 3px solid var(--wire, var(--line)); }
+.port-head {
+  display: grid; grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
+  gap: .5rem; align-items: center;
+}
+.port-name { color: var(--ink); font-size: .85rem; overflow-wrap: anywhere; }
+.required { color: var(--warn); margin-left: .15rem; }
+.port select { width: 100%; }
+.wire-note {
+  display: block; color: var(--dim); font-size: .74rem; line-height: 1.35;
+  margin-top: .1rem; overflow-wrap: anywhere;
+}
+.wire-note.empty { color: var(--warn); }
+
+/* A jack is a socket: a lamp, a name, and whatever drives it. */
+.jack-cards { display: grid; gap: .5rem; }
+.jack-card { border: 1px solid var(--line); border-radius: var(--radius); padding: .5rem .6rem; }
+.jack-head { display: flex; gap: .5rem; align-items: center; margin-bottom: .3rem; }
+.jack-head h4 { margin: 0; }
+.jack-card.unused { border-style: dashed; }
+.jack-card .port { margin-top: .5rem; }
+.led.jack-lamp { background: var(--gate); }
+
+/* A MIDI port, read down the card in the direction the notes travel: what it
+   is fed by, then what it feeds, each leg labelled. */
+.routes { display: grid; gap: 1rem; }
+.route-side { display: grid; gap: .5rem; align-content: start; }
+.route-side-head { display: flex; gap: .5rem; align-items: center; }
+.route-side-head h3 { margin-right: auto; }
+.route {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .5rem .6rem; display: grid; gap: .4rem;
+}
+.route-head { display: flex; gap: .5rem; align-items: center; }
+.route-head h4 { margin: 0; margin-right: auto; color: var(--ink); }
+.route-actions { display: flex; gap: .1rem; margin-left: auto; }
+.route-leg { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: .5rem; }
+.leg-name {
+  color: var(--dim); font-size: .7rem; text-transform: uppercase;
+  letter-spacing: .08em; padding-top: .9rem;
+}
+.leg-body { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }
+.leg-body > select { flex: 1 1 9rem; max-width: 26rem; }
+.route .wire-note { margin-left: 2.9rem; }
+
+@media (min-width: 34rem) {
+  .jack-cards { grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+}
+@media (min-width: 52rem) {
+  .ports { grid-template-columns: 1fr 1fr; gap: .8rem 1.5rem; }
+  .routes { grid-template-columns: 1fr 1fr; align-items: start; }
+  .port-head { grid-template-columns: 8rem 1fr; }
+}

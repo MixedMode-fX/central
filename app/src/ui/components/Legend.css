@@ -1,0 +1,15 @@
+/* One chip per trace, in the colour the canvas draws it, handed over as a
+   custom property because a bus's shade is chosen by its number. A pressed-out
+   chip is a trace put away for the moment. */
+.legend { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
+.legend-chip {
+  display: inline-flex; align-items: center; gap: .4rem;
+  min-height: 2.1rem; padding: .15rem .6rem; border-radius: 999px;
+  background: var(--raised); border: 1px solid var(--line); color: var(--ink); font-size: .78rem;
+}
+.legend-chip::before {
+  content: ''; width: 1rem; height: .55rem; border-radius: 2px;
+  background: var(--key, var(--dim)); flex: none;
+}
+.legend-chip.off { color: var(--dim); text-decoration: line-through; }
+.legend-chip.off::before { opacity: .25; }

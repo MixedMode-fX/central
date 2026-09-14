@@ -1,0 +1,98 @@
+/* The shell, the header, the tabs and the layout primitives every tab is
+   built from: a panel, a row, a grid of fields. */
+
+.shell {
+  max-width: 68rem; margin: 0 auto;
+  padding: 1rem .75rem 5rem;
+  padding-left: max(.75rem, env(safe-area-inset-left));
+  padding-right: max(.75rem, env(safe-area-inset-right));
+}
+
+/* --- the header --- */
+.top { display: grid; gap: .6rem; margin-bottom: .75rem; }
+.title { display: flex; align-items: baseline; gap: .6rem; }
+.patch-name {
+  color: var(--dim); font-size: .95rem; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.top-buttons { display: flex; gap: .5rem; flex-wrap: wrap; }
+.top-buttons .icon-btn { flex: 1 1 auto; }
+.status { color: var(--dim); font-size: .9rem; margin: 0; }
+.status.online { color: var(--gate); }
+.status.warn { color: var(--warn); }
+
+/* --- the tabs: an icon over its word, so five fit a phone --- */
+.tabs {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; gap: .25rem; margin: 0 -.25rem 1rem;
+  padding: .35rem .25rem; background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 1 0 auto; min-height: var(--tap); padding: .25rem .7rem;
+  display: inline-flex; flex-direction: column; align-items: center; gap: .1rem;
+  background: none; border: 1px solid transparent; border-radius: var(--radius);
+  color: var(--dim); font: inherit; cursor: pointer;
+}
+.tab-label { font-size: .72rem; line-height: 1.2; }
+.tab.active { background: var(--panel); border-color: var(--line); color: var(--ink); }
+.tab.active .icon { color: var(--accent); }
+
+/* --- the primitives --- */
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-panel);
+  padding: .9rem; margin-bottom: 1rem;
+}
+.row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.stack { display: grid; gap: .5rem; }
+.fields { display: grid; gap: .7rem; margin-bottom: .8rem; }
+.field { display: grid; gap: .3rem; }
+.field-name { color: var(--dim); font-size: .85rem; }
+.field select, .field input[type=number] { max-width: 100%; }
+
+/* A box for what cannot wrap: a table, a lane on a wide screen. */
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* --- notices: an error to dismiss, the problems in a patch, its notes --- */
+.notice {
+  border-radius: var(--radius); padding: .7rem .8rem; margin-bottom: 1rem; border: 1px solid;
+}
+.notice ul { margin: 0; padding-left: 1.1rem; }
+.notice li { overflow-wrap: anywhere; }
+.notice.error { border-color: var(--bad); color: var(--bad); cursor: pointer; }
+.notice.problems { border-color: var(--bad); }
+.notice.problems h4 { color: var(--bad); }
+.notice.notes { border-color: var(--warn); }
+.notice.notes h4 { color: var(--warn); }
+
+/* --- a disclosure --- */
+details > summary {
+  cursor: pointer; min-height: var(--tap); display: flex;
+  align-items: center; gap: .5rem; color: var(--dim);
+}
+
+/* --- a table --- */
+table.list { border-collapse: collapse; width: 100%; font-size: .85rem; }
+table.list th {
+  text-align: left; color: var(--dim); font-weight: 400;
+  border-bottom: 1px solid var(--line); padding: .35rem .5rem .35rem 0;
+}
+table.list td {
+  padding: .45rem .5rem .45rem 0; border-bottom: 1px solid var(--line); vertical-align: top;
+}
+
+/* --- wider screens: columns, and nothing the editor needs --- */
+@media (min-width: 34rem) {
+  .shell { padding: 1.5rem 1rem 4rem; }
+  h1 { font-size: 1.25rem; }
+  .top { grid-template-columns: 1fr auto; align-items: center; }
+  .top-buttons { justify-content: flex-end; }
+  .top-buttons .icon-btn { flex: 0 0 auto; }
+  .status { grid-column: 1 / -1; }
+  .tab { flex: 0 0 auto; flex-direction: row; gap: .45rem; padding: 0 .9rem; }
+  .tab .icon { width: 1.1rem; height: 1.1rem; }
+  .tab-label { font-size: inherit; }
+  .fields { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+}

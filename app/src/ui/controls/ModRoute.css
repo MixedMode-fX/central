@@ -1,0 +1,38 @@
+/* A modulation route beside the parameter it moves: a meter of what it is
+   doing, then the three settings that decide it, each on a named line. */
+.mod-routes { gap: 1rem; }
+.mod-route { border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem .7rem; }
+.mod-route .param-head { margin-bottom: .5rem; }
+.mod-route .fields { margin-bottom: 0; gap: .5rem; }
+
+/* The meter. The track is the target parameter's whole range; the band is the
+   part this route may write; the tick is the set point; the bar between the
+   tick and the dot is the modulation itself. */
+.mod-meter { margin: .1rem 0 .7rem; }
+.mod-track {
+  position: relative; height: .85rem; border-radius: 5px;
+  background: var(--bg); border: 1px solid var(--line); overflow: hidden;
+}
+.mod-band { position: absolute; inset-block: 0; background: var(--raised); }
+.mod-reach { position: absolute; inset-block: 2px; background: color-mix(in srgb, var(--cv) 55%, transparent); }
+.mod-centre { position: absolute; inset-block: 0; width: 2px; margin-left: -1px; background: var(--dim); }
+.mod-now {
+  position: absolute; top: 50%; width: .55rem; height: .55rem; margin: -.275rem 0 0 -.275rem;
+  border-radius: 50%; background: var(--cv);
+}
+.mod-scale {
+  display: flex; gap: .5rem; align-items: baseline; margin-top: .25rem;
+  color: var(--dim); font-size: .72rem; font-variant-numeric: tabular-nums;
+}
+.mod-live { flex: 1 1 auto; text-align: center; color: var(--cv); }
+.mod-why { margin: .35rem 0 0; color: var(--dim); font-size: .75rem; font-style: italic; }
+.mod-why:empty { display: none; }
+/* A route that is not moving anything must not borrow the signal colour. */
+.mod-meter.idle .mod-now, .mod-meter.idle .mod-reach { background: var(--dim); }
+.mod-meter.idle .mod-live { color: var(--dim); }
+.mod-meter.waiting .mod-now, .mod-meter.waiting .mod-reach { display: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The poll is ten a second and an LFO is slower, so the dot glides. */
+  .mod-now, .mod-reach { transition: left .1s linear, width .1s linear; }
+}

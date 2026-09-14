@@ -1,0 +1,5 @@
+/* The page-wide styles. A component's own rules live beside it and are
+   imported by the module that builds it. */
+@import './tokens.css';
+@import './base.css';
+@import './layout.css';

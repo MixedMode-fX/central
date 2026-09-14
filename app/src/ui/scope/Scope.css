@@ -1,0 +1,11 @@
+/* The scope and the piano roll. A canvas has no intrinsic width, so it is
+   given one - the panel's - and its pixel buffer is set from that times the
+   device pixel ratio in scope.js; a canvas sized in CSS alone is a blurred
+   canvas on every phone. */
+.scope-wrap { margin-bottom: .6rem; }
+canvas.scope, canvas.roll {
+  display: block; width: 100%; border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--bg);
+}
+.legend-row .legend { margin-top: 0; flex: 1 1 auto; }
+.node-roll canvas.roll { margin-bottom: .2rem; }

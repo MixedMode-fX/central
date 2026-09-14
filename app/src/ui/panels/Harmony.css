@@ -1,0 +1,37 @@
+/* A harmony's picture: the key's chords where the circle of fifths puts them,
+   and arrows for the moves. Capped and centred, because a circle two screens
+   wide is no easier to read than one that fits. */
+.harmony .circle-of-fifths { display: block; width: 100%; max-width: 340px; margin: .2rem auto; }
+.circle-ring { fill: none; stroke: var(--line); }
+.circle-label { fill: var(--dim); font-size: 11px; opacity: .5; }
+.circle-label.in-key { fill: var(--ink); opacity: 1; font-size: 12px; }
+.chord-dot { cursor: pointer; }
+.chord-dot circle { fill: var(--raised); stroke: var(--note); stroke-width: 1.5; }
+.chord-dot text { fill: var(--ink); font-size: 12px; }
+/* A chord's quality is in its outline: filled major, open minor, dashed
+   diminished. */
+.chord-dot.q-maj circle { fill: color-mix(in srgb, var(--note) 28%, var(--raised)); }
+.chord-dot.q-dim circle { stroke-dasharray: 3 2; }
+.chord-dot.q-aug circle { stroke-dasharray: 1 2; }
+.chord-dot.focused circle { stroke: var(--accent); stroke-width: 2; }
+.chord-dot.playing circle { stroke: var(--accent); stroke-width: 3; }
+.chord-dot.playing text { fill: var(--accent); }
+.fan path { stroke: var(--dim); fill: none; }
+/* One marker, every arrow: `context-stroke` paints the head the colour of the
+   line it ends. */
+.circle-of-fifths marker path { fill: var(--dim); fill: context-stroke; }
+.fan path.top { stroke: var(--note); stroke-opacity: 1; }
+.fan path.loop { stroke: var(--accent); stroke-width: 2; stroke-opacity: .85; }
+.fan path.loop.round { stroke-dasharray: 4 3; }
+
+/* The loop's slots: a pattern with a playhead in it. */
+.loop-row { display: grid; gap: .2rem; margin-top: .5rem; }
+.chord-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(3.5rem, 1fr)); gap: 3px; }
+.chord-slot {
+  display: grid; gap: 1px; text-align: center; padding: 2px 1px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 3px;
+}
+.chord-slot.empty { border-style: dashed; opacity: .5; }
+.chord-slot .roman { font-size: .85rem; }
+.chord-slot .name { font-size: .65rem; color: var(--dim); min-height: .8rem; }
+.chord-slot.playing { outline: 2px solid var(--accent); outline-offset: 1px; }

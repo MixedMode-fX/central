@@ -1,5 +1,5 @@
 // The parts of the app that are not the protocol: the patch library, the
-// module's runtime seam, and the single-file build.
+// module's runtime seam, and the panels.
 //
 // `protocol.test.mjs` checks the app against the firmware's protocol. This
 // checks the three things the merge added, and it checks them the same way -
@@ -10,85 +10,54 @@
 //   * an incoming CC takes main.cpp's path through the control plane, which is
 //     what makes learn work from a controller plugged into the browser;
 //   * a slider does not take a value from a finger that was scrolling past it;
-//   * the built page still contains every module, wired up.
 //
-//   node app/test/app.test.mjs [path/to/mmmc.wasm]
+//   npm test -- app      (vitest; MMMC_WASM names another module)
 
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 
-import * as P from '../src/protocol.js';
-import * as codec from '../src/codec.js';
-import { Library, toBase64, fromBase64, ago } from '../src/storage.js';
-import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/patchjson.js';
-import { validate } from '../src/validate.js';
+import * as P from '../src/protocol/generated.js';
+import * as codec from '../src/protocol/codec.js';
+import { Library, toBase64, fromBase64, ago } from '../src/services/storage.js';
+import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/core/patchjson.js';
+import { validate } from '../src/core/validate.js';
 import {
   SCALES, scaleMaskOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS, ALL_MUSICAL,
-} from '../src/names.js';
-import { EXAMPLES } from '../src/examples.js';
-import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/schema.js';
-import { EmbeddedModule } from '../src/module.js';
-import {
-  slider, learnButton, paramSections, paramSection, PARAM_SECTIONS, nodeCard, triadQuality,
-  refreshModLive, paintHarmony,
-} from '../src/views.js';
-import { shade, nodeRollSources, scopeRows } from '../src/scope.js';
-import { ICON_NAMES } from '../src/icons.js';
-import { Listener, gateHits } from '../src/audio.js';
-import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/drums.js';
+} from '../src/protocol/names.js';
+import { keySpelling, triadQuality } from '../src/core/music.js';
+import { EXAMPLES } from '../src/core/examples.js';
+import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/core/schema.js';
+import { paramSections, paramSection, PARAM_SECTIONS } from '../src/ui/controls/ParamSections.js';
+import { Slider } from '../src/ui/components/Slider.js';
+import { LearnButton } from '../src/ui/controls/LearnButton.js';
+import { NodeCard } from '../src/ui/panels/NodeCard.js';
+import { NO_STEP } from '../src/ui/panels/grids/playhead.js';
+import { describeTarget, RouteTable } from '../src/ui/panels/ModMatrix.js';
+import { KeyTab } from '../src/ui/tabs/KeyTab.js';
+import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
+import { shade, nodeRollSources, scopeRows } from '../src/ui/scope/scope.js';
+import { ICON_NAMES } from '../src/ui/components/icons.js';
+import { gateHits } from '../src/runtime/audio/listener.js';
+import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/runtime/audio/drums.js';
 import {
   connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
   applyWrite, freeBus, waitingBus, planJackDirection, planPortFlip, applyPortFlip,
   planPortFanOut, planModulation, planBusModulation, planCcBinding, CC_MAX,
-} from '../src/graph.js';
-import { catalogue, filterGroups, optionsOf } from '../src/picker.js';
-import { ENDPOINTS } from '../src/canvas.js';
+} from '../src/core/graph.js';
+import { catalogue, filterGroups, optionsOf, ENDPOINTS } from '../src/core/catalogue.js';
 import {
   autoLayout, layoutOf, socketPoint, blockHeight, forgetNode, BLOCK_W, ROW_H,
-} from '../src/layout.js';
-import { bundle } from '../tools/bundle.mjs';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const wasmPath = process.argv[2] || join(here, '..', '..', 'emulator', 'dist', 'mmmc.wasm');
-
-let tests = 0;
-const failures = [];
-async function test(name, fn) {
-  try {
-    await fn();
-    tests++;
-    console.log(`ok - ${name}`);
-  } catch (error) {
-    failures.push({ name, error });
-    console.log(`not ok - ${name}\n    ${error.message}`);
-  }
-}
-
-// localStorage, as the browser presents it: strings in, strings out, and a
-// quota that can refuse.
-function fakeStorage({ limit = Infinity } = {}) {
-  const map = new Map();
-  return {
-    getItem: (key) => (map.has(key) ? map.get(key) : null),
-    removeItem: (key) => map.delete(key),
-    setItem: (key, value) => {
-      if (value.length > limit) {
-        const error = new Error('quota');
-        error.name = 'QuotaExceededError';
-        throw error;
-      }
-      map.set(key, String(value));
-    },
-  };
-}
+} from '../src/core/layout.js';
+import {
+  instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, listening,
+  words, find, withDom, repoRoot,
+} from './harness/index.mjs';
 
 // --- the library ------------------------------------------------------------
 
-await test('a saved patch comes back as the same image', async () => {
+test('a saved patch comes back as the same image', async () => {
   const library = new Library(fakeStorage());
   const patch = codec.emptyPatch();
   patch.nodes.push(codec.emptyNode(1));
@@ -106,7 +75,7 @@ await test('a saved patch comes back as the same image', async () => {
   assert.equal(back.patch.gatePorts[0].bus, 3);
 });
 
-await test('the library lists, renames, duplicates and deletes', async () => {
+test('the library lists, renames, duplicates and deletes', async () => {
   const library = new Library(fakeStorage());
   const bytes = codec.encodePatch(codec.emptyPatch(), codec.emptyGlobals());
   const first = library.save({ name: 'one', bytes, nodes: 0 });
@@ -135,7 +104,7 @@ await test('the library lists, renames, duplicates and deletes', async () => {
   assert.equal(library.list().length, 2);
 });
 
-await test('a full quota is reported, not swallowed', async () => {
+test('a full quota is reported, not swallowed', async () => {
   const library = new Library(fakeStorage({ limit: 40 }));
   assert.ok(library.available, 'the probe write fits');
   const bytes = codec.encodePatch(codec.emptyPatch(), codec.emptyGlobals());
@@ -146,7 +115,7 @@ await test('a full quota is reported, not swallowed', async () => {
   library.saveWorking({ id: null, name: 'working', bytes });
 });
 
-await test('a browser that stores nothing is a message, not a crash', async () => {
+test('a browser that stores nothing is a message, not a crash', async () => {
   const denied = {
     getItem: () => { throw new Error('denied'); },
     setItem: () => { throw new DOMException('denied', 'SecurityError'); },
@@ -161,7 +130,7 @@ await test('a browser that stores nothing is a message, not a crash', async () =
   library.saveWorking({ id: null, name: 'x', bytes: new Uint8Array([1, 2, 3]) });
 });
 
-await test('the working patch survives a reload', async () => {
+test('the working patch survives a reload', async () => {
   const storage = fakeStorage();
   const bytes = codec.encodePatch(codec.emptyPatch(), codec.emptyGlobals());
   new Library(storage).saveWorking({ id: 'p1', name: 'in progress', bytes });
@@ -171,7 +140,7 @@ await test('the working patch survives a reload', async () => {
   assert.deepEqual([...restored.bytes], [...bytes]);
 });
 
-await test('base64 survives every byte value, and ago() reads as English', async () => {
+test('base64 survives every byte value, and ago() reads as English', async () => {
   const all = Uint8Array.from({ length: 256 }, (_, i) => i);
   assert.deepEqual([...fromBase64(toBase64(all))], [...all]);
   const now = Date.now();
@@ -187,7 +156,7 @@ await test('base64 survives every byte value, and ago() reads as English', async
 // that needs a document (fetching the wasm, the animation frame) out of the
 // class body.
 
-await test('the module runs, keeps time and lights the LEDs', async () => {
+test('the module runs, keeps time and lights the LEDs', async () => {
   const { module } = await instantiate();
   // A freshly booted module runs the default patch, whose clock is internal.
   module.clockStart();
@@ -209,7 +178,7 @@ await test('the module runs, keeps time and lights the LEDs', async () => {
   assert.ok(flashed, 'the green LED never flashed the beat');
 });
 
-await test('a jack tap is an edge, not a level', async () => {
+test('a jack tap is an edge, not a level', async () => {
   const { module } = await instantiate();
   module.pulseJack(0, 20);
   assert.equal(module.jackInput(0), 1, 'the jack goes high at once');
@@ -229,7 +198,7 @@ await test('a jack tap is an edge, not a level', async () => {
 // 10 Hz, and a trigger on this machine is high for one or two passes - one or
 // two *milliseconds*. Ninety-eight times in a hundred the poll landed while it
 // was low, so the lights showed a pattern nobody was playing.
-await test('a pulse too short to paint still reaches the lights', async () => {
+test('a pulse too short to paint still reaches the lights', async () => {
   const { module } = await instantiate();
   module.takeActivity();                            // start from a clean latch
   module.pulseJack(0, 2);                           // two milliseconds: a trigger
@@ -244,7 +213,7 @@ await test('a pulse too short to paint still reaches the lights', async () => {
 
 // The same sampling, kept: what the scope draws is every millisecond of it,
 // not what a paint happened to catch.
-await test('the scope keeps the pulse the eye missed', async () => {
+test('the scope keeps the pulse the eye missed', async () => {
   const { module } = await instantiate();
   module.pulseJack(1, 3);
   module.advance(200_000);
@@ -260,7 +229,7 @@ await test('the scope keeps the pulse the eye missed', async () => {
 // again. A view that redraws when the length changes therefore stops for ever
 // at event two hundred - and comes back to life on "clear", which is exactly
 // what it looked like from outside.
-await test('the MIDI log still reports events once the ring is full', async () => {
+test('the MIDI log still reports events once the ring is full', async () => {
   const { module } = await instantiate();
   for (let i = 0; i < 260; i++) module.emitMidi(P.MidiPort.mmMIDI_USB_0, 0xb0, i & 127, 1, 1);
   const length = module.midiLog.length;
@@ -272,7 +241,7 @@ await test('the MIDI log still reports events once the ring is full', async () =
   assert.equal(module.midiLog.at(-1).d1, 7, 'and the newest event is the one at the end');
 });
 
-await test('the piano roll opens a note, closes it, and holds an open one', async () => {
+test('the piano roll opens a note, closes it, and holds an open one', async () => {
   const { module } = await instantiate();
   const port = P.MidiPort.mmMIDI_USB_0;
   module.deliverMidi(port, 0x90, 1, 60, 100);       // what a key press does
@@ -294,7 +263,7 @@ await test('the piano roll opens a note, closes it, and holds an open one', asyn
 // Listening to a note bus, which is what makes an unfinished patch audible: a
 // bus only leaves the module once a MIDI out is patched to it, and while a
 // patch is being built most of them are not.
-await test('a note bus can be listened to, event by event', async () => {
+test('a note bus can be listened to, event by event', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const heard = [];
@@ -342,7 +311,7 @@ await test('a note bus can be listened to, event by event', async () => {
   assert.equal(heard.length, quiet, 'the bus is still being read with nobody listening');
 });
 
-await test('the monitor setup survives a reload', async () => {
+test('the monitor setup survives a reload', async () => {
   const storage = fakeStorage();
   new Library(storage).saveListen({
     volume: 0.3, clicks: false, clickVolume: 0.1,
@@ -360,7 +329,7 @@ await test('the monitor setup survives a reload', async () => {
   assert.equal(none.readListen(), null);
 });
 
-await test('a bound CC moves a parameter and is consumed', async () => {
+test('a bound CC moves a parameter and is consumed', async () => {
   const { module, E } = await instantiate();
   const device = await connected(module);
 
@@ -400,7 +369,7 @@ await test('a bound CC moves a parameter and is consumed', async () => {
 // from the CV button beside any parameter and a CC only by carrying the patch
 // to the controller - and a CC number is printed on the front of the thing.
 // So a number can be named, and it makes the binding a learn would have made.
-await test('a CC binds by its number, with no controller in the room', async () => {
+test('a CC binds by its number, with no controller in the room', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const descriptor = device.algorithms.find((a) => a.nParams > 0 && a.minIn === 0);
@@ -447,7 +416,7 @@ await test('a CC binds by its number, with no controller in the room', async () 
 
 // And the binding it plans is one the module honours - on any musical cable,
 // which is the point of the mask it starts with.
-await test('a binding made by name is one the module plays', async () => {
+test('a binding made by name is one the module plays', async () => {
   const { module, E } = await instantiate();
   const device = await connected(module);
   const descriptor = device.algorithms.find((a) => a.nParams > 0 && a.minIn === 0);
@@ -470,30 +439,23 @@ await test('a binding made by name is one the module plays', async () => {
 
 // The button itself: pressing it opens the menu, and what is in the menu is
 // what can be done from where the user is standing.
-await test('the learn button opens a menu that arms and binds', async () => {
+test('the learn button opens a menu that arms and binds', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const descriptor = device.algorithms.find((a) => a.nParams > 0 && a.minIn === 0);
   const patch = codec.emptyPatch();
   patch.nodes.push(codec.emptyNode(descriptor.id));
 
-  const calls = [];
-  const app = {
-    patch, device, offline: false, learnTarget: null, controller: null,
-    learn: (index, param) => { calls.push(['learn', index, param]); app.learnTarget = { nodeIndex: index, param }; },
-    cancelLearn: () => { calls.push(['cancel']); app.learnTarget = null; },
-    bindParam: (index, param, cc) => calls.push(['bind', index, param, cc]),
-    clearMapping: (slot) => calls.push(['clear', slot]),
-    render: () => {},
-  };
+  const app = fakeApp({ patch, device });
+  const { calls } = app;
 
   withDom(() => {
     // Nothing listening to a controller: the learn is a row to press, not an
     // arm, and the numbers are there to be picked.
-    const button = learnButton(app, 0, 0, 'depth', null);
+    const button = LearnButton(app, 0, 0, 'depth', null);
     button.fire('click');
     assert.deepEqual(calls, [], 'a learn was armed with nothing to turn it');
-    const menu = document.getElementById('param-menu');
+    const menu = document.getElementById('menu');
     assert.ok(menu, 'the button opened nothing');
     const said = words(menu);
     assert.match(said, /bind a controller to depth/);
@@ -504,25 +466,25 @@ await test('the learn button opens a menu that arms and binds', async () => {
     assert.ok(pick, 'the menu has no list of CC numbers');
     assert.equal(pick.children.length, CC_MAX + 2, 'every control, and "not bound"');
     pick.fire('change', { target: { value: '74' } });
-    assert.deepEqual(calls.at(-1), ['bind', 0, 0, 74]);
-    assert.equal(document.getElementById('param-menu'), null, 'the menu stayed open over the page');
+    assert.deepEqual(calls.at(-1), ['bindParam', 0, 0, 74]);
+    assert.equal(document.getElementById('menu'), null, 'the menu stayed open over the page');
 
     // A controller is listening: opening the menu is the arming, because
     // turning a knob is what the button is called.
     calls.length = 0;
     app.controller = { input: { name: 'a keyboard' } };
-    learnButton(app, 0, 0, 'depth', null).fire('click');
+    LearnButton(app, 0, 0, 'depth', null).fire('click');
     assert.deepEqual(calls, [['learn', 0, 0]], 'the press did not arm the learn');
-    assert.match(words(document.getElementById('param-menu')), /waiting for a controller/);
+    assert.match(words(document.getElementById('menu')), /waiting for a controller/);
 
     // And the button says so where the parameter is, not only in the menu.
-    assert.match(learnButton(app, 0, 0, 'depth', null).className, /armed/);
-    assert.ok(!learnButton(app, 0, 1, 'rate', null).className.includes('armed'),
+    assert.match(LearnButton(app, 0, 0, 'depth', null).className, /armed/);
+    assert.ok(!LearnButton(app, 0, 1, 'rate', null).className.includes('armed'),
               'one learn is armed at a time, and it is not every button');
   });
 });
 
-await test('what the module plays reaches whoever is listening', async () => {
+test('what the module plays reaches whoever is listening', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const heard = [];
@@ -547,7 +509,7 @@ await test('what the module plays reaches whoever is listening', async () => {
 
 // Every example, into the real firmware. An example that no longer loads is a
 // broken front door: it is the first thing a visitor presses.
-await test('every example patch is one the firmware accepts', async () => {
+test('every example patch is one the firmware accepts', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const names = Object.keys(EXAMPLES);
@@ -569,7 +531,7 @@ await test('every example patch is one the firmware accepts', async () => {
 
 // The masks are generated from midi/scale.h; this is the check that the names
 // beside them still point at what the firmware would play.
-await test('the scale names name the firmware\'s scales', async () => {
+test('the scale names name the firmware\'s scales', async () => {
   const { E } = await instantiate();
   // Id 0 is not a scale but an unset byte, and the list leaves it out.
   assert.equal(SCALES.length, E.emu_scale_count() - 1, 'a scale has been added or removed');
@@ -584,7 +546,7 @@ await test('the scale names name the firmware\'s scales', async () => {
 // the words a patch *file* is written in - "1/8", "triplet", "pingpong" - so a
 // division renamed or reordered in the firmware would silently repoint every
 // file that names one.
-await test('the note values and directions name the firmware\'s own options', async () => {
+test('the note values and directions name the firmware\'s own options', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const optionsOf = (algorithm, param) =>
@@ -604,8 +566,7 @@ await test('the note values and directions name the firmware\'s own options', as
 // knob reaches it by kind rather than by node and parameter - and the app has
 // to offer that, or the key is the one thing on the module a controller
 // cannot move.
-await test('a knob and a modulator can be pointed at the key', async () => {
-  const { describeTarget } = await import('../src/modmatrix.js');
+test('a knob and a modulator can be pointed at the key', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
 
@@ -619,7 +580,7 @@ await test('a knob and a modulator can be pointed at the key', async () => {
     bus: 0, targetKind: P.CcTargetKind.CC_TARGET_KEY, targetIndex: 0,
     param: P.CcKeyTarget.CC_KEY_SCALE, min: 0, max: 0, depth: 255, flags: 0,
   };
-  const app = { patch, device };
+  const app = fakeApp({ patch, device });
   assert.equal(describeTarget(app, patch.ccMap[0]), 'key · root');
   assert.equal(describeTarget(app, patch.modMap[0]), 'key · scale');
 
@@ -630,15 +591,13 @@ await test('a knob and a modulator can be pointed at the key', async () => {
 // The key tab is the only place a scale is chosen, so it has to show what the
 // choice does: a keyboard with the notes of the key lit, the root ringed, and
 // every key a way of moving the root.
-await test('the key tab draws the scale on a keyboard, and a key moves the root', async () => {
-  const { keyPanel } = await import('../src/key.js');
+test('the key tab draws the scale on a keyboard, and a key moves the root', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const globals = { ...codec.emptyGlobals(), scale: P.ScaleId.SCALE_NATURAL_MINOR, root: 9 };
-  const sent = [];
-  const app = { device, globals, edit: (fn, what) => sent.push(what), render: () => {} };
+  const app = fakeApp({ device, globals });
 
-  const panel = withDom(() => keyPanel(app));
+  const panel = withDom(() => KeyTab(app));
   const board = find(panel, (n) => n.className === 'keyboard');
   assert.ok(board, 'there is a keyboard');
   // Two octaves: fourteen white keys and ten black ones, in piano order.
@@ -662,7 +621,7 @@ await test('the key tab draws the scale on a keyboard, and a key moves the root'
   // And in a flat key it says so: the panel claims to be what a musician
   // writes down, so it cannot write the third of C minor as D sharp.
   globals.root = 0;
-  const flat = withDom(() => keyPanel(app));
+  const flat = withDom(() => KeyTab(app));
   assert.match(words(flat), /C minor — C D E\u266d F G A\u266d B\u266d/);
   assert.ok(find(flat, (n) => n.attrs?.['aria-label'] === 'root E\u266d'),
             'the keyboard is spelled the same way as the sentence under it');
@@ -670,7 +629,7 @@ await test('the key tab draws the scale on a keyboard, and a key moves the root'
   // And a key is a control, not a picture.
   dark.fire('click');
   assert.equal(globals.root, 1, 'pressing C# put the module in C#');
-  assert.deepEqual(sent, ['key']);
+  assert.deepEqual(app.calls.at(-1), ['globals', { root: 1 }, 'key'], 'and it was sent as the key');
 });
 
 // A pitch class is a number and a number has no spelling, so a list of sharps
@@ -682,8 +641,7 @@ await test('the key tab draws the scale on a keyboard, and a key moves the root'
 // The rule is the one a musician uses: a seven-note scale uses each letter
 // once, in order, so the letter of degree i is the tonic's plus i and the
 // accidental is whatever gets that letter to the pitch.
-await test('a key spells its own notes', async () => {
-  const { keySpelling, scaleMaskOf } = await import('../src/names.js');
+test('a key spells its own notes', async () => {
   const notes = (root, scale) => {
     const mask = scaleMaskOf(scale);
     const spelling = keySpelling(root, mask);
@@ -724,8 +682,7 @@ await test('a key spells its own notes', async () => {
 });
 
 // that appears nowhere is a route nobody can find or remove.
-await test('a route with no block to land on is still listed', async () => {
-  const { routeTable, describeTarget } = await import('../src/modmatrix.js');
+test('a route with no block to land on is still listed', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -733,9 +690,9 @@ await test('a route with no block to land on is still listed', async () => {
     bus: 0, targetKind: P.CcTargetKind.CC_TARGET_CLOCK, targetIndex: 0,
     param: P.CcClockTarget.CC_CLOCK_TEMPO, min: 0, max: 0, depth: 255, flags: 0,
   };
-  const app = { patch, device };
+  const app = fakeApp({ patch, device });
   assert.match(describeTarget(app, patch.modMap[0]), /clock/);
-  assert.ok(withDom(() => routeTable(app)),
+  assert.ok(withDom(() => RouteTable(app)),
             'a clock route has nowhere to be drawn, so the table is where it lives');
 });
 
@@ -745,7 +702,7 @@ await test('a route with no block to land on is still listed', async () => {
 // which notes, when, how loud, how likely - rather than left in the order the
 // firmware stores them. The sorting is arithmetic on the descriptors, so it
 // is checked here against every algorithm the module reports.
-await test('parameters are filed by what they do, on every node', async () => {
+test('parameters are filed by what they do, on every node', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const named = (name) => device.algorithms.find((d) => d?.name === name);
@@ -839,7 +796,7 @@ await test('parameters are filed by what they do, on every node', async () => {
 
 // A route made from the parameter's side - the CV button beside a control -
 // is the route a drag on the canvas makes, and the module takes it.
-await test('a route from the parameter side is the route a drag makes, and moves rather than doubles', async () => {
+test('a route from the parameter side is the route a drag makes, and moves rather than doubles', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const caps = device.capabilities;
@@ -885,7 +842,7 @@ await test('a route from the parameter side is the route a drag makes, and moves
 // several possible nothings it is. Every number here comes from the module
 // (SYSEX_GET_MOD_STATE), so this is also the check that the firmware's own
 // account of a route and the meter drawn from it are the same account.
-await test('a modulation route shows what it is doing, and says why when it is doing nothing', async () => {
+test('a modulation route shows what it is doing, and says why when it is doing nothing', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -905,25 +862,15 @@ await test('a modulation route shows what it is doing, and says why when it is d
   await device.sendPatch(patch, codec.emptyGlobals());
   module.advance(400_000);                 // long enough for the LFO to have moved
 
-  const app = {
-    patch, device, module, globals: codec.emptyGlobals(),
-    render: () => {}, scrolled: new Map(), modLive: new Map(),
-    // As App answers it: the control draws its live readout only when it
-    // knows a route reaches it.
-    routeFor: (node, param) => {
-      const found = patch.modMap.findIndex((r) => r && r.bus !== P.NO_BUS
-        && r.targetKind === P.CcTargetKind.CC_TARGET_NODE
-        && r.targetIndex === node && r.param === param);
-      return found < 0 ? null : { slot: found, ...patch.modMap[found] };
-    },
-  };
+  const app = fakeApp({ patch, device, module, globals: codec.emptyGlobals() });
   const shown = async () => {
     const state = await device.getModState(slot);
     assert.ok(state, 'the module answers with a state');
-    app.modLive.set(slot, state);
-    const card = nodeCard(app, 1);
+    app.session.modLive.set(slot, state);
+    const card = NodeCard(app, 1);
     document.body.append(card);
-    refreshModLive(app);
+    // The meter is painted per frame from what the module last reported.
+    app.live.tick({ module, activity: module.takeActivity() });
     return { state, said: words(card) };
   };
 
@@ -961,7 +908,7 @@ await test('a modulation route shows what it is doing, and says why when it is d
 
 // A control that is stored, real, and reaching nothing until another control
 // says so. The LFO has two rates and one of them is live at a time.
-await test('a setting the algorithm is currently ignoring says so', async () => {
+test('a setting the algorithm is currently ignoring says so', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -972,26 +919,25 @@ await test('a setting the algorithm is currently ignoring says so', async () => 
   const at = (name) => lfo.params.flatMap((g) => (g.repeat > 1 ? [] : g.fields.map((pd, f) => ({ pd, i: g.first + f }))))
     .find((x) => x.pd.name === name).i;
 
-  const app = { patch, device, module, globals: codec.emptyGlobals(),
-                render: () => {}, scrolled: new Map(), modLive: new Map() };
+  const app = fakeApp({ patch, device, module, globals: codec.emptyGlobals() });
 
   // Free-running: the rate decides the cycle, and the note value does not.
   node.params[at('sync')] = 1;
-  let said = withDom(() => words(nodeCard(app, 0)));
+  let said = withDom(() => words(NodeCard(app, 0)));
   assert.match(said, /free-running: the rate decides the cycle/);
   assert.doesNotMatch(said, /the cycle is locked to the clock/);
 
   // Locked: the other way round, and the control that decides is in the same
   // section as the two it switches between.
   node.params[at('sync')] = 2;
-  said = withDom(() => words(nodeCard(app, 0)));
+  said = withDom(() => words(NodeCard(app, 0)));
   assert.match(said, /the cycle is locked to the clock/);
   assert.doesNotMatch(said, /the rate decides the cycle/);
 });
 
 // A control signal is a level, so the scope keeps its value per column the
 // way it keeps a gate's edge, straight off the bus once a pass.
-await test('a control signal reaches the scope, and the scope lists it', async () => {
+test('a control signal reaches the scope, and the scope lists it', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1022,7 +968,7 @@ await test('a control signal reaches the scope, and the scope lists it', async (
 
 // The roll under a node shows both sides of it, in the shades the buses have
 // everywhere else; and a shade never leaves its domain.
-await test('a node\'s roll lists what it reads and writes, in the domain\'s colour', async () => {
+test('a node\'s roll lists what it reads and writes, in the domain\'s colour', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1067,7 +1013,7 @@ function paramNamed(d, name) {
   return null;
 }
 
-await test('a harmony draws its key on the circle of fifths, and the loop it wrote', async () => {
+test('a harmony draws its key on the circle of fifths, and the loop it wrote', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const harmony = device.algorithms.find((d) => d?.name === 'Harmony');
@@ -1095,12 +1041,12 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
 
   // The key is on the app as well as in the module: the circle names its
   // chords the way this key spells them, and that is the app's own table.
-  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
+  const app = fakeApp({ patch, device, module, globals });
   const harmonyAt = patch.nodes.length - 1;
 
   // Before it has played: seven chords of C major on the circle, the walk's
   // arrows from the tonic, and four empty slots waiting to be written.
-  let card = withDom(() => nodeCard(app, harmonyAt));
+  let card = withDom(() => NodeCard(app, harmonyAt));
   let said = words(card);
   assert.match(said, /circle of fifths/);
   assert.match(said, /7 chords/, 'a major key has seven chords');
@@ -1114,7 +1060,7 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
   assert.match(said, /loop \(4\)/, 'the loop says how long it is');
   // The sentence under the picture is written straight onto the element, the
   // way the frame loop rewrites it as the music moves.
-  const caption = (built) => find(built, (kid) => /-caption$/.test(kid.attrs?.id ?? ''))?.textContent ?? '';
+  const caption = (built) => find(built, (kid) => /harmony-caption/.test(kid.className ?? ''))?.textContent ?? '';
   assert.match(caption(card), /writing it down: 0 of 4 chords/, 'nothing is written before it plays');
 
   // Playing: the loop fills, and the circle draws it as a path through the
@@ -1122,11 +1068,11 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
   module.advance(20_000_000);
   assert.equal(module.harmonyLoopLength(harmonyAt), 4);
   const written = [0, 1, 2, 3].map((slot) => module.harmonyLoopChord(harmonyAt, slot));
-  assert.ok(written.every((d) => d !== 0xFF), `the loop never filled: ${written}`);
+  assert.ok(written.every((d) => d !== NO_STEP), `the loop never filled: ${written}`);
   assert.equal(written[0], 0, 'the first advance is the tonic, so the loop starts on it');
   assert.ok(module.harmonyLoopPosition(harmonyAt) < 4, 'and it is somewhere inside the loop');
 
-  card = withDom(() => nodeCard(app, harmonyAt));
+  card = withDom(() => NodeCard(app, harmonyAt));
   assert.doesNotMatch(caption(card), /writing it down/, 'the loop is written, not being written');
   assert.match(caption(card), / → /, 'the written loop is named in order');
 
@@ -1153,7 +1099,7 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
   // Every other algorithm has no circle, which is also how the view knows not
   // to draw one.
   assert.equal(module.harmonyDegrees(0), 0, 'a metronome is not a harmony');
-  assert.doesNotMatch(words(withDom(() => nodeCard(app, 0))), /circle of fifths/);
+  assert.doesNotMatch(words(withDom(() => NodeCard(app, 0))), /circle of fifths/);
 
   // **A flat key is spelled flat.** In C minor the third degree is E flat,
   // and calling it "D#" does not read as a spelling slip - it reads as the
@@ -1163,7 +1109,7 @@ await test('a harmony draws its key on the circle of fifths, and the loop it wro
   globals.root = 0;
   await device.sendPatch(patch, globals);
   module.advance(1_000_000);
-  card = withDom(() => nodeCard(app, harmonyAt));
+  card = withDom(() => NodeCard(app, harmonyAt));
   said = words(card);
   for (const name of ['Cm', 'D\u00b0', 'E\u266d', 'Fm', 'Gm', 'A\u266d', 'B\u266d']) {
     assert.ok(said.split(/\s+/).includes(name), `${name} is not on the circle of C minor`);
@@ -1208,7 +1154,7 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
   globals.scale = P.ScaleId.SCALE_MAJOR;
   await device.sendPatch(patch, globals);
 
-  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
+  const app = fakeApp({ patch, device, module, globals });
   const at = patch.nodes.length - 1;
   const shift = paramNamed(harmony, 'shift');
   assert.ok(shift, 'Harmony has a start shift');
@@ -1218,20 +1164,23 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
             'shift belongs beside the length it shifts');
 
   await withDom(async () => {
-    document.body.append(nodeCard(app, at));
+    document.body.append(NodeCard(app, at));
     const slots = [0, 1, 2, 3];
-    const chip = (slot) => document.getElementById(`harm-${at}-slot-${slot}`);
+    const chips = document.body.querySelectorAll('.chord-slot');
+    assert.equal(chips.length, 4, 'a chip per slot of the loop');
+    const chip = (slot) => chips[slot];
     const lit = () => slots.filter((slot) => chip(slot).classList.contains('playing'));
+    const paint = () => app.live.tick({ module, activity: module.takeActivity() });
 
     // Twenty seconds of the metronome's default, sampled every quarter of a
     // second: the invariant has to hold between chords as well as on them.
     const seen = new Set();
     for (let i = 0; i < 80; i++) {
       module.advance(250_000);
-      paintHarmony(app, at);
+      paint();
       const on = lit();
       const degree = module.harmonyDegree(at);
-      if (module.harmonyLoopChord(at, 0) === 0xFF) continue;   // still writing it down
+      if (module.harmonyLoopChord(at, 0) === NO_STEP) continue;   // still writing it down
       assert.equal(on.length, 1, `${on.length} chips lit at sample ${i}`);
       assert.equal(module.harmonyLoopChord(at, on[0]), degree,
                    `the chip lit holds chord ${module.harmonyLoopChord(at, on[0])}, the jack is playing ${degree}`);
@@ -1243,17 +1192,17 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
     // piece as it will be played, so they move with it.
     const written = slots.map((slot) => module.harmonyLoopChord(at, slot));
     await device.setParam(at, shift.at, 2);
-    paintHarmony(app, at);
+    paint();
     for (const slot of slots) {
       assert.equal(module.harmonyLoopChord(at, slot), written[(slot + 2) % 4],
                    `slot ${slot} did not turn`);
-      assert.equal(chip(slot).attrs['data-degree'], String(written[(slot + 2) % 4]),
+      assert.equal(chip(slot).getAttribute('data-degree'), String(written[(slot + 2) % 4]),
                    `the chip for slot ${slot} was not repainted`);
     }
     // And it is still the chord sounding that is lit.
     for (let i = 0; i < 40; i++) {
       module.advance(250_000);
-      paintHarmony(app, at);
+      paint();
       const on = lit();
       assert.equal(on.length, 1, `${on.length} chips lit after the shift`);
       assert.equal(module.harmonyLoopChord(at, on[0]), module.harmonyDegree(at),
@@ -1265,7 +1214,7 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
 // A control the firmware is currently ignoring says so where it is, because a
 // knob that moves and changes nothing is the most confusing thing a module
 // can offer - and the reason is never in the parameter itself.
-await test('a control the key has made inert says so, and is still a control', async () => {
+test('a control the key has made inert says so, and is still a control', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const harmony = device.algorithms.find((d) => d?.name === 'Harmony');
@@ -1278,8 +1227,8 @@ await test('a control the key has made inert says so, and is still a control', a
   globals.root = 0;
   await device.sendPatch(patch, globals);
 
-  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
-  const said = () => words(withDom(() => nodeCard(app, 0)));
+  const app = fakeApp({ patch, device, module, globals });
+  const said = () => words(withDom(() => NodeCard(app, 0)));
 
   // A major key has a semitone below the tonic, so `leading` is a real
   // control and nothing is said about it.
@@ -1294,7 +1243,7 @@ await test('a control the key has made inert says so, and is still a control', a
 
   // Dimmed, never disabled: the setting is real and it will do something
   // again the moment the key says so.
-  const control = find(withDom(() => nodeCard(app, 0)),
+  const control = find(withDom(() => NodeCard(app, 0)),
                        (kid) => /(^|\s)param(\s|$)/.test(kid.className ?? '')
                              && /(^|\s)inert(\s|$)/.test(kid.className ?? ''));
   assert.ok(control, 'the row is marked');
@@ -1312,7 +1261,7 @@ await test('a control the key has made inert says so, and is still a control', a
 // The same argument for the other walk: `deviation` is the chance of leaving
 // the cycle and `free` has no cycle, `diatonic` refuses a triad outside the
 // key and a chromatic key has no outside.
-await test("Tonnetz says which of its controls the walk is ignoring", async () => {
+test("Tonnetz says which of its controls the walk is ignoring", async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const tonnetz = device.algorithms.find((d) => d?.name === 'Tonnetz');
@@ -1325,8 +1274,8 @@ await test("Tonnetz says which of its controls the walk is ignoring", async () =
   globals.root = 0;
   await device.sendPatch(patch, globals);
 
-  const app = { patch, device, module, globals, render: () => {}, scrolled: new Map() };
-  const said = () => words(withDom(() => nodeCard(app, 0)));
+  const app = fakeApp({ patch, device, module, globals });
+  const said = () => words(withDom(() => NodeCard(app, 0)));
 
   // The default cycle is LR, which names a transform on every step, so
   // deviating from it means something.
@@ -1346,7 +1295,7 @@ await test("Tonnetz says which of its controls the walk is ignoring", async () =
 // One mechanism, one heading. The editor sorts parameters by what their names
 // sound like unless the algorithm says otherwise, and `cycle` sounds like
 // behaviour while `deviation` sounds like chance.
-await test("Tonnetz's walk is shown as one section, not scattered by name", async () => {
+test("Tonnetz's walk is shown as one section, not scattered by name", async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const tonnetz = device.algorithms.find((d) => d?.name === 'Tonnetz');
@@ -1452,7 +1401,7 @@ function schemaProblems(schema, value, root = schema, at = 'the patch') {
 // runs, and the examples are the patches this repository already asserts the
 // firmware accepts. So they are the fixture: anything the schema refuses here
 // is the schema being wrong about the module, not the patch being wrong.
-await test('every example patch passes the schema read from the module', async () => {
+test('every example patch passes the schema read from the module', async () => {
   const { module } = await instantiate();
   const schema = patchSchema(await connected(module));
   for (const [name, example] of Object.entries(EXAMPLES)) {
@@ -1464,7 +1413,7 @@ await test('every example patch passes the schema read from the module', async (
 // And the other direction, which is the half that matters for a patch written
 // by something that has only read the schema: each of these is refused by the
 // firmware, so each has to be refused here.
-await test('the schema refuses what the firmware refuses', async () => {
+test('the schema refuses what the firmware refuses', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const schema = patchSchema(device);
@@ -1506,7 +1455,7 @@ await test('the schema refuses what the firmware refuses', async () => {
 // forgiving about case and spacing, and about the firmware's own enum names.
 // The examples are written in the canonical spelling now that a schema says
 // what canonical is, so this is what keeps the forgiving path covered.
-await test('a MIDI port is read however it is spelled', async () => {
+test('a MIDI port is read however it is spelled', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const mask = (name) => fromPatchJson(
@@ -1522,7 +1471,7 @@ await test('a MIDI port is read however it is spelled', async () => {
 // name algorithms as strings. A rename in the firmware would leave a patch
 // file quietly losing its pattern, so the names are checked against the
 // registry rather than against each other.
-await test('every algorithm the sequencer sugar names is one the module has', async () => {
+test('every algorithm the sequencer sugar names is one the module has', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const known = device.algorithms.filter(Boolean).map((d) => d.name);
@@ -1543,7 +1492,7 @@ await test('every algorithm the sequencer sugar names is one the module has', as
 
 // What the page actually hands over is the prompt, not the schema: a schema
 // with no worked example and no statement of what the buses are is a wall.
-await test('the prompt carries the schema, the example and this module\'s shape', async () => {
+test('the prompt carries the schema, the example and this module\'s shape', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   assert.ok(EXAMPLES[WORKED_EXAMPLE], `the prompt's worked example "${WORKED_EXAMPLE}" is not in examples.js`);
@@ -1560,7 +1509,7 @@ await test('the prompt carries the schema, the example and this module\'s shape'
 // Indenting it more than doubles it for a reader that does not exist: what a
 // person reads about an algorithm is the panel on the patch tab. So this is
 // what stops it being pretty-printed again by someone being helpful.
-await test('the schema is handed over with no whitespace in it', async () => {
+test('the schema is handed over with no whitespace in it', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const text = schemaText(device);
@@ -1582,7 +1531,7 @@ await test('the schema is handed over with no whitespace in it', async () => {
 // and told a reader nothing it had not already been told. So: anything that
 // turns up twice lives in `$defs` and is referred to, and the rules that are
 // true everywhere are on the node schema rather than beside every socket.
-await test('the schema says each thing once', async () => {
+test('the schema says each thing once', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const schema = patchSchema(device);
@@ -1631,20 +1580,16 @@ await test('the schema says each thing once', async () => {
 // The page itself. There is no browser here, so what is checked is that it
 // builds from a device and says the two things a first visit needs: that this
 // is where the prompt is, and - with no module - why there is nothing to copy.
-await test('the schema tab builds, and says so when there is no module', async () => {
-  const { schemaTab } = await import('../src/schema.js');
+test('the schema tab builds, and says so when there is no module', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
 
-  const empty = withDom(() => schemaTab({ device: null }));
+  const empty = withDom(() => SchemaTab(fakeApp()));
   assert.match(words(empty), /none is attached/, 'a page with no module has to say why it is empty');
 
-  const app = {
-    device, schemaWithPatch: true,
-    patchJson: () => JSON.stringify({ nodes: [{ algo: 'NOT', in: [0], out: [1] }] }, null, 2),
-    isOpen: () => false, setOpen: () => {}, render: () => {},
-  };
-  const page = withDom(() => schemaTab(app));
+  const app = fakeApp({ device });
+  app.patches = { patchJson: () => JSON.stringify({ nodes: [{ algo: 'NOT', in: [0], out: [1] }] }, null, 2) };
+  const page = withDom(() => SchemaTab(app));
   const text = words(page);
   assert.match(text, /copy the prompt/, 'the prompt cannot be copied from this page');
   assert.match(text, new RegExp(`${device.algorithms.filter(Boolean).length} algorithms`),
@@ -1659,10 +1604,10 @@ await test('the schema tab builds, and says so when there is no module', async (
 // first one: a finger that lands on a slider and then scrolls the page leaves
 // with the parameter unchanged. Everything else is the check that the cure did
 // not kill the patient.
-await test('a slider ignores a scrolling finger and obeys a deliberate one', async () => {
+test('a slider ignores a scrolling finger and obeys a deliberate one', async () => {
   const made = () => {
     const seen = [];
-    const range = withDom(() => slider(
+    const range = withDom(() => Slider(
       { class: 'slider', min: '0', max: '127', value: '1', 'aria-label': 'test' },
       { onInput: (v) => seen.push(`input ${v}`), onCommit: (v) => seen.push(`commit ${v}`) }));
     return { range, seen };
@@ -1723,28 +1668,6 @@ await test('a slider ignores a scrolling finger and obeys a deliberate one', asy
   }
 });
 
-// --- the single-file build --------------------------------------------------
-
-await test('the built page contains every module, with nothing left to import', async () => {
-  const code = bundle('app.js');
-  for (const name of ['app.js', 'module.js', 'storage.js', 'perform.js', 'controller.js',
-                      'audio.js', 'drums.js', 'library.js', 'scope.js', 'views.js', 'midi.js',
-                      'schema.js', 'protocol.js', 'icons.js']) {
-    assert.ok(code.includes(`__define('${name}'`), `${name} is not in the build`);
-  }
-  // Nothing may be left that a browser would try to fetch: the built page is
-  // opened from a file:// URL, where a fetch cannot work.
-  const left = code.match(/^\s*(import|export)\s+[^(]/m);
-  assert.equal(left, null, `an ${left?.[1]} statement survived: ${left?.[0]?.trim()}`);
-
-  // And it has to parse. A bundler that produces a syntax error produces a
-  // blank page, which is the one failure a smoke test must not miss.
-  const scratch = mkdtempSync(join(tmpdir(), 'mmmc-bundle-'));
-  const file = join(scratch, 'bundle.mjs');
-  writeFileSync(file, code);
-  execFileSync(process.execPath, ['--check', file]);
-});
-
 // --- the patch as blocks and arrows ------------------------------------------
 //
 // The canvas draws a patch; it does not hold one. So what is checked here is
@@ -1787,7 +1710,7 @@ function dragged(device, patch, from, to) {
   return plan;
 }
 
-await test('the arrows are the buses, not a second model of the patch', async () => {
+test('the arrows are the buses, not a second model of the patch', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1811,7 +1734,7 @@ await test('the arrows are the buses, not a second model of the patch', async ()
   assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0);
 });
 
-await test('a jack and a MIDI port are blocks with one socket each', async () => {
+test('a jack and a MIDI port are blocks with one socket each', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1835,7 +1758,7 @@ await test('a jack and a MIDI port are blocks with one socket each', async () =>
   assert.equal(patchBlocks(device, patch).length, 3);
 });
 
-await test('a drag from an outlet to an inlet is a patch the firmware takes', async () => {
+test('a drag from an outlet to an inlet is a patch the firmware takes', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1853,7 +1776,7 @@ await test('a drag from an outlet to an inlet is a patch the firmware takes', as
   await device.sendPatch(patch, codec.emptyGlobals());     // throws if it is refused
 });
 
-await test('one outlet, two readers, one bus', async () => {
+test('one outlet, two readers, one bus', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1876,7 +1799,7 @@ await test('one outlet, two readers, one bus', async () => {
   await device.sendPatch(patch, codec.emptyGlobals());
 });
 
-await test('a drag the module would refuse is refused before it is made', async () => {
+test('a drag the module would refuse is refused before it is made', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1900,7 +1823,7 @@ await test('a drag the module would refuse is refused before it is made', async 
   assert.equal(patch.nodes[1].inBus[0], P.NO_BUS);
 });
 
-await test('which end the drag started at does not change what it connects', async () => {
+test('which end the drag started at does not change what it connects', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const build = () => {
@@ -1920,7 +1843,7 @@ await test('which end the drag started at does not change what it connects', asy
                    [...codec.encodePatch(forwards, codec.emptyGlobals())]);
 });
 
-await test('disconnecting one arrow says what else the inlet stops hearing', async () => {
+test('disconnecting one arrow says what else the inlet stops hearing', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1953,7 +1876,7 @@ await test('disconnecting one arrow says what else the inlet stops hearing', asy
   assert.equal(connectionsOf(patchBlocks(device, patch)).length, 1, 'the other source is still there');
 });
 
-await test('a free bus is one nothing writes, and running out says so', async () => {
+test('a free bus is one nothing writes, and running out says so', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1974,7 +1897,7 @@ await test('a free bus is one nothing writes, and running out says so', async ()
   assert.match(plan.why, /every gate bus/);
 });
 
-await test('a jack and a MIDI port are never taken off their bus', async () => {
+test('a jack and a MIDI port are never taken off their bus', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -1998,7 +1921,7 @@ await test('a jack and a MIDI port are never taken off their bus', async () => {
   assert.notDeepEqual(validate(device, patch), []);
 });
 
-await test('a source added after its listener feeds it', async () => {
+test('a source added after its listener feeds it', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -2020,7 +1943,7 @@ await test('a source added after its listener feeds it', async () => {
 // one is, it is six short lists - and an algorithm added to the firmware
 // arrives on a shelf with no change here, which is the same promise the
 // registry has always made about names and summaries.
-await test('the add list is shelved by what the module says each algorithm is', async () => {
+test('the add list is shelved by what the module says each algorithm is', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const groups = catalogue(device.algorithms, ENDPOINTS);
@@ -2055,7 +1978,7 @@ await test('the add list is shelved by what the module says each algorithm is', 
 // The key has one value, so the module refuses a second Key node. Offering
 // one and having it refused on the way out is the worst of both: the list
 // stops offering it once the patch holds it.
-await test('an algorithm there may only be one of is offered once', async () => {
+test('an algorithm there may only be one of is offered once', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const key = device.algorithms.find((d) => d?.name === 'Key');
@@ -2075,7 +1998,7 @@ await test('an algorithm there may only be one of is offered once', async () => 
 // An algorithm from firmware this app has never heard of still has to be
 // offered: the category is appended to the registry record precisely so that
 // an unknown one costs a shelf, not an algorithm.
-await test('an algorithm whose category this app does not know is still offered', () => {
+test('an algorithm whose category this app does not know is still offered', () => {
   const groups = catalogue([
     { id: 200, name: 'Nova', nIn: 1, nOut: 1, category: 99, summary: 'from later firmware' },
     { id: 201, name: 'Ancient', nIn: 1, nOut: 1, category: P.AlgorithmCategory.CATEGORY_NONE,
@@ -2090,7 +2013,7 @@ await test('an algorithm whose category this app does not know is still offered'
 // is that the bus survives the turn: a jack in on gate bus 3 turned round is
 // the way you listen to gate bus 3, and finding that bus again by hand was
 // the old selector's whole cost.
-await test('a jack turned round keeps its bus, and an unused one lands on a real one', async () => {
+test('a jack turned round keeps its bus, and an unused one lands on a real one', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const caps = device.capabilities;
@@ -2118,7 +2041,7 @@ await test('a jack turned round keeps its bus, and an unused one lands on a real
 // underneath: the module has four inputs and four outputs, so the toggle moves
 // the port. What it carries has to travel with it, or "turn it round" quietly
 // loses the cables and the channel it was set to.
-await test('a MIDI port turned round takes its cables, channel and bus with it', async () => {
+test('a MIDI port turned round takes its cables, channel and bus with it', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const caps = device.capabilities;
@@ -2155,7 +2078,7 @@ await test('a MIDI port turned round takes its cables, channel and bus with it',
 // outputs naming one note bus is two cables carrying the same music - but the
 // only way to build it was to know that a spare port slot was where to go. The
 // half that travels is the source, and it is a different half each way round.
-await test('a MIDI port fans out to a second destination, never to the same one', async () => {
+test('a MIDI port fans out to a second destination, never to the same one', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const caps = device.capabilities;
@@ -2196,7 +2119,7 @@ await test('a MIDI port fans out to a second destination, never to the same one'
 
 // --- where the blocks go -----------------------------------------------------
 
-await test('the layout runs the signal left to right, and a loop does not hang it', async () => {
+test('the layout runs the signal left to right, and a loop does not hang it', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -2218,7 +2141,7 @@ await test('the layout runs the signal left to right, and a loop does not hang i
   assert.equal(round.size, looped.length, 'every block still got a position');
 });
 
-await test('a socket is inside the block it belongs to', async () => {
+test('a socket is inside the block it belongs to', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -2233,7 +2156,7 @@ await test('a socket is inside the block it belongs to', async () => {
   assert.equal(socketPoint(at, 0, false).x, 0, 'an inlet is on the left edge');
 });
 
-await test('a block dragged somewhere is remembered beside the patch, not in it', async () => {
+test('a block dragged somewhere is remembered beside the patch, not in it', async () => {
   const library = new Library(fakeStorage());
   const patch = codec.emptyPatch();
   patch.nodes.push(codec.emptyNode(12));
@@ -2260,14 +2183,14 @@ await test('a block dragged somewhere is remembered beside the patch, not in it'
   assert.equal(library.layoutFor('nobody'), null);
 });
 
-await test('removing a node moves the blocks after it with it', async () => {
+test('removing a node moves the blocks after it with it', async () => {
   const saved = { 'node:0': [0, 0], 'node:1': [1, 1], 'node:3': [3, 3], 'jack:2': [9, 9] };
   const after = forgetNode(saved, 1);
   assert.deepEqual(after, { 'node:0': [0, 0], 'node:2': [3, 3], 'jack:2': [9, 9] },
                    'node 3 became node 2, node 1 is gone, the jack did not move');
 });
 
-await test('a hand-placed block stays where it was put', async () => {
+test('a hand-placed block stays where it was put', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -2290,14 +2213,13 @@ await test('a hand-placed block stays where it was put', async () => {
 // buses they speak on, and that a hit is played once, by the sequencer that
 // made it, rather than by whichever player happened to carry it.
 
-await test('the drum a gate lane plays is the one the firmware names', async () => {
+test('the drum a gate lane plays is the one the firmware names', async () => {
   // A `DrumSeqGate` lane carries no note number at all, so the only thing that
   // says which drum it is, is the note the firmware would send for that lane
   // if this were the MIDI variant. Read it out of the firmware rather than
   // trusting the copy in `drums.js`: a lane renamed there and not here would
   // be a snare on the kick's lane, silently, for ever.
-  const source = readFileSync(join(here, '..', '..', 'src', 'algorithm', 'sequencer',
-                                   'drum_sequencer.cpp'), 'utf8');
+  const source = readFileSync(join(repoRoot, 'src', 'algorithm', 'sequencer', 'drum_sequencer.cpp'), 'utf8');
   const found = /GM_DEFAULT_NOTE\[DRUM_SEQ_LANES\]\s*=\s*\{([^}]*)\}/.exec(source);
   assert.ok(found, 'the firmware no longer spells its default notes out where this can read them');
   const notes = found[1].split(',').map((n) => Number(n.trim()));
@@ -2308,7 +2230,7 @@ await test('the drum a gate lane plays is the one the firmware names', async () 
   for (const note of notes) assert.notEqual(pieceOf(note), 'perc', `note ${note} has no drum`);
 });
 
-await test('every kit can play every drum, and no two kits are the same kit', async () => {
+test('every kit can play every drum, and no two kits are the same kit', async () => {
   for (const kit of KITS) {
     for (const piece of PIECES) {
       const spec = voiceSpec(kit.id, piece);
@@ -2329,7 +2251,7 @@ await test('every kit can play every drum, and no two kits are the same kit', as
   assert.ok(voiceSpec('no such kit', 'snare').noise, 'an unknown kit has no fallback');
 });
 
-await test('a kit builds real audio nodes for every drum in it', async () => {
+test('a kit builds real audio nodes for every drum in it', async () => {
   // The recipes are data, and data with a typo in it is a kit that throws the
   // first time somebody plays a crash. So play every drum of every kit into a
   // stand-in for Web Audio and insist each one built something and scheduled
@@ -2349,7 +2271,7 @@ await test('a kit builds real audio nodes for every drum in it', async () => {
   }
 });
 
-await test('the drum sequencers of a patch are found, with the buses they speak on', async () => {
+test('the drum sequencers of a patch are found, with the buses they speak on', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -2376,7 +2298,7 @@ await test('the drum sequencers of a patch are found, with the buses they speak 
   assert.equal(drumSources(device, patch).length, 2);
 });
 
-await test('a drum note is played by its own sequencer, not by the player that carried it', async () => {
+test('a drum note is played by its own sequencer, not by the player that carried it', async () => {
   const { listener, module } = await listening();
   const kick = { t: 0, bus: 3, type: 0x90, channel: 10, d1: 36, d2: 100 };
 
@@ -2414,7 +2336,7 @@ await test('a drum note is played by its own sequencer, not by the player that c
   assert.equal(listener.players[0].voices.size, 1, 'the player still plays what is not a drum');
 });
 
-await test('a node set to channel 10 is a drum machine, whatever algorithm it runs', async () => {
+test('a node set to channel 10 is a drum machine, whatever algorithm it runs', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
@@ -2447,7 +2369,7 @@ await test('a node set to channel 10 is a drum machine, whatever algorithm it ru
   assert.equal(drumSources(device, patch).length, 1);
 });
 
-await test('a bus that is drums by its channel is drums only on that channel', async () => {
+test('a bus that is drums by its channel is drums only on that channel', async () => {
   const { listener, module } = await listening();
   listener.setDrumSources([
     { key: 'node:0', index: 0, label: 'GateToNote 0', kind: 'note', channel: 10, bus: 3, lanes: [] },
@@ -2476,7 +2398,7 @@ await test('a bus that is drums by its channel is drums only on that channel', a
   assert.equal(listener.drums.get('node:1').hits, 1);
 });
 
-await test('a hit already heard on its bus is not heard again off the cable', async () => {
+test('a hit already heard on its bus is not heard again off the cable', async () => {
   const { listener } = await listening();
   listener.setDrumSources([
     { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
@@ -2496,7 +2418,7 @@ await test('a hit already heard on its bus is not heard again off the cable', as
   assert.equal(listener.drums.get('other').hits, 1);
 });
 
-await test('a gate lane plays its drum on the edge, not while the gate is high', async () => {
+test('a gate lane plays its drum on the edge, not while the gate is high', async () => {
   const { listener, module } = await listening();
   listener.setDrumSources([
     { key: 'node:1', index: 1, label: 'DrumSeqGate 1', kind: 'gate', bus: P.NO_BUS,
@@ -2521,7 +2443,7 @@ await test('a gate lane plays its drum on the edge, not while the gate is high',
   assert.equal(voice.hits, 3);
 });
 
-await test('the gate listener hears what it was pointed at, and each edge once', async () => {
+test('the gate listener hears what it was pointed at, and each edge once', async () => {
   const none = { jacksOut: 0, jacks: 0, buses: 0 };
   assert.deepEqual(gateHits([{ kind: 'jacks' }], none), []);
 
@@ -2549,7 +2471,7 @@ await test('the gate listener hears what it was pointed at, and each edge once',
     [{ kind: 'jack', index: 0 }, { kind: 'bus', index: 2 }]);
 });
 
-await test('what is being listened to survives a reload', async () => {
+test('what is being listened to survives a reload', async () => {
   const { listener } = await listening();
   listener.setDrumSources([
     { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
@@ -2589,255 +2511,3 @@ await test('what is being listened to survives a reload', async () => {
   assert.deepEqual(old.gateSources.map((s) => s.kind), ['jacks'], 'the gate listener keeps its default');
   assert.equal(old.drums.get('other').kit, back.drums.get('other').kit);
 });
-
-// --- the harness ------------------------------------------------------------
-
-// Enough of a document for `el()` to build an element and for a test to fire
-// events at it. views.js touches nothing else, and a fake this small is
-// honest: the sequences fired at it come from a real browser.
-function fakeDocument() {
-  // The two selector shapes the live views use, and no more: a class and the
-  // presence of an attribute. A parser that understood more of CSS than the
-  // app writes would be a second thing to get wrong.
-  const matches = (node, selector) => {
-    if (node.nodeType !== 1) return false;
-    if (selector.startsWith('.')) return String(node.className).split(/\s+/).includes(selector.slice(1));
-    if (selector.startsWith('[') && selector.endsWith(']')) return selector.slice(1, -1) in (node.attrs ?? {});
-    return node.tag === selector;
-  };
-  const descendants = (node, out = []) => {
-    for (const kid of node.children ?? []) { out.push(kid); descendants(kid, out); }
-    return out;
-  };
-  const make = (tag) => {
-    const listeners = new Map();
-    const element = {
-      // Children are kept rather than dropped, so a test can read the words
-      // a panel put on the page. Nothing here lays anything out.
-      tag, nodeType: 1, className: '', attrs: {}, value: '', children: [], parent: null,
-      style: {}, textContent: '',
-      setAttribute(key, value) { this.attrs[key] = String(value); if (key === 'value') this.value = String(value); },
-      // Read back as a browser does - absent is null, not undefined. The live
-      // views mark an element with what they last drew into it and skip the
-      // work when it has not changed, so this is half of how they stay cheap.
-      getAttribute(key) { return key in this.attrs ? this.attrs[key] : null; },
-      addEventListener(type, fn) {
-        if (!listeners.has(type)) listeners.set(type, []);
-        listeners.get(type).push(fn);
-      },
-      append(...kids) {
-        for (const kid of kids) { if (kid && kid.nodeType === 1) kid.parent = this; }
-        this.children.push(...kids);
-      },
-      get firstChild() { return this.children[0] ?? null; },
-      fire(type, event = {}) { for (const fn of listeners.get(type) ?? []) fn({ type, ...event }); },
-      // Enough of an element for a menu to be opened under it and taken away
-      // again: it is anchored on a rectangle, it focuses its first row, and
-      // it is found by its id when the next one opens.
-      getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 0, right: 0 }),
-      querySelector(selector) { return descendants(this).find((kid) => matches(kid, selector)) ?? null; },
-      querySelectorAll(selector) { return descendants(this).filter((kid) => matches(kid, selector)); },
-      contains: () => false,
-      focus() {},
-      remove() {
-        const from = this.parent ?? document.body;
-        const where = from.children.indexOf(this);
-        if (where >= 0) from.children.splice(where, 1);
-        this.parent = null;
-      },
-    };
-    // `data-mod-slot` reads back as `dataset.modSlot`, as it does in a
-    // browser: the live views address a meter by the slot it carries.
-    Object.defineProperty(element, 'dataset', {
-      get() {
-        const out = {};
-        for (const [key, value] of Object.entries(this.attrs)) {
-          if (!key.startsWith('data-')) continue;
-          out[key.slice(5).replace(/-(.)/g, (_, c) => c.toUpperCase())] = value;
-        }
-        return out;
-      },
-    });
-    element.classList = {
-      add: (name) => { if (!matches(element, `.${name}`)) element.className = `${element.className} ${name}`.trim(); },
-      remove: (name) => {
-        element.className = String(element.className).split(/\s+/).filter((c) => c && c !== name).join(' ');
-      },
-      contains: (name) => matches(element, `.${name}`),
-      toggle: (name, on) => (on ? element.classList.add(name) : element.classList.remove(name)),
-    };
-    return element;
-  };
-  const body = make('body');
-  const document = {
-    // `el()` wraps a bare string child in a text node.
-    createTextNode(text) { return { nodeType: 3, text: String(text) }; },
-    createElement: make,
-    // The icons are SVG, built through the namespace: same element here.
-    createElementNS: (_ns, tag) => make(tag),
-    body,
-    // The whole tree, not the top of it: a live view writes into an element
-    // wherever the panel that built it happened to nest it.
-    getElementById(id) { return descendants(body).find((kid) => kid.attrs?.id === id) ?? null; },
-    querySelector(selector) { return body.querySelector(selector); },
-    querySelectorAll(selector) { return body.querySelectorAll(selector); },
-  };
-  return document;
-}
-
-// Enough of Web Audio to build a drum with. Every node records when it was
-// started and stopped, because "a kit that throws on the crash" and "a hit
-// scheduled in the past" are the two ways a recipe goes wrong, and neither
-// makes a sound to notice.
-function fakeAudioContext() {
-  const made = [];
-  const param = () => ({
-    value: 0,
-    setValueAtTime() { return this; },
-    linearRampToValueAtTime() { return this; },
-    exponentialRampToValueAtTime() { return this; },
-    setTargetAtTime() { return this; },
-  });
-  const node = (kind, extra = {}) => {
-    const made_ = {
-      kind, startedAt: null, stoppedAt: null,
-      connect(to) { return to; },
-      disconnect() {},
-      start(at = 0) { this.startedAt = at; },
-      stop(at = 0) { this.stoppedAt = at; },
-      ...extra,
-    };
-    made.push(made_);
-    return made_;
-  };
-  return {
-    made,
-    state: 'running',
-    currentTime: 0,
-    sampleRate: 48000,
-    destination: node('destination'),
-    createGain: () => node('gain', { gain: param() }),
-    createOscillator: () => node('oscillator', { type: 'sine', frequency: param(), detune: param() }),
-    createBufferSource: () => node('noise', { buffer: null, loop: false, playbackRate: param() }),
-    createBiquadFilter: () => node('filter', { type: 'lowpass', frequency: param(), Q: param() }),
-    createBuffer: (channels, length) => ({ getChannelData: () => new Float32Array(length) }),
-    resume: async () => {},
-    suspend: async () => {},
-  };
-}
-
-// The module as the listener uses it: somewhere to hang the hooks, the gate
-// levels of the current pass, and the note-bus watches, so a test can say "a
-// pass happened and this bus was high" without a wasm module in the room.
-function fakeModule() {
-  const hooks = { midi: [], bus: [], frame: [], pass: [] };
-  return {
-    now: 0,
-    levels: { jackIn: 0, jackOut: 0, gate: 0, green: 0, red: 0 },
-    jackSources: Array.from({ length: P.GPIO_N }, () => ({ level: 0, hz: 0, pulseUntil: 0 })),
-    modes: new Array(P.GPIO_N).fill(0),
-    watches: new Map(),
-    jackMode(jack) { return this.modes[jack]; },
-    jackOutput(jack) { return (this.levels.jackOut >> jack) & 1; },
-    jackInput(jack) { return (this.levels.jackIn >> jack) & 1; },
-    onMidi(fn) { hooks.midi.push(fn); },
-    onNoteBus(fn) { hooks.bus.push(fn); },
-    onFrame(fn) { hooks.frame.push(fn); },
-    onPass(fn) { hooks.pass.push(fn); },
-    watchNoteBus(bus) { this.watches.set(bus, (this.watches.get(bus) ?? 0) + 1); },
-    unwatchNoteBus(bus) {
-      const held = this.watches.get(bus);
-      if (!held) return;
-      if (held <= 1) this.watches.delete(bus); else this.watches.set(bus, held - 1);
-    },
-    pass() { for (const fn of hooks.pass) fn(this.now); },
-    hooks,
-  };
-}
-
-// A listener with the audio on, over both fakes. `toggle()` is the real one:
-// it is where the master gain, the click gain and every voice get wired up,
-// and a test that skipped it would be testing a listener no user ever has.
-async function listening() {
-  const module = fakeModule();
-  const ctx = fakeAudioContext();
-  const had = globalThis.AudioContext;
-  globalThis.AudioContext = function AudioContext() { return ctx; };
-  try {
-    const listener = new Listener(module);
-    // The two ways an event reaches it, as the module delivers them: off the
-    // cable, and off a note bus.
-    listener.noteBus = (event) => { for (const fn of module.hooks.bus) fn(event); };
-    await listener.toggle();
-    assert.ok(listener.enabled, 'the fake context should come up running');
-    return { listener, module, ctx };
-  } finally {
-    globalThis.AudioContext = had;
-  }
-}
-
-// Everything a panel wrote, as one string: what a user would read off it.
-function words(node) {
-  // `textContent` as well as the children: a live view writes straight onto
-  // an element rather than rebuilding it, and that is exactly the half a test
-  // of a live view wants to read.
-  return [node?.text ?? '', node?.textContent ?? '',
-          ...(node?.children ?? []).map(words)].flat().join(' ');
-}
-
-// The first element in a panel that answers a question - "is there a select in
-// here" - without the test having to know how deep it was nested.
-function find(node, matches) {
-  for (const kid of node?.children ?? []) {
-    if (kid.nodeType === 1 && matches(kid)) return kid;
-    const deeper = find(kid, matches);
-    if (deeper) return deeper;
-  }
-  return null;
-}
-
-// views.js reads `document` when it builds something, not when it loads, so
-// the fake only has to stand up for the call itself.
-function withDom(fn) {
-  const had = globalThis.document;
-  globalThis.document = fakeDocument();
-  const restore = () => { globalThis.document = had; };
-  try {
-    const result = fn();
-    // A live view is read back after asking the module something, so the body
-    // of a test may be async - and putting the page away in `finally` would
-    // take it down on the first await rather than at the end.
-    return result instanceof Promise ? result.finally(restore) : (restore(), result);
-  } catch (error) {
-    restore();
-    throw error;
-  }
-}
-
-async function instantiate() {
-  // `let`, and assigned after the instance exists: the module may send MIDI
-  // from inside emu_boot(), before the object wrapping it has been made.
-  let made = null;
-  const { instance } = await WebAssembly.instantiate(readFileSync(wasmPath), {
-    env: { mmmc_midi_send: (target, type, d1, d2, channel) => made?.emitMidi(target, type, d1, d2, channel) },
-  });
-  if (instance.exports.__wasm_call_ctors) instance.exports.__wasm_call_ctors();
-  made = new EmbeddedModule(instance.exports);
-  return { module: made, E: instance.exports };
-}
-
-// A Device over the embedded module, as the app builds one.
-async function connected(module) {
-  const { Device } = await import('../src/device.js');
-  const device = new Device(module);
-  await device.readCapabilities();
-  await device.readAlgorithms();
-  for (const descriptor of device.algorithms) await device.readParams(descriptor.id);
-  return device;
-}
-
-console.log(`\n${tests} checks passed against ${wasmPath}`);
-if (failures.length) {
-  console.error(`${failures.length} failed`);
-  process.exit(1);
-}

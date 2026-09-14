@@ -1,0 +1,31 @@
+/* The palette and the few sizes every component is built from. Colour is the
+   domain: a gate is green, a note is orange, a control signal is purple, in an
+   arrow, a socket, a chip, a lamp and a trace. The accent marks what is
+   selected, bound or playing, and nothing else. */
+:root {
+  color-scheme: dark light;
+  --bg: #12141a;
+  --panel: #1b1e26;
+  --raised: #232833;
+  --line: #2c313d;
+  --ink: #e6e9f0;
+  --dim: #8b93a7;
+  --accent: #6ea8fe;
+  --gate: #7bd88f;
+  --note: #d8a67b;
+  --cv: #b78bd8;
+  --bad: #ff8a8a;
+  --warn: #e8c46a;
+  /* A finger, not a mouse pointer. */
+  --tap: 2.75rem;
+  --radius: 8px;
+  --radius-panel: 10px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* A domain, as a custom property a component paints with: `.dom-gate` on a
+   wire, a socket or a chip is enough for it to take the right colour. */
+.dom-gate { --wire: var(--gate); }
+.dom-note { --wire: var(--note); }
+.dom-CV { --wire: var(--cv); }

@@ -198,16 +198,19 @@ is only what a parameter list cannot say.
   number and channel per lane and a velocity per cell.
 - **`Probability` and `GateProbability` are one rule asked of two signals.**
   Both carry a `TrigCondition` (`src/algorithm/util/trig_condition.h`): a
-  percentage, an `X:Y` ratio over the events that reach the node, and a
-  condition (`first`, `pre`, `nei`, `fill` and their negations) — Elektron's
-  trig conditions, as three composable controls rather than one list, so
-  "half the time, on the third of every four" is a setting. The note side
-  counts note-ons and pairs each note-off with its own note-on; the gate side
-  counts rising edges and holds the decision for the length of the gate. A
-  `fill` inlet is the fill button as a cable, and the `passed` outlet is the
-  node's last decision latched — patch it into another node's `nei` and the
-  second plays where the first did, or only where it did not. A transport
-  start puts the count back on the downbeat; a continue does not.
+  percentage, and a condition on the count of events that have reached the
+  node — `first`, `not first`, or `X:Y`, the Xth of every Y. Those are the two
+  things a cable cannot do, because both are the node's own state. The note
+  side counts note-ons and pairs each note-off with its own note-on; the gate
+  side counts rising edges and holds the decision for the length of the gate.
+  A rising edge on `reset` returns the count to the top, as it does on every
+  sequencer.
+- **The `passed` outlet is what a groovebox spends conditions on.** It carries
+  the node's last decision as a gate, latched until the next event. `AND` it
+  with another node's input to play only where this one played, and a `NOT` in
+  front gives the complement — a neighbour rule, at any distance and across
+  both domains. A fill button is the same shape: a gate, ANDed in. Neither is
+  a setting here, because the module already has the nodes that say it.
 - **`GateHold` turns a trigger into a gate** — `latch`, `toggle`, `extend`
   (minimum length), `limit` (maximum length). **Reset wins** over `set` in
   every mode, and a mode change is not a reset. Both inlets are optional: the

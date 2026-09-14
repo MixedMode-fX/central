@@ -3,6 +3,7 @@
 
 #include "node/node.h"
 #include "midi/sounding_notes.h"
+#include "algorithm/sequencer/step_engine.h"
 #include "algorithm/util/trig_condition.h"
 
 // Lets each note through under a condition, and keeps its note-off with it.
@@ -16,9 +17,9 @@
 // which is what makes a repeating pattern breathe.
 //
 // The rule itself is TrigCondition (algorithm/util/trig_condition.h), shared
-// byte for byte with GateProbability: a chance, an X:Y ratio over the events
-// that reach the node, and a condition. The node is what the rule is applied
-// *to* - here, a note-on and the note-off that belongs to it.
+// byte for byte with GateProbability: a chance, and a condition on the count
+// of events this node has seen. The node is what the rule is applied *to* -
+// here, a note-on and the note-off that belongs to it.
 //
 // The decision is taken once, on the note-on, and remembered: a note-off
 // whose note-on was dropped is dropped too, and a note-off whose note-on was
@@ -30,21 +31,27 @@
 // modulation stream thinned at random is a different algorithm and nobody
 // asked for it.
 //
+// **`passed` is the decision, made patchable.** It carries the node's last
+// answer, latched until the next note-on rather than pulsed, so a reader
+// clocked in some other pass still sees it. That outlet is what a groovebox
+// spends two conditions on: `AND(this node's input, another's passed)` is
+// "only where that one played" and a NOT in front of it is "only where it
+// did not", across both domains and any distance in the graph. There is no
+// neighbour rule here because there is no neighbour - there is a cable.
+//
 // Inlet 0 (note): notes in.
-// Inlet 1 (gate, optional): fill. High is `fill`, low is `not fill`.
-// Inlet 2 (gate, optional): nei. The neighbour's last decision, usually
-//         another Probability's `passed`.
+// Inlet 1 (gate, optional): reset. A rising edge returns the count to the
+//         top, exactly as it does on every sequencer in the module.
 // Outlet 0 (note): notes out.
 // Outlet 1 (gate): passed - this node's last decision, latched.
 //
-// params[0..3] are TrigCondition's block: chance, ratio, condition, seed.
+// params[0..2] are TrigCondition's block: chance, condition, seed.
 class Probability : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
         explicit Probability(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
-        void transport_event(BusManager& bus, uint8_t edges) override;
         bool set_param(uint16_t index, uint8_t value) override;
         uint8_t get_param(uint16_t index) const override;
 
@@ -53,10 +60,9 @@ class Probability : public Node{
 
     private:
         uint8_t in;
-        uint8_t fill_in;
-        uint8_t nei_in;
         uint8_t out;
         uint8_t passed_out;
+        EdgeIn reset_in;
         TrigCondition condition;
         SoundingNotes sounding;
 };

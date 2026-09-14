@@ -61,7 +61,7 @@ struct Rig {
     Rig() : gpio(), midi(), eeprom(), led_driver(),
             master(gpio, midi), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
-            sysex(patches, master, store, leds, midi, cc, mod), now(0) {}
+            sysex(patches, master, store, leds, midi, cc, mod, macros, sum), now(0) {}
 
     // One command, framed the way the wire carries it.
     void send(uint8_t command, const std::vector<uint8_t>& args = {}) {
@@ -1214,6 +1214,163 @@ static void test_hello_blinks_the_identify_pattern_whatever_the_uptime() {
     TEST_ASSERT_EQUAL(StatusLeds::BRIGHT, rig.leds.level(LED_GREEN));
 }
 
+
+// --- macros -----------------------------------------------------------------
+// A macro is patch state the app cannot see any other way: the name is what
+// makes four bindings one gesture, and with no browser attached the module
+// still has to be able to say which gesture it is.
+
+// The name is fixed-width rather than length-prefixed, so a name that fills
+// the field carries no terminator and the count *is* the field.
+static void test_a_macro_name_round_trips_over_the_wire() {
+    Rig rig;
+    rig.patches.apply(two_node_patch(), default_globals(), 0);
+
+    rig.send(SYSEX_SET_MACRO, {0, 'o', 'p', 'e', 'n', ' ', 'u', 'p', 0});
+    TEST_ASSERT_TRUE(rig.acked());
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MACRO, {0});
+    const auto* r = rig.midi.last_reply(SYSEX_MACRO);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(0, r->bytes[5]);
+    TEST_ASSERT_EQUAL_CHAR_ARRAY("open up", &r->bytes[6], 7);
+    TEST_ASSERT_EQUAL(0, r->bytes[13]);
+
+    // Eight characters, with nothing left over for a terminator.
+    rig.midi.clear();
+    rig.send(SYSEX_SET_MACRO, {1, 'f', 'u', 'l', 'l', 'w', 'i', 'd', 'e'});
+    TEST_ASSERT_TRUE(rig.acked());
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MACRO, {1});
+    TEST_ASSERT_EQUAL_CHAR_ARRAY("fullwide", &rig.midi.last_reply(SYSEX_MACRO)->bytes[6], 8);
+
+    // A macro that is not a macro is refused rather than answered for.
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MACRO, {N_MACRO});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+    rig.midi.clear();
+    rig.send(SYSEX_SET_MACRO, {N_MACRO, 'x', 0, 0, 0, 0, 0, 0, 0});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+}
+
+// Depth is signed - one macro opening a filter while closing a delay is the
+// move macros exist for - and a SysEx data byte has no room for a sign, so
+// it travels as a magnitude and a sign byte. Getting that wrong is a
+// destination that pushes the wrong way, which no field on screen would show.
+static void test_a_macro_destination_round_trips_with_a_negative_depth() {
+    Rig rig;
+    rig.patches.apply(two_node_patch(), default_globals(), 0);
+    rig.send(SYSEX_SET_MACRO, {0, 'd', 'i', 'v', 'e', 0, 0, 0, 0});
+
+    //            slot macro kind            index param     src_lo    src_hi    depth      sign flags
+    rig.send(SYSEX_SET_MACRO_DEST, {3, 0, CC_TARGET_NODE, 0, 0, 0, 64, 0, 0x7F, 1, 90, 0, 1, 0});
+    TEST_ASSERT_TRUE(rig.acked());
+
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MACRO_DEST, {3});
+    const auto* r = rig.midi.last_reply(SYSEX_MACRO_DEST);
+    TEST_ASSERT_NOT_NULL(r);
+    const auto& b = r->bytes;
+    const auto u14 = [&b](size_t at){ return (uint16_t)(b[at] | ((uint16_t)b[at + 1] << 7)); };
+    TEST_ASSERT_EQUAL(3, b[5]);                     // the pool slot
+    TEST_ASSERT_EQUAL(0, b[6]);                     // the macro it belongs to
+    TEST_ASSERT_EQUAL(CC_TARGET_NODE, b[7]);
+    TEST_ASSERT_EQUAL(0, b[8]);
+    TEST_ASSERT_EQUAL_UINT16(0, u14(9));            // param
+    TEST_ASSERT_EQUAL_UINT16(64, u14(11));          // src_lo
+    TEST_ASSERT_EQUAL_UINT16(255, u14(13));         // src_hi, above a data byte
+    TEST_ASSERT_EQUAL_UINT16(90, u14(15));          // the magnitude
+    TEST_ASSERT_EQUAL(1, b[17]);                    // and the sign, on its own
+    TEST_ASSERT_EQUAL_INT16(-90, rig.patches.active().macro_dest[3].depth);
+
+    // A macro index that is not a macro clears the slot, exactly as a bus
+    // index that is not a bus clears a route: a host can echo a reply for an
+    // empty slot straight back and change nothing.
+    rig.midi.clear();
+    rig.send(SYSEX_SET_MACRO_DEST, {3, 0x7F, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(MACRO_NONE, rig.patches.active().macro_dest[3].macro);
+}
+
+// The pool is shared, so "add a destination" fails for a reason that is not
+// about the destination: the macro it joins is full. It has to fail here as
+// well as in the whole-image validator, or the editor's next dump would be
+// refused by a rule it never saw applied.
+static void test_a_destination_past_the_per_macro_cap_is_refused() {
+    Rig rig;
+    rig.patches.apply(two_node_patch(), default_globals(), 0);
+    for (uint8_t i = 0; i < N_MACRO_DEST_PER_MACRO; i++) {
+        rig.midi.clear();
+        rig.send(SYSEX_SET_MACRO_DEST, {i, 0, CC_TARGET_NODE, 0, 0, 0, 0, 0, 0x7F, 1, 10, 0, 0, 0});
+        TEST_ASSERT_TRUE(rig.acked());
+    }
+    rig.midi.clear();
+    rig.send(SYSEX_SET_MACRO_DEST,
+             {N_MACRO_DEST_PER_MACRO, 0, CC_TARGET_NODE, 0, 0, 0, 0, 0, 0x7F, 1, 10, 0, 0, 0});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_REJECTED));
+
+    // The same destination on another macro is fine: it is the per-macro cap
+    // that is full, not the pool.
+    rig.midi.clear();
+    rig.send(SYSEX_SET_MACRO_DEST,
+             {N_MACRO_DEST_PER_MACRO, 1, CC_TARGET_NODE, 0, 0, 0, 0, 0, 0x7F, 1, 10, 0, 0, 0});
+    TEST_ASSERT_TRUE(rig.acked());
+
+    // And a destination reaching another macro is refused whatever the count:
+    // a macro table that wrote its own inputs would run away every pass.
+    rig.midi.clear();
+    rig.send(SYSEX_SET_MACRO_DEST, {20, 1, CC_TARGET_MACRO, 0, 0, 0, 0, 0, 0x7F, 1, 10, 0, 0, 0});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_REJECTED));
+}
+
+// Where a macro is, is the one thing about it that the patch does not hold -
+// it is deliberately not stored (control/macros.h) - so a pot on screen has
+// nothing to draw until the module is asked.
+static void test_a_macro_reports_where_it_is_and_what_it_is_doing() {
+    Rig rig;
+    Patch p = two_node_patch();
+    p.nodes[0].params[0] = PARAM_CENTRE;          // Transpose, with room either way
+    rig.patches.apply(p, default_globals(), 0);
+    rig.send(SYSEX_SET_MACRO, {0, 'l', 'i', 'f', 't', 0, 0, 0, 0});
+    rig.send(SYSEX_SET_MACRO_DEST, {0, 0, CC_TARGET_NODE, 0, 0, 0, 0, 0, 0x7F, 1, 12, 0, 0, 0});
+
+    // Untouched: silent, not broken, and the panel must be able to tell.
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MACRO_STATE, {0});
+    const auto* idle = rig.midi.last_reply(SYSEX_MACRO_STATE);
+    TEST_ASSERT_NOT_NULL(idle);
+    TEST_ASSERT_EQUAL(0, idle->bytes[5]);                 // the macro asked for
+    TEST_ASSERT_EQUAL(0, idle->bytes[6]);                 // not engaged
+    TEST_ASSERT_EQUAL(1, idle->bytes[9]);                 // one destination
+    TEST_ASSERT_EQUAL(0, idle->bytes[10]);                // in pool slot 0
+    TEST_ASSERT_EQUAL(MOD_STATUS_SILENT, idle->bytes[11]);
+
+    // Moved, and the sum having run: engaged, at a position, and asking for
+    // its whole depth at the top of its window.
+    rig.macros.set(0, 255);
+    rig.sum.begin();
+    rig.macros.expand(rig.patches.active(), rig.sum);
+    rig.sum.commit(1000u);
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MACRO_STATE, {0});
+    const auto* live = rig.midi.last_reply(SYSEX_MACRO_STATE);
+    TEST_ASSERT_NOT_NULL(live);
+    const auto& b = live->bytes;
+    const auto u14 = [&b](size_t at){ return (uint16_t)(b[at] | ((uint16_t)b[at + 1] << 7)); };
+    TEST_ASSERT_EQUAL(1, b[6]);                           // engaged
+    TEST_ASSERT_EQUAL_UINT16(255, u14(7));                // above a data byte
+    TEST_ASSERT_EQUAL(MOD_STATUS_ACTIVE, b[11]);
+    TEST_ASSERT_EQUAL_UINT16(12, u14(12));                // the offset it asks for
+    TEST_ASSERT_EQUAL(0, b[14]);                          // upwards
+    TEST_ASSERT_EQUAL_UINT16(PARAM_CENTRE, u14(15));      // anchored where it was dialled
+    TEST_ASSERT_EQUAL_UINT16(PARAM_CENTRE + 12, u14(17));
+
+    // A macro that is not a macro is refused rather than answered for.
+    rig.midi.clear();
+    rig.send(SYSEX_GET_MACRO_STATE, {N_MACRO});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_seven_bit_packing_round_trips_every_byte_value);
@@ -1237,6 +1394,10 @@ int main() {
     RUN_TEST(test_an_invalid_connection_is_refused_and_changes_nothing);
     RUN_TEST(test_a_parameter_edit_preserves_all_node_state);
     RUN_TEST(test_a_modulation_route_reports_what_it_is_doing);
+    RUN_TEST(test_a_macro_name_round_trips_over_the_wire);
+    RUN_TEST(test_a_macro_destination_round_trips_with_a_negative_depth);
+    RUN_TEST(test_a_destination_past_the_per_macro_cap_is_refused);
+    RUN_TEST(test_a_macro_reports_where_it_is_and_what_it_is_doing);
     RUN_TEST(test_a_parameter_above_127_survives_the_wire);
     RUN_TEST(test_a_parameter_beyond_its_range_is_refused);
     RUN_TEST(test_port_edits_reconstruct_nothing);

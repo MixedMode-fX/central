@@ -56,6 +56,12 @@ export function describeTarget(app, m) {
     case P.CcTargetKind.CC_TARGET_CLOCK: return named(CLOCK_TARGETS, 'clock');
     case P.CcTargetKind.CC_TARGET_TRANSPORT: return named(TRANSPORT_TARGETS, 'transport');
     case P.CcTargetKind.CC_TARGET_KEY: return named(KEY_TARGETS, 'key');
+    // A macro is named by the patch, and the name is the whole reason it is a
+    // macro rather than several bindings that share a number.
+    case P.CcTargetKind.CC_TARGET_MACRO: {
+      const macro = app.state.patch.macros?.[m.targetIndex];
+      return `macro ${m.targetIndex + 1}${macro?.name ? ` · ${macro.name}` : ''}`;
+    }
     default: return 'a target kind this firmware does not have';
   }
 }
@@ -135,6 +141,44 @@ export function RouteTable(app) {
       : Hint('nothing modulated'));
 }
 
+// The target pickers: what kind of thing, which one of them, and which of
+// its fields. Shared by a controller binding and a macro destination, because
+// they reach the same target space - and a destination is refused some of it,
+// which is what `kinds` narrows.
+export function TargetFields(app, entry, push, kinds = CC_TARGET_KINDS) {
+  const fields = [Select({
+    options: kinds, value: entry.targetKind, 'aria-label': 'what kind of target',
+    onChange: (v) => { entry.targetKind = v; entry.param = 0; entry.targetIndex = 0; push(); },
+  })];
+  if (entry.targetKind === P.CcTargetKind.CC_TARGET_NODE) {
+    const nodes = app.state.patch.nodes;
+    fields.push(Select({
+      options: nodes.length
+        ? nodes.map((node, index) => ({ value: index, label: `${index} · ${app.device?.byId.get(node.algorithmId)?.name ?? node.algorithmId}` }))
+        : [{ value: 0, label: 'no nodes in this patch' }],
+      value: entry.targetIndex, 'aria-label': 'which node',
+      onChange: (v) => { entry.targetIndex = v; entry.param = 0; push(); },
+    }));
+    const node = nodes[entry.targetIndex];
+    // Tables are not knob targets: only the header parameters are offered.
+    fields.push(Select({
+      options: knobParams(node ? app.device?.byId.get(node.algorithmId) : null)
+        .map(({ at, pd }) => ({ value: at, label: `${pd.name} (${pd.min}–${pd.max})` })),
+      value: entry.param, 'aria-label': 'which parameter',
+      onChange: (v) => { entry.param = v; push(); },
+    }));
+  } else {
+    // Everything that is not a node is one short list of fields. A kind with
+    // no fields - the reserved port one - offers nothing, which is the
+    // honest thing for a target that does not exist yet.
+    fields.push(Select({
+      options: FIELDS_OF[entry.targetKind] ?? [], value: entry.param, 'aria-label': 'which field',
+      onChange: (v) => { entry.param = v; push(); },
+    }));
+  }
+  return fields;
+}
+
 function MappingEditor(app, slot, existing) {
   const m = existing ?? emptyMapping();
   const active = isBinding(existing);
@@ -152,37 +196,7 @@ function MappingEditor(app, slot, existing) {
     onChange: (on) => { m.flags = on ? (m.flags | bit) : (m.flags & ~bit); push(); },
   });
 
-  const kind = Select({
-    options: CC_TARGET_KINDS, value: m.targetKind,
-    onChange: (v) => { m.targetKind = v; m.param = 0; m.targetIndex = 0; push(); },
-  });
-  const targetFields = [];
-  if (m.targetKind === P.CcTargetKind.CC_TARGET_NODE) {
-    const nodes = app.state.patch.nodes;
-    targetFields.push(Select({
-      options: nodes.length
-        ? nodes.map((node, index) => ({ value: index, label: `${index} · ${app.device?.byId.get(node.algorithmId)?.name ?? node.algorithmId}` }))
-        : [{ value: 0, label: 'no nodes in this patch' }],
-      value: m.targetIndex,
-      onChange: (v) => { m.targetIndex = v; m.param = 0; push(); },
-    }));
-    const node = nodes[m.targetIndex];
-    // Tables are not knob targets: only the header parameters are offered.
-    targetFields.push(Select({
-      options: knobParams(node ? app.device?.byId.get(node.algorithmId) : null)
-        .map(({ at, pd }) => ({ value: at, label: `${pd.name} (${pd.min}–${pd.max})` })),
-      value: m.param,
-      onChange: (v) => { m.param = v; push(); },
-    }));
-  } else {
-    // Everything that is not a node is one short list of fields. A kind with
-    // no fields - the reserved port one - offers nothing, which is the
-    // honest thing for a target that does not exist yet.
-    targetFields.push(Select({
-      options: FIELDS_OF[m.targetKind] ?? [], value: m.param,
-      onChange: (v) => { m.param = v; push(); },
-    }));
-  }
+  const [kind, ...targetFields] = TargetFields(app, m, push);
 
   return Disclosure({
     class: classes('binding', active && 'active'), ...remembered(app.state.ui, `binding-${slot}`),

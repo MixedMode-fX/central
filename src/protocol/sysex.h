@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 10
+#define SYSEX_PROTOCOL_VERSION 11
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -86,6 +86,25 @@ enum SysexCommand : uint8_t {
     SYSEX_SLOT_LOAD        = 0x21,
     SYSEX_SLOT_ERASE       = 0x22,
     SYSEX_SLOT_LIST        = 0x23,
+    // Macros (control/macros.h): one performance control moving several
+    // parameters at once. The name and the destination pool are patch state
+    // and are set one record at a time, exactly as a controller binding is.
+    SYSEX_SET_MACRO        = 0x24,   // <index> <name x MACRO_NAME_BYTES>
+    SYSEX_GET_MACRO        = 0x25,
+    // One pool slot. `param`, the window ends and the depth are all wider
+    // than a SysEx data byte, so each travels as a u14 the way SET_PARAM's
+    // value does. `depth` is **signed** - one macro opening a filter while
+    // closing a delay is the move macros exist for - and travels as a
+    // magnitude followed by a sign byte rather than biased: a bias would
+    // halve the range a target's own units already reach, and the sign of a
+    // depth is not something to get subtly wrong.
+    SYSEX_SET_MACRO_DEST   = 0x26,
+    SYSEX_GET_MACRO_DEST   = 0x27,
+    // <index>: where a macro *is*, which is the one thing about it that is
+    // not in the patch. A macro holds no position of its own across a load
+    // (control/macros.h), so an editor drawing a pot has no other way to
+    // find out where the module has it.
+    SYSEX_GET_MACRO_STATE  = 0x28,
     SYSEX_RESTORE_DEFAULTS = 0x30,
 
     // Device -> host
@@ -100,6 +119,9 @@ enum SysexCommand : uint8_t {
     SYSEX_CONTROL_VALUE    = 0x54,
     SYSEX_MOD_ROUTE        = 0x55,
     SYSEX_MOD_STATE        = 0x56,
+    SYSEX_MACRO            = 0x57,
+    SYSEX_MACRO_DEST       = 0x58,
+    SYSEX_MACRO_STATE      = 0x59,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>

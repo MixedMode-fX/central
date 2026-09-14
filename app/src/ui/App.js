@@ -1,9 +1,16 @@
 // The shell: the header, the tabs, what went wrong, and the tab on screen.
 //
-// Five tabs - patch, key, MIDI, library, schema - in the order the work
+// Six tabs - patch, key, MIDI, module, library, schema - in the order the work
 // happens, and **play** as a button at the top beside *connect a module*,
 // because those two answer the same question: which module am I listening
 // to, the one in the page or the one on the cable.
+//
+// Play does not open a tab. It opens the performance surface, which is its
+// own shell and takes the whole viewport (ui/surface/Surface.js): an
+// instrument rather than an instrument panel. The panels that used to be
+// behind the play button - the meters, the scope, the roll, the jacks, the
+// listener, the monitor - are the **module** tab, which is where an
+// instrument panel belongs.
 
 import { el, classes } from './dom.js';
 import { icon } from './components/icons.js';
@@ -16,6 +23,7 @@ import { busPeers } from '../core/patch.js';
 import { drumSources } from '../runtime/audio/drums.js';
 import { PatchTab } from './tabs/PatchTab.js';
 import { PlayTab } from './tabs/PlayTab.js';
+import { Surface } from './surface/Surface.js';
 import { KeyTab } from './tabs/KeyTab.js';
 import { MidiTab } from './tabs/MidiTab.js';
 import { LibraryTab } from './tabs/LibraryTab.js';
@@ -25,6 +33,7 @@ const TABS = [
   { key: 'patch', label: 'patch', icon: 'patch', view: PatchTab },
   { key: 'key', label: 'key', icon: 'key', view: KeyTab },
   { key: 'midi', label: 'MIDI', icon: 'midi', view: MidiTab },
+  { key: 'module', label: 'module', icon: 'clock', view: PlayTab },
   { key: 'library', label: 'library', icon: 'library', view: LibraryTab },
   { key: 'schema', label: 'schema', icon: 'schema', view: SchemaTab },
 ];
@@ -37,11 +46,16 @@ export function App(app) {
   syncNoteBuses(app);
   syncDrums(app);
 
+  // The surface is not a tab: it is a second shell, with no header and no
+  // tab bar, because a stage view that carried the editor's furniture would
+  // have a third of a phone's screen left for the instrument.
+  if (state.ui.tab === 'play') return Surface(app);
+
   const checked = app.device?.capabilities;
   const problems = checked ? validate(app.device, state.patch) : [];
   const notes = checked ? advise(app.device, state.patch) : [];
   const said = (list) => list.map((p) => `${p.where}: ${p.message}`);
-  const tab = state.ui.tab === 'play' ? PlayTab : TABS.find((t) => t.key === state.ui.tab)?.view ?? PatchTab;
+  const tab = TABS.find((t) => t.key === state.ui.tab)?.view ?? PatchTab;
 
   return el('div', { class: 'shell' },
     Header(app),

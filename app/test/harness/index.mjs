@@ -48,7 +48,7 @@ export async function connected(module) {
 // an editor whose every command is recorded rather than sent. `calls` is what
 // a test reads back to see what a press asked for.
 export function fakeApp({ patch, globals, device = null, module = null, controller = null,
-                          offline = false, modLive = new Map() } = {}) {
+                          offline = false, modLive = new Map(), macroLive = new Map() } = {}) {
   const state = createState();
   if (patch) state.patch = patch;
   if (globals) state.globals = globals;
@@ -65,13 +65,15 @@ export function fakeApp({ patch, globals, device = null, module = null, controll
   };
   for (const name of ['bindParam', 'clearMapping', 'routeParam', 'clearModRoute', 'setParam', 'setParams',
                       'setConnection', 'setJack', 'setMidiPort', 'setModRoute', 'setCcMap', 'learnInto',
-                      'removeNode', 'removeBlock', 'applyPlan', 'add', 'addMidiPort']) {
+                      'removeNode', 'removeBlock', 'applyPlan', 'add', 'addMidiPort',
+                      'setMacro', 'setMacroDest', 'clearMacroDest', 'addMacroDest']) {
     editor[name] = record(name);
   }
+  editor.caps = device?.capabilities ?? null;
   return {
     state, device, module, controller, calls, editor,
     live: new Live(),
-    session: { offline, usingModule: Boolean(module), modLive },
+    session: { offline, usingModule: Boolean(module), modLive, macroLive },
     render: () => {},
     say: record('say'),
     fail: record('fail'),
@@ -198,6 +200,16 @@ export function find(node, matches) {
     if (deeper) return deeper;
   }
   return null;
+}
+
+// Every element that answers, for a question about how many of something a
+// panel drew - one lane per destination, one row per slot.
+export function findAll(node, matches, out = []) {
+  for (const kid of node?.children ?? []) {
+    if (kid.nodeType === 1 && matches(kid)) out.push(kid);
+    findAll(kid, matches, out);
+  }
+  return out;
 }
 
 // The views read `document` when they build something, not when they load,

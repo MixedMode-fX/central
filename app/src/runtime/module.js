@@ -150,11 +150,34 @@ export class EmbeddedModule {
 
   onMessage(fn) { this.handler = fn; }
 
+  // What the module said on its own, if anything: a Program Change recall, a
+  // CC learn, an error behind the red LED. Nobody asked for these and nothing
+  // is waiting on them, so without draining them the page would simply never
+  // hear the module speak first - and worse, the next request would clear the
+  // buffer they were sitting in. A real port streams them out as they happen;
+  // here the page has to come and look, once a frame and before every
+  // request.
+  //
+  // Delivered on a microtask, exactly as a reply is: the handler for an event
+  // goes on to ask the module for a dump, and that must not re-enter `send`
+  // from inside it.
+  drainEvents() {
+    const E = this.E;
+    if (!E.emu_sysex_out_len()) return;
+    const out = new Uint8Array(E.memory.buffer, E.emu_sysex_out_ptr(), E.emu_sysex_out_len());
+    const messages = splitSysex(out).map((message) => message.slice());
+    E.emu_sysex_out_clear();
+    queueMicrotask(() => { for (const message of messages) this.handler(message); });
+  }
+
   send(bytes) {
     const E = this.E;
     if (bytes.length > E.emu_sysex_in_capacity()) {
       throw new Error('that message is longer than the module will accept');
     }
+    // Anything the module has already said, before this request's own replies
+    // take the buffer over.
+    this.drainEvents();
     const scratch = E.emu_sysex_in_ptr();
     new Uint8Array(E.memory.buffer).set(bytes, scratch);
     E.emu_sysex_out_clear();
@@ -176,6 +199,10 @@ export class EmbeddedModule {
     // module's memory, which the next call overwrites.
     const out = new Uint8Array(E.memory.buffer, E.emu_sysex_out_ptr(), E.emu_sysex_out_len());
     const replies = splitSysex(out).map((reply) => reply.slice());
+    // Taken, so the buffer is empty again and the next thing found in it is
+    // the module speaking first rather than this request's answer a second
+    // time (`drainEvents`).
+    E.emu_sysex_out_clear();
     // Delivered on a microtask, the way a real port would: the Device API is
     // async, and code that only works because a reply arrived synchronously
     // would break the moment it met real hardware.
@@ -200,6 +227,7 @@ export class EmbeddedModule {
       last = ts;
       for (const listener of this.frameListeners) listener(this.now);
       this.advance(dt);
+      this.drainEvents();
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

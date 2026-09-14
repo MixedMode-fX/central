@@ -9,6 +9,7 @@
 import * as P from '../protocol/generated.js';
 import { Domain } from './validate.js';
 import { KEY_TARGETS } from '../protocol/names.js';
+import { MACRO_NONE } from '../protocol/codec.js';
 
 // A slot in the modulation table holds a route only while it names a bus
 // (src/control/mod_matrix.h); a slot in the binding table holds a binding only
@@ -16,6 +17,13 @@ import { KEY_TARGETS } from '../protocol/names.js';
 // reads either table reads it through these two.
 export const isRoute = (r) => Boolean(r) && r.bus !== P.NO_BUS && r.bus !== null && r.bus !== undefined;
 export const isBinding = (m) => Boolean(m) && Boolean(m.sourceMask);
+// A macro exists while it has a name - the name is what makes several
+// destinations one gesture rather than several bindings that happen to share
+// a number (src/node/patch.h) - and a pool entry belongs to a macro while it
+// names one.
+export const isMacro = (m) => Boolean(m) && Boolean(m.name);
+export const isDest = (d) => Boolean(d) && d.macro !== null && d.macro !== undefined
+  && d.macro !== MACRO_NONE;
 
 const reachesParam = (entry, index, param) =>
   entry.targetKind === P.CcTargetKind.CC_TARGET_NODE
@@ -50,6 +58,27 @@ export function freeModSlot(patch, limit) {
   const map = patch.modMap ?? [];
   const n = Math.min(limit ?? map.length, map.length);
   for (let i = 0; i < n; i++) if (!isRoute(map[i])) return i;
+  return null;
+}
+
+// The destinations of one macro, with their pool slots. The pool is shared,
+// so a macro's destinations are wherever they landed rather than a block.
+export function destsOfMacro(patch, macro) {
+  const found = [];
+  (patch.macroDest ?? []).forEach((dest, slot) => {
+    if (isDest(dest) && dest.macro === macro) found.push({ slot, dest });
+  });
+  return found;
+}
+
+// The first pool entry nothing is using, or null when the pool is full. The
+// cap on one macro is a separate question (`destsOfMacro`): a destination can
+// be refused because the pool is full or because that macro is, and the two
+// read differently to whoever is adding it.
+export function freeMacroDestSlot(patch, limit) {
+  const pool = patch.macroDest ?? [];
+  const n = Math.min(limit ?? pool.length, pool.length);
+  for (let i = 0; i < n; i++) if (!isDest(pool[i])) return i;
   return null;
 }
 

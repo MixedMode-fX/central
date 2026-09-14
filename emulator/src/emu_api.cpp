@@ -52,7 +52,8 @@ static CcMapper cc_map(patches, master, macros);
 static ControlSum control_sum(cc_map);
 static ModMatrix mod_matrix(patches, cc_map, control_sum);
 static NrpnDecoder nrpn(patches, cc_map);
-static SysexHandler protocol(patches, master, store, leds, midi, cc_map, mod_matrix);
+static SysexHandler protocol(patches, master, store, leds, midi, cc_map, mod_matrix,
+                             macros, control_sum);
 
 // The patch under construction. Separate from what is running: the page fills
 // this through the emu_patch_* setters and calls emu_load() to make it live.

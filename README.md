@@ -523,10 +523,10 @@ SysEx use. Deliberately **not** a node: a parameter has no domain, no fan-in
 rule and no per-pass value.
 
 A target has a kind: `node` (index plus parameter), `clock` (tempo, source, CV
-PPQN), `transport` (start, stop, continue, tap tempo) and `key` (root, scale,
-register). `port` is reserved. The last is a kind rather than somebody's
-parameter because the key is one setting for the whole patch and no node
-carries a copy of it.
+PPQN), `transport` (start, stop, continue, tap tempo), `key` (root, scale,
+register) and `macro`. `port` is reserved. The last two are kinds rather than
+somebody's parameter because the key is one setting for the whole patch and a
+macro is not a node at all.
 
 - **14-bit**, as CC *n* MSB and CC *n*+32 LSB, because tempo does not fit in
   seven bits. A lone MSB is applied rather than stalling.
@@ -551,11 +551,49 @@ front buffer — so a route sees a published value and order does not matter.
   wrote, so a target that has moved elsewhere re-takes the centre.
 - Each route carries a depth, a sub-range in the target's units, and
   `bipolar` and `invert` flags. Polarity belongs to the route, not the bus.
-- **Two routes may not share a target** — the validator refuses it; the CV bus
-  is where two modulators mix. A route cannot reach a `transport` target.
+- **Several offset contributions may share a target.** They do not race: every
+  offset route and every macro destination hands what it wants to `ControlSum`
+  (`src/control/control_sum.h`), which sums them per target, clips **once**
+  against the target's range and writes once, from one anchor. A route cannot
+  reach a `transport` target.
 
-One write per route per pass. Routes travel in the patch image, over SysEx as
-`SET_MOD_ROUTE` / `GET_MOD_ROUTE`, and through the console as `mods`.
+One write per *target* per pass. Routes travel in the patch image, over SysEx
+as `SET_MOD_ROUTE` / `GET_MOD_ROUTE`, and through the console as `mods`.
+
+### Macros
+
+`N_MACRO` named macros in the `Patch`, sharing a pool of `N_MACRO_DEST`
+destinations capped at `N_MACRO_DEST_PER_MACRO` each
+(`src/control/macros.h`). One control, several parameters.
+
+- **A macro is a target, not a source.** `CC_TARGET_MACRO` puts it in the same
+  target space a binding and a route already reach, so a knob drives one
+  through `CcMapper` — inheriting takeover, the relative encodings and 14-bit
+  pairing — and a CV bus drives one through the matrix.
+- **It holds; it does not store.** A macro's position is runtime state and is
+  deliberately absent from the patch: it is silent until first moved, and then
+  holds its destinations every pass until the next patch load. A macro with no
+  stored position has no position, and asserting one at load time would slam
+  every macro'd parameter to whatever zero happened to mean.
+- **Offset over a window, clamped.** A destination sweeps its target across
+  `[src_lo, src_hi]` of the macro's travel as a signed offset from the
+  parameter's own dialled value; past `src_hi` it **holds** its whole depth
+  rather than falling back, so sweeping a macro up builds. A destination that
+  rises and falls back is two adjacent windows with opposite depths — which is
+  why holding is the primitive and releasing is not.
+- **Fan-out never stores.** Destinations go through `modulate_param`, never
+  `set_param`: a macro an LFO can sweep would otherwise rewrite EEPROM every
+  pass.
+- Refused at validate time: a destination targeting a macro, a `transport`
+  target, and more than the per-macro cap on one macro.
+
+The name is what makes a macro a macro rather than several bindings that
+happen to share a CC number: with nothing plugged in, the module can still say
+which gesture this is. Names are fixed-width `MACRO_NAME_BYTES`. Macros travel
+in the patch image and over SysEx as `SET_MACRO` / `GET_MACRO`,
+`SET_MACRO_DEST` / `GET_MACRO_DEST`, with `GET_MACRO_STATE` reporting the one
+thing that is not in the patch: where a macro is, and what each of its
+destinations is doing about it.
 
 ### NRPN
 

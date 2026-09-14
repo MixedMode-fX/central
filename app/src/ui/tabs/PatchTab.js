@@ -1,13 +1,15 @@
 // The patch, drawn. The canvas answers "what feeds what", which the bus
 // model otherwise hides in a dozen selectors reading "gate bus 2", and the
 // block that is selected gets the whole of its detail in the panel below the
-// picture. Under that, the mod matrix: a binding and a route are part of the
-// patch, so they are read under the graph they act on.
+// picture. Under that, the mod matrix and the macro bench: a binding, a route
+// and a macro are all part of the patch, so they are read under the graph
+// they act on.
 
 import { el } from '../dom.js';
 import { Hint } from '../components/Panel.js';
 import { Meters } from '../panels/Meters.js';
 import { ModMatrix } from '../panels/ModMatrix.js';
+import { Macros } from '../panels/Macros.js';
 import { CanvasPanel, geometry } from '../canvas/Canvas.js';
 import { Inspector } from '../canvas/Inspector.js';
 
@@ -17,5 +19,6 @@ export function PatchTab(app) {
   // canvas counts the free buses in the patch below it, not the one drawn
   // before this edit.
   const geom = geometry(app);
-  return el('div', {}, Meters(app), CanvasPanel(app, geom), Inspector(app, geom), ModMatrix(app));
+  return el('div', {}, Meters(app), CanvasPanel(app, geom), Inspector(app, geom),
+    ModMatrix(app), Macros(app));
 }

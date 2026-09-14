@@ -59,7 +59,8 @@ static Console console(console_io, patches, master, store, leds, cc_map);
 // The patch protocol (#11). Not a node, not reachable from a bus: with no
 // button to hold at power-on, a patch that could take this down would leave
 // reflashing over USB as the only way to recover.
-static SysexHandler protocol(patches, master, store, leds, midi_out, cc_map, mod_matrix);
+static SysexHandler protocol(patches, master, store, leds, midi_out, cc_map, mod_matrix,
+                             macros, control_sum);
 
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;

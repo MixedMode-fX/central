@@ -124,6 +124,12 @@ export class Device extends EventTarget {
     this.capabilities.ccMappings = u8();
     this.capabilities.modRoutes = u8();
     this.capabilities.cvFull = u14();
+    // The macro table and the pool it shares, so a panel draws its budget
+    // from the module rather than from eight and thirty-two written into it.
+    this.capabilities.macros = u8();
+    this.capabilities.macroDests = u8();
+    this.capabilities.macroDestsPerMacro = u8();
+    this.capabilities.macroNameBytes = u8();
     return this.capabilities;
   }
 
@@ -449,6 +455,89 @@ export class Device extends EventTarget {
       rangeHi: codec.readU14(reply, 13),
       centre: codec.readU14(reply, 15),
       value: codec.readU14(reply, 17),
+    };
+  }
+
+  // Macros ---------------------------------------------------------------
+  // A macro is a *target*: nothing here moves one. It is moved by a source -
+  // a knob through the binding table, a CV bus through the matrix - so what
+  // the app writes is the name and the destinations, and what it reads back
+  // is where the module has put it.
+
+  async setMacro(index, name) {
+    return this.command(P.SysexCommand.SYSEX_SET_MACRO, [index, ...codec.nameBytes(name)]);
+  }
+  async getMacro(index) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_MACRO, [index]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_MACRO) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    this.throwOnNak(reply, 'no such macro');
+    const name = codec.nameFrom(reply, 6);
+    return name ? { name } : null;
+  }
+
+  // One destination. A macro index that is not a macro clears the slot, which
+  // is what the firmware reads too: MACRO_NONE is 0xFF and does not fit a
+  // data byte, so "not a macro" says it rather than a separate enable flag
+  // that could disagree with the macro field.
+  async setMacroDest(slot, dest) {
+    const d = dest ?? null;
+    if (!d || d.macro === null || d.macro === undefined || d.macro === codec.MACRO_NONE) {
+      return this.command(P.SysexCommand.SYSEX_SET_MACRO_DEST,
+        [slot, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+    return this.command(P.SysexCommand.SYSEX_SET_MACRO_DEST, [
+      slot, d.macro, d.targetKind, d.targetIndex,
+      ...codec.u14(d.param), ...codec.u14(d.srcLo), ...codec.u14(d.srcHi),
+      ...codec.s14(d.depth), d.flags ?? 0,
+    ]);
+  }
+  async getMacroDest(slot) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_MACRO_DEST, [slot]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_MACRO_DEST) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    this.throwOnNak(reply, 'no such macro destination');
+    const macro = reply[6];
+    if (macro >= 0x7f) return null;
+    return {
+      macro,
+      targetKind: reply[7],
+      targetIndex: reply[8],
+      param: codec.readU14(reply, 9),
+      srcLo: codec.readU14(reply, 11),
+      srcHi: codec.readU14(reply, 13),
+      depth: codec.readS14(reply, 15),
+      flags: reply[18],
+    };
+  }
+
+  // Where a macro *is*, and what each of its destinations is doing about it.
+  // None of this is in the patch and none of it can be derived from the patch:
+  // a macro deliberately does not store its position, so a pot on screen has
+  // nothing to draw until the module is asked. A destination that has never
+  // been moved reads as silent rather than as a mistake, which is the
+  // distinction the bench exists to draw.
+  async getMacroState(index) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_MACRO_STATE, [index]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_MACRO_STATE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    if (!reply || this.isReply(reply, P.SysexCommand.SYSEX_NAK)) return null;
+    const dests = [];
+    const n = reply[9];
+    for (let i = 0, at = 10; i < n; i++, at += 9) {
+      dests.push({
+        slot: reply[at],
+        status: reply[at + 1],
+        offset: codec.readS14(reply, at + 2),
+        anchor: codec.readU14(reply, at + 5),
+        value: codec.readU14(reply, at + 7),
+      });
+    }
+    return {
+      macro: reply[5],
+      engaged: reply[6] !== 0,
+      position: codec.readU14(reply, 7),
+      dests,
     };
   }
 

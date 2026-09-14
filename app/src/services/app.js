@@ -16,6 +16,8 @@ import { Live, Renderer } from './render.js';
 import { Arrangement } from './arrangement.js';
 import { Session } from './session.js';
 import { Editor } from './editor.js';
+import { Play } from './play.js';
+import { Surface } from './surface.js';
 import { Patches } from './patches.js';
 
 export function createApp({ root, view, wasmUrl }) {
@@ -37,8 +39,19 @@ export function createApp({ root, view, wasmUrl }) {
   const arrangement = new Arrangement({ state, library });
   const session = new Session({ state, live, render });
   const editor = new Editor({ state, session, arrangement, render });
+  // Where a note goes when you play one: the module in the page, or the one
+  // on the cable. No view knows which (services/play.js).
+  const play = new Play({
+    state, session, render,
+    module: () => app.module,
+    listener: () => app.listener,
+    refresh: () => app.refreshLive(),
+  });
   const patches = new Patches({ state, library, editor, arrangement, render });
-  Object.assign(app, { render, arrangement, session, editor, patches });
+  // The pads and pots: the performer's own controller, kept in this browser
+  // rather than in the patch (services/surface.js).
+  const surface = new Surface({ state, library, play, editor, session, render });
+  Object.assign(app, { render, arrangement, session, editor, patches, play, surface });
 
   app.say = (message) => editor.say(message);
   app.fail = (message) => editor.fail(message);
@@ -53,7 +66,12 @@ export function createApp({ root, view, wasmUrl }) {
   };
 
   session.addEventListener('replaced', (e) => patches.adopt(e.detail));
-  session.addEventListener('learned', () => editor.learned());
+  // The module's learn is the truth about whether one is running: when it
+  // lands, the control that armed it stops saying it is waiting.
+  session.addEventListener('learned', () => {
+    editor.learned();
+    state.ui.surface.armed = null;
+  });
 
   // --- the module, and the module on the cable ------------------------------
 
@@ -86,6 +104,7 @@ export function createApp({ root, view, wasmUrl }) {
     if (!app.module) return;
     if (!silent) patches.stash();
     app.module.start();
+    play.detach();
     await session.adopt(app.module, { usingModule: true });
     state.current = noPatch();
     state.savedImage = null;
@@ -102,7 +121,8 @@ export function createApp({ root, view, wasmUrl }) {
     if (!support.ok) { app.say(support.reason); return; }
     app.say('looking for a module…');
     try {
-      const found = await discover(await access());
+      const midi = await access();
+      const found = await discover(midi);
       if (!found.length) { app.say('no module answered'); return; }
       const kept = patches.stash();
       const port = found[0];
@@ -110,6 +130,11 @@ export function createApp({ root, view, wasmUrl }) {
       stopLive?.();
       stopLive = null;
       await session.adopt(new WebMidiTransport(port.input, port.output), { deviceId: port.deviceId });
+      // Musical MIDI goes out a different cable from the protocol's, which is
+      // why cable 3 is reserved: a dump in flight and a pad being hit must not
+      // collide. The access is the one already granted - a second request
+      // would be a second permission prompt for something already allowed.
+      play.attach({ access: midi, control: port.output, name: port.name });
       state.current = { id: null, name: `on ${port.name}`, dirty: true, savedAt: 0 };
       state.savedImage = null;
       arrangement.reset();

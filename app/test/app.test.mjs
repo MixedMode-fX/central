@@ -37,6 +37,7 @@ import { NodeCard } from '../src/ui/panels/NodeCard.js';
 import { KeyBadge, rootInlet } from '../src/ui/components/KeyBadge.js';
 import { NO_STEP } from '../src/ui/panels/grids/playhead.js';
 import { describeTarget, RouteTable } from '../src/ui/panels/ModMatrix.js';
+import { Macros } from '../src/ui/panels/Macros.js';
 import { KeyTab } from '../src/ui/tabs/KeyTab.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
 import { shade, nodeRollSources, scopeRows } from '../src/ui/scope/scope.js';
@@ -54,7 +55,7 @@ import {
 } from '../src/core/layout.js';
 import {
   instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, listening,
-  words, find, withDom, repoRoot,
+  words, find, findAll, withDom, repoRoot,
 } from './harness/index.mjs';
 
 // --- the library ------------------------------------------------------------
@@ -2580,4 +2581,86 @@ test('what is being listened to survives a reload', async () => {
   old.restore({ volume: 0.3, clicks: true, clickVolume: 0.2, players: [{ source: 'out' }] });
   assert.deepEqual(old.gateSources.map((s) => s.kind), ['jacks'], 'the gate listener keeps its default');
   assert.equal(old.drums.get('other').kit, back.drums.get('other').kit);
+});
+
+// --- the macro bench ---------------------------------------------------------
+
+// A destination carries a window, a signed depth and a target. Those are
+// numbers rather than gestures, which is why they are here and not on the
+// performance surface - and why the panel has to draw them: four rows of
+// numbers do not say what a macro does.
+test('the macro bench draws a window per destination, and offers the parameters', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const divider = device.algorithms.find((a) => a.name === 'ClockDiv');
+  patch.nodes = [codec.emptyNode(divider.id)];
+  patch.macros[0] = { name: 'open up' };
+  // Two windows on one parameter, pushing opposite ways: the rise-and-fall a
+  // single destination deliberately cannot do, because holding is the
+  // primitive (src/node/patch.h).
+  const dest = (srcLo, srcHi, depth) => ({
+    macro: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 0,
+    param: 1, srcLo, srcHi, depth, flags: 0,
+  });
+  patch.macroDest[0] = dest(0, 128, 90);
+  patch.macroDest[1] = dest(128, 255, -60);
+
+  const app = fakeApp({ patch, device });
+  const panel = withDom(() => Macros(app));
+  const lanes = findAll(panel, (n) => String(n.className).includes('lane-line'));
+  assert.equal(lanes.length, 2, 'one lane drawn per destination');
+
+  // The target pickers are the mod matrix's, and the parameter list is the
+  // module's own descriptors: a picker with nothing in it would be a
+  // destination nobody could point anywhere.
+  const params = find(panel, (n) => n.attrs['aria-label'] === 'which parameter');
+  assert.ok(params.children.length > 1, 'the parameters of the node are offered');
+
+  // A macro may not reach a macro - the firmware refuses it - so it is not
+  // offered rather than refused after the fact.
+  const kinds = find(panel, (n) => n.attrs['aria-label'] === 'what kind of target');
+  assert.ok(!words(kinds).includes('a macro'), 'a destination cannot target a macro');
+
+  // The name field stops at the width the patch holds.
+  const name = find(panel, (n) => n.attrs['aria-label'] === 'the name of macro 1');
+  assert.equal(name.getAttribute('maxlength'), String(device.capabilities.macroNameBytes));
+});
+
+// Silent, clipped and working look identical in a table of numbers and are
+// three different problems. The module reports all three; the panel draws
+// them apart.
+test('the bench tells a silent destination from a clipped one', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const divider = device.algorithms.find((a) => a.name === 'ClockDiv');
+  patch.nodes = [codec.emptyNode(divider.id)];
+  patch.macros[0] = { name: 'lift' };
+  patch.macroDest[0] = {
+    macro: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 0,
+    param: 1, srcLo: 0, srcHi: 255, depth: 90, flags: 0,
+  };
+  patch.macroDest[1] = {
+    macro: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 0,
+    param: 2, srcLo: 0, srcHi: 255, depth: -20, flags: 0,
+  };
+
+  const live = new Map([[0, {
+    macro: 0, engaged: true, position: 200,
+    dests: [
+      { slot: 0, status: P.ModStatus.MOD_STATUS_CLIPPED, offset: 90, anchor: 100, value: 255 },
+      { slot: 1, status: P.ModStatus.MOD_STATUS_SILENT, offset: 0, anchor: 100, value: 100 },
+    ],
+  }]]);
+  const app = fakeApp({ patch, device, macroLive: live });
+  const panel = withDom(() => Macros(app));
+  assert.ok(find(panel, (n) => String(n.className).includes('is-clipped')), 'the pinned one says so');
+  assert.ok(find(panel, (n) => String(n.className).includes('is-silent')), 'the dark one is not the same as broken');
+  assert.ok(words(panel).includes('pinned against the end of its range'));
+  assert.ok(words(panel).includes('silent until the macro is moved'));
+
+  // The pool budget is read from the module rather than written into the
+  // panel, so cutting the pool is a firmware change and not two.
+  assert.ok(words(panel).includes(`${device.capabilities.macroDests} destinations in the pool`));
 });

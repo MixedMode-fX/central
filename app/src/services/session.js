@@ -24,6 +24,11 @@ export class Session extends EventTarget {
     // (src/control/mod_matrix.h). Live state, keyed by slot: nothing here is
     // saved, exported or sent anywhere.
     this.modLive = new Map();
+    // Where each macro is, as the module last reported it (control/macros.h).
+    // A macro deliberately stores no position, so this is the only account of
+    // one - and like modLive it is live state: nothing here is saved,
+    // exported or sent anywhere.
+    this.macroLive = new Map();
     this.modPolling = false;
     this.stopModPoll = null;
   }
@@ -105,17 +110,25 @@ export class Session extends EventTarget {
   async pollModState() {
     if (this.modPolling || !this.device || this.state.diverged) return;
     const slots = [...this.live.modSlots];
-    if (!slots.length) { this.modLive.clear(); return; }
+    const macros = [...this.live.macroSlots];
+    if (!slots.length) this.modLive.clear();
+    if (!macros.length) this.macroLive.clear();
+    if (!slots.length && !macros.length) return;
     this.modPolling = true;
     try {
       for (const slot of slots) {
         const state = await this.device.getModState(slot);
         if (state) this.modLive.set(slot, state); else this.modLive.delete(slot);
       }
+      for (const index of macros) {
+        const state = await this.device.getMacroState(index);
+        if (state) this.macroLive.set(index, state); else this.macroLive.delete(index);
+      }
     } catch {
       // A module that has gone away is the connection's problem, not this
       // view's: the meters go quiet and every other panel is unaffected.
       this.modLive.clear();
+      this.macroLive.clear();
     } finally {
       this.modPolling = false;
     }

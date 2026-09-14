@@ -1,0 +1,14 @@
+/* Which machine is live. The dot is the whole signal at a glance: lit means
+   a note played now is heard, dull means it goes nowhere. */
+.machine { display: flex; gap: .45rem; align-items: baseline; flex-wrap: wrap; }
+.machine-dot {
+  width: .6rem; height: .6rem; border-radius: 50%; align-self: center;
+  background: var(--dim); box-shadow: none;
+}
+.machine.ok .machine-dot { background: var(--gate); box-shadow: 0 0 6px var(--gate); }
+.machine.warn .machine-dot { background: var(--warn); }
+.machine-name { font-weight: 600; }
+.machine.compact { font-size: .8rem; }
+.machine.compact .machine-name { font-weight: 500; }
+
+.machine-port { display: flex; gap: .4rem; align-items: center; }

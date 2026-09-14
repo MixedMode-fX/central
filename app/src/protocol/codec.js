@@ -99,6 +99,25 @@ export const MACRO_NONE = 0xff;
 // closing a delay is the move macros exist for.
 function signed16(v) { return v >= 0x8000 ? v - 0x10000 : v; }
 
+// A macro's name, as both the patch image and the wire carry it: a fixed
+// field of MACRO_NAME_BYTES, padded with zeros and not terminated when it is
+// full. Written once here because the image and SYSEX_SET_MACRO must not
+// disagree about what an eight-character name looks like.
+export function nameBytes(name) {
+  const text = String(name ?? '').slice(0, P.MACRO_NAME_BYTES);
+  return Array.from({ length: P.MACRO_NAME_BYTES },
+                    (_, i) => (i < text.length ? text.charCodeAt(i) & 0x7f : 0));
+}
+
+export function nameFrom(bytes, at) {
+  let name = '';
+  for (let i = 0; i < P.MACRO_NAME_BYTES; i++) {
+    const byte = bytes[at + i];
+    if (byte) name += String.fromCharCode(byte);
+  }
+  return name;
+}
+
 export function emptyPatch() {
   return {
     gatePorts: Array.from({ length: P.GPIO_N }, () => ({ direction: 0, bus: P.NO_BUS })),
@@ -261,8 +280,7 @@ export function encodePatch(patch, globals = emptyGlobals()) {
   w.u8(macros.length);
   for (const { m, slot } of macros) {
     w.u8(slot);
-    const name = String(m.name).slice(0, P.MACRO_NAME_BYTES);
-    for (let i = 0; i < P.MACRO_NAME_BYTES; i++) w.u8(i < name.length ? name.charCodeAt(i) & 0x7f : 0);
+    w.many(nameBytes(m.name));
   }
 
   const dests = (patch.macroDest ?? []).map((d, slot) => ({ d, slot }))
@@ -367,11 +385,8 @@ export function decodePatch(image) {
   if (nMacros > P.N_MACRO) throw new Error('more macros than the module holds');
   for (let i = 0; i < nMacros; i++) {
     const slot = r.u8();
-    let name = '';
-    for (let c = 0; c < P.MACRO_NAME_BYTES; c++) {
-      const byte = r.u8();
-      if (byte !== 0) name += String.fromCharCode(byte);
-    }
+    const bytes = Array.from({ length: P.MACRO_NAME_BYTES }, () => r.u8());
+    const name = nameFrom(bytes, 0);
     if (slot < P.N_MACRO) patch.macros[slot] = { name };
   }
 
@@ -465,3 +480,10 @@ export function splitSysex(bytes) {
 // A 14-bit value, as the protocol carries one: low seven bits first.
 export const u14 = (value) => [value & 0x7f, (value >> 7) & 0x7f];
 export const readU14 = (bytes, at) => bytes[at] | (bytes[at + 1] << 7);
+
+// A signed value on the wire: magnitude as a u14, then the sign on its own.
+// A data byte has no room for a sign bit, and biasing would halve a range the
+// target's own units already fill - see src/protocol/sysex.h at
+// SYSEX_SET_MACRO_DEST, which is the one place that decides this.
+export const s14 = (value) => [...u14(Math.min(0x3fff, Math.abs(value | 0))), value < 0 ? 1 : 0];
+export const readS14 = (bytes, at) => (bytes[at + 2] ? -readU14(bytes, at) : readU14(bytes, at));

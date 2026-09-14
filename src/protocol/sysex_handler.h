@@ -8,6 +8,8 @@
 #include "protocol/sysex.h"
 #include "patch/patch_manager.h"
 #include "control/cc_mapper.h"
+#include "control/control_sum.h"
+#include "control/macros.h"
 #include "control/mod_matrix.h"
 #include "led/status_leds.h"
 
@@ -51,7 +53,7 @@ class SysexHandler : public ISysexIn {
 
         SysexHandler(PatchManager& patches, MixedModeMaster& master,
                      PatchStore& store, StatusLeds& leds, IMidiOut& midi, CcMapper& mapper,
-                     ModMatrix& matrix);
+                     ModMatrix& matrix, const Macros& macros, const ControlSum& sum);
         SysexHandler(const SysexHandler&) = delete;
         SysexHandler& operator=(const SysexHandler&) = delete;
 
@@ -95,6 +97,9 @@ class SysexHandler : public ISysexIn {
         void reply_cc_map(uint8_t source, uint8_t slot);
         void reply_mod_route(uint8_t source, uint8_t slot);
         void reply_mod_state(uint8_t source, uint8_t slot);
+        void reply_macro(uint8_t source, uint8_t index);
+        void reply_macro_dest(uint8_t source, uint8_t slot);
+        void reply_macro_state(uint8_t source, uint8_t index);
         void reply_pattern(uint8_t source, uint8_t node, uint16_t offset, uint16_t length);
         void ack(uint8_t source);
         void nak(uint8_t source, SysexError code);
@@ -116,6 +121,15 @@ class SysexHandler : public ISysexIn {
         static constexpr uint8_t SUMMARY_MAX = 96;
         void put_string(const char* text, uint8_t limit = TEXT_MAX);
         void put_u14(uint16_t value){ put((uint8_t)(value & 0x7F)); put((uint8_t)((value >> 7) & 0x7F)); }
+        // A signed value: its magnitude as a u14, then its sign on its own.
+        // Biasing would halve a range the target's own units already fill,
+        // and a sign bit borrowed from a flags byte is one more place for
+        // the two ends to disagree - see sysex.h at SYSEX_SET_MACRO_DEST.
+        void put_s14(int32_t value){
+            const int32_t magnitude = value < 0 ? -value : value;
+            put_u14((uint16_t)(magnitude > 0x3FFF ? 0x3FFF : magnitude));
+            put(value < 0 ? 1u : 0u);
+        }
         void send_reply(uint8_t source);
 
         void abort_transfer();
@@ -135,6 +149,12 @@ class SysexHandler : public ISysexIn {
         // never drives it. A route is edited through the patch like anything
         // else.
         const ModMatrix& mod;
+        // Read-only for the same reason, and for one more: a macro is moved
+        // by a *source* - a knob through CcMapper, a bus through the matrix -
+        // so there is nothing for the protocol to write here even in
+        // principle. It reports where a macro is; it does not put it there.
+        const Macros& macros;
+        const ControlSum& sum;
 
         // The staging image a bulk transfer accumulates into. The live graph
         // is untouched until the last chunk has arrived and the whole image

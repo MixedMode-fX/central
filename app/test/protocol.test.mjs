@@ -93,6 +93,12 @@ test('capabilities match the firmware constants', async () => {
   assert.equal(P.SYSEX_PROTOCOL_VERSION, E.emu_const_protocol_version());
   assert.equal(P.PATCH_FORMAT_VERSION, E.emu_const_patch_format_version());
   assert.equal(P.N_CC_MAP, E.emu_const_n_cc_map());
+  // The macro table and the pool it shares, so a panel can draw a budget
+  // without eight and thirty-two written into it.
+  assert.equal(caps.macros, E.emu_const_n_macro());
+  assert.equal(caps.macroDests, E.emu_const_n_macro_dest());
+  assert.equal(caps.macroDestsPerMacro, P.N_MACRO_DEST_PER_MACRO);
+  assert.equal(caps.macroNameBytes, P.MACRO_NAME_BYTES);
 });
 
 test('the registry dump names every algorithm the firmware has', async () => {
@@ -774,4 +780,94 @@ test('seven-bit packing survives every byte value', () => {
   const packed = codec.pack(original);
   for (const b of packed) assert.ok(b <= 0x7f, 'a SysEx data byte cannot have bit 7 set');
   assert.deepEqual(Array.from(codec.unpack(packed)), Array.from(original));
+});
+
+// --- macros -----------------------------------------------------------------
+
+test('a macro and its destinations can be written and read back', async () => {
+  await device.sendPatch(modulationPatch(), codec.emptyGlobals());
+  await device.setMacro(2, 'open up');
+  assert.deepEqual(await device.getMacro(2), { name: 'open up' });
+
+  const dest = {
+    macro: 2,
+    targetKind: P.CcTargetKind.CC_TARGET_NODE,
+    targetIndex: 1,
+    param: 1,
+    srcLo: 0,
+    srcHi: 255,                          // past seven bits, so the wire is tested
+    depth: -90,                          // and signed, which the wire carries apart
+    flags: 0,
+  };
+  await device.setMacroDest(5, dest);
+  assert.deepEqual(await device.getMacroDest(5), dest);
+
+  // Both are patch state, so both come back in a dump - and the app's own
+  // codec decodes the firmware's bytes to the same thing the app sent.
+  const dumped = await device.dump();
+  assert.deepEqual(dumped.patch.macros[2], { name: 'open up' });
+  assert.deepEqual(dumped.patch.macroDest[5], dest);
+  assert.equal(dumped.patch.macros[0], null);
+  assert.equal(dumped.patch.macroDest[0], null);
+});
+
+test('a macro name that fills the field survives, and a longer one is cut', async () => {
+  await device.sendPatch(modulationPatch(), codec.emptyGlobals());
+  // Fixed-width and not NUL-terminated when full: the field *is* the length,
+  // which is the one shape the hand-rolled codec and patch_codec.cpp cannot
+  // disagree about.
+  await device.setMacro(0, 'fullwide');
+  assert.deepEqual(await device.getMacro(0), { name: 'fullwide' });
+  await device.setMacro(1, 'much too long to fit');
+  assert.deepEqual(await device.getMacro(1), { name: 'much too' });
+});
+
+test('a whole patch of macros round-trips through the firmware', async () => {
+  const patch = modulationPatch();
+  patch.macros[0] = { name: 'lift' };
+  patch.macros[3] = { name: 'dive' };
+  patch.macroDest[0] = { macro: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE,
+                         targetIndex: 1, param: 1, srcLo: 0, srcHi: 128, depth: 60, flags: 0 };
+  patch.macroDest[1] = { macro: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE,
+                         targetIndex: 1, param: 1, srcLo: 128, srcHi: 255, depth: -60, flags: 0 };
+  patch.macroDest[9] = { macro: 3, targetKind: P.CcTargetKind.CC_TARGET_CLOCK,
+                         targetIndex: 0, param: P.CcClockTarget.CC_CLOCK_TEMPO,
+                         srcLo: 10, srcHi: 250, depth: 40, flags: 0 };
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  const dumped = await device.dump();
+  assert.deepEqual(dumped.patch.macros, patch.macros);
+  assert.deepEqual(dumped.patch.macroDest, patch.macroDest);
+});
+
+test('the module refuses a destination reaching another macro', async () => {
+  await device.sendPatch(modulationPatch(), codec.emptyGlobals());
+  await assert.rejects(() => device.setMacroDest(0, {
+    macro: 0, targetKind: P.CcTargetKind.CC_TARGET_MACRO, targetIndex: 1,
+    param: 0, srcLo: 0, srcHi: 255, depth: 10, flags: 0,
+  }), /REJECTED/, 'a macro table that wrote its own inputs would run away');
+
+  // And one macro cannot eat the shared pool.
+  const dest = { macro: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+                 param: 1, srcLo: 0, srcHi: 255, depth: 10, flags: 0 };
+  for (let i = 0; i < P.N_MACRO_DEST_PER_MACRO; i++) await device.setMacroDest(i, dest);
+  await assert.rejects(() => device.setMacroDest(P.N_MACRO_DEST_PER_MACRO, dest), /REJECTED/);
+});
+
+test('a macro says where it is, and an untouched one says it is silent', async () => {
+  const patch = modulationPatch();
+  patch.macros[0] = { name: 'lift' };
+  patch.macroDest[0] = { macro: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE,
+                         targetIndex: 1, param: 1, srcLo: 0, srcHi: 255, depth: 40, flags: 0 };
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  const state = await device.getMacroState(0);
+  // A macro holds no position across a patch load, so an untouched one is
+  // silent rather than at zero - and the panel has to be able to tell the
+  // difference between that and a destination that is wrong.
+  assert.equal(state.macro, 0);
+  assert.equal(state.engaged, false);
+  assert.equal(state.dests.length, 1);
+  assert.equal(state.dests[0].slot, 0);
+  assert.equal(state.dests[0].status, P.ModStatus.MOD_STATUS_SILENT);
 });

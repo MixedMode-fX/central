@@ -17,7 +17,9 @@ import { ScopePanel, RollPanel } from '../scope/ScopePanels.js';
 import { busPeers } from '../../core/patch.js';
 import { Domain } from '../../core/validate.js';
 import { noteName } from '../../core/music.js';
-import { MUSICAL_PORTS, portNames } from '../../protocol/names.js';
+import { portNames } from '../../protocol/names.js';
+import { MachineBadge, PortSelect } from '../components/Machine.js';
+import { Keyboard } from '../components/Keyboard.js';
 import { WAVES } from '../../runtime/audio/listener.js';
 import { KITS, PIECE_LABELS } from '../../runtime/audio/drums.js';
 import './Play.css';
@@ -28,19 +30,23 @@ const MIDI_TYPES = {
 };
 const LOG_SHOWN = 40;
 const LOG_MS = 60;
-const WHITE_KEYS = [0, 2, 4, 5, 7, 9, 11];
 
 const peers = (app, domain, bus) => busPeers(app.device, app.state.patch, domain, bus);
 
 export function PlayTab(app) {
   if (!app.module) return Hint('the built-in module is not running');
+  // A module on the cable has its own jacks, LEDs and sound, and the page
+  // cannot show any of that. It can still be **played** - that is what
+  // `services/play.js` is for - so this says which machine is being driven
+  // rather than refusing to draw anything.
   if (!app.session.usingModule) {
-    // A module on the cable has its own jacks, LEDs and sound; the page
-    // cannot show any of it, and pretending otherwise would be a lie about
-    // what is making the noise.
-    return Panel('playing the module on the cable',
-      Hint('play it from its own inputs'),
-      Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module')));
+    return el('div', {},
+      Panel('the module on the cable',
+        Row(MachineBadge(app)),
+        Hint('its jacks, LEDs and sound are its own: the meters, the scope and the '
+             + 'audio below need the module in the page'),
+        Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))),
+      KeyboardPanel(app));
   }
   return el('div', {},
     Meters(app), TransportPanel(app), ScopePanel(app), RollPanel(app),
@@ -116,56 +122,40 @@ function JacksPanel(app) {
 // --- playing ----------------------------------------------------------------
 
 function KeyboardPanel(app) {
-  const module = app.module;
   const play = app.state.ui.play;
-  const send = (type, d1, d2) => { module.deliverMidi(play.port, type, play.channel, d1, d2); app.refreshLive(); };
   const accepted = el('span', { class: 'hint' }, '');
-  app.live.paint(({ module: m }) => {
-    accepted.textContent = m.accepted === null ? '' : `taken by ${m.accepted} port(s)`;
-  });
-
-  const base = (play.octave + 1) * 12;
-  const keys = [];
-  for (let n = base; n <= base + 12 && n <= 127; n++) {
-    const key = el('button', { class: classes('key', !WHITE_KEYS.includes(n % 12) && 'black'), type: 'button' }, noteName(n));
-    const down = (e) => {
-      e.preventDefault();
-      if (key.classList.contains('held')) return;
-      key.classList.add('held');
-      send(0x90, n, play.velocity);
-    };
-    const up = (e) => {
-      e?.preventDefault();
-      if (!key.classList.contains('held')) return;
-      key.classList.remove('held');
-      module.deliverMidi(play.port, 0x80, play.channel, n, 0);
-    };
-    key.addEventListener('pointerdown', down);
-    for (const type of ['pointerup', 'pointercancel', 'pointerleave']) key.addEventListener(type, up);
-    key.addEventListener('contextmenu', (e) => e.preventDefault());
-    keys.push(key);
+  if (app.session.usingModule) {
+    app.live.paint(({ module: m }) => {
+      accepted.textContent = m.accepted === null ? '' : `taken by ${m.accepted} port(s)`;
+    });
   }
   const number = (key, min, max, label) => NumberField({
     value: play[key], min, max, 'aria-label': label, onChange: (v) => { play[key] = v; },
   });
 
   return Panel('play',
-    Row(...Labelled('into', Select({ options: MUSICAL_PORTS, value: play.port,
-                                     onChange: (port) => { play.port = port; app.render(); } })),
+    // Which machine, and which of its cables - both of which decide whether a
+    // key played here is heard at all, and neither of which a view should be
+    // guessing at (services/play.js).
+    Row(MachineBadge(app, { compact: true })),
+    Row(PortSelect(app),
         ...Labelled('channel', number('channel', 1, 16, 'channel')),
         ...Labelled('velocity', number('velocity', 1, 127, 'velocity')),
         accepted),
-    Row(el('button', { class: 'ghost', onclick: () => { play.octave = Math.max(-1, play.octave - 1); app.render(); } }, 'oct −'),
-        el('span', { class: 'field-name' }, `C${play.octave}`),
-        el('button', { class: 'ghost', onclick: () => { play.octave = Math.min(8, play.octave + 1); app.render(); } }, 'oct +')),
-    el('div', { class: 'keys' }, keys),
+    // The one keyboard component (ui/components/Keyboard.js). It takes
+    // callbacks and knows nothing about where a note goes.
+    Keyboard({
+      octave: play.octave, velocity: play.velocity,
+      mounted: (fn) => app.live.onMount(fn),
+      onOctave: (octave) => { play.octave = octave; },
+      onNoteOn: (pitch, velocity) => app.play.noteOn(pitch, velocity),
+      onNoteOff: (pitch) => app.play.noteOff(pitch),
+    }),
+    Hint('a key is louder towards its bottom edge; the velocity above is its loud end'),
     Row(...Labelled('CC', number('cc', 0, 127, 'CC number')),
         ...Labelled('value', number('ccValue', 0, 127, 'CC value')),
-        el('button', { onclick: () => send(0xb0, play.cc, play.ccValue) }, 'send'),
-        el('button', { class: 'ghost', onclick: () => {
-          module.deliverMidi(play.port, 0xb0, play.channel, 123, 0);
-          app.listener?.allOff();
-        } }, 'all notes off')));
+        el('button', { onclick: () => app.play.cc(play.cc, play.ccValue) }, 'send'),
+        el('button', { class: 'ghost', onclick: () => app.play.allNotesOff() }, 'all notes off')));
 }
 
 // --- listening -------------------------------------------------------------

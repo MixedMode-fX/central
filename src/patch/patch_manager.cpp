@@ -158,6 +158,36 @@ ApplyError PatchManager::commit_mod_route(uint8_t slot, uint32_t now_us){
     return error = APPLY_OK;
 }
 
+ApplyError PatchManager::commit_macro(uint8_t index, uint32_t now_us){
+    if (index >= N_MACRO) return error = APPLY_INVALID;
+    live.macros[index] = stage.macros[index];
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
+ApplyError PatchManager::commit_macro_dest(uint8_t slot, uint32_t now_us){
+    if (slot >= N_MACRO_DEST) return error = APPLY_INVALID;
+    const MacroDest dest = stage.macro_dest[slot];
+    // An empty slot is always legal: clearing a destination must never fail.
+    if (dest.macro != MACRO_NONE){
+        // The pool is shared, so a destination is refused for a reason that
+        // is not about itself: the macro it joins may already be full. Count
+        // against the running patch with this slot's old entry taken out,
+        // which is what the whole image's validator would see.
+        uint8_t on_macro = 0;
+        for (uint8_t i = 0; i < N_MACRO_DEST; i++){
+            if (i != slot && live.macro_dest[i].macro == dest.macro) on_macro++;
+        }
+        if (!MixedModeMaster::dest_valid(live, dest) || on_macro >= N_MACRO_DEST_PER_MACRO){
+            leds.error(now_us);
+            return error = APPLY_INVALID;
+        }
+    }
+    live.macro_dest[slot] = dest;
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
 void PatchManager::set_globals(const GlobalSettings& g, uint32_t now_us, bool persist){
     live_globals = g;
     push_globals();

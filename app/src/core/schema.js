@@ -35,7 +35,7 @@ import { SEQ_FAMILY } from './patchjson.js';
 import { EXAMPLES } from './examples.js';
 import {
   MIDI_PORTS, SCALES, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS,
-  CLOCK_SOURCES, SWAP_TIMINGS, CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS,
+  CLOCK_SOURCES, SWAP_TIMINGS, CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS, KEY_TARGETS,
   TAKEOVER, RELATIVE, FOURTEEN_BIT, PASS_THROUGH,
 } from '../protocol/names.js';
 import { PITCH_CLASSES } from './music.js';
@@ -467,14 +467,24 @@ function globalsSchema() {
   };
 }
 
-const targetProperties = (caps) => ({
-  targetKind: { type: 'integer', enum: valuesOf(CC_TARGET_KINDS),
-                description: namedValues(CC_TARGET_KINDS) },
+// Who a binding, a route or a macro destination is pointing at. A macro
+// destination reaches a narrower set of kinds than the other two - it may not
+// reach a macro, which would be a table writing its own inputs, nor the
+// transport, which is momentary and has nothing for a swept window to set
+// (src/master.cpp) - so the kinds are passed in rather than assumed.
+const targetFields = (caps, kinds = CC_TARGET_KINDS) => ({
+  targetKind: { type: 'integer', enum: valuesOf(kinds),
+                description: namedValues(kinds) },
   targetIndex: { type: 'integer', minimum: 0, maximum: caps.nodes - 1,
                  description: 'which node in "nodes", counted from 0, when the target kind is a node parameter' },
   param: { type: 'integer', minimum: 0, maximum: caps.nParams - 1,
            description: 'the parameter index on that node; or, for the clock, '
-                      + `${namedValues(CLOCK_TARGETS)}; for the transport, ${namedValues(TRANSPORT_TARGETS)}` },
+                      + `${namedValues(CLOCK_TARGETS)}; for the transport, ${namedValues(TRANSPORT_TARGETS)}; `
+                      + `for the key, ${namedValues(KEY_TARGETS)}` },
+});
+
+const targetProperties = (caps) => ({
+  ...targetFields(caps),
   min: { $ref: '#/$defs/param_byte' },
   max: { $ref: '#/$defs/param_byte' },
 });
@@ -524,6 +534,66 @@ function modMapSchema(caps) {
                  description: `a bitmask: ${P.ModFlags.MOD_MODE_MASK} adds to the parameter instead of `
                             + `setting it, ${P.ModFlags.MOD_BIPOLAR} reads the bus as bipolar, `
                             + `${P.ModFlags.MOD_INVERT} inverts it` },
+        target: { type: 'string',
+                  description: 'the parameter’s name, for a reader. It is not resolved back: "param" is what '
+                             + 'the module is told' },
+      },
+    },
+  };
+}
+
+// The macro table, and the pool of destinations every macro shares. Split in
+// two exactly as the patch is (src/node/patch.h): a macro is a name, and what
+// it moves is a list of windows that name it back.
+function macroSchema(caps) {
+  if (!caps.macros) return false;
+  return {
+    type: 'array', maxItems: caps.macros,
+    description: `up to ${caps.macros} macros: one performance control moving several parameters at once. `
+               + 'A macro is a target, not a source - nothing about a knob is here. A knob reaches one with a '
+               + `"cc_map" binding whose targetKind is ${P.CcTargetKind.CC_TARGET_MACRO} and whose targetIndex `
+               + 'is the macro, so a macro costs one of the bindings as well as one of these.',
+    items: {
+      type: 'object', additionalProperties: false, required: ['index', 'name'],
+      properties: {
+        index: { type: 'integer', minimum: 0, maximum: caps.macros - 1,
+                 description: 'which macro this is; two macros may not share one' },
+        name: { type: 'string', minLength: 1, maxLength: caps.macroNameBytes,
+                description: `what the control is called, in at most ${caps.macroNameBytes} characters - `
+                           + 'the patch holds no more, and a macro with no name is not a macro' },
+      },
+    },
+  };
+}
+
+function macroDestSchema(caps) {
+  if (!caps.macroDests) return false;
+  const kinds = CC_TARGET_KINDS.filter((k) => k.value !== P.CcTargetKind.CC_TARGET_MACRO
+                                           && k.value !== P.CcTargetKind.CC_TARGET_TRANSPORT);
+  return {
+    type: 'array', maxItems: caps.macroDests,
+    description: `up to ${caps.macroDests} destinations, shared between every macro rather than fixed per `
+               + `macro, and at most ${caps.macroDestsPerMacro} of them on any one macro. Each is a window of `
+               + 'one macro’s travel reaching one target, as a signed offset from wherever that target is set: '
+               + 'below "srcLo" it contributes nothing, at "srcHi" it contributes the whole of "depth", and '
+               + 'past "srcHi" it holds that rather than falling back - so a macro swept up builds, and '
+               + 'destinations on adjacent windows are how one control walks a patch through several states.',
+    items: {
+      type: 'object', additionalProperties: false, required: ['slot', 'macro'],
+      properties: {
+        slot: { type: 'integer', minimum: 0, maximum: caps.macroDests - 1,
+                description: 'which pool entry this is; two destinations may not share one' },
+        macro: { type: 'integer', minimum: 0, maximum: caps.macros - 1,
+                 description: 'the macro this destination belongs to' },
+        ...targetFields(caps, kinds),
+        srcLo: { type: 'integer', minimum: 0, maximum: 255,
+                 description: 'the bottom of the window, over the macro’s 0..255 travel' },
+        srcHi: { type: 'integer', minimum: 0, maximum: 255,
+                 description: 'the top of the window. srcHi <= srcLo is a step at srcLo rather than an error' },
+        depth: { type: 'integer', minimum: -32768, maximum: 32767,
+                 description: 'the offset at the top of the window, in the target’s own units. Signed: one '
+                            + 'macro opening a filter while closing a delay is the move macros exist for' },
+        flags: { type: 'integer', minimum: 0, maximum: 0, description: 'reserved; zero' },
         target: { type: 'string',
                   description: 'the parameter’s name, for a reader. It is not resolved back: "param" is what '
                              + 'the module is told' },
@@ -659,6 +729,8 @@ export function patchSchema(device) {
       },
       cc_map: ccMapSchema(caps),
       mod_map: modMapSchema(caps),
+      macros: macroSchema(caps),
+      macro_dest: macroDestSchema(caps),
     },
     $defs,
   };

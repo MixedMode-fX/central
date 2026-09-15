@@ -11,8 +11,9 @@
 // the emulator became one app, so patches written for that page still load,
 // and it is how the example patches in `examples.js` are written.
 //
-// It carries `globals` and `cc_map` too. An export that dropped the tempo and
-// the controller bindings would be a lossy copy of the patch it claims to be.
+// It carries `globals`, `cc_map`, `mod_map` and the macro table too. An export
+// that dropped the tempo, the controller bindings or the one knob the patch is
+// played from would be a lossy copy of the patch it claims to be.
 //
 // A sequencer node may carry a `seq` block instead of raw `params`, which is
 // packed into the parameter layout the firmware documents in
@@ -26,7 +27,7 @@ import * as codec from '../protocol/codec.js';
 import { MIDI_PORTS, portNames, scaleIdOf, scaleName, STEP_DIRECTIONS,
          METRONOME_DIVISIONS, METRONOME_FEELS } from '../protocol/names.js';
 import { DEFAULT_KEY_OCTAVE } from './music.js';
-import { isRoute, isBinding, targetParamName } from './patch.js';
+import { isRoute, isBinding, isMacro, isDest, targetParamName } from './patch.js';
 
 const DIRECTIONS = { [P.GatePortDirection.GATE_PORT_UNUSED]: 'unused',
                      [P.GatePortDirection.GATE_PORT_IN]: 'in',
@@ -266,6 +267,23 @@ export function toPatchJson(patch, globals, device) {
     routes.push(entry);
   });
   if (routes.length) json.mod_map = routes;
+
+  // The macros, and the pool of destinations they share. A macro is its name
+  // (src/node/patch.h), so the table is written as the ones that have one
+  // rather than as eight slots most of which are empty.
+  const macros = [];
+  (patch.macros ?? []).forEach((m, index) => { if (isMacro(m)) macros.push({ index, name: m.name }); });
+  if (macros.length) json.macros = macros;
+
+  const dests = [];
+  (patch.macroDest ?? []).forEach((d, slot) => {
+    if (!isDest(d)) return;
+    const entry = { slot, ...d };
+    const named = targetParamName(device, patch, d);
+    if (named) entry.target = named;
+    dests.push(entry);
+  });
+  if (dests.length) json.macro_dest = dests;
   return json;
 }
 
@@ -357,6 +375,37 @@ export function fromPatchJson(json, device) {
       max: r.max ?? 0,
       depth: r.depth ?? 255,
       flags: r.flags ?? 0,
+    };
+  }
+
+  // A macro is its name, and a destination belongs to a macro by index. The
+  // name is cut to the field the patch image holds rather than accepted and
+  // silently shortened on the way out (protocol/codec.js).
+  for (const m of json.macros ?? []) {
+    const index = Number(m.index ?? 0);
+    if (!(index >= 0 && index < patch.macros.length)) {
+      throw new Error(`macro ${m.index} does not exist (0..${patch.macros.length - 1})`);
+    }
+    const name = String(m.name ?? '');
+    if (name.length > P.MACRO_NAME_BYTES) {
+      throw new Error(`macro ${index}: "${name}" is longer than the ${P.MACRO_NAME_BYTES} characters a patch holds`);
+    }
+    patch.macros[index] = name ? { name } : null;
+  }
+  for (const d of json.macro_dest ?? []) {
+    const slot = Number(d.slot ?? 0);
+    if (!(slot >= 0 && slot < patch.macroDest.length)) continue;
+    // `target` is a name for a reader, exactly as a route's is, and is not
+    // resolved back: `param` is what the module is told.
+    patch.macroDest[slot] = {
+      macro: d.macro ?? 0,
+      targetKind: d.targetKind ?? P.CcTargetKind.CC_TARGET_NODE,
+      targetIndex: d.targetIndex ?? 0,
+      param: d.param ?? 0,
+      srcLo: d.srcLo ?? 0,
+      srcHi: d.srcHi ?? 255,
+      depth: d.depth ?? 0,
+      flags: d.flags ?? 0,
     };
   }
   return { patch, globals };

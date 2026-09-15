@@ -9,6 +9,7 @@
 // accepts to the real firmware and asserts it is accepted.
 
 import * as P from '../protocol/generated.js';
+import { isMacro, isDest } from './patch.js';
 
 export const Domain = Object.freeze({ Gate: 0, Note: 1, CV: 2 });
 
@@ -88,23 +89,59 @@ export function validateMapping(device, patch, slot) {
   if (m.sourceMask & P.MIDI_CONTROL_PORT) {
     found.push(problem(where, 'the control cable is reserved for the protocol'));
   }
-  switch (m.targetKind) {
+  found.push(...targetProblems(device, patch, m, where));
+  return found;
+}
+
+// Whether a target exists in this patch, by the rules `target_exists` applies
+// in src/master.cpp - shared by a binding, a route and a macro destination,
+// because they reach one target space and "no such parameter" has to mean the
+// same thing to all three. `refuse` names the kinds this particular table may
+// not reach at all: a modulator and a macro destination cannot press the
+// transport, which is momentary, and a macro destination cannot reach a macro,
+// which would be a table writing its own inputs.
+function targetProblems(device, patch, entry, where, refuse = []) {
+  const found = [];
+  if (refuse.includes(entry.targetKind)) {
+    found.push(problem(where, entry.targetKind === P.CcTargetKind.CC_TARGET_TRANSPORT
+      ? 'the transport is a button, not a value: there is nothing here for this to set'
+      : 'a macro cannot reach a macro'));
+    return found;
+  }
+  switch (entry.targetKind) {
     case P.CcTargetKind.CC_TARGET_NODE: {
-      if (m.targetIndex >= patch.nodes.length) {
-        found.push(problem(where, `node ${m.targetIndex} is not in this patch`));
+      if (entry.targetIndex >= patch.nodes.length) {
+        found.push(problem(where, `node ${entry.targetIndex} is not in this patch`));
         break;
       }
-      const node = patch.nodes[m.targetIndex];
-      if (!device.describeParam(node.algorithmId, m.param)) {
-        found.push(problem(where, `that node has no parameter ${m.param}`));
+      const node = patch.nodes[entry.targetIndex];
+      if (!device.describeParam(node.algorithmId, entry.param)) {
+        found.push(problem(where, `that node has no parameter ${entry.param}`));
       }
       break;
     }
     case P.CcTargetKind.CC_TARGET_CLOCK:
-      if (m.param >= 3) found.push(problem(where, 'no such clock target'));
+      if (entry.param >= P.CcClockTarget.CC_CLOCK_TARGETS) {
+        found.push(problem(where, 'no such clock target'));
+      }
       break;
     case P.CcTargetKind.CC_TARGET_TRANSPORT:
-      if (m.param >= 4) found.push(problem(where, 'no such transport target'));
+      if (entry.param >= P.CcTransportTarget.CC_TRANSPORT_TARGETS) {
+        found.push(problem(where, 'no such transport target'));
+      }
+      break;
+    // The key exists whatever the patch holds, and so does every macro slot:
+    // a macro is a target because the table has that many entries, not
+    // because the patch has put a name in one.
+    case P.CcTargetKind.CC_TARGET_KEY:
+      if (entry.param >= P.CcKeyTarget.CC_KEY_TARGETS) {
+        found.push(problem(where, 'no such key target'));
+      }
+      break;
+    case P.CcTargetKind.CC_TARGET_MACRO:
+      if (entry.targetIndex >= (device.capabilities?.macros ?? P.N_MACRO)) {
+        found.push(problem(where, `macro ${entry.targetIndex} is not on this module`));
+      }
       break;
     default:
       found.push(problem(where, 'that target kind is reserved and not built yet'));
@@ -125,19 +162,7 @@ export function validateRoute(device, patch, slot) {
   if (r.min > r.max) found.push(problem(where, 'the low end of the range is above the high end'));
   // A transport target fires; it does not hold a value, so there is nothing
   // for a continuous signal to set.
-  if (r.targetKind === P.CcTargetKind.CC_TARGET_TRANSPORT) {
-    found.push(problem(where, 'a modulator cannot press the transport — it is a value, not a button'));
-  } else if (r.targetKind === P.CcTargetKind.CC_TARGET_NODE) {
-    if (r.targetIndex >= patch.nodes.length) {
-      found.push(problem(where, `node ${r.targetIndex} is not in this patch`));
-    } else if (!device.describeParam(patch.nodes[r.targetIndex].algorithmId, r.param)) {
-      found.push(problem(where, `that node has no parameter ${r.param}`));
-    }
-  } else if (r.targetKind === P.CcTargetKind.CC_TARGET_CLOCK) {
-    if (r.param >= 3) found.push(problem(where, 'no such clock target'));
-  } else {
-    found.push(problem(where, 'that target kind is reserved and not built yet'));
-  }
+  found.push(...targetProblems(device, patch, r, where, [P.CcTargetKind.CC_TARGET_TRANSPORT]));
   // Two writers racing over one value has no defined result. Two modulators
   // reaching one parameter is two writers on one CV bus, which the bus sums.
   const clash = (patch.modMap ?? []).findIndex((other, i) => i !== slot && other
@@ -147,6 +172,21 @@ export function validateRoute(device, patch, slot) {
     found.push(problem(where, `modulation ${clash} already reaches that parameter — `
                             + 'sum two modulators on one CV bus instead'));
   }
+  return found;
+}
+
+// One macro destination, against the same rules `MixedModeMaster::dest_valid`
+// enforces. A destination belongs to a macro that exists, and reaches a target
+// that is neither a macro nor the transport (src/master.cpp).
+export function validateMacroDest(device, patch, slot) {
+  const d = patch.macroDest?.[slot];
+  if (!isDest(d)) return [];
+  const where = `macro destination ${slot}`;
+  const found = [];
+  const macros = device.capabilities?.macros ?? P.N_MACRO;
+  if (d.macro >= macros) found.push(problem(where, `macro ${d.macro} is not on this module`));
+  found.push(...targetProblems(device, patch, d, where,
+    [P.CcTargetKind.CC_TARGET_MACRO, P.CcTargetKind.CC_TARGET_TRANSPORT]));
   return found;
 }
 
@@ -176,6 +216,17 @@ export function validate(device, patch) {
   patch.nodes.forEach((_, i) => found.push(...validateNode(device, patch, i)));
   patch.ccMap.forEach((_, slot) => found.push(...validateMapping(device, patch, slot)));
   (patch.modMap ?? []).forEach((_, slot) => found.push(...validateRoute(device, patch, slot)));
+  (patch.macroDest ?? []).forEach((_, slot) => found.push(...validateMacroDest(device, patch, slot)));
+  // The pool is shared, so a macro with more destinations than the module
+  // expands is refused here rather than by a NAK on the last one written.
+  (patch.macros ?? []).forEach((m, index) => {
+    if (!isMacro(m)) return;
+    const n = (patch.macroDest ?? []).filter((d) => isDest(d) && d.macro === index).length;
+    if (n > caps.macroDestsPerMacro) {
+      found.push(problem(`macro ${index + 1}`,
+        `${n} destinations; one macro holds ${caps.macroDestsPerMacro}`));
+    }
+  });
   return found;
 }
 
@@ -208,6 +259,15 @@ export function advise(device, patch) {
           `nothing writes ${domainName(d.inDomain[i])} bus ${bus}`));
       }
     }
+  });
+
+  // A destination on a macro nobody has named is a destination nothing can
+  // ever move: the firmware keeps it and simply never expands it, which is
+  // why this is a note and not a refusal.
+  (patch.macroDest ?? []).forEach((dest, slot) => {
+    if (!isDest(dest) || isMacro(patch.macros?.[dest.macro])) return;
+    notes.push(problem(`macro destination ${slot}`,
+      `macro ${dest.macro + 1} has no name, so nothing can move it`));
   });
   return notes;
 }

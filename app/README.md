@@ -222,7 +222,9 @@ new route does.
 the same bytes a `.syx` file carries and a slot holds, not a third format to
 keep in step with the firmware. The working patch is written back on every
 change; anything unsaved is put in the library before something replaces it.
-Example patches ship with it, each exercising one part of the machine.
+Example patches ship with it, shelved by what each is for: most exercise one
+part of the machine, and the performance shelf holds finished pieces whose
+macros arrive already on the surface's pots.
 
 **Two file formats, for two readers.** `.syx` is the image, which is what
 hardware and a librarian want and what nobody can read — and the fallback for a

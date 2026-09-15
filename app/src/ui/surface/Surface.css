@@ -143,7 +143,7 @@
       var(--engrave) calc(var(--at) * 280deg) 280deg,
       transparent 280deg);
   cursor: ns-resize; touch-action: none;
-  -webkit-user-select: none; user-select: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 /* The notch at twelve o'clock: the middle of the travel, engraved. */
 .knob::after {
@@ -214,6 +214,9 @@
   box-shadow: 0 1px 0 rgba(255, 255, 255, .04) inset;
   color: var(--ink); font: inherit; cursor: pointer;
   touch-action: none; -webkit-user-select: none; user-select: none;
+  /* A held pad is a held note, so the callout a long press summons on iOS is
+     refused here as well as in the handler. */
+  -webkit-touch-callout: none;
   overflow: hidden;
 }
 .pad:hover { border-color: var(--wire, var(--line)); }

@@ -12,6 +12,12 @@
 // numbers you cannot gesture, and typing numbers into a stage view is what
 // stops it being one. That is the bench's job (the macros panel).
 //
+// The sheet is a panel like the surface behind it: the caption first and
+// biggest, because it is the silkscreen and what will be read at arm's
+// length; the labels in the panel face; the fields in pairs rather than a
+// column of stacked labels; and numbers as steppers, because a native
+// spinner's arrows are three pixels wide under a thumb.
+//
 // **The cable is not here.** Which of the module's inputs a control arrives on
 // decides what hears it - a MIDI input takes a port mask, a binding filters by
 // source port, and so does Program Change recall - and it is one lead for the
@@ -24,7 +30,6 @@ import { Field, Fields } from '../components/Field.js';
 import { Row, Hint } from '../components/Panel.js';
 import { Segmented } from '../components/Segmented.js';
 import { Select, range } from '../components/Select.js';
-import { NumberField } from '../components/NumberField.js';
 import { openMenu, MenuItem } from '../components/Menu.js';
 import { PadKind, PadMode, COLOURS } from '../../services/surface.js';
 import { SWAP_TIMINGS, channelLabel, portNames } from '../../protocol/names.js';
@@ -53,19 +58,18 @@ export function AssignSheet(app, where) {
 
   return el('div', { class: 'sheet', role: 'dialog', 'aria-label': 'what this control does' },
     el('div', { class: 'sheet-bar' },
-      el('span', { class: 'field-name' },
+      el('span', { class: 'sheet-which' },
         where.kind === 'pot' ? `pot ${where.index + 1}` : `pad ${where.index + 1}`),
       el('button', { class: 'ghost', onclick: close }, 'done')),
     el('div', { class: 'sheet-body' },
-      Fields(
-        Field({ label: 'caption' }, el('input', {
-          type: 'text', class: 'grow', value: control.label, maxlength: '10',
-          placeholder: where.kind === 'pot' ? `CC ${control.cc}` : String(where.index + 1),
-          'aria-label': 'what this control is called',
-          oninput: (e) => { control.label = e.target.value; },
-          onchange: () => set({}),
-        })),
-        Field({ label: 'colour' }, Colours(control.colour, (colour) => set({ colour })))),
+      el('input', {
+        type: 'text', class: 'sheet-caption', value: control.label, maxlength: '10',
+        placeholder: where.kind === 'pot' ? `cc ${control.cc}` : `pad ${where.index + 1}`,
+        'aria-label': 'what this control is called',
+        oninput: (e) => { control.label = e.target.value; },
+        onchange: () => set({}),
+      }),
+      Colours(control.colour, (colour) => set({ colour })),
       where.kind === 'pot' ? PotFields(app, where, control, set) : PadFields(app, where, control, set),
       BindingSection(app, where, control)));
 }
@@ -85,6 +89,21 @@ const ChannelField = (value, onChange) => Select({
   options: range(17, channelLabel, 1), value, onChange, 'aria-label': 'channel',
 });
 
+// A number, as two big targets either side of a readout. Everything set here
+// is set with a thumb, over a surface that is being played with one.
+function Stepper({ value, min, max, label, onChange }) {
+  const at = Math.max(min, Math.min(max, value));
+  const step = (by) => el('button', {
+    type: 'button', 'aria-label': `${label} ${by > 0 ? 'up' : 'down'}`,
+    disabled: (by > 0 ? at >= max : at <= min) ? 'disabled' : null,
+    onclick: () => onChange(Math.max(min, Math.min(max, at + by))),
+  }, by > 0 ? '+' : '−');
+  return el('div', { class: 'stepper', role: 'group', 'aria-label': label },
+    step(-1),
+    el('span', { class: 'stepper-value' }, String(at)),
+    step(1));
+}
+
 // The lead this control is on, which is the surface's and not its own, and
 // whether anything is on the other end of it: a cable no browser port reaches
 // is a cable nothing hears, and the channel below would be the only thing on
@@ -98,49 +117,56 @@ function cableHint(app) {
 }
 
 function PotFields(app, where, pot, set) {
-  return el('div', {},
+  return el('div', { class: 'stack' },
     Fields(
-      Field({ label: 'sends' }, NumberField({
-        value: pot.cc, min: 0, max: 119, wide: true, 'aria-label': 'CC number',
-        onChange: (cc) => set({ cc }),
+      Field({ label: 'sends cc' }, Stepper({
+        value: pot.cc, min: 0, max: 119, label: 'CC number', onChange: (cc) => set({ cc }),
       })),
-      Field({ label: 'on channel' }, ChannelField(pot.channel, (channel) => set({ channel })))),
+      Field({ label: 'channel' }, ChannelField(pot.channel, (channel) => set({ channel })))),
     cableHint(app));
 }
 
 function PadFields(app, where, pad, set) {
-  const fields = [
+  const kind = el('div', { class: 'fields one' },
     Field({ label: 'sends' }, Segmented({
       options: KINDS, value: pad.kind, label: 'what this pad sends',
-      onChange: (kind) => set({ kind }),
-    })),
-  ];
-  if (pad.kind === PadKind.NOTE) {
-    fields.push(Field({ label: 'note', hint: noteName(pad.note) }, NumberField({
-      value: pad.note, min: 0, max: 127, wide: true, 'aria-label': 'note number',
-      onChange: (note) => set({ note }),
+      onChange: (k) => set({ kind: k }),
     })));
-    fields.push(Field({ label: 'velocity' }, NumberField({
-      value: pad.velocity, min: 1, max: 127, wide: true, 'aria-label': 'velocity',
+  const channel = Field({ label: 'channel' },
+    ChannelField(pad.channel, (c) => set({ channel: c })));
+  if (pad.kind === PadKind.PROGRAM) {
+    return el('div', { class: 'stack' },
+      kind, el('div', { class: 'fields one' }, channel), cableHint(app), Launch(app, pad, set));
+  }
+
+  const what = [];
+  if (pad.kind === PadKind.NOTE) {
+    what.push(Field({ label: `note · ${noteName(pad.note)}` }, Stepper({
+      value: pad.note, min: 0, max: 127, label: 'note number', onChange: (note) => set({ note }),
+    })));
+    what.push(Field({ label: 'velocity' }, Stepper({
+      value: pad.velocity, min: 1, max: 127, label: 'velocity',
       onChange: (velocity) => set({ velocity }),
     })));
-  }
-  if (pad.kind === PadKind.CC) {
-    fields.push(Field({ label: 'CC number' }, NumberField({
-      value: pad.cc, min: 0, max: 119, wide: true, 'aria-label': 'CC number',
-      onChange: (cc) => set({ cc }),
+    what.push(channel);
+  } else {
+    what.push(Field({ label: 'sends cc' }, Stepper({
+      value: pad.cc, min: 0, max: 119, label: 'CC number', onChange: (cc) => set({ cc }),
     })));
+    what.push(channel);
   }
-  const channel = Field({ label: 'on channel' },
-    ChannelField(pad.channel, (channel) => set({ channel })));
-  if (pad.kind === PadKind.PROGRAM) {
-    return el('div', {}, Fields(...fields, channel), cableHint(app), Launch(app, pad, set));
-  }
-  fields.push(channel);
-  fields.push(Field({ label: 'press', hint: 'a latch shows what it last sent, not what the module holds' },
-    Segmented({ options: MODES, value: pad.mode, label: 'how this pad behaves',
-                onChange: (mode) => set({ mode }) })));
-  return el('div', {}, Fields(...fields), cableHint(app));
+  return el('div', { class: 'stack' },
+    kind,
+    Fields(...what),
+    el('div', { class: 'fields one' },
+      // The caveat only where it applies: a momentary pad claims nothing
+      // about the module, so it needs no line about what it is not saying.
+      Field({ label: 'press',
+              hint: pad.mode === PadMode.TOGGLE
+                ? 'a latch shows what it last sent, not what the module holds' : null },
+        Segmented({ options: MODES, value: pad.mode, label: 'how this pad behaves',
+                    onChange: (mode) => set({ mode }) }))),
+    cableHint(app));
 }
 
 // A launch pad recalls one of the module's stored patches. Where that lands
@@ -150,7 +176,7 @@ function PadFields(app, where, pad, set) {
 function Launch(app, pad, set) {
   const g = app.state.globals;
   const slots = app.device?.capabilities?.slots ?? P.PATCH_SLOTS;
-  return el('div', {},
+  return el('div', { class: 'stack' },
     Fields(
       // Slot 0 is the autosaved patch on screen, so it is not a scene to
       // launch: the launchable ones are the rest.
@@ -159,7 +185,7 @@ function Launch(app, pad, set) {
         'aria-label': 'which stored patch this pad launches',
         onChange: (program) => set({ program }),
       })),
-      Field({ label: 'lands', hint: 'one setting for the whole patch' }, Segmented({
+      Field({ label: 'lands' }, Segmented({
         options: SWAP_TIMINGS, value: g.pcQuantise ?? 0, label: 'when a recall lands',
         onChange: (pcQuantise) => app.editor.setGlobals({ pcQuantise }, 'recall timing'),
       }))),

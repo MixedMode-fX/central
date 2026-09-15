@@ -2764,6 +2764,29 @@ test('a pad held is a note held, and edit is a mode', async () => {
   assert.equal(app.heard.length, 2, 'a pad in edit mode plays nothing');
 });
 
+test('a finger held on a pad is a long note, not a question', async () => {
+  const app = surfaced();
+  const view = withDom(() => SurfaceView(app));
+  const pad = findAll(view, (n) => String(n.className).split(/\s+/).includes('pad'))[0];
+  const touch = { pointerId: 1, pointerType: 'touch', clientX: 0, clientY: 0, preventDefault: () => {} };
+
+  // A touch browser reports its own long press as `contextmenu` - the same
+  // event a mouse's right button sends - so a note held past half a second
+  // arrived at the sheet through the one door left open.
+  pad.fire('pointerdown', touch);
+  pad.fire('contextmenu', { preventDefault: () => {} });
+  assert.equal(app.state.ui.surface.editing, null, 'a held finger does not open the sheet');
+  assert.deepEqual(app.heard.map((e) => e.type), [NOTE_ON], 'and the note is still sounding');
+  pad.fire('pointerup', touch);
+  assert.deepEqual(app.heard.map((e) => e.type), [NOTE_ON, NOTE_OFF]);
+
+  // A right button on a mouse is still asking it: that is not a long press,
+  // and it is how a control is set up without leaving the mode on.
+  pad.fire('pointerdown', { pointerId: 2, pointerType: 'mouse', clientX: 0, clientY: 0, preventDefault: () => {} });
+  pad.fire('contextmenu', { preventDefault: () => {} });
+  assert.deepEqual(app.state.ui.surface.editing, { kind: 'pad', index: 0 });
+});
+
 test('the lead is chosen once, in the bar, and the sheet says which it is', async () => {
   const app = surfaced();
   app.surface.setPort(P.MidiPort.mmMIDI_SERIAL_2);

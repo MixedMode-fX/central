@@ -382,10 +382,16 @@ function padSaid(pad, index) {
 // over, because a control is drawn once and the toggle is a render away.
 function drag(app, node, where, { onDown = () => ({}), onMove = null, onUp = () => {} }) {
   let gesture = null;
+  // What is pressing. A touch browser reports its own long press as
+  // `contextmenu` - the same event a mouse's right button sends - so without
+  // this the gesture came back in through the one door left open, and a note
+  // still could not be held for longer than the browser's half second.
+  let pressed = 'mouse';
   const editing = () => app.state.ui.surface.edit;
 
   node.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    pressed = e.pointerType || 'mouse';
     if (editing()) { openAssign(app, where); return; }
     gesture = { x: e.clientX, y: e.clientY, id: e.pointerId, ...onDown(e) };
   });
@@ -401,8 +407,13 @@ function drag(app, node, where, { onDown = () => ({}), onMove = null, onUp = () 
     });
   }
   // A right-click asks the same question the toggle does, and it is how a
-  // control is set up with a mouse without leaving the mode on.
-  node.addEventListener('contextmenu', (e) => { e.preventDefault(); openAssign(app, where); });
+  // control is set up with a mouse without leaving the mode on. A finger
+  // resting on a pad is not asking it: that is a long note, and the menu the
+  // browser wanted to open for it is refused either way.
+  node.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (pressed === 'mouse') openAssign(app, where);
+  });
 }
 
 function openAssign(app, where) {

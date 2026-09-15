@@ -14,26 +14,29 @@
 // have.
 //
 // **Fixed geometry, soft assignment** (services/surface.js): you cannot move a
-// control, and you can change everything about what it does. Long-press one to
-// say what it does.
+// control, and you can change everything about what it does. **Edit** is a
+// mode rather than a gesture: a long press is how a note is held, and a
+// surface that read one as a question could not play a whole note. So the bar
+// has a toggle, and while it is on every control is a button that opens its
+// sheet instead of playing.
+//
+// **One lead for the whole surface**, chosen in the bar while edit is on, the
+// way a controller has one. The keyboard summoned over it is a separate
+// instrument with a cable and a channel of its own, because playing a part
+// into one input of the patch while the pads drive another is the ordinary
+// case, not a trick.
 
 import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
-import { icon } from '../components/icons.js';
 import { IconButton } from '../components/IconButton.js';
-import { MachineBadge } from '../components/Machine.js';
+import { MachineBadge, PortSelect } from '../components/Machine.js';
 import { KeyboardOverlay } from '../components/Keyboard.js';
+import { Select, range } from '../components/Select.js';
 import { closeMenu } from '../components/Menu.js';
 import { PadKind, PadMode, POTS, PADS } from '../../services/surface.js';
 import { describeTarget } from '../panels/ModMatrix.js';
 import { AssignSheet } from './Assign.js';
 import './Surface.css';
-
-// How long a press has to be held before it stops being a note and starts
-// being a question about what this control does. Long enough not to fire
-// during a drum roll, short enough to find by accident once.
-const HOLD_MS = 500;
-const MOVED_PX = 10;
 
 // A vertical drag across a knob's own height and a bit: far enough to be
 // deliberate, short enough to reach 127 without a second grab.
@@ -42,7 +45,7 @@ const PIXELS_PER_STEP = 1.6;
 export function Surface(app) {
   closeMenu();
   const ui = app.state.ui.surface;
-  return el('div', { class: 'surface' },
+  return el('div', { class: classes('surface', ui.edit && 'editing') },
     TopBar(app),
     Pots(app),
     Pads(app),
@@ -52,6 +55,7 @@ export function Surface(app) {
           octave: app.state.ui.play.octave,
           velocity: app.state.ui.play.velocity,
           mounted: (fn) => app.live.onMount(fn),
+          controls: Cable(app),
           onOctave: (octave) => { app.state.ui.play.octave = octave; },
           onNoteOn: (pitch, velocity) => app.play.noteOn(pitch, velocity),
           onNoteOff: (pitch) => app.play.noteOff(pitch),
@@ -63,26 +67,59 @@ export function Surface(app) {
 
 function TopBar(app) {
   const b = app.surface.budget();
-  const armed = app.state.ui.surface.armed;
+  const ui = app.state.ui.surface;
   return el('header', { class: 'surface-top' },
     IconButton({
-      icon: 'edit', text: 'edit', label: 'leave the surface and go back to editing',
+      icon: 'close', label: 'leave the surface and go back to editing the patch',
       class: 'ghost', onclick: () => app.togglePlay(),
     }),
     el('div', { class: 'surface-say' },
-      MachineBadge(app, { compact: true }),
+      // Editing, the bar is where the surface's own lead is chosen; playing,
+      // it says which machine that lead is reaching, which is the question a
+      // stage view has to answer without being asked.
+      ui.edit
+        ? PortSelect(app, {
+            label: 'on', said: 'the module input this surface plays into',
+            value: app.surface.port, onChange: (port) => app.surface.setPort(port),
+          })
+        : MachineBadge(app, { compact: true, port: app.surface.port }),
       el('span', { class: classes('hint', !b.free && 'spent') },
         `CC ${b.bindings}/${b.bindingSlots} · macros ${b.macros}/${b.macroSlots} · pool ${b.dests}/${b.destSlots}`)),
-    armed
+    ui.armed
       ? el('button', { class: 'warn-btn', onclick: () => app.surface.disarm() }, 'waiting — cancel')
       : IconButton({
           icon: 'key', text: 'keys', label: 'summon the keyboard',
-          class: classes('ghost', app.state.ui.surface.keyboard && 'active'),
-          onclick: () => {
-            app.state.ui.surface.keyboard = !app.state.ui.surface.keyboard;
-            app.render();
-          },
-        }));
+          class: classes('ghost', ui.keyboard && 'active'),
+          onclick: () => { ui.keyboard = !ui.keyboard; app.render(); },
+        }),
+    // The mode, not a gesture: with this off a pad held is a note held, which
+    // is the whole reason the sheet is no longer on a long press.
+    IconButton({
+      icon: 'edit', text: 'edit', label: 'set up what the controls do',
+      class: classes('ghost', ui.edit && 'active'),
+      'aria-pressed': ui.edit ? 'true' : 'false',
+      onclick: () => {
+        ui.edit = !ui.edit;
+        if (!ui.edit) ui.editing = null;
+        app.render();
+      },
+    }));
+}
+
+// Where the keys play: the cable first, because a channel on the wrong cable
+// is heard by nothing. This pair is the keyboard's own - the pads and pots are
+// on the surface's lead, chosen in the bar - and it is the same pair the play
+// panel on the module tab shows.
+function Cable(app) {
+  const play = app.state.ui.play;
+  return [
+    PortSelect(app),
+    Select({
+      'aria-label': 'the channel the keys play on',
+      options: range(17, (c) => `ch ${c}`, 1), value: play.channel,
+      onChange: (channel) => { play.channel = channel; app.render(); },
+    }),
+  ];
 }
 
 // --- the pots ----------------------------------------------------------------
@@ -99,10 +136,13 @@ function Pot(app, index) {
   const bound = surface.bindingOf(pot);
   const live = liveMacro(app, bound);
 
+  const editing = app.state.ui.surface.edit;
   const dial = el('div', {
     class: classes('knob', `hue-${pot.colour}`, live && 'reading'),
-    role: 'slider', tabindex: '0',
-    'aria-label': `${potName(pot)}, ${describeReach(app, bound)}`,
+    role: editing ? 'button' : 'slider', tabindex: '0',
+    'aria-label': editing
+      ? `set up ${potName(pot)}`
+      : `${potName(pot)}, ${describeReach(app, bound)}`,
     'aria-valuemin': '0', 'aria-valuemax': '127', 'aria-valuenow': String(pot.value),
     style: `--at: ${pot.value / 127}`,
   }, el('span', { class: 'knob-value' }, String(pot.value)));
@@ -116,8 +156,7 @@ function Pot(app, index) {
     dial.firstChild.textContent = String(value);
   };
 
-  hold(dial, {
-    onHold: () => openAssign(app, where),
+  drag(app, dial, where, {
     onDown: (e) => {
       dial.setPointerCapture(e.pointerId);
       return { y: e.clientY, from: pot.value };
@@ -127,6 +166,12 @@ function Pot(app, index) {
   });
 
   dial.addEventListener('keydown', (e) => {
+    if (editing) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      openAssign(app, where);
+      return;
+    }
     const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
     const to = e.key === 'Home' ? 0 : e.key === 'End' ? 127 : null;
     if (step === undefined && to === null) return;
@@ -181,13 +226,14 @@ function Pad(app, index) {
   const where = { kind: 'pad', index };
   const latched = pad.mode === PadMode.TOGGLE && pad.kind !== PadKind.PROGRAM && pad.on;
 
+  const editing = app.state.ui.surface.edit;
   const button = el('button', {
     type: 'button',
     class: classes('pad', `hue-${pad.colour}`, latched && 'latched',
                    pad.kind === PadKind.PROGRAM && 'launch',
                    surface.armedOn(where) && 'armed'),
-    'aria-pressed': pad.mode === PadMode.TOGGLE ? String(Boolean(pad.on)) : null,
-    'aria-label': padSaid(app, pad, index),
+    'aria-pressed': !editing && pad.mode === PadMode.TOGGLE ? String(Boolean(pad.on)) : null,
+    'aria-label': editing ? `set up pad ${index + 1}` : padSaid(app, pad, index),
     title: latched ? 'last sent: on — the module is not asked' : null,
   },
     el('span', { class: 'pad-name' }, padName(pad, index)),
@@ -199,8 +245,7 @@ function Pad(app, index) {
     // N ports" are the same honesty: nothing here pretends to know.
     latched ? el('span', { class: 'pad-latch' }, 'last sent') : null);
 
-  hold(button, {
-    onHold: () => { surface.release(index); openAssign(app, where); },
+  drag(app, button, where, {
     onDown: () => { surface.press(index); button.classList.add('hit'); return {}; },
     onUp: () => { surface.release(index); button.classList.remove('hit'); },
   });
@@ -208,7 +253,7 @@ function Pad(app, index) {
   // A pad reached without a pointer: press and release, so a latch still
   // latches and a momentary pad does not hang.
   button.addEventListener('click', (e) => {
-    if (e.detail !== 0) return;
+    if (e.detail !== 0 || app.state.ui.surface.edit) return;
     surface.press(index);
     setTimeout(() => surface.release(index), 120);
   });
@@ -234,41 +279,34 @@ function padSaid(app, pad, index) {
   return `pad ${index + 1}: ${what}, ${mode}`;
 }
 
-// --- the one gesture ----------------------------------------------------------
+// --- the gesture ----------------------------------------------------------
 
-// Press to play, hold to say what this does. One gesture deep, on purpose: a
-// stage view stays a stage view only while the thing under your thumb is the
-// instrument and not a settings page.
-function hold(node, { onHold, onDown = () => ({}), onMove = null, onUp = () => {} }) {
+// Press to play, drag to turn - and in edit mode, one press opens the sheet
+// instead. The mode is read at the moment of the press rather than closed
+// over, because a control is drawn once and the toggle is a render away.
+function drag(app, node, where, { onDown = () => ({}), onMove = null, onUp = () => {} }) {
   let gesture = null;
+  const editing = () => app.state.ui.surface.edit;
+
   node.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    const start = { x: e.clientX, y: e.clientY, id: e.pointerId, held: false, ...onDown(e) };
-    start.timer = setTimeout(() => {
-      start.held = true;
-      gesture = null;
-      onHold();
-    }, HOLD_MS);
-    gesture = start;
+    if (editing()) { openAssign(app, where); return; }
+    gesture = { x: e.clientX, y: e.clientY, id: e.pointerId, ...onDown(e) };
   });
   node.addEventListener('pointermove', (e) => {
     if (!gesture || gesture.id !== e.pointerId) return;
-    if (Math.abs(e.clientX - gesture.x) > MOVED_PX || Math.abs(e.clientY - gesture.y) > MOVED_PX) {
-      clearTimeout(gesture.timer);
-    }
     onMove?.(e, gesture);
   });
   for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
     node.addEventListener(type, (e) => {
       if (!gesture || gesture.id !== e.pointerId) return;
-      clearTimeout(gesture.timer);
       gesture = null;
       onUp(e);
     });
   }
-  // A right-click is the same question a long press asks, and it is how this
-  // is reached with a mouse without holding still for half a second.
-  node.addEventListener('contextmenu', (e) => { e.preventDefault(); onHold(); });
+  // A right-click asks the same question the toggle does, and it is how a
+  // control is set up with a mouse without leaving the mode on.
+  node.addEventListener('contextmenu', (e) => { e.preventDefault(); openAssign(app, where); });
 }
 
 function openAssign(app, where) {

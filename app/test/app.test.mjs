@@ -38,6 +38,11 @@ import { KeyBadge, rootInlet } from '../src/ui/components/KeyBadge.js';
 import { NO_STEP } from '../src/ui/panels/grids/playhead.js';
 import { describeTarget, RouteTable } from '../src/ui/panels/ModMatrix.js';
 import { Macros } from '../src/ui/panels/Macros.js';
+import { Keyboard } from '../src/ui/components/Keyboard.js';
+import { Surface as SurfaceView } from '../src/ui/surface/Surface.js';
+import { AssignSheet } from '../src/ui/surface/Assign.js';
+import { Surface as SurfaceDoc, PadKind } from '../src/services/surface.js';
+import { Play } from '../src/services/play.js';
 import { KeyTab } from '../src/ui/tabs/KeyTab.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
 import { shade, nodeRollSources, scopeRows } from '../src/ui/scope/scope.js';
@@ -2663,4 +2668,140 @@ test('the bench tells a silent destination from a clipped one', async () => {
   // The pool budget is read from the module rather than written into the
   // panel, so cutting the pool is a firmware change and not two.
   assert.ok(words(panel).includes(`${device.capabilities.macroDests} destinations in the pool`));
+});
+
+
+// --- the performance surface ---------------------------------------------------
+
+// The surface over a module that records what it was handed: the cable and the
+// channel a control claims are only real if they arrive at the module that
+// way, so the test reads the module's own argument list rather than a spy on
+// the service above it.
+function surfaced({ patch = codec.emptyPatch() } = {}) {
+  const heard = [];
+  const module = {
+    deliverMidi(port, type, channel, d1, d2) { heard.push({ port, type, channel, d1, d2 }); return 1; },
+  };
+  const app = fakeApp({ patch, module });
+  const play = new Play({
+    state: app.state, session: app.session, module: () => module, render: () => {},
+  });
+  const surface = new SurfaceDoc({
+    state: app.state, library: { readSurface: () => null, writeSurface: () => {} },
+    play, editor: app.editor, session: app.session, render: () => {},
+  });
+  Object.assign(app, { play, surface, heard });
+  return app;
+}
+
+const NOTE_ON = 0x90;
+const NOTE_OFF = 0x80;
+
+test('the surface is on one lead, and the keyboard on its own', async () => {
+  const app = surfaced();
+  // One lead for all twenty-four controls, the way a controller has one: the
+  // cable decides what in the patch can hear the thing at all, and a box of
+  // pads each on a different lead is not a controller anybody could reason
+  // about. The channel stays the control's own.
+  app.surface.setPort(P.MidiPort.mmMIDI_SERIAL_1);
+  app.surface.setPad(0, { channel: 5 });
+  app.surface.press(0);
+  app.surface.release(0);
+  app.surface.setPot(0, { channel: 9 });
+  app.surface.turn(0, 64, { commit: true });
+  // The keyboard summoned over the surface is a separate instrument: playing
+  // a part into one input while the pads drive another is the ordinary case.
+  app.play.noteOn(60, 100);
+
+  assert.deepEqual(app.heard.map((e) => [e.type, e.port, e.channel, e.d1]), [
+    [NOTE_ON, P.MidiPort.mmMIDI_SERIAL_1, 5, 36],
+    [NOTE_OFF, P.MidiPort.mmMIDI_SERIAL_1, 5, 36],
+    [0xb0, P.MidiPort.mmMIDI_SERIAL_1, 9, 20],
+    [NOTE_ON, app.state.ui.play.port, app.state.ui.play.channel, 60],
+  ]);
+  assert.notEqual(app.state.ui.play.port, P.MidiPort.mmMIDI_SERIAL_1,
+                  'the keyboard did not follow the surface onto its lead');
+});
+
+test('a binding learned on another cable is not this control’s', async () => {
+  const app = surfaced();
+  const pot = app.surface.pot(0);
+  app.state.patch.ccMap[0] = {
+    sourceMask: P.MidiPort.mmMIDI_USB_1, channel: 0, cc: pot.cc,
+    targetKind: P.CcTargetKind.CC_TARGET_MACRO, targetIndex: 0, param: 0,
+    min: 0, max: 0, flags: 0,
+  };
+  // The module's own learn writes the single port the CC arrived on
+  // (src/control/cc_mapper.cpp), so moving the surface's lead leaves every
+  // binding learned on the old one behind - and the sheet must not go on
+  // saying a control still reaches what it no longer does.
+  assert.equal(app.surface.bindingOf(pot), null, 'the cable is part of the match');
+  app.surface.setPort(P.MidiPort.mmMIDI_USB_1);
+  assert.equal(app.surface.bindingOf(pot)?.slot, 0);
+});
+
+test('a pad held is a note held, and edit is a mode', async () => {
+  const app = surfaced();
+  const pads = (view) => findAll(view, (n) => String(n.className).split(/\s+/).includes('pad'));
+
+  // Playing: press, hold as long as you like, release. Nothing in the gesture
+  // asks what the pad does, which is the whole point - a long press used to
+  // open the sheet and take the note with it.
+  const playing = withDom(() => SurfaceView(app));
+  const button = pads(playing)[0];
+  button.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, preventDefault: () => {} });
+  button.fire('pointerup', { pointerId: 1, preventDefault: () => {} });
+  assert.deepEqual(app.heard.map((e) => e.type), [NOTE_ON, NOTE_OFF]);
+  assert.equal(app.state.ui.surface.editing, null, 'playing a pad does not open its sheet');
+
+  // Editing: the same press opens the sheet and sends nothing.
+  app.state.ui.surface.edit = true;
+  const editing = withDom(() => SurfaceView(app));
+  assert.ok(String(editing.className).includes('editing'), 'the mode is on the surface itself');
+  const second = pads(editing)[1];
+  second.fire('pointerdown', { pointerId: 2, clientX: 0, clientY: 0, preventDefault: () => {} });
+  assert.deepEqual(app.state.ui.surface.editing, { kind: 'pad', index: 1 });
+  assert.equal(app.heard.length, 2, 'a pad in edit mode plays nothing');
+});
+
+test('the lead is chosen once, in the bar, and the sheet says which it is', async () => {
+  const app = surfaced();
+  app.surface.setPort(P.MidiPort.mmMIDI_SERIAL_2);
+
+  // A per-control cable would be twenty-four answers to a question a
+  // controller asks once, so the sheet has the channel and no port picker -
+  // and says the lead, because a channel means nothing without it.
+  const sheet = withDom(() => AssignSheet(app, { kind: 'pad', index: 0 }));
+  assert.ok(find(sheet, (n) => n.attrs['aria-label'] === 'channel'));
+  assert.equal(find(sheet, (n) => n.attrs['aria-label'] === 'the module input this surface plays into'),
+               null, 'the cable is not a per-control field');
+  assert.ok(words(sheet).includes('the whole surface sends on DIN 2'));
+
+  // The bar is where it is chosen, and only while the surface is being set
+  // up: playing, that corner says which machine the lead reaches.
+  app.state.ui.surface.edit = true;
+  const bar = withDom(() => SurfaceView(app));
+  const picker = find(bar, (n) => n.attrs['aria-label'] === 'the module input this surface plays into');
+  assert.ok(picker, 'the surface names its own cable in the bar');
+});
+
+// --- the keyboard --------------------------------------------------------------
+
+test('a white key is notched where a black key stands over it', async () => {
+  const keyboard = withDom(() => Keyboard({
+    from: 60, to: 72, onNoteOn: () => {}, onNoteOff: () => {},
+  }));
+  const key = (name) => find(keyboard, (n) => n.attrs['aria-label'] === name);
+  const cuts = (name) => String(key(name).className).split(/\s+/).filter((c) => c.startsWith('pk-cut'));
+
+  // A rectangle under the black keys lights a slab of colour when it is held,
+  // which reads as a rendering fault rather than a note. D has a black key
+  // either side of its top; E has one only below it.
+  assert.deepEqual(cuts('D4'), ['pk-cut-l', 'pk-cut-r']);
+  assert.deepEqual(cuts('E4'), ['pk-cut-l']);
+  assert.deepEqual(cuts('F4'), ['pk-cut-r']);
+  // C4 is the bottom of this range: there is no B3 above it to hide behind,
+  // so its top is whole on that side.
+  assert.deepEqual(cuts('C4'), ['pk-cut-r']);
+  assert.deepEqual(cuts('C5'), [], 'and the last key of the range keeps both shoulders');
 });

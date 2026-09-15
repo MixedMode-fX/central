@@ -14,23 +14,29 @@ import { Select } from './Select.js';
 import { MUSICAL_PORTS } from '../../protocol/names.js';
 import './Machine.css';
 
-export function MachineBadge(app, { compact = false } = {}) {
-  const machine = app.play.machine();
+// `port` names the cable the badge is about - the surface's lead, say, rather
+// than the keyboard's. Left out, it is whatever the play panel is set to.
+export function MachineBadge(app, { compact = false, port = undefined } = {}) {
+  const machine = app.play.machine(port);
   return el('div', { class: classes('machine', machine.ok ? 'ok' : 'warn', compact && 'compact') },
     el('span', { class: 'machine-dot' }),
     el('span', { class: 'machine-name' }, machine.kind === 'module' ? 'built-in module' : machine.name),
     compact ? null : el('span', { class: 'hint' }, machine.reaches));
 }
 
-// Which of the module's logical inputs the surface arrives on. Never the
+// Which of the module's logical inputs something plays into. Never the
 // control cable: MUSICAL_PORTS leaves it out, because a page that could send
 // notes down the protocol's cable could stall a patch transfer with a chord.
-export function PortSelect(app, { label = 'into' } = {}) {
+//
+// The keyboard's cable is the default; the surface passes its own, which is
+// one lead for all twenty-four of its controls (services/surface.js).
+export function PortSelect(app, {
+  label = 'into',
+  said = 'the module input the keys play into',
+  value = app.play.port,
+  onChange = (port) => app.play.setPort(port),
+} = {}) {
   return el('label', { class: 'machine-port' },
     el('span', { class: 'field-name' }, label),
-    Select({
-      options: MUSICAL_PORTS, value: app.play.port,
-      'aria-label': 'the module input the surface plays into',
-      onChange: (port) => app.play.setPort(port),
-    }));
+    Select({ options: MUSICAL_PORTS, value, 'aria-label': said, onChange }));
 }

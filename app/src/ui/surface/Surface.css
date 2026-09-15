@@ -15,10 +15,18 @@
   overflow: hidden;
 }
 
+/* Edit is a mode, and a mode nobody can see is a surface that has gone silent
+   for no reason. The frame is the whole screen rather than a mark on each
+   control: a dashed pad already means a launch pad, and a mode that redrew
+   the controls would be saying two things with one line. */
+.surface.editing { box-shadow: inset 0 0 0 2px var(--accent); }
+.surface.editing .pad, .surface.editing .knob { cursor: pointer; }
+
 .surface-top { display: flex; gap: .4rem; align-items: center; }
 .surface-top .icon-btn { flex: 0 0 auto; }
 .surface-say { flex: 1 1 auto; min-width: 0; display: grid; }
-.surface-say .hint { font-size: .72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.surface-say .field-name, .surface-say .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.surface-say .hint { font-size: .72rem; }
 .surface-say .hint.spent { color: var(--warn); }
 .warn-btn { border-color: var(--warn); color: var(--warn); }
 

@@ -1,4 +1,5 @@
-// What a control does, asked for by holding it.
+// What a control does, asked for by turning **edit** on in the bar and
+// pressing it.
 //
 // One sheet over the surface rather than a second page: the surface is the
 // stage view, and a control that had to be configured somewhere else is a
@@ -10,6 +11,12 @@
 // **Windows and depths are not here.** A macro destination carries two
 // numbers you cannot gesture, and typing numbers into a stage view is what
 // stops it being one. That is the bench's job (the macros panel).
+//
+// **The cable is not here.** Which of the module's inputs a control arrives on
+// decides what hears it - a MIDI input takes a port mask, a binding filters by
+// source port, and so does Program Change recall - and it is one lead for the
+// whole surface, chosen in the bar. This sheet says which lead that is,
+// because a channel means nothing without it.
 
 import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
@@ -20,7 +27,7 @@ import { Select, range } from '../components/Select.js';
 import { NumberField } from '../components/NumberField.js';
 import { openMenu, MenuItem } from '../components/Menu.js';
 import { PadKind, PadMode, COLOURS } from '../../services/surface.js';
-import { SWAP_TIMINGS, channelLabel } from '../../protocol/names.js';
+import { SWAP_TIMINGS, channelLabel, portNames } from '../../protocol/names.js';
 import { knobParams } from '../../core/patch.js';
 import { describeTarget } from '../panels/ModMatrix.js';
 import { noteName } from '../../core/music.js';
@@ -78,13 +85,27 @@ const ChannelField = (value, onChange) => Select({
   options: range(17, channelLabel, 1), value, onChange, 'aria-label': 'channel',
 });
 
+// The lead this control is on, which is the surface's and not its own, and
+// whether anything is on the other end of it: a cable no browser port reaches
+// is a cable nothing hears, and the channel below would be the only thing on
+// screen if that went unsaid.
+function cableHint(app) {
+  const port = app.surface.port;
+  const machine = app.play.machine(port);
+  const named = portNames(port).join(', ') || 'no cable';
+  return Hint(`the whole surface sends on ${named}`
+    + (machine.ok ? '' : ` — ${machine.reaches}`));
+}
+
 function PotFields(app, where, pot, set) {
-  return Fields(
-    Field({ label: 'sends' }, NumberField({
-      value: pot.cc, min: 0, max: 119, wide: true, 'aria-label': 'CC number',
-      onChange: (cc) => set({ cc }),
-    })),
-    Field({ label: 'on channel' }, ChannelField(pot.channel, (channel) => set({ channel }))));
+  return el('div', {},
+    Fields(
+      Field({ label: 'sends' }, NumberField({
+        value: pot.cc, min: 0, max: 119, wide: true, 'aria-label': 'CC number',
+        onChange: (cc) => set({ cc }),
+      })),
+      Field({ label: 'on channel' }, ChannelField(pot.channel, (channel) => set({ channel })))),
+    cableHint(app));
 }
 
 function PadFields(app, where, pad, set) {
@@ -110,12 +131,16 @@ function PadFields(app, where, pad, set) {
       onChange: (cc) => set({ cc }),
     })));
   }
-  if (pad.kind === PadKind.PROGRAM) return el('div', {}, Fields(...fields), Launch(app, pad, set));
-  fields.push(Field({ label: 'on channel' }, ChannelField(pad.channel, (channel) => set({ channel }))));
+  const channel = Field({ label: 'on channel' },
+    ChannelField(pad.channel, (channel) => set({ channel })));
+  if (pad.kind === PadKind.PROGRAM) {
+    return el('div', {}, Fields(...fields, channel), cableHint(app), Launch(app, pad, set));
+  }
+  fields.push(channel);
   fields.push(Field({ label: 'press', hint: 'a latch shows what it last sent, not what the module holds' },
     Segmented({ options: MODES, value: pad.mode, label: 'how this pad behaves',
                 onChange: (mode) => set({ mode }) })));
-  return el('div', {}, Fields(...fields));
+  return el('div', {}, Fields(...fields), cableHint(app));
 }
 
 // A launch pad recalls one of the module's stored patches. Where that lands
@@ -139,12 +164,26 @@ function Launch(app, pad, set) {
         onChange: (pcQuantise) => app.editor.setGlobals({ pcQuantise }, 'recall timing'),
       }))),
     g.pcEnabled
-      ? Hint(`the module recalls Program Change on ${g.pcChannel ? `channel ${g.pcChannel}` : 'any channel'}`)
+      ? Hint(recallSaid(g, pad, app.surface.port))
       : Row(el('span', { class: 'hint' }, 'the module is not recalling Program Change'),
             el('button', {
               onclick: () => app.editor.setGlobals(
-                { pcEnabled: 1, pcChannel: pad.channel }, 'Program Change recall'),
+                { pcEnabled: 1, pcChannel: pad.channel, pcSourceMask: app.surface.port },
+                'Program Change recall'),
             }, 'turn recall on')));
+}
+
+// Whether this pad's Program Change is one the module is listening for. The
+// channel was always half the answer; the cable is the other half, and a
+// recall filtered to a port this pad does not send on is silence with no
+// explanation anywhere on screen (src/protocol/sysex_handler.h).
+function recallSaid(g, pad, port) {
+  const where = g.pcChannel ? `channel ${g.pcChannel}` : 'any channel';
+  const ports = g.pcSourceMask ? portNames(g.pcSourceMask).join(', ') : 'any cable';
+  const deaf = (g.pcChannel && g.pcChannel !== pad.channel)
+    || (g.pcSourceMask && (g.pcSourceMask & port) === 0);
+  return `the module recalls Program Change on ${where}, from ${ports}`
+    + (deaf ? ' — not what this pad sends' : '');
 }
 
 // --- what it moves ------------------------------------------------------------

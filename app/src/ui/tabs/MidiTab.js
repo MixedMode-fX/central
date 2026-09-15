@@ -3,6 +3,11 @@
 // here: a binding is part of the patch, so it lives in the mod matrix. What
 // is left is the room - the cables, the channels, the clock and Program
 // Change recall, none of which a patch travels with.
+//
+// One panel per concern. The clock is what the module plays *in time with*;
+// recall is how it is told to load another patch; NRPN is a second transport
+// for the same bindings. They shared a panel once, and a panel called "clock
+// and recall" is a panel whose title had already given up.
 
 import { el } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
@@ -21,7 +26,8 @@ import '../panels/cards.css';
 
 export function MidiTab(app) {
   if (!app.device?.capabilities) return Hint('no module');
-  return el('div', {}, ControllerPanel(app), RoutingPanel(app), GlobalsPanel(app));
+  return el('div', {}, ControllerPanel(app), RoutingPanel(app),
+            ClockPanel(app), RecallPanel(app), NrpnPanel(app));
 }
 
 // --- routing ---------------------------------------------------------------
@@ -52,34 +58,56 @@ export function RoutingPanel(app) {
   return Panel('MIDI routing', el('div', { class: 'routes' }, RouteSide(app, false), RouteSide(app, true)));
 }
 
-// --- clock, Program Change, NRPN -------------------------------------------
+// --- the clock -------------------------------------------------------------
 
-export function GlobalsPanel(app) {
+// What the module counts time by. The source and the tempo are the same two
+// fields the module tab draws (controls/ClockFields.js), so the two cannot
+// disagree about what a tempo is; the CV pulse rate is here because it is
+// what the clock *is* out of a jack.
+export function ClockPanel(app) {
   const g = app.state.globals;
-  const set = (changes) => app.editor.setGlobals(changes);
-  const nrpn = (changes) => app.editor.setNrpn(changes);
-
-  return Panel('clock and recall',
+  return Panel('clock',
     Fields(
       ...ClockFields(app),
       Field({ label: 'CV pulses per quarter' }, NumberField({
         value: g.cvPpqn, min: 1, max: 96, fallback: 4, wide: true, 'aria-label': 'CV pulses per quarter note',
-        onChange: (cvPpqn) => set({ cvPpqn }),
-      })),
+        onChange: (cvPpqn) => app.editor.setGlobals({ cvPpqn }),
+      }))));
+}
+
+// --- Program Change recall --------------------------------------------------
+
+// How the module is told to load another patch: whether it listens at all,
+// and where a recall it hears lands. The pads that send one are on the
+// surface; this is the module's side of the same conversation.
+export function RecallPanel(app) {
+  const g = app.state.globals;
+  const set = (changes) => app.editor.setGlobals(changes);
+  return Panel('patch recall',
+    Fields(
       Field({ label: 'Program Change recalls presets' }, Switch({
         checked: g.pcEnabled !== 0, label: g.pcEnabled ? 'on' : 'off',
         onChange: (on) => set({ pcEnabled: on ? 1 : 0 }),
       })),
-      Field({ label: 'recall listens on' }, ChannelSelect({ value: g.pcChannel, onChange: (pcChannel) => set({ pcChannel }) })),
-      Field({ label: 'recall lands' }, Select({
+      Field({ label: 'listens on' }, ChannelSelect({ value: g.pcChannel, onChange: (pcChannel) => set({ pcChannel }) })),
+      Field({ label: 'a recall lands' }, Select({
         options: SWAP_TIMINGS, value: g.pcQuantise, onChange: (pcQuantise) => set({ pcQuantise }),
       }))),
     Fields(
       Field({ label: 'from these ports', hint: 'none = any' }, PortToggles({
         mask: g.pcSourceMask, label: 'Program Change source ports',
         onChange: (pcSourceMask) => set({ pcSourceMask }),
-      }))),
-    el('h2', { class: 'spaced' }, 'NRPN'),
+      }))));
+}
+
+// --- NRPN --------------------------------------------------------------------
+
+// A second transport for the bindings a CC already reaches: fourteen bits,
+// and its own channel and cables to arrive on.
+export function NrpnPanel(app) {
+  const g = app.state.globals;
+  const nrpn = (changes) => app.editor.setNrpn(changes);
+  return Panel('NRPN',
     Fields(
       Field({ label: 'accept NRPN' }, Switch({
         checked: g.nrpnEnabled !== 0, label: g.nrpnEnabled ? 'on' : 'off',

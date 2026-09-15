@@ -28,7 +28,8 @@ import {
 } from '../src/protocol/names.js';
 import { keySpelling, triadQuality, degreeOf, scaleTriad, romanNumeral,
          fifthsFrom } from '../src/core/music.js';
-import { EXAMPLES } from '../src/core/examples.js';
+import { EXAMPLES, EXAMPLE_CATEGORIES, exampleGroups } from '../src/core/examples.js';
+import { isMacro, isBinding, destsOfMacro } from '../src/core/patch.js';
 import { patchSchema, promptText, schemaText, WORKED_EXAMPLE } from '../src/core/schema.js';
 import { paramSections, paramSection, PARAM_SECTIONS } from '../src/ui/controls/ParamSections.js';
 import { Slider } from '../src/ui/components/Slider.js';
@@ -534,6 +535,56 @@ test('every example patch is one the firmware accepts', async () => {
     const again = fromPatchJson(toPatchJson(patch, globals, device), device);
     assert.deepEqual([...codec.encodePatch(again.patch, again.globals)],
                      [...codec.encodePatch(patch, globals)], `${name} does not round-trip`);
+  }
+});
+
+// The picker shelves them, so an example on a shelf nobody drew is an example
+// nobody finds. `exampleGroups` puts an unknown category on a shelf of its own
+// rather than dropping it, which is right at runtime and wrong in a commit.
+test('every example is on a shelf the picker knows', () => {
+  const groups = exampleGroups();
+  const listed = groups.flatMap((g) => g.options.map((o) => o.value));
+  assert.deepEqual([...listed].sort(), Object.keys(EXAMPLES).sort(), 'the picker lost or doubled an example');
+  for (const [name, example] of Object.entries(EXAMPLES)) {
+    assert.ok(EXAMPLE_CATEGORIES.includes(example.category),
+              `"${name}" is in category "${example.category}", which is not one of the shelves`);
+  }
+  for (const group of groups) {
+    for (const option of group.options) {
+      assert.ok(option.note, `${option.value} says nothing beside its name`);
+      assert.ok(option.hint && option.hint.length < EXAMPLES[option.value].about.length + 1,
+                `${option.value} has no summary line`);
+    }
+  }
+});
+
+// The performance presets are the reason the JSON dialect learned about
+// macros. A preset whose pots quietly stopped travelling in the file would
+// still load, still play, and no longer be the thing it says it is.
+test('the performance presets carry macros a pot can reach', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const played = Object.entries(EXAMPLES).filter(([, e]) => e.category === 'performance');
+  assert.ok(played.length >= 4, `only ${played.length} presets to play`);
+  for (const [name, example] of played) {
+    const { patch, globals } = fromPatchJson(example.patch, device);
+    const macros = patch.macros.filter(isMacro);
+    assert.ok(macros.length >= 4, `${name} has ${macros.length} macros`);
+    for (const [index, macro] of patch.macros.entries()) {
+      if (!isMacro(macro)) continue;
+      assert.ok(destsOfMacro(patch, index).length, `${name}: "${macro.name}" moves nothing`);
+      // And something has to move the macro, or it is a name and no gesture.
+      assert.ok(patch.ccMap.some((m) => isBinding(m)
+        && m.targetKind === P.CcTargetKind.CC_TARGET_MACRO && m.targetIndex === index),
+        `${name}: nothing is bound to "${macro.name}"`);
+    }
+    // The module takes them, and gives them back: a macro's name and every
+    // window of its travel survive the patch image.
+    await device.sendPatch(patch, globals);
+    for (const [index, macro] of patch.macros.entries()) {
+      if (!isMacro(macro)) continue;
+      assert.equal((await device.getMacro(index))?.name, macro.name, `${name}: macro ${index} came back wrong`);
+    }
   }
 });
 
@@ -1401,7 +1452,7 @@ test("Tonnetz's walk is shown as one section, not scattered by name", async () =
 // is why the generator's own vocabulary is written out here.
 const KEYWORDS = new Set([
   '$schema', '$id', '$ref', '$defs', 'title', 'description', 'type', 'enum', 'const',
-  'minimum', 'maximum', 'minItems', 'maxItems', 'maxLength', 'prefixItems', 'items',
+  'minimum', 'maximum', 'minItems', 'maxItems', 'minLength', 'maxLength', 'prefixItems', 'items',
   'properties', 'required', 'additionalProperties', 'allOf', 'anyOf', 'oneOf', 'if', 'then',
 ]);
 
@@ -1437,8 +1488,13 @@ function schemaProblems(schema, value, root = schema, at = 'the patch') {
     if (schema.minimum !== undefined && value < schema.minimum) bad(`${value} is below ${schema.minimum}`);
     if (schema.maximum !== undefined && value > schema.maximum) bad(`${value} is above ${schema.maximum}`);
   }
-  if (typeof value === 'string' && schema.maxLength !== undefined && value.length > schema.maxLength) {
-    bad(`is longer than ${schema.maxLength}`);
+  if (typeof value === 'string') {
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      bad(`is shorter than ${schema.minLength}`);
+    }
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+      bad(`is longer than ${schema.maxLength}`);
+    }
   }
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) bad(`needs ${schema.minItems} entries`);
@@ -1519,6 +1575,17 @@ test('the schema refuses what the firmware refuses', async () => {
           { nodes: Array.from({ length: caps.nodes + 1 }, () => ({ algo: 'NOT', in: [0], out: [0] })) });
   refuses('a MIDI port that is not on this module',
           { midi_in: [{ sources: ['DIN 9'], channel: 0, bus: 0 }] });
+
+  refuses('a macro name longer than the field the patch holds',
+          { macros: [{ index: 0, name: 'x'.repeat(caps.macroNameBytes + 1) }] });
+  refuses('a macro this module has not got',
+          { macros: [{ index: caps.macros, name: 'nope' }] });
+  refuses('a macro destination reaching a macro',
+          { macros: [{ index: 0, name: 'loop' }],
+            macro_dest: [{ slot: 0, macro: 0, targetKind: P.CcTargetKind.CC_TARGET_MACRO, targetIndex: 0 }] });
+  refuses('a macro destination pressing the transport',
+          { macros: [{ index: 0, name: 'go' }],
+            macro_dest: [{ slot: 0, macro: 0, targetKind: P.CcTargetKind.CC_TARGET_TRANSPORT, param: 0 }] });
 
   // A `seq` block is sugar for one algorithm's parameter layout, so offering
   // it to an algorithm that has none is a patch nobody can pack.

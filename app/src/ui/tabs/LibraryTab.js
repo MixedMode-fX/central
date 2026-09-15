@@ -6,10 +6,10 @@
 import { el, classes } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
 import { IconButton } from '../components/IconButton.js';
-import { Select } from '../components/Select.js';
+import { Picker } from '../components/Picker.js';
 import { Disclosure, remembered } from '../components/Disclosure.js';
 import { ago } from '../../services/storage.js';
-import { EXAMPLES } from '../../core/examples.js';
+import { EXAMPLES, exampleGroups } from '../../core/examples.js';
 import { UNTITLED } from '../../services/state.js';
 import './Library.css';
 
@@ -59,15 +59,22 @@ function SavedPanel(app) {
 }
 
 // Somewhere to start. An empty library in front of a machine with this many
-// algorithms is a wall, not a blank page.
+// algorithms is a wall, not a blank page - and so is a flat list of thirty
+// patches named in one font, which is why this is the same picker the add bar
+// uses (components/Picker.js): shelved by what a patch is for, each row saying
+// its tempo and key and what it does, and a search box over the lot.
 function ExamplesPanel(app) {
   const { ui } = app.state;
-  const names = Object.keys(EXAMPLES);
-  ui.example ??= names[0];
+  const groups = exampleGroups();
+  if (!EXAMPLES[ui.example]) ui.example = Object.keys(EXAMPLES)[0];
+  const chosen = EXAMPLES[ui.example];
   return Panel('examples',
-    Row(Select({ class: 'grow', options: names.map((name) => ({ value: name, label: name })), value: ui.example,
-                 onChange: (name) => { ui.example = name; app.render(); } }),
-        el('button', { onclick: () => app.patches.loadExample(ui.example) }, 'load')));
+    Row(el('div', { class: 'grow' }, Picker({
+          value: ui.example, groups, label: 'examples',
+          onPick: (name) => { ui.example = name; app.render(); },
+        })),
+        el('button', { class: 'primary', onclick: () => app.patches.loadExample(ui.example) }, 'load')),
+    chosen ? Hint(chosen.about) : null);
 }
 
 function FilesPanel(app) {

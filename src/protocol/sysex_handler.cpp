@@ -526,6 +526,26 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
 
         case SYSEX_SLOT_LIST: reply_slots(source); return;
 
+        // The transport, from the control cable. A CcTransportTarget, so the
+        // four buttons a controller can be bound to and the four a host can
+        // press are one list (node/patch.h) rather than two that drift.
+        case SYSEX_TRANSPORT:
+            if (n < 1){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            switch (args[0]){
+                case CC_TRANSPORT_START:    mm.clock().start(); break;
+                case CC_TRANSPORT_STOP:     mm.clock().stop(); break;
+                case CC_TRANSPORT_CONTINUE: mm.clock().resume(); break;
+                case CC_TRANSPORT_TAP:      mm.clock().tap(now_us); break;
+                default: nak(source, SYSEX_ERR_BAD_ARGUMENT); return;
+            }
+            ack(source);
+            return;
+
+        case SYSEX_PANIC:
+            mm.panic();
+            ack(source);
+            return;
+
         case SYSEX_RESTORE_DEFAULTS:
             pending_patch = default_patch();
             pending_globals = default_globals_for_patch();

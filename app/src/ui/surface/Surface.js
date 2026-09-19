@@ -46,6 +46,7 @@ import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
 import { icon } from '../components/icons.js';
 import { MachineBadge, PortSelect } from '../components/Machine.js';
+import { Transport } from '../components/Transport.js';
 import { KeyboardOverlay } from '../components/Keyboard.js';
 import { Select, range } from '../components/Select.js';
 import { portNames } from '../../protocol/names.js';
@@ -160,7 +161,11 @@ function TopBar(app, display) {
           if (!ui.edit) ui.editing = null;
           app.render();
         },
-      })));
+      })),
+    // The transport, on the case. It costs a row of the pads' height and it is
+    // worth it: this is the view a phone is held in on stage, and leaving the
+    // surface to press start is the one thing an instrument must not ask.
+    Transport(app, { compact: true, class: 'surface-transport' }));
 }
 
 // Where the keys play: the cable first, because a channel on the wrong cable

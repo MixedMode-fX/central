@@ -18,6 +18,7 @@ import { Arrangement } from './arrangement.js';
 import { Session } from './session.js';
 import { Editor } from './editor.js';
 import { Play } from './play.js';
+import { Transport } from './transport.js';
 import { Surface } from './surface.js';
 import { Patches } from './patches.js';
 
@@ -49,11 +50,19 @@ export function createApp({ root, view, wasmUrl }) {
     listener: () => app.listener,
     refresh: () => app.refreshLive(),
   });
+  // Start, stop, continue and panic: the machine's own controls, which is why
+  // they are in the shell rather than on a tab (services/transport.js).
+  const transport = new Transport({
+    session,
+    listener: () => app.listener,
+    outputs: () => app.outputs,
+    fail: (message) => app.fail(message),
+  });
   const patches = new Patches({ state, library, editor, arrangement, render });
   // The pads and pots: the performer's own controller, kept in this browser
   // rather than in the patch (services/surface.js).
   const surface = new Surface({ state, library, play, editor, session, render });
-  Object.assign(app, { render, arrangement, session, editor, patches, play, surface });
+  Object.assign(app, { render, arrangement, session, editor, patches, play, transport, surface });
 
   app.say = (message) => editor.say(message);
   app.fail = (message) => editor.fail(message);

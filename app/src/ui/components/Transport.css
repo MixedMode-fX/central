@@ -1,0 +1,19 @@
+/* The transport: four buttons that read as one control, because they are one
+   control. The gap inside the group is tighter than the gap around it, which is
+   the only thing that says "these belong together" without a box around them. */
+.transport { display: flex; align-items: center; gap: .2rem; }
+
+/* Playing, the start button is lit — the same green the module's own clock LED
+   is, so the shell and the panel agree. Only the module in the page can be
+   asked, so on a cable this simply never lights (components/Transport.js). */
+.transport.running .start { border-color: var(--gate); color: var(--gate); }
+
+/* The word "panic" is worth its width in the shell, where there is a row to
+   spare; the ghost buttons keep it from reading as the loudest thing on the
+   page until it is wanted. */
+.transport .icon-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
+
+/* Compact: on an instrument panel, where every control is a glyph on a case
+   and the buttons stretch to fill the row they are given. */
+.transport.compact { gap: .4rem; }
+.transport.compact .icon-btn { width: auto; flex: 1 1 0; }

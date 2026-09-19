@@ -44,6 +44,22 @@ static int sounding_on(const RecordingMidiOut& midi, uint8_t target) {
     return held;
 }
 
+// How many channels the panic's own sweep reached, on every port that carries
+// music: All Notes Off is a CC, and one message per channel is what "all
+// channels" means on a wire that has no way of saying it once.
+static int swept_channels(const RecordingMidiOut& midi) {
+    int channels = 0;
+    for (uint8_t channel = 1; channel <= MIDI_CHANNELS; channel++) {
+        for (const RecordingMidiOut::Message& m : midi.messages) {
+            if (m.type != MIDI_CONTROL_CHANGE || m.d1 != MIDI_CC_ALL_NOTES_OFF) continue;
+            if (m.channel != channel || m.target != MIDI_MUSICAL_PORTS) continue;
+            channels++;
+            break;
+        }
+    }
+    return channels;
+}
+
 // ---------------------------------------------------------------------------
 // Gate in -> LogicNot -> GateToNote -> MidiOutPort: toggling the fake input
 // produces exactly one MIDI message, with no algorithm touching a pin or a
@@ -699,6 +715,88 @@ static void test_stopping_the_transport_leaves_a_held_note_alone() {
     TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_0));
 }
 
+// ---------------------------------------------------------------------------
+// A panic ends the sound and nothing else. Every node hands back what it is
+// holding, so a note-off goes out with the transformation that made the note;
+// then the sweep, which is the only thing that reaches a note this module has
+// no record of - one left hanging by a cable pulled mid-phrase.
+// ---------------------------------------------------------------------------
+static void test_a_panic_releases_what_is_sounding_and_sweeps_every_channel() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
+    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].params[1] = 4;                                  // /4
+    p.nodes[1] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
+    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS;
+    p.nodes[1].out_bus[0] = 0; p.nodes[1].out_bus[1] = NO_BUS;
+    p.nodes[2] = node_config(ALGO_TONNETZ);                    // gate 0 -> note 1
+    p.nodes[2].in_bus[0] = 0; p.nodes[2].in_bus[1] = NO_BUS;
+    p.nodes[2].out_bus[0] = 1;
+    p.n_nodes = 3;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    uint32_t now = 0;
+    master.clock().start();
+    for (uint32_t t = 0; t < 4 * 4 * CLOCK_SUBTICK; t++) {
+        master.clock().advance();
+        master.pass(now);
+        now += 1000;
+    }
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+    TEST_ASSERT_EQUAL(3, sounding_on(midi, mmMIDI_USB_1));
+
+    master.panic();
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_0));
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_1));
+    TEST_ASSERT_EQUAL(MIDI_CHANNELS, swept_channels(midi));
+
+    // It is not a stop: the clock never left, and the next chord plays.
+    TEST_ASSERT_TRUE(master.clock().running());
+    for (uint32_t t = 0; t < 4 * 4 * CLOCK_SUBTICK; t++) {
+        master.clock().advance();
+        master.pass(now);
+        now += 1000;
+    }
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+    TEST_ASSERT_EQUAL(3, sounding_on(midi, mmMIDI_USB_1));
+}
+
+// The other side of test_stopping_the_transport_leaves_a_held_note_alone: a
+// stop leaves a key somebody is holding down, and a panic is the button for
+// exactly the case where that is what has gone wrong. The key's own note-off,
+// whenever it comes, sends nothing more - the ledger it would have been
+// released from is already empty.
+static void test_a_panic_cuts_a_held_note_that_a_stop_leaves_alone() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};        // DIN 1 -> note bus 0
+    p.nodes[0] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, +12
+    p.nodes[0].params[0] = PARAM_CENTRE + 12;
+    p.n_nodes = 1;
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 1};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    uint32_t now = 0;
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_ON, 1, 60, 100});
+    run_passes(master, 4, now);
+    TEST_ASSERT_EQUAL(1, sounding_on(midi, mmMIDI_USB_0));
+
+    master.panic();
+    TEST_ASSERT_EQUAL(0, sounding_on(midi, mmMIDI_USB_0));
+    midi.clear();
+
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_OFF, 1, 60, 0});
+    run_passes(master, 4, now);
+    TEST_ASSERT_EQUAL(0, midi.messages.size());
+}
+
 // Chaining is the point: every modifier's output is legal input to every
 // other. Transpose -> arpeggiator -> note priority over three buses, with the
 // arpeggiator advanced by a divider.
@@ -865,6 +963,8 @@ int main() {
     RUN_TEST(test_stopping_the_transport_releases_a_chord_through_a_voicer);
     RUN_TEST(test_stopping_the_transport_releases_a_synced_delay);
     RUN_TEST(test_stopping_the_transport_leaves_a_held_note_alone);
+    RUN_TEST(test_a_panic_releases_what_is_sounding_and_sweeps_every_channel);
+    RUN_TEST(test_a_panic_cuts_a_held_note_that_a_stop_leaves_alone);
     RUN_TEST(test_a_jack_clocked_patch_plays_with_the_transport_stopped);
     RUN_TEST(test_zero_heap_allocation_after_setup);
     RUN_TEST(test_thousand_load_unload_cycles_leave_identical_state);

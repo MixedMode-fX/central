@@ -5,6 +5,10 @@
 // because those two answer the same question: which module am I listening
 // to, the one in the page or the one on the cable.
 //
+// The transport - start, stop, continue and panic - is in the bar with the
+// tabs rather than on any of them: it is the machine's, not a panel's, and it
+// is needed while looking at whatever tab happens to be open.
+//
 // Play does not open a tab. It opens the performance surface, which is its
 // own shell and takes the whole viewport (ui/surface/Surface.js): an
 // instrument rather than an instrument panel. The panels that used to be
@@ -16,6 +20,7 @@ import { el, classes } from './dom.js';
 import { icon } from './components/icons.js';
 import { IconButton } from './components/IconButton.js';
 import { Notice } from './components/Panel.js';
+import { Transport } from './components/Transport.js';
 import { closeMenu } from './components/Menu.js';
 import { validate, advise } from '../core/validate.js';
 import { Domain } from '../core/validate.js';
@@ -59,7 +64,11 @@ export function App(app) {
 
   return el('div', { class: 'shell' },
     Header(app),
-    Tabs(app),
+    // The transport travels with the tabs, stuck to the top of the page: a
+    // start button that scrolls away with the header is one you have to go
+    // and find again, which was the whole complaint against keeping it inside
+    // the module tab's clock panel.
+    el('div', { class: 'bar' }, Tabs(app), Transport(app)),
     state.error ? Notice({ kind: 'error', text: state.error, onClick: app.dismissError }) : null,
     problems.length ? Notice({ kind: 'problems', title: state.diverged ? 'not sent' : 'rejected', items: said(problems) }) : null,
     notes.length ? Notice({ kind: 'notes', title: 'notes', items: said(notes) }) : null,

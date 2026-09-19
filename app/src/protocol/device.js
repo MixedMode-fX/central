@@ -565,6 +565,21 @@ export class Device extends EventTarget {
   async eraseSlot(slot) { return this.command(P.SysexCommand.SYSEX_SLOT_ERASE, [slot]); }
   async restoreDefaults() { return this.command(P.SysexCommand.SYSEX_RESTORE_DEFAULTS); }
 
+  // --- the transport, and the panic button ------------------------------------
+
+  // One of the four buttons a controller can also be bound to
+  // (`CcTransportTarget`). It goes over the control cable rather than as MIDI
+  // realtime, because realtime bytes arrive on a musical port and the app
+  // holds cable 3 - which is reserved and carries nothing musical.
+  //
+  // Not `transport()`: that is the wire this Device talks over.
+  async pressTransport(what) { return this.command(P.SysexCommand.SYSEX_TRANSPORT, [what]); }
+
+  // Everything the module is playing, released: its nodes hand back what they
+  // are holding, then All Notes Off on every channel of every port it can
+  // play. Only the module can do either - the notes are on its own cables.
+  async panic() { return this.command(P.SysexCommand.SYSEX_PANIC); }
+
   async command(command, args = []) {
     const [reply] = await this.request(
       this.msg(command, args),

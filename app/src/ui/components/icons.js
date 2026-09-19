@@ -14,6 +14,8 @@ const ICONS = {
   play: { d: 'M8 5v14l11-7z', fill: true },
   stop: { d: 'M6 6h12v12H6z', fill: true },
   resume: { d: 'M6 5v14 M10 5l10 7-10 7z' },
+  // A note, struck through: what a panic does is end every one of them.
+  panic: { d: 'M10 16.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0 M10 16.5V6l6-1.6v3.2 M4 19.5L20 4.5' },
   edit: { d: 'M4 20h4L18 10l-4-4L4 16z M13 7l4 4' },
   plug: { d: 'M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0z M12 17v4' },
   zoomIn: { d: 'M9 3a6 6 0 1 1 0 12 6 6 0 0 1 0-12z M14 14l6 6 M9 6v6 M6 9h6' },

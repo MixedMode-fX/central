@@ -181,8 +181,7 @@ void MixedModeMaster::unload(){
     const uint8_t n = pool.count();
     if (n > 0){
         for (uint8_t i = 0; i < n; i++) pool.node(i)->silence(bus);
-        bus.swap();
-        for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, 0);
+        flush_releases();
     }
     pool.unload_all();
     sched.clear();
@@ -198,6 +197,26 @@ void MixedModeMaster::unload(){
     // Nothing of the old patch is in flight any more, so a stop that was
     // still settling has nothing left to settle against.
     stop_settle = 0;
+}
+
+void MixedModeMaster::flush_releases(){
+    bus.swap();
+    for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, 0);
+}
+
+void MixedModeMaster::panic(){
+    const uint8_t n = pool.count();
+    if (n > 0){
+        for (uint8_t i = 0; i < n; i++) pool.node(i)->silence(bus);
+        flush_releases();
+    }
+    // Then the sweep, whatever the patch routes and whether or not anything
+    // was holding a note: what a panic is for is the note this module has no
+    // record of, and a patch that plays nothing at all is exactly the patch
+    // loaded over the one that hung it.
+    for (uint8_t channel = 1; channel <= MIDI_CHANNELS; channel++){
+        midi.send(MIDI_MUSICAL_PORTS, MIDI_CONTROL_CHANGE, MIDI_CC_ALL_NOTES_OFF, 0, channel);
+    }
 }
 
 void MixedModeMaster::setup(){
@@ -293,8 +312,7 @@ LoadError MixedModeMaster::replace_node(uint8_t index, const NodeConfig& config)
     // exactly as unload() does at patch scope.
     Node* old = pool.node(index);
     old->silence(bus);
-    bus.swap();
-    for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, 0);
+    flush_releases();
 
     Node* fresh = pool.replace(index, config);
     if (fresh == nullptr) return error = LOAD_NODE_INVALID;

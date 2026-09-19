@@ -531,10 +531,6 @@ export class EmbeddedModule {
   syncPulse() { this.E.emu_sync_edge(this.now); }
   setSyncRate(hz) { this.syncHz = hz; }
 
-  clockStart() { this.E.emu_clock_start(); }
-  clockStop() { this.E.emu_clock_stop(); }
-  clockResume() { this.E.emu_clock_resume(); }
-
   clock() {
     return {
       bpm: this.E.emu_clock_bpm(),

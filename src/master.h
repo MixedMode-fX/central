@@ -72,6 +72,18 @@ class MixedModeMaster {
         // cannot hang it downstream (#11, #13).
         void unload();
 
+        // Everything sounding, released, whatever is playing it. Two halves,
+        // because a note can be in either: every pool node hands back what it
+        // owns, exactly as a patch swap makes it do, so a note-off goes out
+        // with the transformation that made the note; then All Notes Off on
+        // every channel of every musical port, for the notes no ledger here
+        // knows of - one a DAW left holding, or one whose note-off went out of
+        // a cable that had already been re-pointed.
+        //
+        // It is not a stop: the clock keeps running, and a sequencer plays the
+        // next step. What it ends is the sound, and only the sound.
+        void panic();
+
         // Once after load(): hardware nodes claim their pins.
         void setup();
         // One evaluation pass.
@@ -189,6 +201,11 @@ class MixedModeMaster {
         // is one of those the stop is held for; the pool's own loop is what
         // tells each node, at that node's place in the graph order.
         bool settling_stop();
+        // Note-offs that a silence() just wrote, out to the transports before
+        // anything else runs. The front buffer at that point holds the last
+        // pass's events, already delivered in that pass, so swapping them away
+        // loses nothing.
+        void flush_releases();
 
         IGpio& gpio;
         IMidiOut& midi;

@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 11
+#define SYSEX_PROTOCOL_VERSION 12
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -106,6 +106,15 @@ enum SysexCommand : uint8_t {
     // find out where the module has it.
     SYSEX_GET_MACRO_STATE  = 0x28,
     SYSEX_RESTORE_DEFAULTS = 0x30,
+
+    // <CcTransportTarget>: start, stop, continue, tap. The transport is
+    // otherwise reachable only as MIDI realtime, which arrives on a musical
+    // port - and an editor holds the control cable, which carries nothing
+    // musical. Without this, the only start button is the one on the DAW.
+    SYSEX_TRANSPORT        = 0x31,
+    // Everything sounding, released, on every port and channel. See
+    // MixedModeMaster::panic() for the two halves and why both are needed.
+    SYSEX_PANIC            = 0x32,
 
     // Device -> host
     SYSEX_IDENTITY         = 0x41,

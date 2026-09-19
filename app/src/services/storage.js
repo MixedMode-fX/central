@@ -24,6 +24,9 @@ const CANVAS_KEY = 'mmmc.canvas.v1';
 // of the instrument, and a pad that changed meaning with every patch load
 // would be a pad nobody could learn (services/surface.js).
 const SURFACE_KEY = 'mmmc.surface.v1';
+// Which of this computer's MIDI outputs each of the module's cables is played
+// out of. Your desk, not your patch (runtime/midiout.js).
+const MIDI_OUT_KEY = 'mmmc.midiout.v1';
 
 // How many patches keep hand-placed blocks. A layout is a few hundred bytes
 // and only exists for a patch somebody arranged by hand, but the store must
@@ -189,6 +192,29 @@ export class Library {
     } catch {
       return null;
     }
+  }
+
+  // Which of this computer's MIDI outputs stands in for each of the module's
+  // cables (runtime/midiout.js). It is about the room and not about the
+  // patch - the same synth is on the same socket whatever is loaded - so it
+  // is kept here rather than in a patch image, which has nowhere to put a
+  // port name and should not gain one.
+  readMidiOut() {
+    if (!this.available) return {};
+    try {
+      const raw = this.storage.getItem(MIDI_OUT_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  writeMidiOut(routes) {
+    if (!this.available) return;
+    try {
+      this.storage.setItem(MIDI_OUT_KEY, JSON.stringify(routes));
+    } catch { /* a full quota must never stop a note leaving the page */ }
   }
 
   // The performance surface. One document for the browser, not one per

@@ -3,8 +3,8 @@
 // The module the app is editing is usually the one embedded in the page, and a
 // patch is a thing you play, not a thing you read. So the keys, pads and knobs
 // on a controller plugged into the *computer* are routed into the module's
-// MIDI input, and everything the module sends can go back out to a real port -
-// a DAW, a synth, or the same interface it came in on.
+// MIDI input. The other direction - what the module plays, out of this
+// computer and into a synth - is `runtime/midiout.js`.
 //
 // Two things follow from routing a controller in rather than around:
 //
@@ -32,26 +32,18 @@ export class Controller {
     this.module = module;
     this.access = null;
     this.inputId = '';
-    this.outputId = '';
     // Which of the module's MIDI inputs the controller appears on. A patch
     // filters by source port, so this is part of what is being tested: the
     // default is the first musical port, never the control cable.
     this.port = MUSICAL_PORTS[0]?.value ?? P.MidiPort.mmMIDI_USB_0;
-    this.onChange = () => {};
-    module.onMidi((event) => this.forward(event));
   }
 
   get inputs() { return this.access ? [...this.access.inputs.values()] : []; }
-  get outputs() { return this.access ? [...this.access.outputs.values()] : []; }
 
   get input() { return this.access?.inputs.get(this.inputId) ?? null; }
-  get output() { return this.access?.outputs.get(this.outputId) ?? null; }
 
   async connect() {
     this.access = await access();
-    // A controller unplugged mid-session should not leave a dead selection on
-    // screen; Web MIDI tells us, so the page follows.
-    this.access.onstatechange = () => this.onChange();
     return this.access;
   }
 
@@ -64,8 +56,6 @@ export class Controller {
     const input = this.input;
     if (input) input.onmidimessage = (event) => this.receive(event.data);
   }
-
-  sendTo(id) { this.outputId = id; }
 
   setPort(mask) { this.port = mask; }
 
@@ -82,21 +72,5 @@ export class Controller {
     const type = status & 0xf0;
     const channel = (status & 0x0f) + 1;            // the firmware counts channels from 1
     this.module.deliverMidi(this.port, type, channel, bytes[1] ?? 0, bytes[2] ?? 0);
-  }
-
-  // Everything the module plays, on the chosen port. The module's own target
-  // mask says which of *its* cables an event went to; a browser has one output
-  // per interface port, so the choice of where it lands is made here.
-  forward(event) {
-    const output = this.output;
-    if (!output) return;
-    if (event.type >= REALTIME_FIRST) {
-      try { output.send([event.type]); } catch { /* a port that went away */ }
-      return;
-    }
-    const status = (event.type & 0xf0) | ((event.channel - 1) & 0x0f);
-    try {
-      output.send([status, event.d1 & 0x7f, event.d2 & 0x7f]);
-    } catch { /* a port that went away between the event and the send */ }
   }
 }

@@ -9,6 +9,7 @@ import { EmbeddedModule } from '../runtime/module.js';
 import { loadWasm } from '../runtime/wasm.js';
 import { Listener } from '../runtime/audio/listener.js';
 import { Controller } from '../runtime/controller.js';
+import { MidiOutputs } from '../runtime/midiout.js';
 import { describeSupport, access, discover, WebMidiTransport } from '../runtime/webmidi.js';
 import { Library } from './storage.js';
 import { createState, noPatch } from './state.js';
@@ -29,6 +30,7 @@ export function createApp({ root, view, wasmUrl }) {
     module: null,           // the firmware, running in this page
     listener: null,         // the audio standing in for what is downstream
     controller: null,       // a MIDI controller plugged into this computer
+    outputs: null,          // where what the module plays leaves this computer
     get device() { return session.device; },
   };
   const render = () => renderer.render();
@@ -87,7 +89,7 @@ export function createApp({ root, view, wasmUrl }) {
       editor.listener = app.listener;
       patches.listener = app.listener;
       app.controller = new Controller(app.module);
-      app.controller.onChange = render;
+      app.outputs = new MidiOutputs(app.module, library);
       await app.useModule({ silent: true });
       patches.restoreWorking();
     } catch (error) {
@@ -126,6 +128,10 @@ export function createApp({ root, view, wasmUrl }) {
       if (!found.length) { app.say('no module answered'); return; }
       const kept = patches.stash();
       const port = found[0];
+      // The module in the page is about to stop playing, and a note it sent
+      // out of this computer is only ended by a note-off: nothing will send
+      // one once it has stopped.
+      app.outputs?.panic();
       app.module?.stop();
       stopLive?.();
       stopLive = null;
@@ -145,9 +151,20 @@ export function createApp({ root, view, wasmUrl }) {
     render();
   };
 
-  app.connectController = async () => {
+  // The MIDI devices on this computer, asked for once: a controller to play
+  // the module with and the outputs to play a synth out of are two halves of
+  // the same permission, and asking twice is two prompts for something
+  // already allowed.
+  app.connectMidi = async () => {
     try {
-      await app.controller.connect();
+      const midi = await app.controller.connect();
+      await app.outputs.connect();
+      // A device unplugged mid-session should not leave a dead selection on
+      // screen, and a route pointed at it is not forgotten - it comes back
+      // when the device does. Web MIDI tells us, so the page follows. One
+      // owner: `onstatechange` is a single slot, so a second listener set
+      // from a peripheral would silently take the first one's place.
+      midi.onstatechange = () => render();
       state.status = 'MIDI devices found';
     } catch (error) {
       state.status = `could not reach the MIDI devices: ${error.message}`;

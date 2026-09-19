@@ -33,6 +33,13 @@ answer the same question: which module am I listening to, the one in the page
 or the one on the cable. Play does not open a tab: it opens the performance
 surface, which is a second shell with no header and no tabs.
 
+**The transport is in the bar with the tabs**, and on the surface's own case:
+start, stop, continue and **panic** are the machine's controls rather than any
+panel's, so they are reachable from whatever is on screen. Panic reaches all
+three places a note can be — the module's own nodes, this computer's MIDI
+ports, and the page's audio — because a button that missed one would be worse
+than none.
+
 **The module runs in the page, always.** The firmware compiled to WebAssembly
 is both the *transport* the editor talks to (`Device` talks to a transport, not
 to Web MIDI, so every edit is the SysEx message a cable would have carried and

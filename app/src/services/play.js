@@ -33,7 +33,6 @@ const NOTE_ON = 0x90;
 const NOTE_OFF = 0x80;
 const CONTROL_CHANGE = 0xb0;
 const PROGRAM_CHANGE = 0xc0;
-const ALL_NOTES_OFF = 123;
 
 // The USB cables, in the order a host enumerates them. A Teensy built
 // USB_MIDI4_SERIAL offers four, and the browser shows each as a port of its
@@ -158,11 +157,6 @@ export class Play {
   // `pc_quantise` says (src/protocol/sysex_handler.h). It is one data byte,
   // not two.
   programChange(program, where = null) { this.send(PROGRAM_CHANGE, program, 0, where); }
-
-  allNotesOff() {
-    this.cc(ALL_NOTES_OFF, 0);
-    this.listenerOf()?.allOff();
-  }
 
   // One message, to whichever machine is live. Returns what the module made
   // of it when that can be known - how many of its ports took the event, or

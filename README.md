@@ -502,6 +502,12 @@ than mid-transfer. Binary payloads are 7-in-8 packed.
   a checksum per chunk and accumulates into a staging buffer; the live graph is
   untouched until the whole image passes magic, version, CRC and validation. An
   incremental edit is one message changing one field.
+- **The transport and the panic button** have messages of their own. MIDI
+  realtime only arrives on a musical port, and an editor holds the control
+  cable, so `SYSEX_TRANSPORT` carries the same start / stop / continue / tap a
+  controller can be bound to. `SYSEX_PANIC` releases what every node is
+  sounding, each note-off carrying the transformation that made its note, and
+  then sends All Notes Off on every channel of every musical port.
 - **Program Change recall** is off by default, with a configurable channel and
   port. A recall can be immediate or quantised to the next beat or bar;
   immediate with the clock stopped. The module announces a recall to the host.

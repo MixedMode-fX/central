@@ -49,13 +49,13 @@ export function PlayTab(app) {
       KeyboardPanel(app));
   }
   return el('div', {},
-    Meters(app), TransportPanel(app), ScopePanel(app), RollPanel(app),
+    Meters(app), ClockPanel(app), ScopePanel(app), RollPanel(app),
     JacksPanel(app), KeyboardPanel(app), ListenPanel(app), MonitorPanel(app));
 }
 
 // --- the clock ------------------------------------------------------------------
 
-function TransportPanel(app) {
+function ClockPanel(app) {
   const module = app.module;
   const g = app.state.globals;
   const extras = [];
@@ -69,13 +69,11 @@ function TransportPanel(app) {
       el('span', { class: 'hint' }, 'Hz')));
   }
   if (g.clockSource === 2) extras.push(Hint('waiting for MIDI clock'));
-  return Panel('clock',
-    Row(IconButton({ icon: 'play', label: 'start the clock', text: 'start', onclick: () => module.clockStart() }),
-        IconButton({ icon: 'stop', label: 'stop the clock', text: 'stop', onclick: () => module.clockStop() }),
-        IconButton({ icon: 'resume', label: 'continue from where the clock stopped', text: 'continue',
-                     class: 'ghost', onclick: () => module.clockResume() })),
-    Fields(...ClockFields(app)),
-    extras);
+  // Start, stop and continue used to be here, which is exactly what made them
+  // hard to reach: they are in the shell's bar and on the surface now
+  // (components/Transport.js). What is left is the clock itself - what drives
+  // it, how fast, and the sync jack no cable reaches in a browser.
+  return Panel('clock', Fields(...ClockFields(app)), extras);
 }
 
 // --- jacks ------------------------------------------------------------------
@@ -152,10 +150,12 @@ function KeyboardPanel(app) {
       onNoteOff: (pitch) => app.play.noteOff(pitch),
     }),
     Hint('a key is louder towards its bottom edge; the velocity above is its loud end'),
+    // No all-notes-off here: it was this panel's own cable and channel only,
+    // and the panic in the bar above is every port and every channel of
+    // whatever is playing (services/transport.js).
     Row(...Labelled('CC', number('cc', 0, 127, 'CC number')),
         ...Labelled('value', number('ccValue', 0, 127, 'CC value')),
-        el('button', { onclick: () => app.play.cc(play.cc, play.ccValue) }, 'send'),
-        el('button', { class: 'ghost', onclick: () => app.play.allNotesOff() }, 'all notes off')));
+        el('button', { onclick: () => app.play.cc(play.cc, play.ccValue) }, 'send')));
 }
 
 // --- listening -------------------------------------------------------------

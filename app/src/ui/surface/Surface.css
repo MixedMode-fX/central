@@ -69,6 +69,15 @@
   align-items: stretch;
 }
 
+/* The transport, engraved on the case rather than on a panel: four buttons
+   across the width, thumb-sized, in the same row order the shell has them. */
+.surface-transport { display: flex; gap: .4rem; }
+.surface-transport .icon-btn {
+  height: 2.1rem; background: var(--engrave); border-color: var(--line); color: var(--silk);
+}
+.surface-transport .icon-btn:hover { color: var(--ink); }
+.surface-transport.running .start { border-color: var(--gate); color: var(--gate); }
+
 /* One display. It holds whatever was last touched, and says what is loaded
    and how fast it is going when nothing has been. */
 .readout {

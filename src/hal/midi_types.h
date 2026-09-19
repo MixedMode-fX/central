@@ -19,6 +19,15 @@ enum MidiType : uint8_t {
     MIDI_STOP               = 0xFC,
 };
 
+// Channel Mode messages ride as a CC on the channel they apply to. Only the
+// one a panic needs is named: 123, All Notes Off.
+constexpr uint8_t MIDI_CC_ALL_NOTES_OFF = 123;
+
+// Channels a MIDI port has, numbered from 1 as everything here numbers them.
+// A panic sweeps all of them, because a note nothing is holding a record of
+// is on no channel anybody can name.
+constexpr uint8_t MIDI_CHANNELS = 16;
+
 // Logical MIDI endpoints, one bit each. A target mask is any OR of these.
 // Which of them are actually compiled in is the transport's business
 // (see hal/teensy/teensy_midi.h).

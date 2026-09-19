@@ -44,6 +44,9 @@ import { Surface as SurfaceView } from '../src/ui/surface/Surface.js';
 import { AssignSheet } from '../src/ui/surface/Assign.js';
 import { Surface as SurfaceDoc, PadKind } from '../src/services/surface.js';
 import { Play } from '../src/services/play.js';
+import { Transport } from '../src/services/transport.js';
+import { Transport as TransportView } from '../src/ui/components/Transport.js';
+import { Device } from '../src/protocol/device.js';
 import { KeyTab } from '../src/ui/tabs/KeyTab.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
 import { shade, nodeRollSources, scopeRows } from '../src/ui/scope/scope.js';
@@ -170,7 +173,9 @@ test('base64 survives every byte value, and ago() reads as English', async () =>
 test('the module runs, keeps time and lights the LEDs', async () => {
   const { module } = await instantiate();
   // A freshly booted module runs the default patch, whose clock is internal.
-  module.clockStart();
+  // Start is pressed the way the app presses it: over the protocol, because
+  // the transport has no other way in from the cable the app holds.
+  await new Device(module).pressTransport(P.CcTransportTarget.CC_TRANSPORT_START);
   module.advance(1_000_000);                        // one second of simulated time
   const clock = module.clock();
   assert.ok(clock.running, 'the clock is running');
@@ -187,6 +192,88 @@ test('the module runs, keeps time and lights the LEDs', async () => {
     if (module.leds().green > 0) flashed = true;
   }
   assert.ok(flashed, 'the green LED never flashed the beat');
+});
+
+// --- the transport and the panic button -------------------------------------
+
+// The transport is one service for both machines, and the page's own module is
+// driven through the very same SysEx a cable carries, so this is the real path
+// and not a stand-in for it.
+test('the transport service presses start, stop and continue on the module', async () => {
+  const { module } = await instantiate();
+  const transport = new Transport({ session: { device: new Device(module) }, fail: (m) => assert.fail(m) });
+
+  transport.stop();
+  assert.equal(module.clock().running, false);
+  transport.start();
+  assert.equal(module.clock().running, true);
+  assert.equal(module.clock().count, 0, 'start runs from the top');
+
+  module.advance(200_000);
+  const at = module.clock().count;
+  transport.stop();
+  transport.resume();
+  assert.equal(module.clock().running, true);
+  assert.equal(module.clock().count, at, 'continue resumes on the count the stop kept');
+  // The acks are answered on a microtask, as a real port would answer them.
+  await Promise.resolve();
+});
+
+// A panic has three places to reach and the button is worthless if it misses
+// one: the module's own note-offs, the notes already gone out of this
+// computer's ports, and the page's own audio.
+test('a panic sweeps every channel of the module and releases both sides of the page', async () => {
+  const { module } = await instantiate();
+  const swept = [];
+  module.onMidi(({ type, d1, channel, target }) => {
+    if (type === 0xb0 && d1 === 123) swept.push({ channel, target });
+  });
+  const released = [];
+  const transport = new Transport({
+    session: { device: new Device(module) },
+    listener: () => ({ panic: () => released.push('listener') }),
+    outputs: () => ({ panic: () => released.push('outputs') }),
+    fail: (m) => assert.fail(m),
+  });
+
+  transport.panic();
+  assert.deepEqual(released, ['outputs', 'listener']);
+  assert.deepEqual(swept.map((m) => m.channel), Array.from({ length: 16 }, (_, i) => i + 1));
+  // Every cable that carries music, which is all of them but the control one.
+  for (const { target } of swept) {
+    assert.equal(target & P.MIDI_CONTROL_PORT, 0, 'the protocol\'s own cable is never played on');
+    assert.equal(target | P.MIDI_CONTROL_PORT, 0xff, 'and every other cable is');
+  }
+  await Promise.resolve();
+});
+
+// The same four buttons in the shell's bar and on the surface's case. The lamp
+// is the one thing the view decides for itself, and only for the module in the
+// page: nothing in the protocol reports a cabled module's clock, and a lamp
+// that guessed would be worse than none.
+test('the transport draws four buttons and lights while the clock runs', () => {
+  const pressed = [];
+  const app = {
+    ...fakeApp({ module: { clock: () => ({ running: true }) } }),
+    transport: {
+      start: () => pressed.push('start'), stop: () => pressed.push('stop'),
+      resume: () => pressed.push('resume'), panic: () => pressed.push('panic'),
+    },
+  };
+  withDom(() => {
+    const group = TransportView(app);
+    const buttons = findAll(group, (n) => n.tag === 'button');
+    assert.equal(buttons.length, 4);
+    for (const button of buttons) button.fire('click');
+    assert.deepEqual(pressed, ['start', 'stop', 'resume', 'panic']);
+    assert.match(words(group), /panic/, 'the one button whose word is worth its width');
+    assert.ok(!group.className.includes('running'), 'nothing is lit until a frame says so');
+    app.live.tick({ module: app.module });
+    assert.ok(group.className.includes('running'));
+
+    // On the instrument panel it is glyphs only: the case has no room for prose.
+    assert.ok(!words(TransportView(app, { compact: true })).includes('panic'));
+  });
 });
 
 test('a jack tap is an edge, not a level', async () => {

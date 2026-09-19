@@ -982,6 +982,60 @@ static void test_a_quantised_recall_with_a_stopped_clock_is_immediate() {
     TEST_ASSERT_EQUAL(ALGO_TRANSPOSE, rig.patches.active().nodes[0].algorithm_id);
 }
 
+// The transport, from the control cable. MIDI realtime is the other way in and
+// it arrives on a musical port, which an editor holding cable 3 has not got:
+// without this message the app's start button would have to be a lie.
+static void test_the_transport_can_be_pressed_over_sysex() {
+    Rig rig;
+    rig.patches.boot(0);
+
+    rig.send(SYSEX_TRANSPORT, {CC_TRANSPORT_STOP});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_FALSE(rig.master.clock().running());
+
+    rig.send(SYSEX_TRANSPORT, {CC_TRANSPORT_START});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_TRUE(rig.master.clock().running());
+    TEST_ASSERT_EQUAL(0, rig.master.clock().count());
+
+    // Continue resumes on the count a stop kept, which is the whole difference
+    // between it and start.
+    rig.master.clock().advance();
+    rig.master.clock().advance();
+    const uint32_t at = rig.master.clock().count();
+    rig.send(SYSEX_TRANSPORT, {CC_TRANSPORT_STOP});
+    rig.send(SYSEX_TRANSPORT, {CC_TRANSPORT_CONTINUE});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_TRUE(rig.master.clock().running());
+    TEST_ASSERT_EQUAL(at, rig.master.clock().count());
+
+    rig.send(SYSEX_TRANSPORT, {CC_TRANSPORT_TARGETS});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+    rig.send(SYSEX_TRANSPORT);
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_TRUNCATED));
+}
+
+// The panic button. What it does to the graph is MixedModeMaster's (tested in
+// test_master); what matters here is that a host can press it and that the
+// sweep leaves the module over every cable that carries music.
+static void test_panic_over_sysex_sweeps_every_channel() {
+    Rig rig;
+    rig.patches.boot(0);
+    rig.midi.clear();
+
+    rig.send(SYSEX_PANIC);
+    TEST_ASSERT_TRUE(rig.acked());
+
+    int swept = 0;
+    for (const RecordingMidiOut::Message& m : rig.midi.messages) {
+        if (m.type != MIDI_CONTROL_CHANGE || m.d1 != MIDI_CC_ALL_NOTES_OFF) continue;
+        TEST_ASSERT_EQUAL(MIDI_MUSICAL_PORTS, m.target);
+        TEST_ASSERT_EQUAL(swept + 1, m.channel);
+        swept++;
+    }
+    TEST_ASSERT_EQUAL(MIDI_CHANNELS, swept);
+}
+
 static void test_restore_defaults_over_sysex() {
     Rig rig;
     GlobalSettings g = default_globals();
@@ -1408,6 +1462,8 @@ int main() {
     RUN_TEST(test_a_recall_notifies_the_host);
     RUN_TEST(test_quantised_recall_swaps_on_the_next_bar_and_not_before);
     RUN_TEST(test_a_quantised_recall_with_a_stopped_clock_is_immediate);
+    RUN_TEST(test_the_transport_can_be_pressed_over_sysex);
+    RUN_TEST(test_panic_over_sysex_sweeps_every_channel);
     RUN_TEST(test_restore_defaults_over_sysex);
     RUN_TEST(test_globals_can_be_set_and_come_back_in_a_dump);
     RUN_TEST(test_the_key_travels_with_the_globals);

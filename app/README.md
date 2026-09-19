@@ -135,9 +135,10 @@ keyboard: the notes of the key are lit, its root is ringed, and pressing a key
 moves the root. Nothing in the patch names a scale or a root of its own; a node
 says only which register it plays in, and its default is the key's.
 
-**MIDI** — the external controller, routing, the clock and Program Change
-recall: the room the module is in, none of which a patch travels with. What a
-controller *moves* is in the patch, so it is in the mod matrix.
+**MIDI** — the external controller, the external MIDI out, routing, the clock
+and Program Change recall: the room the module is in, none of which a patch
+travels with. What a controller *moves* is in the patch, so it is in the mod
+matrix.
 
 **library** — where a patch lives: this browser, a file, or the module's preset
 slots.
@@ -243,6 +244,14 @@ the whole file.
 makes learn work with no module in the room: an incoming CC takes the path
 `main.cpp` gives it — preset recall, NRPN, the binding table, then the graph.
 
+**The module's cables are routed out of it, one at a time.** A MIDI out node
+names a mask of the module's own cables and the browser has a port per socket,
+so the correspondence is chosen per cable (`runtime/midiout.js`) and a patch
+reaches as many synths as it plays to. The routing is kept in this browser —
+it is your desk, not your patch — and what a cable is holding is released to
+the port that is holding it before it is pointed anywhere else, because a
+note-off is the only thing that ends a note.
+
 **What is live is sampled by the module, not polled by the page.** The jacks,
 the gate buses, the LEDs and the note buses are read once per *pass*, and the
 page folds together everything since it last painted. A trigger is high for one
@@ -307,7 +316,9 @@ app/
                       schema.js, catalogue.js, music.js, examples.js
     runtime/          the machine and its peripherals: module.js (the
                       firmware in the page), wasm.js, webmidi.js,
-                      controller.js, audio/ (the listener and the drum kits)
+                      controller.js (a controller playing it), midiout.js
+                      (what it plays, out of this computer), audio/ (the
+                      listener and the drum kits)
     services/         the app's state and every command on it: state.js,
                       render.js (the coalesced re-render and the per-frame
                       painters), session.js (the device), editor.js (every
@@ -343,7 +354,8 @@ app/
 
 Web MIDI is Chrome, Edge and Opera with permission, Firefox behind a prompt,
 and not Safari — verify against current support before relying on it. That is
-only about reaching *hardware* and playing a controller: the built-in module
+only about reaching *hardware*, playing a controller and playing a synth: the
+built-in module
 needs none of it, so the app is fully usable on any modern browser including
 iOS Safari. A browser without Web MIDI is not a degraded experience, it is a
 user who cannot set their module up, so the page says plainly what is wrong and

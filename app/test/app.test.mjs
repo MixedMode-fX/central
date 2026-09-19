@@ -59,6 +59,8 @@ import { catalogue, filterGroups, optionsOf, ENDPOINTS } from '../src/core/catal
 import {
   autoLayout, layoutOf, socketPoint, blockHeight, forgetNode, BLOCK_W, ROW_H,
 } from '../src/core/layout.js';
+import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js';
+import { OutputPanel } from '../src/ui/tabs/MidiTab.js';
 import {
   instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, listening,
   words, find, findAll, withDom, repoRoot,
@@ -512,6 +514,133 @@ test('what the module plays reaches whoever is listening', async () => {
             `no note on came out (${heard.length} events)`);
   assert.ok(module.midiLog.length > 0, 'the log the play tab shows is empty');
   assert.equal(heard[0].target, P.MidiPort.mmMIDI_SERIAL_1, 'the target port is carried through');
+});
+
+// --- out of this computer ----------------------------------------------------
+//
+// The other half of routing a controller into the page: what the module plays
+// has to leave it, or the app can be played with but never *play* anything.
+// The module names its own cables and the browser names ports; these check
+// that the one reaches the other, and that a note already out of the page is
+// taken back rather than left sounding on a synth nobody can reach.
+
+// Ports that record what was sent, and an access holding them.
+function fakeMidiOut(...names) {
+  const sent = new Map(names.map((name) => [name, []]));
+  const ports = names.map((name) => ({ id: `id:${name}`, name, send: (bytes) => sent.get(name).push([...bytes]) }));
+  return { access: { outputs: new Map(ports.map((port) => [port.id, port])) }, sent };
+}
+
+// The routing, over the real module or - where the module is not what is
+// being checked - one that only has to hand events over.
+function routed(names, { library = null, module = null } = {}) {
+  let emit = () => {};
+  const { access, sent } = fakeMidiOut(...names);
+  const outputs = new MidiOutputs(module ?? { onMidi: (fn) => { emit = fn; } }, library);
+  outputs.access = access;
+  return { outputs, sent, play: (event) => emit(event) };
+}
+
+test('what the module plays leaves by the port its cable is routed to', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const { outputs, sent } = routed(['a synth', 'a drum machine'], { module });
+  outputs.route(P.MidiPort.mmMIDI_SERIAL_1, 'a synth');
+  outputs.route(P.MidiPort.mmMIDI_USB_1, 'a drum machine');
+  // The module is the one in the page, playing a real patch: in on USB 1, out
+  // on DIN 1, which is the cable the synth is on.
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, bus: 0 };
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 60, 100);
+  module.advance(5000);
+  assert.deepEqual(sent.get('a synth'), [[0x90, 60, 100]], 'the note did not reach the synth on DIN 1');
+  assert.deepEqual(sent.get('a drum machine'), [], 'a cable the patch never plays to sent something');
+});
+
+test('two cables on one synth is one note, not two', () => {
+  const { outputs, sent, play } = routed(['a synth']);
+  outputs.route(P.MidiPort.mmMIDI_USB_0, 'a synth');
+  outputs.route(P.MidiPort.mmMIDI_SERIAL_1, 'a synth');
+  // What the firmware sends: one call carrying the whole target mask.
+  play({ target: P.MidiPort.mmMIDI_USB_0 | P.MidiPort.mmMIDI_SERIAL_1, type: 0x90, d1: 64, d2: 90, channel: 1 });
+  assert.deepEqual(sent.get('a synth'), [[0x90, 64, 90]], 'the same port was sent to twice: a flam nobody programmed');
+});
+
+test('a message leaves as many bytes as its status says', () => {
+  assert.deepEqual(messageBytes(0x90, 1, 60, 100), [0x90, 60, 100]);
+  assert.deepEqual(messageBytes(0x90, 16, 60, 100), [0x9f, 60, 100], 'the firmware counts channels from 1');
+  // Web MIDI refuses a message of the wrong length rather than truncating it,
+  // so a Program Change sent as three bytes is a throw and a patch that
+  // recalls on another box goes silent.
+  assert.deepEqual(messageBytes(0xc0, 1, 7, 0), [0xc0, 7], 'a Program Change is two bytes');
+  assert.deepEqual(messageBytes(0xd0, 2, 40, 0), [0xd1, 40], 'channel pressure is two bytes');
+  assert.deepEqual(messageBytes(0xf8, 0, 0, 0), [0xf8], 'a clock byte has no channel and no data');
+});
+
+test('a note held when its cable is re-pointed is taken back', () => {
+  const { outputs, sent, play } = routed(['a synth', 'another synth']);
+  outputs.route(P.MidiPort.mmMIDI_USB_0, 'a synth');
+  play({ target: P.MidiPort.mmMIDI_USB_0, type: 0x90, d1: 60, d2: 100, channel: 2 });
+
+  // Only a note off ends a note, and the module's own would arrive at the new
+  // port: without this the synth holds that note until it is power-cycled.
+  outputs.route(P.MidiPort.mmMIDI_USB_0, 'another synth');
+  assert.deepEqual(sent.get('a synth'), [[0x91, 60, 100], [0x81, 60, 0]], 'the note was left sounding');
+  assert.deepEqual(sent.get('another synth'), [], 'a note nobody played was sent to the new port');
+
+  // And what is no longer sounding is not released twice.
+  play({ target: P.MidiPort.mmMIDI_USB_0, type: 0x90, d1: 64, d2: 80, channel: 2 });
+  play({ target: P.MidiPort.mmMIDI_USB_0, type: 0x80, d1: 64, d2: 0, channel: 2 });
+  outputs.panic();
+  assert.deepEqual(sent.get('another synth'), [[0x91, 64, 80], [0x81, 64, 0]], 'a panic sent a note off nobody was holding');
+});
+
+test('a route is remembered by the name on the desk', () => {
+  const storage = fakeStorage();
+  const first = routed(['a synth'], { library: new Library(storage) });
+  first.outputs.route(P.MidiPort.mmMIDI_SERIAL_2, 'a synth');
+
+  // A reload: the id Web MIDI made up is gone, the name is not.
+  const { outputs } = routed(['a synth'], { library: new Library(storage) });
+  assert.equal(outputs.routeOf(P.MidiPort.mmMIDI_SERIAL_2), 'a synth', 'the routing was forgotten on reload');
+  assert.ok(outputs.output(P.MidiPort.mmMIDI_SERIAL_2), 'the remembered name found no port');
+});
+
+test('the output panel asks once per cable the patch plays to', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  patch.midiOut[1] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, bus: 1 };
+  assert.deepEqual(cablesOut(patch, device.capabilities).map((c) => c.label), ['USB 1', 'DIN 1']);
+
+  const { outputs, sent } = routed(['a synth']);
+  const app = fakeApp({ patch, device, module });
+  app.outputs = outputs;
+
+  withDom(() => {
+    const panel = OutputPanel(app);
+    const said = words(panel);
+    assert.match(said, /USB 1/);
+    assert.match(said, /DIN 1/, 'a cable the patch plays to was not offered a port');
+    const picks = findAll(panel, (kid) => kid.tag === 'select');
+    assert.equal(picks.length, 2, 'one select per cable in use');
+    // Every port on the computer, and "nothing", which is where a cable starts.
+    assert.deepEqual(picks[0].children.map((option) => option.attrs.value), ['', 'a synth']);
+
+    picks[1].fire('change', { target: { value: 'a synth' } });
+    assert.equal(outputs.routeOf(P.MidiPort.mmMIDI_SERIAL_1), 'a synth', 'picking a port routed nothing');
+    outputs.forward({ target: P.MidiPort.mmMIDI_SERIAL_1, type: 0x90, d1: 48, d2: 70, channel: 1 });
+    assert.deepEqual(sent.get('a synth'), [[0x90, 48, 70]]);
+
+    // A patch that plays nothing out is told so rather than shown an empty box.
+    const quiet = fakeApp({ patch: codec.emptyPatch(), device, module });
+    quiet.outputs = outputs;
+    assert.match(words(OutputPanel(quiet)), /plays nothing out/);
+  });
 });
 
 // --- the example patches ----------------------------------------------------

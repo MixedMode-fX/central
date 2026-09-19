@@ -12,6 +12,14 @@
 // that has something live registers a painter while it is built, and the
 // registry is emptied when the page is rebuilt, so a painter never outlives
 // the elements it closed over.
+//
+// A rebuild is the longest thing this page does on its main thread, and the
+// module runs on the same thread: for as long as the rebuild takes, no pass
+// runs. So before one starts, the module is run ahead by what the last few
+// rebuilds cost (`before`), and the passes the rebuild would have held up have
+// already happened - with their notes scheduled where they belong, because a
+// note is heard at its simulated time and not at the moment it was computed.
+// That is what makes an edit inaudible.
 
 export class Live {
   constructor() {
@@ -48,13 +56,25 @@ export class Live {
   }
 }
 
+// The margin a rebuild is run ahead by, over what the last ones cost: the
+// browser lays the new tree out after this code has measured itself, and the
+// estimate is a decaying maximum rather than a mean because the cost to cover
+// is the next rebuild's, and the next one is as likely as not the expensive
+// tab. Bounded by the module (`EmbeddedModule.runAhead`).
+const COST_MARGIN = 1.5;
+const COST_FLOOR_MS = 8;
+const COST_DECAY = 0.8;
+
 export class Renderer {
-  constructor({ root, view, live, onPainted = () => {} }) {
+  constructor({ root, view, live, onPainted = () => {}, before = () => {} }) {
     this.root = root;
     this.view = view;
     this.live = live;
     this.onPainted = onPainted;
+    this.before = before;
     this.scheduled = false;
+    // What a rebuild has been costing, in milliseconds of this thread.
+    this.cost = 0;
   }
 
   render() {
@@ -66,10 +86,16 @@ export class Renderer {
     });
   }
 
+  // How far ahead the module is run before the next rebuild.
+  runAheadMs() { return this.cost ? this.cost * COST_MARGIN + COST_FLOOR_MS : 0; }
+
   paint() {
+    this.before(this.runAheadMs());
+    const t0 = performance.now();
     this.live.reset();
     this.root.replaceChildren(this.view());
     for (const fn of this.live.mounted) fn();
     this.onPainted();
+    this.cost = Math.max(performance.now() - t0, this.cost * COST_DECAY);
   }
 }

@@ -34,12 +34,39 @@
 import * as P from '../protocol/generated.js';
 import { splitSysex } from '../protocol/codec.js';
 
-// Simulated microseconds per pass, and the most simulated time one animation
-// frame may advance. The module is a gate-rate machine: it wants passes, not
-// wall-clock. One frame of real time is one frame of simulated time, capped so
-// a backgrounded tab does not come back and run a minute of passes at once.
-const MAX_FRAME_US = 100000;
+// Simulated microseconds per pass. The module is a gate-rate machine: it
+// wants passes, and the page owes it one per millisecond of wall clock.
 const PASS_US = 1000;
+
+// **Simulated time is wall time.** `now` follows `performance.now()` from an
+// origin fixed when the loop starts, and every tick runs the passes the wall
+// clock owes. Not "one frame of real time is one frame of simulated time":
+// a frame is 16.667 ms and a pass is a millisecond, and flooring each frame to
+// whole passes threw the odd fraction away every time - four percent of the
+// tempo at 60 Hz, thirteen at 144 Hz, and a different amount whenever a frame
+// came late. Against a fixed origin the fraction is simply still owed.
+//
+// The passes are run from a timer while the page is visible as well as from
+// the animation frame, so the module is never more than a few milliseconds
+// behind between frames; the frame is where the page paints what they did.
+const TICK_MS = 4;
+// Further behind than this the module skips rather than catches up: a tab
+// coming back from the background does not run a minute of passes at once,
+// and a stall long enough to be a hole is a hole rather than every note of
+// it played in the same instant.
+const MAX_CATCHUP_US = 250000;
+// How far ahead of the wall clock a render may run the module (`runAhead`).
+const MAX_RUN_AHEAD_US = 150000;
+
+// How far ahead of wall time the module's outputs are scheduled: a note the
+// module plays at simulated `t` sounds, and leaves the MIDI port, at
+// `wallAt(t)` plus this. It is the page's headroom against its own main
+// thread. Passes run on the main thread, and so does everything else the
+// page does; when a rebuild of the page takes forty milliseconds, the passes
+// those milliseconds owed run afterwards, and their notes are still in the
+// future by however much of this is left. It is also the latency of a key
+// pressed on screen, which is what keeps it from being larger.
+export const OUTPUT_LATENCY_MS = 40;
 
 // MIDI status bytes the page has to recognise to route an event the way
 // main.cpp's loop does.
@@ -68,6 +95,10 @@ export class EmbeddedModule {
   constructor(exports) {
     this.E = exports;
     this.now = 0;
+    // The wall time (`performance.now()`, ms) at which simulated time was
+    // zero. Fixed by `start()` and moved only by `syncTo()`.
+    this.origin = 0;
+    this.timer = null;
     this.clockInterval = 0;
     this.clockNextAt = 0;
     this.running = false;
@@ -217,26 +248,80 @@ export class EmbeddedModule {
   // The module is a machine that runs passes. Without this it would answer
   // SysEx and do nothing else: no beat on the green LED, no sequencer moving,
   // no debounced autosave, no quantised patch swap ever arriving.
+  //
+  // Two drivers, one job. The timer keeps the module within a few
+  // milliseconds of the wall clock whether or not a frame is due, which is
+  // what puts its outputs on their clocks early (`OUTPUT_LATENCY_MS`). The
+  // animation frame runs the same catch-up and then lets the page paint what
+  // the passes did. Neither runs a hidden page: the animation frame does not
+  // fire there, and the timer looks before it runs, so a tab left in the
+  // background finds the module where it left it and skips forward.
   start() {
     if (this.running) return;
     this.running = true;
-    let last = 0;
-    const frame = (ts) => {
+    this.syncTo(performance.now());
+    const tick = () => {
+      if (!this.running || globalThis.document?.hidden) return;
+      this.advanceTo(performance.now());
+      this.drainEvents();
+    };
+    this.timer = setInterval(tick, TICK_MS);
+    const frame = () => {
       if (!this.running) return;
-      const dt = last ? Math.min(MAX_FRAME_US, (ts - last) * 1000) : 0;
-      last = ts;
+      this.advanceTo(performance.now());
       for (const listener of this.frameListeners) listener(this.now);
-      this.advance(dt);
       this.drainEvents();
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
   }
 
-  stop() { this.running = false; }
+  stop() {
+    this.running = false;
+    clearInterval(this.timer);
+    this.timer = null;
+  }
 
-  // Called at the top of every animation frame, before the passes it will run.
-  // The audio listener uses it to anchor simulated time to the audio clock.
+  // --- the time base --------------------------------------------------------
+
+  // Simulated `now` is wall time `wallMs`, from here on.
+  syncTo(wallMs) { this.origin = wallMs - this.now / 1000; }
+
+  // Where simulated time `simUs` falls on the wall clock, in the domain of
+  // `performance.now()`. This is what puts a note the module played on the
+  // audio clock and on a MIDI port's clock: both are offsets from it.
+  wallAt(simUs) { return this.origin + simUs / 1000; }
+
+  // Run every pass owed up to wall time `wallMs`. A late frame runs the
+  // passes it owes and lands on time; a frame's odd fraction of a millisecond
+  // stays owed rather than being dropped; and a gap longer than
+  // MAX_CATCHUP_US is skipped, so a tab that was in the background does not
+  // play everything it missed in one instant. Nothing runs when the module is
+  // already ahead of `wallMs` (`runAhead`).
+  advanceTo(wallMs) {
+    let owed = (wallMs - this.origin) * 1000 - this.now;
+    if (owed > MAX_CATCHUP_US) {
+      this.syncTo(wallMs - MAX_CATCHUP_US / 1000);
+      owed = MAX_CATCHUP_US;
+    }
+    if (owed >= PASS_US) this.advance(owed);
+  }
+
+  // Run the module up to `ms` ahead of the wall clock, now. For a stall the
+  // page can see coming - a rebuild of itself - so that the passes the stall
+  // would have delayed are run before it and their outputs are scheduled
+  // where they belong. The module then waits for the wall clock to catch up,
+  // and nothing about the outputs' timing changes: they are early to be
+  // computed, not early to sound.
+  runAhead(ms) {
+    if (!this.running) return;
+    const ahead = Math.min(ms * 1000, MAX_RUN_AHEAD_US);
+    if (ahead > 0) this.advanceTo(performance.now() + ahead / 1000);
+  }
+
+  // Called once per animation frame, after the passes owed to it have run and
+  // before the page paints. The audio listener uses it to pair the wall clock
+  // with the audio clock.
   onFrame(fn) { this.frameListeners.add(fn); return () => this.frameListeners.delete(fn); }
 
   // Called after every pass. A gate that goes high and low again between two

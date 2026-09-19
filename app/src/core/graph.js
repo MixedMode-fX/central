@@ -1,8 +1,7 @@
-// The patch's shape, as an editor sees it: what a node added to this patch
-// should be connected to, the blocks and arrows a canvas draws, and what a
-// drag from one socket to another means.
+// The patch's shape, as an editor sees it: the blocks and arrows a canvas
+// draws, and what a drag from one socket to another means.
 //
-// These live apart from the views because they are the part of "add a node"
+// These live apart from the views because they are the part of a patch edit
 // that has to be *right*, not merely drawn - and because the app's test
 // suite drives them against the real firmware's validator, where a mistake
 // shows up as a rejected patch rather than as a layout that looks odd.
@@ -17,67 +16,25 @@ import {
 
 const key = (domain, bus) => `${domain}:${bus}`;
 
-// A node added with every port unconnected is a node the module refuses: its
-// required inlets are empty, so the patch stops being sendable the moment you
-// add it, and every incremental edit afterwards addresses a node the module
-// never took. "Add a clock, add an inverter" hit exactly that, and reported it
-// as a bad argument.
+// **A block arrives unconnected.** Nothing here chooses a bus for a node, and
+// that is the point: a bus chosen for you is a wire you did not draw. The
+// editor used to patch a new node in on arrival - required inlets onto the bus
+// the last node wrote, the first outlet onto the first bus nothing wrote yet -
+// and every one of those choices was a guess about a patch that did not exist
+// yet. Add a MIDI output while a sequencer is being built and the sequencer's
+// next node lands on the output's bus; add two unrelated nodes and they come
+// out chained. On a canvas those guesses are arrows nobody drew, and undoing
+// one means finding which port to move off which bus.
 //
-// So a new node arrives patched. Required inlets go to a bus something already
-// writes - which is what makes the second node of a chain land on the first -
-// and the first outlet to a bus nothing writes yet, so two sources do not end
-// up merged by accident. Both are ordinary bus selections shown in the node's
-// own panel: nothing here is hidden, and every one of them can be changed.
+// So a node is added with every port at NO_BUS, and the wires are the ones you
+// drag. Until a required inlet has one the patch is incomplete and the app
+// says so rather than sending it (`validate`, `Editor.sendWhole`) - which is
+// the same thing the canvas is already showing.
 //
-// Returns what it did, in words, so the app can say so.
-export function connectNewNode(device, patch, node, descriptor) {
-  const caps = device?.capabilities;
-  if (!caps) return [];
-  const written = writtenBuses(device, patch);
-  const said = [];
-
-  for (let i = 0; i < descriptor.minIn && i < descriptor.nIn && i < P.MAX_IN; i++) {
-    const domain = descriptor.inDomain[i];
-    // The node most recently added first: "add a divider, add a sequencer"
-    // means the sequencer reads the divider, not whichever bus a jack happened
-    // to claim earlier. Then any bus something writes, then bus 0.
-    let bus = latestOutlet(device, patch, domain);
-    if (bus === null) {
-      bus = 0;
-      for (let b = 0; b < busCount(caps, domain); b++) {
-        if (written.has(key(domain, b))) { bus = b; break; }
-      }
-    }
-    node.inBus[i] = bus;
-    said.push(`${descriptor.inName?.[i] || `in ${i}`} on ${domainName(domain)} bus ${bus}`);
-  }
-
-  if (descriptor.nOut > 0) {
-    const domain = descriptor.outDomain[0];
-    for (let b = 0; b < busCount(caps, domain); b++) {
-      if (written.has(key(domain, b))) continue;
-      node.outBus[0] = b;
-      said.push(`${descriptor.outName?.[0] || 'out 0'} on ${domainName(domain)} bus ${b}`);
-      break;
-    }
-  }
-  return said;
-}
-
-// The last node in the patch that writes this domain, and the bus it writes.
-// Nodes are added in order, so the last one is the one a user just made.
-function latestOutlet(device, patch, domain) {
-  for (let n = patch.nodes.length - 1; n >= 0; n--) {
-    const d = device?.byId.get(patch.nodes[n].algorithmId);
-    if (!d) continue;
-    for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
-      if (d.outDomain[i] === domain && patch.nodes[n].outBus[i] !== P.NO_BUS) {
-        return patch.nodes[n].outBus[i];
-      }
-    }
-  }
-  return null;
-}
+// An endpoint has no NO_BUS to sit at: a jack and a MIDI port carry a bus
+// index whatever they are doing, so "unconnected" for one of them is a bus
+// nothing else is on. `unusedBus` is that, and it is the only bus choice left
+// in this file that is not a drag.
 
 // --- the patch as blocks and arrows ---------------------------------------
 //
@@ -443,30 +400,18 @@ export function freeBus(blocks, caps, domain) {
   return null;
 }
 
-// The bus the last thing to write this domain is on - what a reader added now
-// should listen to, and the same rule `connectNewNode` uses: the block added
-// most recently, because that is the one somebody has just made.
-export function writtenBus(blocks, domain) {
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    for (const port of blocks[i].outlets) {
-      if (port.domain === domain && port.bus !== P.NO_BUS) return port.bus;
-    }
-  }
-  return null;
-}
-
-// A bus something is already *waiting* on: read by an inlet and written by
-// nothing. Adding a MIDI input after the MIDI output that is to send it should
-// feed it, not take a fresh bus and leave the output silent - which is the
-// warning `advise` raises about exactly this shape.
-export function waitingBus(blocks, domain) {
-  const written = new Set();
-  const read = new Set();
+// A bus nothing is on at all, for a block that cannot be left unconnected.
+// Unlike `freeBus` there is no second choice: a jack or a MIDI port put on a
+// bus something already writes or reads is exactly the wire nobody asked for,
+// so when the domain is full the caller refuses instead.
+export function unusedBus(blocks, caps, domain) {
+  const taken = new Set();
   for (const block of blocks) {
-    for (const port of block.outlets) if (port.domain === domain) written.add(port.bus);
-    for (const port of block.inlets) if (port.domain === domain && port.bus !== P.NO_BUS) read.add(port.bus);
+    for (const port of block.outlets) if (port.domain === domain) taken.add(port.bus);
+    for (const port of block.inlets) if (port.domain === domain) taken.add(port.bus);
   }
-  for (const bus of read) if (!written.has(bus)) return bus;
+  const n = busCount(caps, domain);
+  for (let b = 0; b < n; b++) if (!taken.has(b)) return b;
   return null;
 }
 

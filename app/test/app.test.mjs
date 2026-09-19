@@ -51,8 +51,8 @@ import { ICON_NAMES } from '../src/ui/components/icons.js';
 import { gateHits } from '../src/runtime/audio/listener.js';
 import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/runtime/audio/drums.js';
 import {
-  connectNewNode, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
-  applyWrite, freeBus, waitingBus, planJackDirection, planPortFlip, applyPortFlip,
+  patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
+  applyWrite, freeBus, unusedBus, planJackDirection, planPortFlip, applyPortFlip,
   planPortFanOut, planModulation, planBusModulation, planCcBinding, CC_MAX,
 } from '../src/core/graph.js';
 import { catalogue, filterGroups, optionsOf, ENDPOINTS } from '../src/core/catalogue.js';
@@ -63,7 +63,7 @@ import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js'
 import { OutputPanel } from '../src/ui/tabs/MidiTab.js';
 import {
   instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, listening,
-  words, find, findAll, withDom, repoRoot,
+  patched, words, find, findAll, withDom, repoRoot,
 } from './harness/index.mjs';
 
 // --- the library ------------------------------------------------------------
@@ -991,11 +991,7 @@ test('a route from the parameter side is the route a drag makes, and moves rathe
   const patch = codec.emptyPatch();
   const lfo = device.algorithms.find((d) => d?.name === 'LFO');
   const transpose = device.algorithms.find((d) => d?.name === 'Transpose');
-  for (const d of [lfo, transpose]) {
-    const node = codec.emptyNode(d.id);
-    connectNewNode(device, patch, node, d);
-    patch.nodes.push(node);
-  }
+  for (const d of [lfo, transpose]) patched(device, patch, d);
   const semitones = transpose.params[0].fields.findIndex((pd) => pd.name === 'semitones');
   assert.ok(semitones >= 0, 'Transpose has a semitones parameter');
   const cvBus = patch.nodes[0].outBus[0];
@@ -1036,11 +1032,7 @@ test('a modulation route shows what it is doing, and says why when it is doing n
   const patch = codec.emptyPatch();
   const lfo = device.algorithms.find((d) => d?.name === 'LFO');
   const transpose = device.algorithms.find((d) => d?.name === 'Transpose');
-  for (const d of [lfo, transpose]) {
-    const node = codec.emptyNode(d.id);
-    connectNewNode(device, patch, node, d);
-    patch.nodes.push(node);
-  }
+  for (const d of [lfo, transpose]) patched(device, patch, d);
   const semitones = transpose.params[0].fields.findIndex((pd) => pd.name === 'semitones');
   const bus = patch.nodes[0].outBus[0];
   const plan = planBusModulation(patch, device.capabilities, 1, semitones, bus, { device });
@@ -1169,9 +1161,7 @@ test('a setting the algorithm is currently ignoring says so', async () => {
   const device = await connected(module);
   const patch = codec.emptyPatch();
   const lfo = device.algorithms.find((d) => d?.name === 'LFO');
-  const node = codec.emptyNode(lfo.id);
-  connectNewNode(device, patch, node, lfo);
-  patch.nodes.push(node);
+  const node = patched(device, patch, lfo);
   const at = (name) => lfo.params.flatMap((g) => (g.repeat > 1 ? [] : g.fields.map((pd, f) => ({ pd, i: g.first + f }))))
     .find((x) => x.pd.name === name).i;
 
@@ -1198,9 +1188,7 @@ test('a control signal reaches the scope, and the scope lists it', async () => {
   const device = await connected(module);
   const patch = codec.emptyPatch();
   const lfo = device.algorithms.find((d) => d?.name === 'LFO');
-  const node = codec.emptyNode(lfo.id);
-  connectNewNode(device, patch, node, lfo);
-  patch.nodes.push(node);
+  const node = patched(device, patch, lfo);
   await device.sendPatch(patch, codec.emptyGlobals());
   module.advance(1_500_000);
   const bus = node.outBus[0];
@@ -1230,10 +1218,8 @@ test('a node\'s roll lists what it reads and writes, in the domain\'s colour', a
   const patch = codec.emptyPatch();
   patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 2 };
   const chord = device.algorithms.find((d) => d?.name === 'Chord');
-  const node = codec.emptyNode(chord.id);
-  connectNewNode(device, patch, node, chord);
+  const node = patched(device, patch, chord);
   node.inBus[0] = 2;                     // the chord is optional to patch; here it is patched
-  patch.nodes.push(node);
   const sources = nodeRollSources({ patch, device }, 0);
   assert.equal(sources.filter((s) => s.role === 'in').length, 1, 'the held chord, once');
   assert.equal(sources.filter((s) => s.role === 'out').length, 1, 'the chord it makes, once');
@@ -1276,12 +1262,9 @@ test('a harmony draws its key on the circle of fifths, and the loop it wrote', a
   const metronome = device.algorithms.find((d) => d?.name === 'Metronome');
   const patch = codec.emptyPatch();
 
-  const clock = codec.emptyNode(metronome.id);
-  connectNewNode(device, patch, clock, metronome);
-  patch.nodes.push(clock);
+  const clock = patched(device, patch, metronome);
 
-  const node = codec.emptyNode(harmony.id);
-  connectNewNode(device, patch, node, harmony);
+  const node = patched(device, patch, harmony);
   const loop = paramNamed(harmony, 'loop');
   assert.ok(loop.pd.max > 1, 'loop is a length, not a switch: that is the control it needed');
   node.params[loop.at] = 4;
@@ -1396,12 +1379,9 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
   const metronome = device.algorithms.find((d) => d?.name === 'Metronome');
   const patch = codec.emptyPatch();
 
-  const clock = codec.emptyNode(metronome.id);
-  connectNewNode(device, patch, clock, metronome);
-  patch.nodes.push(clock);
+  const clock = patched(device, patch, metronome);
 
-  const node = codec.emptyNode(harmony.id);
-  connectNewNode(device, patch, node, harmony);
+  const node = patched(device, patch, harmony);
   node.params[paramNamed(harmony, 'loop').at] = 4;
   node.params[paramNamed(harmony, 'seed').at] = 11;
   patch.nodes.push(node);
@@ -1475,9 +1455,7 @@ test('a control the key has made inert says so, and is still a control', async (
   const device = await connected(module);
   const harmony = device.algorithms.find((d) => d?.name === 'Harmony');
   const patch = codec.emptyPatch();
-  const node = codec.emptyNode(harmony.id);
-  connectNewNode(device, patch, node, harmony);
-  patch.nodes.push(node);
+  const node = patched(device, patch, harmony);
   const globals = codec.emptyGlobals();
   globals.scale = P.ScaleId.SCALE_MAJOR;
   globals.root = 0;
@@ -1522,9 +1500,7 @@ test("Tonnetz says which of its controls the walk is ignoring", async () => {
   const device = await connected(module);
   const tonnetz = device.algorithms.find((d) => d?.name === 'Tonnetz');
   const patch = codec.emptyPatch();
-  const node = codec.emptyNode(tonnetz.id);
-  connectNewNode(device, patch, node, tonnetz);
-  patch.nodes.push(node);
+  const node = patched(device, patch, tonnetz);
   const globals = codec.emptyGlobals();
   globals.scale = P.ScaleId.SCALE_MAJOR;
   globals.root = 0;
@@ -1948,16 +1924,6 @@ test('a slider ignores a scrolling finger and obeys a deliberate one', async () 
 // firmware accepts, and that a drag it would refuse is refused before it is
 // made rather than after.
 
-// The app's own "add a node": it arrives connected, which is what makes the
-// second node of a chain read the first.
-function added(device, patch, algorithmId) {
-  const descriptor = device.byId.get(algorithmId);
-  const node = codec.emptyNode(algorithmId);
-  connectNewNode(device, patch, node, descriptor);
-  patch.nodes.push(node);
-  return node;
-}
-
 const idOf = (name, device) => device.algorithms.find((d) => d && d.name === name).id;
 
 // Where an algorithm keeps its channel, found by the name the firmware
@@ -1986,8 +1952,8 @@ test('the arrows are the buses, not a second model of the patch', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  added(device, patch, idOf('ClockDiv', device));
-  added(device, patch, idOf('StepSequencer', device));
+  patched(device, patch, idOf('ClockDiv', device));
+  patched(device, patch, idOf('StepSequencer', device));
 
   const blocks = patchBlocks(device, patch);
   assert.equal(blocks.length, 2);
@@ -2193,20 +2159,30 @@ test('a jack and a MIDI port are never taken off their bus', async () => {
   assert.notDeepEqual(validate(device, patch), []);
 });
 
-test('a source added after its listener feeds it', async () => {
+test('a port taken into use lands on a bus nothing else is on', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  // A MIDI output waiting on note bus 0 that nothing writes - which `advise`
-  // flags, and which "add the MIDI input next" should answer.
+  // A MIDI output on note bus 0 that nothing writes - which `advise` flags,
+  // and which adding a MIDI input must *not* silently answer: a source that
+  // lands on whatever was waiting is a wire nobody drew.
   patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
   const blocks = patchBlocks(device, patch);
-  assert.equal(waitingBus(blocks, 1), 0, 'note bus 0 is read and written by nothing');
-  assert.equal(waitingBus(blocks, 0), null, 'and no gate bus is waiting');
+  assert.equal(unusedBus(blocks, device.capabilities, 1), 1, 'note bus 0 is taken, 1 is not');
+  assert.equal(unusedBus(blocks, device.capabilities, 0), 0, 'and no gate bus is in use');
 
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
-  assert.equal(waitingBus(patchBlocks(device, patch), 1), null, 'nothing is waiting once it is fed');
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0,
+                      bus: unusedBus(blocks, device.capabilities, 1) };
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0, 'two blocks, no arrow');
   assert.deepEqual(validate(device, patch), []);
+
+  // Every note bus in use is the one case there is no answer to, and it is a
+  // refusal rather than a bus chosen for you.
+  const full = codec.emptyPatch();
+  for (let b = 0; b < device.capabilities.noteBuses; b++) {
+    full.nodes.push({ ...codec.emptyNode(idOf('Transpose', device)), inBus: [0], outBus: [b] });
+  }
+  assert.equal(unusedBus(patchBlocks(device, full), device.capabilities, 1), null);
 });
 
 // --- the patch's edges, and the list you add them from ------------------------
@@ -2395,9 +2371,9 @@ test('the layout runs the signal left to right, and a loop does not hang it', as
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  added(device, patch, idOf('ClockDiv', device));
-  added(device, patch, idOf('StepSequencer', device));
-  added(device, patch, idOf('GateToNote', device));
+  patched(device, patch, idOf('ClockDiv', device));
+  patched(device, patch, idOf('StepSequencer', device));
+  patched(device, patch, idOf('GateToNote', device));
 
   const blocks = patchBlocks(device, patch);
   const positions = autoLayout(blocks, connectionsOf(blocks));
@@ -2417,7 +2393,7 @@ test('a socket is inside the block it belongs to', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  added(device, patch, idOf('DrumSeqGate', device));       // eight outlets, two inlets
+  patched(device, patch, idOf('DrumSeqGate', device));       // eight outlets, two inlets
   const block = patchBlocks(device, patch)[0];
   const at = { x: 0, y: 0 };
   const last = block.outlets[block.outlets.length - 1];
@@ -2466,8 +2442,8 @@ test('a hand-placed block stays where it was put', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  added(device, patch, idOf('ClockDiv', device));
-  added(device, patch, idOf('StepSequencer', device));
+  patched(device, patch, idOf('ClockDiv', device));
+  patched(device, patch, idOf('StepSequencer', device));
   const blocks = patchBlocks(device, patch);
   const arrows = connectionsOf(blocks);
   const placed = layoutOf(blocks, arrows, { 'node:1': [777, 333] });
@@ -2547,8 +2523,8 @@ test('the drum sequencers of a patch are found, with the buses they speak on', a
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  const midi = added(device, patch, idOf('DrumSeqMidi', device));
-  const gate = added(device, patch, idOf('DrumSeqGate', device));
+  const midi = patched(device, patch, idOf('DrumSeqMidi', device));
+  const gate = patched(device, patch, idOf('DrumSeqGate', device));
   // Three lanes out, five left alone - the ordinary shape of a drum patch.
   gate.outBus[0] = 4; gate.outBus[1] = 5; gate.outBus[2] = 6;
 
@@ -2566,7 +2542,7 @@ test('the drum sequencers of a patch are found, with the buses they speak on', a
 
   // A patch with no drums in it has no drum voices to show, and nothing else
   // in the registry may be mistaken for one.
-  added(device, patch, idOf('ClockDiv', device));
+  patched(device, patch, idOf('ClockDiv', device));
   assert.equal(drumSources(device, patch).length, 2);
 });
 
@@ -2613,7 +2589,7 @@ test('a node set to channel 10 is a drum machine, whatever algorithm it runs', a
   const device = await connected(module);
   const patch = codec.emptyPatch();
   const id = idOf('GateToNote', device);
-  const node = added(device, patch, id);
+  const node = patched(device, patch, id);
   const at = channelParam(device, id);
   assert.ok(at >= 0, 'GateToNote names a channel');
 
@@ -2630,7 +2606,7 @@ test('a node set to channel 10 is a drum machine, whatever algorithm it runs', a
 
   // A drum sequencer is drums because of what it is rather than where it
   // sends, so it claims its bus whatever channel its lanes are on.
-  added(device, patch, idOf('DrumSeqMidi', device));
+  patched(device, patch, idOf('DrumSeqMidi', device));
   const sources = drumSources(device, patch);
   assert.equal(sources.length, 2);
   assert.equal(sources[1].channel, null, 'a drum sequencer takes the whole bus');

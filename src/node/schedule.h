@@ -79,8 +79,8 @@ class Schedule {
         // space (see the .cpp), and the key, which is not a bus and needs no
         // index because there is only one of it.
         struct Ports {
-            uint32_t read;
-            uint32_t write;
+            uint64_t read;
+            uint64_t write;
             bool reads_key;
             bool writes_key;
         };
@@ -96,7 +96,7 @@ class Schedule {
 #define N_BUS_TOTAL (N_GATE_BUS + N_NOTE_BUS + N_CV_BUS)
 
 static_assert(N_NODE <= 64, "the scheduler holds a set of nodes in a 64-bit word");
-static_assert(N_BUS_TOTAL <= 32, "the scheduler holds a set of buses in a 32-bit word");
+static_assert(N_BUS_TOTAL <= 64, "the scheduler holds a set of buses in a 64-bit word");
 static_assert(N_GATE_BUS <= 32, "a gate bus set is a 32-bit word");
 static_assert(N_NOTE_BUS <= 16, "a note bus set is a 16-bit word");
 static_assert(N_CV_BUS <= 16, "a CV bus set is a 16-bit word");

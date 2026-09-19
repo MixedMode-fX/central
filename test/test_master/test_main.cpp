@@ -214,7 +214,7 @@ static void test_fan_in_holds_whatever_order_the_patch_is_in() {
     }
 }
 
-// A patch assigning a gate bus index to a note inlet is rejected by the
+// A patch assigning a note bus index to a CV inlet is rejected by the
 // validator, and the running patch is left untouched.
 static void test_validator_rejects_wrong_domain_index_and_keeps_running_patch() {
     FakeGpio gpio; RecordingMidiOut midi;
@@ -227,7 +227,7 @@ static void test_validator_rejects_wrong_domain_index_and_keeps_running_patch() 
 
     Patch bad = empty_patch();
     bad.nodes[0] = node(ALGO_LOGIC_NOT, 0, 1);
-    bad.nodes[1] = node(ALGO_TRANSPOSE, 12, 0);           // 12 is a gate bus index; only 8 note buses exist
+    bad.nodes[1] = node(ALGO_CV_TO_GATE, 12, 0);          // 12 is a note bus index; there are fewer CV buses
     bad.n_nodes = 2;
     TEST_ASSERT_EQUAL(LOAD_NODE_INVALID, master.load(bad));
     TEST_ASSERT_EQUAL(CONFIG_INLET_OUT_OF_RANGE, master.last_node_error());

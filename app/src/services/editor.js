@@ -3,15 +3,15 @@
 //
 // The views never touch the device. A control writes a byte by asking the
 // editor to, and the editor decides whether that is one message or a whole
-// patch. The rules about the shape of a patch - which bus a new node lands
-// on, what a drag means - are `core/graph.js`'s and are tested against the
-// firmware's validator; this is only the writing of them.
+// patch. The rules about the shape of a patch - what a drag means, which bus
+// is free - are `core/graph.js`'s and are tested against the firmware's
+// validator; this is only the writing of them.
 
 import * as P from '../protocol/generated.js';
 import * as codec from '../protocol/codec.js';
 import { validate, Domain } from '../core/validate.js';
 import {
-  connectNewNode, BlockKind, patchBlocks, freeBus, writtenBus, waitingBus, applyWrite,
+  BlockKind, patchBlocks, unusedBus, applyWrite,
   planJackDirection, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation, planCcBinding,
 } from '../core/graph.js';
 import {
@@ -245,12 +245,12 @@ export class Editor {
       return;
     }
     const d = this.device?.byId.get(algorithmId);
-    const node = codec.emptyNode(algorithmId);
-    const said = d ? connectNewNode(this.device, this.patch, node, d) : [];
-    this.patch.nodes.push(node);
-    this.state.status = said.length
-      ? `added ${d.name} — ${said.join(', ')}`
-      : `added ${d?.name ?? algorithmId}`;
+    // Unconnected, every port at NO_BUS: the wires are the ones you drag
+    // (core/graph.js). A node whose required inlets are still empty makes the
+    // patch incomplete, which the problems notice says and `sendWhole` acts
+    // on, so the module is never handed a patch it would refuse.
+    this.patch.nodes.push(codec.emptyNode(algorithmId));
+    this.state.status = `added ${d?.name ?? algorithmId} — drag its inlets to connect it`;
     // A block that arrives selected is one whose parameters are already on
     // screen, which is what "add a sequencer" is usually the first half of.
     this.state.ui.canvas.selected = selectBlock(`node:${this.patch.nodes.length - 1}`);
@@ -275,9 +275,9 @@ export class Editor {
   }
 
   // A jack or a MIDI port is not added so much as *taken into use*: the
-  // module has a fixed number of each, so this claims the first unused one
-  // and puts it on a bus - connected on arrival, for the same reason a node
-  // is.
+  // module has a fixed number of each, so this claims the first unused one.
+  // It lands on a bus nothing else is on, because a jack always carries a bus
+  // index and that is what unconnected looks like for one.
   addEndpoint(endpoint) {
     if (endpoint.kind !== BlockKind.Jack) { this.addMidiPort(endpoint.kind === BlockKind.MidiOut); return; }
     const blocks = patchBlocks(this.device, this.patch);
@@ -285,29 +285,24 @@ export class Editor {
       (port) => port.direction === P.GatePortDirection.GATE_PORT_UNUSED);
     if (index < 0) { this.fail('every jack is already in use'); return; }
     const writesGate = endpoint.direction === P.GatePortDirection.GATE_PORT_IN;
-    const bus = writesGate
-      ? (waitingBus(blocks, Domain.Gate) ?? freeBus(blocks, this.caps, Domain.Gate))
-      : (writtenBus(blocks, Domain.Gate) ?? 0);
-    if (bus === null) { this.fail('every gate bus is already written'); return; }
+    const bus = unusedBus(blocks, this.caps, Domain.Gate);
+    if (bus === null) { this.fail('every gate bus is already in use'); return; }
     this.patch.gatePorts[index] = { direction: endpoint.direction, bus };
     this.state.ui.canvas.selected = selectBlock(`jack:${index}`);
     this.edit(() => this.device.setGatePort(index, endpoint.direction, bus), 'jack');
     this.say(`jack ${index + 1} ${writesGate ? 'in' : 'out'}, on gate bus ${bus}`);
   }
 
-  // One MIDI port, taken into use: the first free one, on USB 1, and on the
-  // note bus the patch is waiting for - a bus something already writes if
-  // this is an output, one nothing writes yet if it is an input.
+  // One MIDI port, taken into use: the first free one, on USB 1, and on a note
+  // bus nothing else is on - so it arrives connected to nothing, like a node.
   addMidiPort(isOut) {
     const blocks = patchBlocks(this.device, this.patch);
     const ports = portsOf(this.patch, isOut);
     const limit = (isOut ? this.caps?.midiOut : this.caps?.midiIn) ?? ports.length;
     const index = ports.findIndex((port, i) => i < limit && !maskOf(port, isOut));
     if (index < 0) { this.fail(`every MIDI ${isOut ? 'output' : 'input'} port is already in use`); return; }
-    const bus = isOut
-      ? (writtenBus(blocks, Domain.Note) ?? 0)
-      : (waitingBus(blocks, Domain.Note) ?? freeBus(blocks, this.caps, Domain.Note));
-    if (bus === null) { this.fail('every note bus is already written'); return; }
+    const bus = unusedBus(blocks, this.caps, Domain.Note);
+    if (bus === null) { this.fail('every note bus is already in use'); return; }
     this.takeMidiPort(index, isOut, P.MidiPort.mmMIDI_USB_0, ports[index].channel, bus,
                       `${portWhat(isOut)} ${index + 1} on USB 1, note bus ${bus}`);
   }

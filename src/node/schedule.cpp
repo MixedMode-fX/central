@@ -5,11 +5,11 @@
 static const uint8_t NOTE_BASE = N_GATE_BUS;
 static const uint8_t CV_BASE = N_GATE_BUS + N_NOTE_BUS;
 
-static uint32_t bus_bit(Domain domain, uint8_t bus){
+static uint64_t bus_bit(Domain domain, uint8_t bus){
     switch (domain){
-        case Domain::Gate: return bus < N_GATE_BUS ? (uint32_t)1u << bus : 0u;
-        case Domain::Note: return bus < N_NOTE_BUS ? (uint32_t)1u << (NOTE_BASE + bus) : 0u;
-        case Domain::CV:   return bus < N_CV_BUS   ? (uint32_t)1u << (CV_BASE + bus) : 0u;
+        case Domain::Gate: return bus < N_GATE_BUS ? (uint64_t)1u << bus : 0u;
+        case Domain::Note: return bus < N_NOTE_BUS ? (uint64_t)1u << (NOTE_BASE + bus) : 0u;
+        case Domain::CV:   return bus < N_CV_BUS   ? (uint64_t)1u << (CV_BASE + bus) : 0u;
     }
     return 0u;
 }
@@ -66,7 +66,7 @@ void Schedule::build(){
     uint64_t writers[N_BUS_TOTAL] = {0};
     for (uint8_t i = 0; i < n; i++){
         for (uint8_t b = 0; b < N_BUS_TOTAL; b++){
-            if (ports[i].write & ((uint32_t)1u << b)) writers[b] |= (uint64_t)1u << i;
+            if (ports[i].write & ((uint64_t)1u << b)) writers[b] |= (uint64_t)1u << i;
         }
     }
     // The key, the same way: whoever writes it runs before whoever plays in
@@ -79,7 +79,7 @@ void Schedule::build(){
     for (uint8_t i = 0; i < n; i++){
         uint64_t before_this = 0;
         for (uint8_t b = 0; b < N_BUS_TOTAL; b++){
-            if (ports[i].read & ((uint32_t)1u << b)) before_this |= writers[b];
+            if (ports[i].read & ((uint64_t)1u << b)) before_this |= writers[b];
         }
         if (ports[i].reads_key) before_this |= key_writers;
         // A node reading a bus it writes itself is a loop of one: it reads
@@ -116,7 +116,7 @@ void Schedule::build(){
     for (uint8_t b = 0; b < N_BUS_TOTAL; b++){
         uint8_t last = 0xFF;
         for (uint8_t pos = 0; pos < n; pos++){
-            if (ports[order[pos]].write & ((uint32_t)1u << b)) last = pos;
+            if (ports[order[pos]].write & ((uint64_t)1u << b)) last = pos;
         }
         add_bus(last == 0xFF ? early : publish[last], b);
     }

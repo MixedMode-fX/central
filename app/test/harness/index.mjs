@@ -14,6 +14,7 @@ import { EmbeddedModule } from '../../src/runtime/module.js';
 import { Listener } from '../../src/runtime/audio/listener.js';
 import { createState } from '../../src/services/state.js';
 import { Live } from '../../src/services/render.js';
+import { emptyNode } from '../../src/protocol/codec.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const wasmPath = process.env.MMMC_WASM ?? join(here, '..', '..', '..', 'emulator', 'dist', 'mmmc.wasm');
@@ -316,3 +317,58 @@ export async function listening() {
     globalThis.AudioContext = had;
   }
 }
+
+// --- a patch to test something else with ------------------------------------
+
+// A node appended and patched in, for the tests whose subject is something
+// else and which need a patch that runs: required inlets onto the bus the last
+// node of that domain wrote, the first outlet onto a bus nothing writes yet.
+//
+// **The editor does none of this.** A node it adds arrives unconnected and the
+// wires are the ones you drag (src/core/graph.js), so this is the tests' own
+// shorthand for a chain rather than a second copy of a rule the app has. What
+// the editor really does on "add" is `protocol.test.mjs`'s to check.
+export function patched(device, patch, descriptor) {
+  const d = typeof descriptor === 'number' ? device.byId.get(descriptor) : descriptor;
+  const node = emptyNode(d.id);
+  const written = new Set();
+  const outletsOf = (n, dd) => {
+    for (let i = 0; i < dd.nOut && i < P.MAX_OUT; i++) {
+      if (n.outBus[i] !== P.NO_BUS) written.add(`${dd.outDomain[i]}:${n.outBus[i]}`);
+    }
+  };
+  patch.nodes.forEach((other) => {
+    const od = device.byId.get(other.algorithmId);
+    if (od) outletsOf(other, od);
+  });
+
+  for (let i = 0; i < d.minIn && i < d.nIn && i < P.MAX_IN; i++) {
+    const domain = d.inDomain[i];
+    let bus = 0;
+    for (let n = patch.nodes.length - 1; n >= 0 && bus === 0; n--) {
+      const od = device.byId.get(patch.nodes[n].algorithmId);
+      for (let k = 0; od && k < od.nOut && k < P.MAX_OUT; k++) {
+        if (od.outDomain[k] === domain && patch.nodes[n].outBus[k] !== P.NO_BUS) {
+          bus = patch.nodes[n].outBus[k];
+          break;
+        }
+      }
+    }
+    node.inBus[i] = bus;
+  }
+  if (d.nOut > 0) {
+    const domain = d.outDomain[0];
+    const buses = busCountOf(device, domain);
+    for (let b = 0; b < buses; b++) {
+      if (written.has(`${domain}:${b}`)) continue;
+      node.outBus[0] = b;
+      break;
+    }
+  }
+  patch.nodes.push(node);
+  return node;
+}
+
+const busCountOf = (device, domain) => [
+  device.capabilities.gateBuses, device.capabilities.noteBuses, device.capabilities.cvBuses,
+][domain];

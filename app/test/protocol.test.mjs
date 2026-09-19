@@ -24,7 +24,7 @@ import * as P from '../src/protocol/generated.js';
 import * as codec from '../src/protocol/codec.js';
 import { Device } from '../src/protocol/device.js';
 import { validate } from '../src/core/validate.js';
-import { connectNewNode, patchBlocks, connectionsOf, isModPort,
+import { patchBlocks, connectionsOf, isModPort,
          modulationChoices, planModulation } from '../src/core/graph.js';
 import { toPatchJson, toPatchJsonText, fromPatchJson } from '../src/core/patchjson.js';
 import { layoutOf, socketPoint, blockHeight } from '../src/core/layout.js';
@@ -389,31 +389,52 @@ test('pattern data reads and writes in runs', async () => {
   assert.deepEqual(Array.from(back.subarray(0, written.length)), Array.from(written));
 });
 
-// The regression this whole seam exists for. Adding a clock and an inverter -
-// two nodes, no configuration - used to leave the module refusing the patch
-// (the inverter's inlet was unconnected) and then refusing every edit
-// afterwards with SYSEX_ERR_BAD_ARGUMENT, because those edits addressed a node
-// the module had never taken.
-test('nodes added the way the editor adds them build a patch the module takes', async () => {
+// **A block arrives unconnected, and the app knows it is not sendable yet.**
+// The editor used to patch a new node in on arrival, and on a canvas those
+// guesses are arrows nobody drew: add a MIDI output and the next node lands on
+// its bus, add two unrelated nodes and they come out chained. So "add" is now
+// `codec.emptyNode` and nothing else, and what keeps the regression this seam
+// exists for from coming back is the other half - the module refuses a node
+// whose required inlet is empty, so the app must refuse to send one too, or
+// every incremental edit afterwards addresses a node the module never took.
+//
+// `validate` is that refusal, and `Editor.sendWhole` acts on it. This checks
+// the two agree with the firmware, for every algorithm the module has.
+test('a node the editor adds arrives on no bus, and is sent once it is wired', async () => {
   const patch = codec.emptyPatch();
   const add = (name) => {
     const d = device.algorithms.find((a) => a.name === name);
-    const node = codec.emptyNode(d.id);
-    connectNewNode(device, patch, node, d);
+    const node = codec.emptyNode(d.id);            // exactly what Editor.addNode pushes
     patch.nodes.push(node);
     return { d, node };
   };
 
+  // A ClockDiv needs no inlet - free, it divides the master clock - so added
+  // and left alone it is a patch, and it is on no bus either way.
   const clock = add('ClockDiv');
+  assert.deepEqual(clock.node.inBus, clock.node.inBus.map(() => P.NO_BUS), 'on no bus');
+  assert.deepEqual(clock.node.outBus, clock.node.outBus.map(() => P.NO_BUS), 'writing nothing');
   assert.deepEqual(validate(device, patch), [], 'a clock on its own must be valid');
   await device.sendPatch(patch, codec.emptyGlobals());
 
+  // An inverter does, and until it is wired the patch is one the module
+  // refuses - so the app refuses to send it, which is what keeps the next
+  // incremental edit addressing a node the module really has.
   const inverter = add('NOT');
-  assert.deepEqual(validate(device, patch), [], 'clock + inverter must be valid');
-  // The inverter reads what the clock writes: that is the patch, not a
-  // coincidence of both defaulting to bus 0.
-  assert.equal(inverter.node.inBus[0], clock.node.outBus[0]);
-  assert.notEqual(inverter.node.outBus[0], clock.node.outBus[0]);
+  assert.ok(inverter.d.minIn > 0, 'a NOT has to read something');
+  assert.equal(inverter.node.inBus[0], P.NO_BUS, 'and it does not land on the clock');
+  const waiting = validate(device, patch);
+  assert.equal(waiting.length, 1, JSON.stringify(waiting));
+  assert.match(waiting[0].message, /must be connected/);
+  await assert.rejects(() => device.sendPatch(patch, codec.emptyGlobals()),
+                       'the module refuses it too');
+
+  // Wired - which on the canvas is a drag, and here is the bus each port is
+  // put on.
+  clock.node.outBus[0] = 0;
+  inverter.node.inBus[0] = 0;
+  inverter.node.outBus[0] = 1;
+  assert.deepEqual(validate(device, patch), []);
   await device.sendPatch(patch, codec.emptyGlobals());
 
   // And now an incremental edit addresses a node the module really has.
@@ -422,12 +443,15 @@ test('nodes added the way the editor adds them build a patch the module takes', 
   assert.equal(dumped.patch.nodes.length, 2);
   assert.equal(dumped.patch.nodes[1].inBus[0], clock.node.outBus[0]);
 
-  // Every algorithm, added into an empty patch the same way.
+  // Every algorithm, added into an empty patch the same way: unconnected is
+  // refused when the algorithm needs an inlet and accepted when it does not,
+  // and wiring the required inlets is all it ever takes to make it sendable.
   for (const d of device.algorithms) {
     const one = codec.emptyPatch();
     const node = codec.emptyNode(d.id);
-    connectNewNode(device, one, node, d);
     one.nodes.push(node);
+    assert.equal(validate(device, one).length, d.minIn, `${d.name}: one problem per required inlet`);
+    for (let i = 0; i < d.minIn && i < d.nIn && i < P.MAX_IN; i++) node.inBus[i] = 0;
     const problems = validate(device, one);
     assert.deepEqual(problems, [], `${d.name}: ${JSON.stringify(problems)}`);
     await device.sendPatch(one, codec.emptyGlobals());

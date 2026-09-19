@@ -162,10 +162,12 @@ file and the JSON dialect describe a graph. The canvas lays a patch out from
 its own shape — signal left to right — and a hand-placed block is remembered in
 `localStorage` as a preference about looking at it.
 
-**A node arrives connected.** Required inlets go to a bus something already
-writes (the node added last, so a chain builds as you type), the first outlet
-to a bus nothing writes. A patch the app's own validator refuses is never sent;
-the first edit that makes it valid sends the whole patch (`App.diverged`).
+**A block arrives unconnected.** A node is added on no bus at all and the
+wires are the ones you drag; a jack or a MIDI port, which carries a bus index
+whatever it is doing, takes one nothing else is on. A bus chosen for you is an
+arrow nobody drew. A patch the app's own validator refuses is never sent — a
+node whose required inlet is still empty is one of those — and the first edit
+that makes it valid sends the whole patch (`App.diverged`).
 
 **A drag sends one message**, not a full dump — under the bus model a
 connection change is one byte. Adding or removing a node changes the graph's

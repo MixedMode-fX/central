@@ -16,14 +16,14 @@
 
 // Internal buses per domain.
 #define N_GATE_BUS 16
-#define N_NOTE_BUS 8
+#define N_NOTE_BUS 16
 #define N_CV_BUS 8
 // Events a note bus can carry per pass. Beyond this, writes are dropped and
 // counted (BusManager::note_overflows()). The input drain never delivers
 // past it (control/midi_dispatch.h), so the depth only has to cover what the
 // nodes themselves emit in one pass: a four-voice PolySequencer and an
 // eight-lane DrumSeqMidi on one bus is up to 24 note-ons and note-offs on one
-// step. 32 costs 1 KB more than 16 across both buffers of eight buses.
+// step. 32 costs 2 KB more than 16 across both buffers of every note bus.
 #define NOTE_QUEUE_DEPTH 32
 
 // Node pool: uniform slots, each large enough for any algorithm's state.
@@ -154,8 +154,8 @@
 //
 // A macro is one performance control that moves several parameters at once,
 // each over its own window of the macro's travel (node/patch.h,
-// control/macros.h). Eight is this machine's idiom - GPIO_N, N_CV_BUS and
-// N_NOTE_BUS are all 8 - and one pot row on every controller worth copying.
+// control/macros.h). Eight is this machine's idiom - GPIO_N and N_CV_BUS are
+// both 8 - and one pot row on every controller worth copying.
 //
 // The destinations are a **shared pool**, not a fixed array per macro,
 // because real macros are lopsided: one sweeping control with six

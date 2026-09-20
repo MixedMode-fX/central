@@ -6,12 +6,18 @@
 static const Domain IN[2] = {Domain::Note, Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
+static const ParamDescriptor PARAMS[NoteQuantise::N_PARAMS] = {
+    {"channel", 0, 16, 0, PARAM_CHANNEL_OUT, nullptr},
+};
+static const ParamGroup GROUPS[1] = {{0, 1, NoteQuantise::N_PARAMS, PARAMS}};
+
 static const char* const IN_NAMES[2] = {"notes in", "root"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor NoteQuantise::descriptor = {
-    ALGO_NOTE_QUANTISE, "Note Quantise", 2, 1, 1, 0, IN, OUT, sizeof(NoteQuantise), false,
-    construct_node<NoteQuantise>, nullptr, 0, IN_NAMES, OUT_NAMES,
+    ALGO_NOTE_QUANTISE, "Note Quantise", 2, 1, 1, NoteQuantise::N_PARAMS, IN, OUT,
+    sizeof(NoteQuantise), false,
+    construct_node<NoteQuantise>, GROUPS, 1, IN_NAMES, OUT_NAMES,
     "Snaps every note into the key the module is in. The root inlet moves it.",
     CATEGORY_MIDI,
     true };   // reads_key: every pitch it plays comes from the key
@@ -21,8 +27,21 @@ NoteQuantise::NoteQuantise(const NodeConfig& config) :
     root_in(config.in_bus[1]),
     out(config.out_bus[0]),
     root(NO_ROOT),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     sounding()
 {}
+
+// The ledger releases on the channel it recorded, so this may move under a
+// held note like every other control here.
+bool NoteQuantise::set_param(uint16_t index, uint8_t value){
+    if (index != P_CHANNEL || value > 16) return false;
+    channel = value;
+    return true;
+}
+
+uint8_t NoteQuantise::get_param(uint16_t index) const {
+    return index == P_CHANNEL ? channel : (uint8_t)0;
+}
 
 uint16_t NoteQuantise::active_mask() const {
     return global_key::mask();
@@ -54,13 +73,13 @@ void NoteQuantise::process(BusManager& bus, uint32_t){
             continue;
         }
         if (!is_note_on(e)){
-            bus.note_write(out, e);
+            bus.note_write(out, readdressed(e, channel));
             continue;
         }
         const uint8_t snapped = scale_quantise(e.data1, tonic, mask);
         // Two incoming pitches can snap to the same tone. The ledger keys on
         // the source note, so each of them still gets its own release.
-        sounding.emit(bus, out, e.data1, snapped, e.data2, e.channel);
+        sounding.emit(bus, out, e.data1, snapped, e.data2, out_channel(channel, e.channel));
     }
 }
 

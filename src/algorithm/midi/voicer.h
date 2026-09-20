@@ -67,12 +67,14 @@
 // params[4] bass      keep the chord's own bass as the lowest voice
 // params[5] retrigger re-strike every voice on every change, common tones
 //                     included
+// params[6] channel   0 keeps the channel the chord arrived on
+//                     (midi/note_event.h)
 class Voicer : public Node{
     public:
         static constexpr uint8_t MAX_VOICES = 8;
         static constexpr uint16_t P_MODE = 0, P_LOW = 1, P_HIGH = 2, P_VOICES = 3,
-                                  P_BASS = 4, P_RETRIGGER = 5;
-        static constexpr uint8_t N_PARAMS = 6;
+                                  P_BASS = 4, P_RETRIGGER = 5, P_CHANNEL = 6;
+        static constexpr uint8_t N_PARAMS = 7;
         static constexpr uint8_t DEFAULT_LOW = 48, DEFAULT_HIGH = 84;
         // The gap `spread` forces between adjacent voices: a fifth, which is
         // the widest one that still leaves a triad inside three octaves.
@@ -129,11 +131,16 @@ class Voicer : public Node{
         // at: whatever the note-on that last changed it was played with.
         HeldNotes held;
         uint8_t velocity;
+        uint8_t source_channel;
+        // Where the chord is sent, or 0 for wherever it came from.
         uint8_t channel;
         // The voicing currently sounding, ascending. This is what "nearest to
         // where the voices were" is measured against.
         uint8_t voiced[MAX_VOICES];
         uint8_t n_voiced;
+        // Where that voicing went out, so a chord is never left split across
+        // two channels when the one it is sent on moves.
+        uint8_t voiced_channel;
         bool dirty;
         SoundingNotes sounding;
 };

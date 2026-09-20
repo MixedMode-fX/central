@@ -60,10 +60,12 @@
 // params[1] amount   percent of note-ons reflected; the rest pass through
 // params[2] snap     put the reflection back in the scale
 // params[3] seed     0 draws from the entropy pool, anything else is exact
+// params[4] channel  0 keeps the channel each note arrived on (midi/note_event.h)
 class Mirror : public Node{
     public:
-        static constexpr uint16_t P_MODE = 0, P_AMOUNT = 1, P_SNAP = 2, P_SEED = 3;
-        static constexpr uint8_t N_PARAMS = 4;
+        static constexpr uint16_t P_MODE = 0, P_AMOUNT = 1, P_SNAP = 2, P_SEED = 3,
+                                  P_CHANNEL = 4;
+        static constexpr uint8_t N_PARAMS = 5;
         static constexpr uint8_t DEFAULT_AMOUNT = 100;
 
         enum Mode : uint8_t {
@@ -99,6 +101,7 @@ class Mirror : public Node{
         uint8_t amount;
         bool snap;
         uint8_t seed;
+        uint8_t channel;          // 0 keeps the source's
         Xorshift32 rng;
         SoundingNotes sounding;
 };

@@ -61,8 +61,15 @@
 // Outlet 2 (gate): decision - this node's last answer, latched.
 //
 // params[0..2] are TrigCondition's block: chance, condition, seed.
+// params[3] channel: 0 keeps the channel each note arrived on
+// (midi/note_event.h). It moves both outlets, because `dropped` is the other
+// half of one split and a ghost part on a channel of its own is what the
+// split is for - a second Probability is how two parts get two channels.
 class Probability : public Node{
     public:
+        static constexpr uint16_t P_CHANNEL = TrigCondition::N_PARAMS;
+        static constexpr uint8_t N_PARAMS = TrigCondition::N_PARAMS + 1;
+
         static const AlgorithmDescriptor descriptor;
         explicit Probability(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
@@ -79,6 +86,7 @@ class Probability : public Node{
         uint8_t out;
         uint8_t dropped_out;
         uint8_t decision_out;
+        uint8_t channel;          // 0 keeps the source's
         EdgeIn reset_in;
         TrigCondition condition;
         SoundingNotes sounding;

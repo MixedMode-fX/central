@@ -20,6 +20,9 @@ export function paramText(pd, stored) {
     case P.ParamKind.PARAM_PITCH: return `${noteName(effective)} (${effective})`;
     case P.ParamKind.PARAM_PITCH_CLASS: return PITCH_CLASSES[effective % 12];
     case P.ParamKind.PARAM_CHANNEL: return effective === 0 ? 'omni' : `ch ${effective}`;
+    // Not 'omni': on an outlet zero is not every channel, it is whichever one
+    // the note came in on (src/node/param.h).
+    case P.ParamKind.PARAM_CHANNEL_OUT: return effective === 0 ? 'as played' : `ch ${effective}`;
     case P.ParamKind.PARAM_BITFIELD: return `0b${effective.toString(2).padStart(8, '0')}`;
     default: return String(effective);
   }

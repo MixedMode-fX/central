@@ -359,6 +359,15 @@ is only what a parameter list cannot say.
   the channel test alone: the other clauses each have their own way round
   already, and inverting all of them would take away "the notes, but not the
   ones on channel 10".
+- **Every node that emits MIDI says which channel it emits on, and a modifier
+  says it by leaving the stream alone.** A generator names a channel outright;
+  a modifier's `channel` is 0 by default and 0 means the one each message
+  arrived on, so a keyboard split across two channels stays split until a
+  patch says otherwise. Overriding it is not the same as a `Channel` node
+  after the modifier: `Channel` re-addresses a whole bus, so a bus two parts
+  are merged onto cannot have one of them moved without being split first.
+  The note-off leaves where its note-on went, whatever the control says by
+  then, so it can be moved under a held chord.
 - **`Channel`'s `count` is why it is not a relabelling.** A span of one is a
   fixed channel; wider, the parameters name a span of that many channels
   wrapping at 16 and each note-on is allocated one of them, which makes four

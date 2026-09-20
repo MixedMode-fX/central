@@ -102,14 +102,20 @@
 // params[4] velocity  what a self-playing chord is sounded at. Ignored
 //                     while a note inlet is patched: a played note keeps
 //                     the velocity it was played with.
+// params[5] channel    0 keeps the channel the note arrived on
+//                     (midi/note_event.h). A self-playing chord has no
+//                     source to keep, so it sounds on channel 1 until this
+//                     says otherwise.
 class Chord : public Node{
     public:
         // A ninth is the widest named stack: four steps over the root.
         static constexpr uint8_t MAX_STEPS = 4, MAX_VOICES = MAX_STEPS + 1;
         // The parameter order is the preset format, so these never move.
         static constexpr uint16_t P_QUALITY = 0, P_VOICING = 1, P_INVERSION = 2,
-                                  P_OCTAVE = 3, P_VELOCITY = 4;
-        static constexpr uint8_t N_PARAMS = 5;
+                                  P_OCTAVE = 3, P_VELOCITY = 4, P_CHANNEL = 5;
+        static constexpr uint8_t N_PARAMS = 6;
+        // What a self-playing chord sounds on when nothing has overridden it.
+        static constexpr uint8_t FREE_CHANNEL = 1;
 
         // Numbered from 1, so that a stored zero is the default triad the way
         // a stored zero is the default everywhere else in this module
@@ -169,8 +175,10 @@ class Chord : public Node{
         void shape(int16_t* pitch, uint8_t n) const;
         // Sounds every voice, all recorded against `source` so one release
         // takes the whole chord down.
+        // `send_on` is the channel the whole chord leaves on: the override,
+        // or the channel the note that caused it arrived on.
         void emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t tonic,
-                        uint16_t mask, uint8_t velocity_out, uint8_t channel);
+                        uint16_t mask, uint8_t velocity_out, uint8_t send_on);
         // One pass of a chord with no note inlet: works out what it should be
         // playing and re-voices only if that has moved.
         void play_free(BusManager& bus, uint16_t mask, uint8_t tonic);
@@ -182,6 +190,7 @@ class Chord : public Node{
         uint8_t inversion;
         uint8_t octave;
         uint8_t velocity;
+        uint8_t channel;          // 0 keeps the source's
         // Free-running state: `voiced` is the root actually sounding,
         // `voiced_mask` the scale it was voiced in, and `dirty` a parameter
         // edit that has to be heard.

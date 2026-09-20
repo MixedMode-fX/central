@@ -49,10 +49,12 @@
 // is the byte less PARAM_CENTRE, so a zeroed preset means no shift at all and
 // a knob sweeping either one sweeps a single rising interval (node/param.h).
 // params[2] diatonic: move in the key's steps rather than in semitones.
+// params[3] channel: 0 keeps the channel each note arrived on (midi/note_event.h).
 class Transpose : public Node{
     public:
-        static constexpr uint16_t P_SEMITONES = 0, P_OCTAVES = 1, P_DIATONIC = 2;
-        static constexpr uint16_t N_PARAMS = 3;
+        static constexpr uint16_t P_SEMITONES = 0, P_OCTAVES = 1, P_DIATONIC = 2,
+                                  P_CHANNEL = 3;
+        static constexpr uint16_t N_PARAMS = 4;
         static const int8_t MAX_SEMITONES = 12;
         static const int8_t MAX_OCTAVES = 4;
 
@@ -91,6 +93,7 @@ class Transpose : public Node{
         int8_t semitones;
         int8_t octaves;
         bool diatonic;
+        uint8_t channel;          // 0 keeps the source's
         SoundingNotes sounding;
 };
 

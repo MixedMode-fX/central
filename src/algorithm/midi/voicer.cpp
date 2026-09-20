@@ -15,6 +15,7 @@ static const ParamDescriptor PARAMS[Voicer::N_PARAMS] = {
     {"voices",    0, Voicer::MAX_VOICES, 0,     PARAM_NUMBER, nullptr},
     {"bass",      0, 1, 0, PARAM_BOOL, nullptr},
     {"retrigger", 0, 1, 0, PARAM_BOOL, nullptr},
+    {"channel",   0, 16, 0, PARAM_CHANNEL_OUT, nullptr},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Voicer::N_PARAMS, PARAMS}};
 
@@ -54,7 +55,9 @@ Voicer::Voicer(const NodeConfig& config) :
     voices(config.params[P_VOICES] > MAX_VOICES ? MAX_VOICES : config.params[P_VOICES]),
     bass(config.params[P_BASS] != 0),
     retrigger(config.params[P_RETRIGGER] != 0),
-    held(), velocity(100), channel(1), voiced(), n_voiced(0), dirty(false), sounding()
+    held(), velocity(100), source_channel(1),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
+    voiced(), n_voiced(0), voiced_channel(0), dirty(false), sounding()
 {}
 
 // Placement is the only thing every parameter here changes, so all of them
@@ -78,6 +81,12 @@ bool Voicer::set_param(uint16_t index, uint8_t value){
         case P_RETRIGGER:
             if (value > 1) return false;
             retrigger = value != 0; return true;
+        // A voice already in the air is released on the channel the ledger
+        // recorded, so the move is heard on the next chord rather than
+        // stranding this one. `dirty` is what makes it the next *pass*.
+        case P_CHANNEL:
+            if (value > 16) return false;
+            channel = value; dirty = true; return true;
         default: return false;
     }
 }
@@ -90,6 +99,7 @@ uint8_t Voicer::get_param(uint16_t index) const {
         case P_VOICES:    return voices;
         case P_BASS:      return bass ? 1u : 0u;
         case P_RETRIGGER: return retrigger ? 1u : 0u;
+        case P_CHANNEL:   return channel;
         default: return 0;
     }
 }
@@ -201,8 +211,14 @@ uint8_t Voicer::voicing(uint8_t* want) const {
 void Voicer::revoice(BusManager& bus){
     uint8_t want[MAX_VOICES];
     const uint8_t m = voicing(want);
+    const uint8_t send_on = out_channel(channel, source_channel);
 
-    if (retrigger){
+    // A common tone is only common if it is already sounding *where the new
+    // chord is going*. Moving the output channel under a held chord would
+    // otherwise keep the shared notes on the channel they started on and play
+    // one chord across two synths, so a change of channel re-strikes
+    // everything exactly as `retrigger` does.
+    if (retrigger || send_on != voiced_channel){
         sounding.release_all(bus, out);
     } else {
         // Everything sounding that the new chord does not want. Collected
@@ -223,11 +239,12 @@ void Voicer::revoice(BusManager& bus){
     // is neither released above nor emitted here.
     for (uint8_t j = 0; j < m; j++){
         if (sounding.holds(want[j])) continue;
-        sounding.emit(bus, out, want[j], want[j], velocity, channel);
+        sounding.emit(bus, out, want[j], want[j], velocity, send_on);
     }
 
     for (uint8_t j = 0; j < m; j++) voiced[j] = want[j];
     n_voiced = m;
+    voiced_channel = send_on;
 }
 
 void Voicer::process(BusManager& bus, uint32_t){
@@ -240,12 +257,12 @@ void Voicer::process(BusManager& bus, uint32_t){
             bool did_evict = false;
             held.add(e.data1, e.data2, e.channel, evicted, did_evict);
             if (e.data2) velocity = e.data2;
-            if (e.channel) channel = e.channel;
+            if (e.channel) source_channel = e.channel;
             changed = true;
         } else if (is_note_off(e)){
             if (held.remove(e.data1)) changed = true;
         } else {
-            bus.note_write(out, e);
+            bus.note_write(out, readdressed(e, channel));
         }
     }
     // A chord is what is held at the end of the pass. `Chord` releases its old

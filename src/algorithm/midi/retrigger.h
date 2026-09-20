@@ -66,8 +66,14 @@
 // params[1] feel      straight, dotted (x3/2) or triplet (x2/3)
 // params[2] release   `length`, or `tie` to the next trigger
 // params[3] velocity  0 keeps the velocity each note was played with
+// params[4] channel   0 keeps the channel each note arrived on
+//                     (midi/note_event.h)
 class Retrigger : public Node{
     public:
+        static constexpr uint16_t P_LENGTH = 0, P_FEEL = 1, P_RELEASE = 2,
+                                  P_VELOCITY = 3, P_CHANNEL = 4;
+        static constexpr uint8_t N_PARAMS = 5;
+
         static const AlgorithmDescriptor descriptor;
 
         enum Release : uint8_t {
@@ -108,6 +114,7 @@ class Retrigger : public Node{
         uint8_t how;             // MusicalFeel
         uint8_t release;         // Release
         uint8_t fixed_velocity;  // 0 keeps what was played
+        uint8_t channel;         // 0 keeps the source's
         uint32_t subtick;        // the master clock's count
         uint32_t off_at;         // subtick the current strike is released at
         uint32_t struck;

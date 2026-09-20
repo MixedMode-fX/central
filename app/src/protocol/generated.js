@@ -56,7 +56,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 13;
+export const SYSEX_PROTOCOL_VERSION = 14;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 320;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -237,6 +237,7 @@ export const ParamKind = Object.freeze({
   PARAM_PERCENT: 8,
   PARAM_CHANNEL: 9,
   PARAM_CENTRED: 10,
+  PARAM_CHANNEL_OUT: 11,
 });
 
 export const ConfigError = Object.freeze({

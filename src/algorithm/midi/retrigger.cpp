@@ -8,27 +8,32 @@ static const Domain OUT[1] = {Domain::Note};
 
 static const char* const RELEASE_NAMES[Retrigger::RT_RELEASES] = {"length", "tie"};
 
-static const ParamDescriptor PARAMS[4] = {
+static const ParamDescriptor PARAMS[Retrigger::N_PARAMS] = {
     {"length",   DIV_8_BARS,    DIVISIONS, DIV_16TH,      PARAM_ENUM,   DIVISION_NAMES},
     {"feel",     FEEL_STRAIGHT, FEELS,     FEEL_STRAIGHT, PARAM_ENUM,   FEEL_NAMES},
     {"release",  Retrigger::RT_LENGTH, Retrigger::RT_RELEASES, Retrigger::RT_LENGTH,
                                                           PARAM_ENUM,   RELEASE_NAMES},
     {"velocity", 0,             127,       0,             PARAM_NUMBER, nullptr},
+    {"channel",  0,             16,        0,             PARAM_CHANNEL_OUT, nullptr},
 };
-// All four describe one thing - what a strike is - so the editor is told
-// that rather than left to sort them by what their names sound like, which
-// files a note value under "timing", a release under "other" and a velocity
-// under "level": three headings over a node with four controls
-// (src/node/param.h).
+// The first four describe one thing - what a strike is - so the editor is
+// told that rather than left to sort them by what their names sound like,
+// which files a note value under "timing", a release under "other" and a
+// velocity under "level": three headings over a node with four controls
+// (src/node/param.h). The channel is not part of a strike and is left out of
+// the label, so it lands under the editor's own MIDI heading.
 static const char* const STRIKE = "the strike";
-static const ParamGroup GROUPS[1] = {{0, 1, 4, PARAMS, STRIKE}};
+static const ParamGroup GROUPS[2] = {
+    {0, 1, 4, PARAMS, STRIKE},
+    {Retrigger::P_CHANNEL, 1, 1, &PARAMS[Retrigger::P_CHANNEL]},
+};
 
 static const char* const IN_NAMES[2] = {"chord in", "trigger"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor Retrigger::descriptor = {
-    ALGO_RETRIGGER, "Retrigger", 2, 2, 1, 4, IN, OUT, sizeof(Retrigger), true,
-    construct_node<Retrigger>, GROUPS, 1, IN_NAMES, OUT_NAMES,
+    ALGO_RETRIGGER, "Retrigger", 2, 2, 1, Retrigger::N_PARAMS, IN, OUT, sizeof(Retrigger), true,
+    construct_node<Retrigger>, GROUPS, 2, IN_NAMES, OUT_NAMES,
     "Re-strikes a held chord on every trigger. The rhythm is the trigger's, the length a note value.",
     CATEGORY_MIDI };
 
@@ -40,10 +45,11 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 Retrigger::Retrigger(const NodeConfig& config) :
     in(config.in_bus[0]),
     out(config.out_bus[0]),
-    length(clamp_enum(config.params[0], DIVISIONS, DIV_16TH)),
-    how(clamp_enum(config.params[1], FEELS, FEEL_STRAIGHT)),
-    release(clamp_enum(config.params[2], RT_RELEASES, RT_LENGTH)),
-    fixed_velocity((uint8_t)(config.params[3] & 0x7F)),
+    length(clamp_enum(config.params[P_LENGTH], DIVISIONS, DIV_16TH)),
+    how(clamp_enum(config.params[P_FEEL], FEELS, FEEL_STRAIGHT)),
+    release(clamp_enum(config.params[P_RELEASE], RT_RELEASES, RT_LENGTH)),
+    fixed_velocity((uint8_t)(config.params[P_VELOCITY] & 0x7F)),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     subtick(0), off_at(0), struck(0),
     trigger_in(config.in_bus[1]),
     held(), sounding()
@@ -64,7 +70,7 @@ void Retrigger::strike(BusManager& bus){
         const HeldNote& h = held.sorted(i);
         if (h.note == HeldNotes::NONE) continue;
         const uint8_t velocity = fixed_velocity ? fixed_velocity : h.velocity;
-        sounding.emit(bus, out, h.note, h.note, velocity, h.channel);
+        sounding.emit(bus, out, h.note, h.note, velocity, out_channel(channel, h.channel));
     }
     off_at = subtick + length_subticks();
     struck++;
@@ -93,7 +99,7 @@ void Retrigger::process(BusManager& bus, uint32_t){
             continue;
         }
         // A CC, a bend, aftertouch: not a note, so not this node's to hold.
-        bus.note_write(out, e);
+        bus.note_write(out, readdressed(e, channel));
     }
 
     // The length is counted in subticks from the strike. An edit to `length`
@@ -115,24 +121,28 @@ void Retrigger::silence(BusManager& bus){
 
 bool Retrigger::set_param(uint16_t index, uint8_t value){
     switch (index){
-        case 0: if (value == 0 || value > DIVISIONS) return false; length = value; return true;
-        case 1: if (value == 0 || value > FEELS) return false; how = value; return true;
+        case P_LENGTH: if (value == 0 || value > DIVISIONS) return false; length = value; return true;
+        case P_FEEL: if (value == 0 || value > FEELS) return false; how = value; return true;
         // Turning `tie` on leaves the strike sounding and turning it off
         // hands it back to a deadline that has already passed, so the next
         // pass releases it: either way the change is heard on the next
         // strike rather than by cutting the one in progress.
-        case 2: if (value == 0 || value > RT_RELEASES) return false; release = value; return true;
-        case 3: if (value > 127) return false; fixed_velocity = value; return true;
+        case P_RELEASE: if (value == 0 || value > RT_RELEASES) return false; release = value; return true;
+        case P_VELOCITY: if (value > 127) return false; fixed_velocity = value; return true;
+        // The strike in the air was recorded with the channel it went out
+        // on, so this too is heard on the next strike and strands nothing.
+        case P_CHANNEL: if (value > 16) return false; channel = value; return true;
         default: return false;
     }
 }
 
 uint8_t Retrigger::get_param(uint16_t index) const {
     switch (index){
-        case 0: return length;
-        case 1: return how;
-        case 2: return release;
-        case 3: return fixed_velocity;
+        case P_LENGTH:   return length;
+        case P_FEEL:     return how;
+        case P_RELEASE:  return release;
+        case P_VELOCITY: return fixed_velocity;
+        case P_CHANNEL:  return channel;
         default: return 0;
     }
 }

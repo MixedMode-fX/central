@@ -54,8 +54,15 @@
 // params[3] velocity  0 keeps the velocity each note was played with
 // params[4] hold      latch the chord: it keeps playing with no key down
 // params[5] new chord 0 restart the figure, 1 run on from where it was
+// params[6] channel   0 keeps the channel each note arrived on
+//                     (midi/note_event.h)
 class Arpeggiator : public Node{
     public:
+        static constexpr uint16_t P_MODE = 0, P_OCTAVES = 1, P_GATE = 2,
+                                  P_VELOCITY = 3, P_HOLD = 4, P_NEW_CHORD = 5,
+                                  P_CHANNEL = 6;
+        static constexpr uint8_t N_PARAMS = 7;
+
         enum Mode : uint8_t {
             ARP_UP = 0, ARP_DOWN = 1, ARP_UP_DOWN = 2, ARP_RANDOM = 3, ARP_AS_PLAYED = 4,
         };
@@ -82,7 +89,7 @@ class Arpeggiator : public Node{
     private:
         uint8_t steps() const;              // notes held, times the octave range
         void step(BusManager& bus, uint32_t now_us);
-        void note_for(uint8_t index, uint8_t& note, uint8_t& velocity, uint8_t& channel) const;
+        void note_for(uint8_t index, uint8_t& note, uint8_t& velocity, uint8_t& from) const;
         void release(BusManager& bus);
         // Which keys are physically down. Kept apart from `held` because
         // hold is the state where they disagree, and one bit per note is
@@ -103,6 +110,7 @@ class Arpeggiator : public Node{
         uint8_t fixed_velocity;
         uint8_t hold;                       // the parameter, not the inlet
         uint8_t run_on;                     // a chord change leaves the cursor
+        uint8_t channel;                    // 0 keeps the source's
         uint8_t cursor;                     // position in the figure
         uint8_t playing;                    // source key of the sounding note
         uint32_t started_us;

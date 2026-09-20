@@ -12,6 +12,7 @@ static const ParamDescriptor PARAMS[Transpose::N_PARAMS] = {
     {"octaves",   PARAM_CENTRE - Transpose::MAX_OCTAVES,   PARAM_CENTRE + Transpose::MAX_OCTAVES,
                   PARAM_CENTRE, PARAM_CENTRED, nullptr},
     {"diatonic",  0, 1, 0, PARAM_BOOL, nullptr},
+    {"channel",   0, 16, 0, PARAM_CHANNEL_OUT, nullptr},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Transpose::N_PARAMS, PARAMS}};
 
@@ -43,6 +44,7 @@ Transpose::Transpose(const NodeConfig& config) :
     semitones(clamp_to(config.params[P_SEMITONES], MAX_SEMITONES)),
     octaves(clamp_to(config.params[P_OCTAVES], MAX_OCTAVES)),
     diatonic(config.params[P_DIATONIC] != 0),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     sounding()
 {}
 
@@ -113,10 +115,11 @@ void Transpose::process(BusManager& bus, uint32_t){
         if (is_note_on(e)){
             const uint8_t shifted = shift_note(e.data1);
             if (shifted == DROPPED) continue;         // dropped, off and all
-            sounding.emit(bus, out, e.data1, shifted, e.data2, e.channel);
+            sounding.emit(bus, out, e.data1, shifted, e.data2,
+                          out_channel(channel, e.channel));
             continue;
         }
-        bus.note_write(out, e);
+        bus.note_write(out, readdressed(e, channel));
     }
 }
 
@@ -137,6 +140,10 @@ bool Transpose::set_param(uint16_t index, uint8_t value){
             if (value > 1) return false;
             diatonic = value != 0;
             return true;
+        case P_CHANNEL:
+            if (value > 16) return false;
+            channel = value;
+            return true;
         default:
             return false;
     }
@@ -147,6 +154,7 @@ uint8_t Transpose::get_param(uint16_t index) const {
         case P_SEMITONES: return param_centred_byte(semitones);
         case P_OCTAVES:   return param_centred_byte(octaves);
         case P_DIATONIC:  return diatonic ? 1u : 0u;
+        case P_CHANNEL:   return channel;
         default:          return 0;
     }
 }

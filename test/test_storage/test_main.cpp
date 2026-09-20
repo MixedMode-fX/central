@@ -125,6 +125,8 @@ static void test_patch_round_trips_through_the_codec() {
     g.scale = SCALE_DORIAN;                        // the key travels with the patch
     g.root = 5;
     g.root_octave = 4;                             // and the register it sits in
+    g.clock_in_mask = mmMIDI_SERIAL_1;             // and where the clock is routed
+    g.clock_out_mask = (uint8_t)(mmMIDI_USB_0 | mmMIDI_HOST_1);
 
     size_t written = 0;
     TEST_ASSERT_EQUAL(CODEC_OK, patch_codec::encode(original, g, buffer, sizeof buffer, written));
@@ -143,6 +145,10 @@ static void test_patch_round_trips_through_the_codec() {
     // The register is another reserved byte, so this round-trips without the
     // format version having had to move for it.
     TEST_ASSERT_EQUAL(4, decoded_globals.root_octave);
+    // Where the clock comes from and where it goes is a patch's own setting,
+    // so a preset recalls a module pointed at the same gear it was saved on.
+    TEST_ASSERT_EQUAL(mmMIDI_SERIAL_1, decoded_globals.clock_in_mask);
+    TEST_ASSERT_EQUAL(mmMIDI_USB_0 | mmMIDI_HOST_1, decoded_globals.clock_out_mask);
 }
 
 // The whole point of trimming: a patch of ordinary nodes is a couple of

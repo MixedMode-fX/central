@@ -13,6 +13,11 @@ void PatchManager::push_globals(){
     mm.clock().set_source(live_globals.clock_source);
     mm.clock().set_bpm(live_globals.bpm);
     mm.clock().set_cv_ppqn(live_globals.cv_ppqn);
+    // Where the clock is taken from and where it is sent. Both are masks of
+    // cables rather than ports in the patch, because realtime reaches no bus
+    // (patch/patch_codec.h).
+    mm.clock().set_in_mask(live_globals.clock_in_mask);
+    mm.clock_out().set_target(live_globals.clock_out_mask);
     // The key, for every algorithm that did not name a scale of its own.
     // Pushed rather than read from here, because a node's process() sees the
     // buses and nothing else (midi/global_key.h).

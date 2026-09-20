@@ -32,7 +32,7 @@
 // `.syx` file from one, is refused rather than decoded into the wrong bytes.
 // Bump it whenever anything below moves - including a parameter number or an
 // algorithm id, which change no field here but change what the bytes mean.
-#define PATCH_FORMAT_VERSION 8
+#define PATCH_FORMAT_VERSION 9
 
 // "MMMC", big-endian, at the head of every stored or transmitted image.
 #define PATCH_MAGIC 0x4D4D4D43u
@@ -59,6 +59,20 @@ struct GlobalSettings {
     uint8_t clock_source;      // MasterClock::Source
     uint8_t cv_ppqn;
     uint16_t bpm;
+    // **Where the clock comes from and where it goes**, as MidiPort masks.
+    // Realtime is transport-level and reaches no bus (README, "MIDI"), so
+    // neither of these is a MidiInPort or a MidiOutPort: a cable carrying
+    // nothing but clock has no note bus, and a note bus fanning out to four
+    // synths is not four opinions about the tempo.
+    //
+    // `clock_in_mask` is the cables start, stop, continue and 0xF8 are taken
+    // from; 0 is every musical cable, the module's rule that an empty source
+    // mask is "any" (pc_source_mask below). `clock_out_mask` is the cables
+    // the module's own clock and transport leave by; 0 is nowhere, because
+    // sending clock nobody asked for down every wire is how a chain ends up
+    // with two masters.
+    uint8_t clock_in_mask;
+    uint8_t clock_out_mask;
     uint8_t pc_enabled;        // Program Change recall on / off (#11)
     uint8_t pc_channel;        // 1..16, 0 = omni
     uint8_t pc_source_mask;    // MidiPort bits the recall listens on
@@ -80,7 +94,7 @@ struct GlobalSettings {
     // whole patch up or down. Zero reads as KEY_DEFAULT_OCTAVE, the
     // module's rule that a stored zero is the default.
     uint8_t root_octave;
-    uint8_t reserved[18];      // #8's calibration lands here
+    uint8_t reserved[16];      // #8's calibration lands here
 };
 
 inline GlobalSettings default_globals(){
@@ -88,6 +102,8 @@ inline GlobalSettings default_globals(){
     g.clock_source = 0;                 // CLOCK_INTERNAL
     g.cv_ppqn = 4;
     g.bpm = CLOCK_DEFAULT_BPM;
+    g.clock_in_mask = 0;                // any musical cable
+    g.clock_out_mask = 0;               // nowhere until a user asks for it
     g.pc_enabled = 0;                   // off until a user asks for it (#11)
     g.pc_channel = 1;
     g.pc_source_mask = 0;

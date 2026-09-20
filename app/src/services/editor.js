@@ -158,6 +158,13 @@ export class Editor {
     this.render();
   }
 
+  // The clock's two cable masks, sent as the one message that carries them.
+  setClockRoute(changes) {
+    const g = Object.assign(this.state.globals, changes);
+    this.edit(() => this.device.setClockRoute(g.clockInMask, g.clockOutMask), 'clock routing');
+    this.render();
+  }
+
   setNrpn(changes) {
     const g = Object.assign(this.state.globals, changes);
     this.edit(() => this.device.setNrpn(g.nrpnEnabled, g.nrpnChannel, g.nrpnSourceMask), 'NRPN');

@@ -76,6 +76,11 @@ export function emptyGlobals() {
     clockSource: 0,
     cvPpqn: 4,
     bpm: P.CLOCK_DEFAULT_BPM,
+    // The cables the clock arrives on and leaves by (src/patch/patch_codec.h).
+    // Nothing for the input mask is every musical cable; nothing for the
+    // output mask is nowhere.
+    clockInMask: 0,
+    clockOutMask: 0,
     pcEnabled: 0,
     pcChannel: 1,
     pcSourceMask: 0,
@@ -172,6 +177,8 @@ function writeGlobals(w, g) {
   w.u8(g.clockSource);
   w.u8(g.cvPpqn);
   w.u16(g.bpm);
+  w.u8(g.clockInMask ?? 0);
+  w.u8(g.clockOutMask ?? 0);
   w.u8(g.pcEnabled);
   w.u8(g.pcChannel);
   w.u8(g.pcSourceMask);
@@ -182,7 +189,7 @@ function writeGlobals(w, g) {
   w.u8(g.scale ?? P.ScaleId.SCALE_CHROMATIC);
   w.u8(g.root ?? 0);
   w.u8(g.rootOctave ?? 0);
-  for (let i = 0; i < GLOBALS_BYTES - 14; i++) w.u8(0);
+  for (let i = 0; i < GLOBALS_BYTES - 16; i++) w.u8(0);
 }
 
 function readGlobals(r) {
@@ -190,6 +197,8 @@ function readGlobals(r) {
     clockSource: r.u8(),
     cvPpqn: r.u8(),
     bpm: r.u16(),
+    clockInMask: r.u8(),
+    clockOutMask: r.u8(),
     pcEnabled: r.u8(),
     pcChannel: r.u8(),
     pcSourceMask: r.u8(),
@@ -206,7 +215,7 @@ function readGlobals(r) {
     // module's default (src/midi/global_key.h).
     rootOctave: r.u8(),
   };
-  for (let i = 0; i < GLOBALS_BYTES - 14; i++) r.u8();
+  for (let i = 0; i < GLOBALS_BYTES - 16; i++) r.u8();
   return g;
 }
 

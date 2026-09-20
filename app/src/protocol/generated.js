@@ -41,7 +41,7 @@ export const NRPN_KEY_BASE = 15488;
 export const NRPN_RESERVED_BASE = 15504;
 export const NRPN_TRANSPORT_BASE = 15472;
 export const PARAM_CENTRE = 128;
-export const PATCH_FORMAT_VERSION = 8;
+export const PATCH_FORMAT_VERSION = 9;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
 export const PATCH_SLOTS = 4;
@@ -56,7 +56,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 12;
+export const SYSEX_PROTOCOL_VERSION = 13;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 320;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -94,6 +94,7 @@ export const SysexCommand = Object.freeze({
   SYSEX_SET_MACRO_DEST: 38,
   SYSEX_GET_MACRO_DEST: 39,
   SYSEX_GET_MACRO_STATE: 40,
+  SYSEX_SET_CLOCK_ROUTE: 41,
   SYSEX_RESTORE_DEFAULTS: 48,
   SYSEX_TRANSPORT: 49,
   SYSEX_PANIC: 50,

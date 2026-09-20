@@ -5,6 +5,7 @@
 #include "config.h"
 #include "bus/bus_manager.h"
 #include "clock/master_clock.h"
+#include "clock/clock_out.h"
 #include "node/node_pool.h"
 #include "node/schedule.h"
 #include "node/ports.h"
@@ -151,6 +152,11 @@ class MixedModeMaster {
 
         MasterClock& clock() { return clk; }
         const MasterClock& clock() const { return clk; }
+        // Where the clock leaves by (clock/clock_out.h). Configured from the
+        // patch's globals, exactly as the clock's source and its input mask
+        // are: routing the clock is a setting, not a node.
+        MidiClockOut& clock_out() { return clk_out; }
+        const MidiClockOut& clock_out() const { return clk_out; }
 
         // Diagnostics
         LoadError last_error() const { return error; }
@@ -210,6 +216,7 @@ class MixedModeMaster {
         IGpio& gpio;
         IMidiOut& midi;
         MasterClock clk;
+        MidiClockOut clk_out;
         BusManager bus;
         NodePool pool;
         Schedule sched;

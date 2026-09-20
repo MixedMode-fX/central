@@ -54,13 +54,18 @@ export function messageBytes(type, channel, d1, d2) {
 }
 
 // The module's cables a patch plays out of: the union of its MIDI out nodes'
-// target masks, as the ports the app names them by. Only these are offered a
-// route - eight rows, six of them for cables nothing is played on, is the
-// panel saying "no" six times.
-export function cablesOut(patch, caps = null) {
+// target masks and the clock's own output mask, as the ports the app names
+// them by. Only these are offered a route - eight rows, six of them for
+// cables nothing is played on, is the panel saying "no" six times.
+//
+// The clock's mask is in it because a cable carrying nothing but clock is
+// still a cable something is on: clocking a drum machine and playing it no
+// notes is an ordinary patch, and without this the row it needs to reach the
+// desk would never appear.
+export function cablesOut(patch, caps = null, globals = null) {
   const slots = patch?.midiOut ?? [];
   const limit = caps?.midiOut ?? slots.length;
-  let mask = 0;
+  let mask = globals?.clockOutMask ?? 0;
   for (const [i, port] of slots.entries()) if (i < limit) mask |= port.targetMask;
   return MUSICAL_PORTS.filter((cable) => (mask & cable.value) !== 0);
 }

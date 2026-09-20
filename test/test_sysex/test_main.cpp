@@ -1068,6 +1068,38 @@ static void test_globals_can_be_set_and_come_back_in_a_dump() {
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_TRUNCATED));
 }
 
+// Where the clock is taken from and where it is sent. Its own message, and
+// its own two bytes in the globals, because realtime reaches no bus and so
+// no MidiInPort or MidiOutPort can say it (src/patch/patch_codec.h).
+static void test_clock_routing_is_set_over_the_wire() {
+    Rig rig;
+    rig.patches.boot(0);
+    rig.send(SYSEX_SET_CLOCK_ROUTE, {mmMIDI_SERIAL_1, mmMIDI_USB_0, 0});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_SERIAL_1, rig.patches.globals().clock_in_mask);
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_USB_0, rig.patches.globals().clock_out_mask);
+    // And it reached the running clock, not just the stored settings.
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_SERIAL_1, rig.master.clock().in_mask());
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_USB_0, rig.master.clock_out().target_mask());
+
+    // The USB host cable is bit 7, which no data byte can carry: it rides in
+    // the third byte, one bit per mask.
+    rig.send(SYSEX_SET_CLOCK_ROUTE, {0, 0, 0x03});
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_HOST_1, rig.patches.globals().clock_in_mask);
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_HOST_1, rig.patches.globals().clock_out_mask);
+
+    // The control cable carries the protocol; a clock on it would be the
+    // patch taking the module away from its editor.
+    rig.send(SYSEX_SET_CLOCK_ROUTE, {0, MIDI_CONTROL_PORT, 0});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+    rig.send(SYSEX_SET_CLOCK_ROUTE, {MIDI_CONTROL_PORT, 0, 0});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+
+    rig.send(SYSEX_SET_CLOCK_ROUTE, {mmMIDI_SERIAL_1});
+    TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_TRUNCATED));
+}
+
 // The key (midi/global_key.h) rides on the same message as the clock: it is
 // patch state rather than a node's, so it is set the way the clock is and
 // comes back in the dump the way the clock does.
@@ -1466,6 +1498,7 @@ int main() {
     RUN_TEST(test_panic_over_sysex_sweeps_every_channel);
     RUN_TEST(test_restore_defaults_over_sysex);
     RUN_TEST(test_globals_can_be_set_and_come_back_in_a_dump);
+    RUN_TEST(test_clock_routing_is_set_over_the_wire);
     RUN_TEST(test_the_key_travels_with_the_globals);
     RUN_TEST(test_dump_chunks_stay_within_the_wire_budget);
     RUN_TEST(test_the_protocol_never_allocates);

@@ -326,6 +326,48 @@ test('stopping the transport releases what the clock was playing', () => {
   assert.equal(held(), 1, 'starting plays again');
 });
 
+// The clock, out of the cables its own mask names - the one path a MidiOutPort
+// cannot carry, because realtime reaches no bus. Driven over the protocol
+// exactly as the app drives it, so this is the wire the page uses.
+test('the clock is routed out of the cables the protocol names', () => {
+  const MANUFACTURER = E.emu_const_sysex_manufacturer();
+  const SET_CLOCK_ROUTE = 0x29, CLOCK = 0xf8, START = 0xfa, STOP = 0xfc;
+  const sysex = (command, args) => {
+    const bytes = [0xf0, MANUFACTURER, 0x00, command, E.emu_const_protocol_version(), ...args, 0xf7];
+    const mem = new Uint8Array(E.memory.buffer, E.emu_sysex_in_ptr(), E.emu_sysex_in_capacity());
+    mem.set(bytes);
+    E.emu_sysex_in(E.emu_const_control_port(), E.emu_sysex_in_ptr(), bytes.length, now);
+  };
+  const seen = (type) => sent.filter((m) => m.type === type);
+
+  assert.equal(E.emu_load(), 0);
+  E.emu_clock_stop();
+  E.emu_pass(now);
+  sent.length = 0;
+
+  // Nothing leaves until a cable is named.
+  E.emu_clock_start();
+  for (let i = 0; i < 2 * 24 * E.emu_const_clock_subtick(); i++) { E.emu_clock_advance(); E.emu_pass(now); now += 100; }
+  assert.equal(seen(CLOCK).length, 0, 'no clock out until one is asked for');
+
+  sysex(SET_CLOCK_ROUTE, [SERIAL_2, SERIAL_1, 0]);
+  E.emu_clock_stop();
+  E.emu_pass(now);
+  sent.length = 0;
+
+  // A quarter note of subticks is MASTER_PPQN clock bytes, on DIN 1 alone.
+  E.emu_clock_start();
+  E.emu_pass(now);
+  for (let i = 0; i < 24 * E.emu_const_clock_subtick(); i++) { E.emu_clock_advance(); E.emu_pass(now); now += 100; }
+  assert.equal(seen(START).length, 1, 'the transport went out too');
+  assert.equal(seen(CLOCK).length, E.emu_const_master_ppqn() + 1, 'the downbeat and a quarter of ticks');
+  assert.ok(seen(CLOCK).every((m) => m.target === SERIAL_1), 'only the cable that was named');
+
+  E.emu_clock_stop();
+  E.emu_pass(now);
+  assert.equal(seen(STOP).length, 1);
+});
+
 test('unload returns every jack to an input', () => {
   E.emu_patch_gate_port(2, GATE_OUT, 1);
   assert.equal(E.emu_load(), 0);

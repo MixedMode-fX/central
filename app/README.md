@@ -274,7 +274,16 @@ a timer and the animation frame run whatever passes the clock owes, so a late
 frame is caught up rather than lost and no fraction of a frame is dropped. A
 note is scheduled on the audio clock and on a Web MIDI port by its own
 simulated time plus `OUTPUT_LATENCY_MS`, never by when the pass that made it
-happened to run. Rebuilding the page is the one stall the page can see coming,
+happened to run. **A hidden page keeps running.** A browser gives one no
+animation frames and clamps its timers, so what runs the passes there is a
+worklet on the audio render thread, which is the one clock it does not throttle
+(`runtime/heartbeat.js`): tab away from a running patch and it is still playing
+when you come back, rather than frozen where you left it. It arms itself on the
+first press anywhere in the page, because audio starts from a gesture and
+nothing else is asked of you; where a browser will not have it — no
+AudioWorklet, or a phone that suspends a backgrounded tab's audio outright —
+the module stops with the page and skips forward on return.
+Rebuilding the page is the one stall the page can see coming,
 so the renderer runs the module ahead by what the last rebuilds cost before it
 starts one (`services/render.js`): an edit changes the patch and nothing about
 the beat.

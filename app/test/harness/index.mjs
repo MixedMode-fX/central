@@ -101,6 +101,72 @@ export function fakeStorage({ limit = Infinity } = {}) {
   };
 }
 
+// --- a page that can be looked away from ------------------------------------
+
+// A document with nothing on it but the two things the heartbeat cares about:
+// whether the page is hidden, and the events that say so. `hide()` and
+// `show()` are the user switching tabs.
+export function fakePage() {
+  const listeners = new Map();
+  return {
+    hidden: false,
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      listeners.set(type, (listeners.get(type) ?? []).filter((held) => held !== fn));
+    },
+    fire(type) { for (const fn of [...(listeners.get(type) ?? [])]) fn({ type }); },
+    hide() { this.hidden = true; this.fire('visibilitychange'); },
+    show() { this.hidden = false; this.fire('visibilitychange'); },
+  };
+}
+
+// An audio thread that renders when a test says so. The real one beats on its
+// own at real time, which is exactly what a test cannot wait for: `beats()` is
+// the quanta, and a suspended context renders none - which is the whole
+// question the heartbeat turns on.
+export function fakeAudioThread() {
+  const ports = [];
+  const log = [];
+  const ctx = {
+    state: 'suspended',
+    sampleRate: 48000,
+    destination: {},
+    audioWorklet: { addModule: async (url) => { log.push(`addModule ${typeof url}`); } },
+    resume: async () => { ctx.state = 'running'; log.push('resume'); },
+    suspend: async () => { ctx.state = 'suspended'; log.push('suspend'); },
+    close: async () => { ctx.state = 'closed'; log.push('close'); },
+  };
+  class FakeWorkletNode {
+    constructor(_ctx, name, options) {
+      this.name = name;
+      this.options = options;
+      this.port = { onmessage: null, postMessage() {} };
+      ports.push(this.port);
+    }
+    connect() {}
+    disconnect() {}
+  }
+  const had = { context: globalThis.AudioContext, node: globalThis.AudioWorkletNode };
+  globalThis.AudioContext = function AudioContext() { return ctx; };
+  globalThis.AudioWorkletNode = FakeWorkletNode;
+  return {
+    ctx, log, ports,
+    beats(n = 1) {
+      for (let i = 0; i < n; i++) {
+        if (ctx.state !== 'running') continue;
+        for (const port of ports) port.onmessage?.({ data: 0 });
+      }
+    },
+    restore() {
+      globalThis.AudioContext = had.context;
+      globalThis.AudioWorkletNode = had.node;
+    },
+  };
+}
+
 // --- a document ---------------------------------------------------------------
 
 // Enough of a document for `el()` to build an element and for a test to fire

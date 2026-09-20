@@ -64,11 +64,12 @@ import {
 } from '../src/core/layout.js';
 import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js';
 import { OUTPUT_LATENCY_MS } from '../src/runtime/module.js';
+import { Heartbeat } from '../src/runtime/heartbeat.js';
 import { OutputPanel, ClockPanel } from '../src/ui/tabs/MidiTab.js';
 import { CLOCK_MIDI_SOURCE } from '../src/protocol/names.js';
 import {
-  instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, listening,
-  patched, words, find, findAll, withDom, repoRoot,
+  instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, fakeAudioThread,
+  fakePage, listening, patched, words, find, findAll, withDom, repoRoot,
 } from './harness/index.mjs';
 
 // --- the library ------------------------------------------------------------
@@ -194,6 +195,79 @@ test('the module runs, keeps time and lights the LEDs', async () => {
     if (module.leds().green > 0) flashed = true;
   }
   assert.ok(flashed, 'the green LED never flashed the beat');
+});
+
+// --- the module while nobody is looking --------------------------------------
+
+// A hidden page gets no animation frames and has its timers clamped, so the
+// heartbeat (`runtime/heartbeat.js`) is what runs the passes there. Both
+// halves are checked: that the page's own clocks stand down when it is hidden,
+// and that a beat off the audio thread runs what they owed.
+test('the heartbeat runs the module while the page is hidden', async () => {
+  const { module } = await instantiate();
+  const page = fakePage();
+  const audio = fakeAudioThread();
+  const had = { doc: globalThis.document, frame: globalThis.requestAnimationFrame };
+  globalThis.document = page;
+  globalThis.requestAnimationFrame = () => 0;      // no frames here, as in a hidden page
+  const heartbeat = new Heartbeat(module, { doc: page });
+  try {
+    heartbeat.arm();
+    page.fire('pointerdown');                      // audio starts from a gesture, never on its own
+    await heartbeat.ready;
+    assert.equal(audio.ctx.state, 'suspended', 'a page being looked at holds no audio device open');
+
+    module.start();
+    page.hide();
+    await heartbeat.ready;
+    assert.equal(audio.ctx.state, 'running', 'hidden, the audio thread is the clock');
+
+    const before = module.now;
+    await new Promise((done) => setTimeout(done, 40));
+    assert.equal(module.now, before, 'the interval timer stands down in a hidden page');
+    audio.beats(1);
+    assert.ok(module.now - before >= 30_000,
+      `a beat runs the passes the wall clock owed, got ${(module.now - before) / 1000} ms`);
+
+    page.show();
+    await heartbeat.ready;
+    assert.equal(audio.ctx.state, 'suspended', 'back in the open, the device is let go again');
+    assert.equal(heartbeat.beating, false);
+    const back = module.now;
+    audio.beats(4);
+    assert.equal(module.now, back, 'a suspended context renders nothing to beat with');
+  } finally {
+    module.stop();
+    await heartbeat.close();
+    audio.restore();
+    globalThis.document = had.doc;
+    globalThis.requestAnimationFrame = had.frame;
+  }
+});
+
+// Every browser without an AudioWorklet, and every page nobody has pressed
+// yet. Neither is an error: the module stops with the page and skips forward
+// when it comes back, which is what it did before there was a heartbeat.
+test('no audio worklet is a heartbeat that says so rather than throwing', async () => {
+  const page = fakePage();
+  const had = { context: globalThis.AudioContext, node: globalThis.AudioWorkletNode };
+  globalThis.AudioContext = undefined;
+  globalThis.AudioWorkletNode = undefined;
+  const ticks = [];
+  const heartbeat = new Heartbeat({ tick: () => ticks.push(1) }, { doc: page });
+  try {
+    heartbeat.arm();
+    page.fire('keydown');
+    assert.equal(await heartbeat.ready, false);
+    assert.match(heartbeat.reason, /worklet/);
+    page.hide();
+    await heartbeat.ready;
+    assert.equal(heartbeat.beating, false);
+    assert.equal(ticks.length, 0);
+  } finally {
+    globalThis.AudioContext = had.context;
+    globalThis.AudioWorkletNode = had.node;
+  }
 });
 
 // --- the transport and the panic button -------------------------------------

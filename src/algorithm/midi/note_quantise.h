@@ -14,11 +14,12 @@
 // random source, an arpeggio spread over a wide chord, or a CV input, where
 // the pitch that arrives is arbitrary rather than a degree that was chosen.
 //
-// It has no parameters at all: what it snaps to is the key the module is in
-// (midi/global_key.h), and the only thing left to say about it is where the
-// root comes from - which is a cable, not a setting. A patched root inlet
-// outranks the key, because a cable is the most explicit thing a user can
-// say; last note-on wins, so one keyboard transposes a whole patch.
+// What it snaps to is not a parameter: it is the key the module is in
+// (midi/global_key.h), and where the root comes from is a cable rather than a
+// setting. A patched root inlet outranks the key, because a cable is the most
+// explicit thing a user can say; last note-on wins, so one keyboard
+// transposes a whole patch. Its one parameter says nothing about pitch at
+// all - only which channel what it plays leaves on.
 //
 // Changing the root or the scale under a sounding note is the failure this
 // class of algorithm is prone to: the release is taken from the ledger, so it
@@ -27,12 +28,19 @@
 //
 // Inlet 0 (note): the notes to quantise.
 // Inlet 1 (note, optional): the root. Note-ons set it; nothing else is read.
+//
+// params[0] channel: 0 keeps the channel each note arrived on (midi/note_event.h).
 class NoteQuantise : public Node{
     public:
+        static constexpr uint16_t P_CHANNEL = 0;
+        static constexpr uint8_t N_PARAMS = 1;
+
         static const AlgorithmDescriptor descriptor;
         explicit NoteQuantise(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
         void silence(BusManager& bus) override;
+        bool set_param(uint16_t index, uint8_t value) override;
+        uint8_t get_param(uint16_t index) const override;
 
         // The scale and root actually played: the key's, unless a cable has
         // said otherwise.
@@ -48,6 +56,7 @@ class NoteQuantise : public Node{
         // is still what the node is in.
         static constexpr uint8_t NO_ROOT = 0xFF;
         uint8_t root;
+        uint8_t channel;          // 0 keeps the source's
         SoundingNotes sounding;
 };
 

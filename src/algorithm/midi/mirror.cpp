@@ -14,6 +14,7 @@ static const ParamDescriptor PARAMS[Mirror::N_PARAMS] = {
     {"amount", 1, 100, Mirror::DEFAULT_AMOUNT, PARAM_PERCENT, nullptr},
     {"snap",   0, 1,   0, PARAM_BOOL,   nullptr},
     {"seed",   0, 255, 0, PARAM_NUMBER, nullptr},
+    {"channel", 0, 16, 0, PARAM_CHANNEL_OUT, nullptr},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Mirror::N_PARAMS, PARAMS}};
 
@@ -43,6 +44,7 @@ Mirror::Mirror(const NodeConfig& config) :
                                    : DEFAULT_AMOUNT),
     snap(config.params[P_SNAP] != 0),
     seed(config.params[P_SEED]),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     // Seeded from entropy when `seed` is zero and from the byte otherwise, so
     // a patch can be exactly reproducible or never the same twice.
     rng(config.params[P_SEED] ? (uint32_t)(config.params[P_SEED] * 2654435761u) : entropy::seed()),
@@ -69,6 +71,9 @@ bool Mirror::set_param(uint16_t index, uint8_t value){
             seed = value;
             rng.reseed(value ? (uint32_t)(value * 2654435761u) : entropy::seed());
             return true;
+        case P_CHANNEL:
+            if (value > 16) return false;
+            channel = value; return true;
         default: return false;
     }
 }
@@ -79,6 +84,7 @@ uint8_t Mirror::get_param(uint16_t index) const {
         case P_AMOUNT: return amount;
         case P_SNAP:   return snap ? 1u : 0u;
         case P_SEED:   return seed;
+        case P_CHANNEL: return channel;
         default: return 0;
     }
 }
@@ -131,7 +137,7 @@ void Mirror::process(BusManager& bus, uint32_t){
             continue;
         }
         if (!is_note_on(e)){
-            bus.note_write(out, e);
+            bus.note_write(out, readdressed(e, channel));
             continue;
         }
         // A note that is not reflected still goes through the ledger, so the
@@ -140,7 +146,7 @@ void Mirror::process(BusManager& bus, uint32_t){
         // again.
         const uint8_t note = rng.chance(amount) ? reflect(e.data1) : e.data1;
         if (note == 0xFF) continue;                    // dropped, and its note-off with it
-        sounding.emit(bus, out, e.data1, note, e.data2, e.channel);
+        sounding.emit(bus, out, e.data1, note, e.data2, out_channel(channel, e.channel));
     }
 }
 

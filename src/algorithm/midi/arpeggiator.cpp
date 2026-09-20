@@ -7,21 +7,23 @@ static const Domain OUT[1] = {Domain::Note};
 
 static const char* const MODE_NAMES[5] = {"up", "down", "up-down", "random", "as played"};
 static const char* const CHORD_NAMES[2] = {"restart", "run on"};
-static const ParamDescriptor PARAMS[6] = {
+static const ParamDescriptor PARAMS[Arpeggiator::N_PARAMS] = {
     {"mode",      0, 4,                       0, PARAM_ENUM,   MODE_NAMES},
     {"octaves",   1, Arpeggiator::MAX_OCTAVES, 1, PARAM_NUMBER, nullptr},
     {"gate",      0, 255,                     0, PARAM_MILLIS, nullptr},
     {"velocity",  0, 127,                     0, PARAM_NUMBER, nullptr},
     {"hold",      0, 1,                       0, PARAM_BOOL,   nullptr},
     {"new chord", 0, 1,                       0, PARAM_ENUM,   CHORD_NAMES},
+    {"channel",   0, 16,                      0, PARAM_CHANNEL_OUT, nullptr},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 6, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, Arpeggiator::N_PARAMS, PARAMS}};
 
 static const char* const IN_NAMES[4] = {"chord in", "advance", "reset", "hold"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor Arpeggiator::descriptor = {
-    ALGO_ARPEGGIATOR, "Arpeggiator", 4, 2, 1, 6, IN, OUT, sizeof(Arpeggiator), false, construct_node<Arpeggiator>,
+    ALGO_ARPEGGIATOR, "Arpeggiator", 4, 2, 1, Arpeggiator::N_PARAMS, IN, OUT,
+    sizeof(Arpeggiator), false, construct_node<Arpeggiator>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
     "Plays a held chord one note per advance edge, over a range of octaves. Hold latches it.",
     CATEGORY_MIDI };
@@ -44,6 +46,9 @@ bool Arpeggiator::set_param(uint16_t index, uint8_t value){
         // operation as a footswitch going down.
         case 4: hold = value ? 1u : 0u; return true;
         case 5: if (value > 1) return false; run_on = value; return true;
+        // The sounding step was recorded with the channel it went out on, so
+        // this is heard from the next step and strands nothing.
+        case 6: if (value > 16) return false; channel = value; return true;
         default: return false;
     }
 }
@@ -56,6 +61,7 @@ uint8_t Arpeggiator::get_param(uint16_t index) const {
         case 3: return fixed_velocity;
         case 4: return hold;
         case 5: return run_on;
+        case 6: return channel;
         default: return 0;
     }
 }
@@ -72,6 +78,7 @@ Arpeggiator::Arpeggiator(const NodeConfig& config) :
     fixed_velocity(config.params[3]),
     hold(config.params[4] ? 1u : 0u),
     run_on(config.params[5] ? 1u : 0u),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     cursor(0), playing(HeldNotes::NONE), started_us(0),
     descending(false), last_advance(false), last_reset(false), holding(false),
     down{0, 0, 0, 0}, down_count(0),
@@ -118,11 +125,13 @@ void Arpeggiator::release(BusManager& bus){
 
 // Turns a position in the figure into a note. The figure is the held notes in
 // the configured order, repeated once per octave.
-void Arpeggiator::note_for(uint8_t index, uint8_t& note, uint8_t& velocity, uint8_t& channel) const {
+// `from` is the channel the key that caused this step arrived on, which the
+// caller overrides or keeps (midi/note_event.h).
+void Arpeggiator::note_for(uint8_t index, uint8_t& note, uint8_t& velocity, uint8_t& from) const {
     const uint8_t count = held.count();
     note = HeldNotes::NONE;
     velocity = 0;
-    channel = 1;
+    from = 1;
     if (count == 0) return;
 
     const uint8_t octave = (uint8_t)((index / count) % octaves);
@@ -134,7 +143,7 @@ void Arpeggiator::note_for(uint8_t index, uint8_t& note, uint8_t& velocity, uint
     if (shifted > 127) return;                       // skipped, never wrapped
     note = (uint8_t)shifted;
     velocity = fixed_velocity ? fixed_velocity : h.velocity;
-    channel = h.channel;
+    from = h.channel;
 }
 
 void Arpeggiator::step(BusManager& bus, uint32_t now_us){
@@ -172,12 +181,12 @@ void Arpeggiator::step(BusManager& bus, uint32_t now_us){
             break;
     }
 
-    uint8_t note = 0, velocity = 0, channel = 1;
-    note_for(index, note, velocity, channel);
+    uint8_t note = 0, velocity = 0, from = 1;
+    note_for(index, note, velocity, from);
     if (note == HeldNotes::NONE) return;             // an octave off the top
     // The ledger is keyed on the note as sent: two steps can produce the same
     // pitch from different octaves, and each still gets its own release.
-    if (sounding.emit(bus, out, note, note, velocity, channel)){
+    if (sounding.emit(bus, out, note, note, velocity, out_channel(channel, from))){
         playing = note;
         started_us = now_us;
     }

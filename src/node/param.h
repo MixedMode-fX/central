@@ -21,9 +21,19 @@ enum ParamKind : uint8_t {
     PARAM_SIGNED,       // an int8 stored in the byte: 128..255 are -128..-1
     PARAM_MILLIS,
     PARAM_PERCENT,
-    PARAM_CHANNEL,      // MIDI channel, 1..16
+    PARAM_CHANNEL,      // MIDI channel, 1..16 (0, where a descriptor allows it, is omni)
     PARAM_CENTRED,      // a byte biased by PARAM_CENTRE: the value is stored - 128
+    PARAM_CHANNEL_OUT,  // the channel a node sends on; 0 keeps the incoming one
 };
+
+// **A channel a node *reads* and a channel a node *sends on* are not the same
+// control, and zero is where they part.** Both are a number from 1 to 16 with
+// a spare zero, so one kind would render both - and would have to pick one
+// word for that zero. On an input it means omni, every channel at once; on an
+// output there is no such thing, and it means the message leaves on the
+// channel it arrived on. An editor showing "omni" over a transposer's output
+// is telling the player the opposite of what the byte does, so the two kinds
+// are separate and each says its own zero.
 
 // The zero of a PARAM_CENTRED byte.
 //

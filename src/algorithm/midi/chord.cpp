@@ -54,6 +54,7 @@ static const ParamDescriptor PARAMS[Chord::N_PARAMS] = {
     {"inversion", 0, Chord::MAX_INVERSION,     0,          PARAM_ENUM,        INVERSION_NAMES},
     {"octave",    0, KEY_MAX_OCTAVE, 0,           PARAM_ENUM,        PARAM_OCTAVE_NAMES},
     {"velocity",  1, 127,               Chord::DEFAULT_VELOCITY, PARAM_NUMBER, nullptr},
+    {"channel",   0, 16,                0,           PARAM_CHANNEL_OUT, nullptr},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, Chord::N_PARAMS, PARAMS}};
 
@@ -106,6 +107,10 @@ bool Chord::set_param(uint16_t index, uint8_t value){
             if (value > 127) return false;
             velocity = value ? value : DEFAULT_VELOCITY;
             break;
+        case P_CHANNEL:
+            if (value > 16) return false;
+            channel = value;
+            break;
         default:
             return false;
     }
@@ -120,6 +125,7 @@ uint8_t Chord::get_param(uint16_t index) const {
         case P_INVERSION: return inversion;
         case P_OCTAVE:    return octave;
         case P_VELOCITY:  return velocity;
+        case P_CHANNEL:   return channel;
         default:          return 0;
     }
 }
@@ -133,6 +139,7 @@ Chord::Chord(const NodeConfig& config) :
     inversion(config.params[P_INVERSION] <= MAX_INVERSION ? config.params[P_INVERSION] : (uint8_t)0),
     octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     velocity(config.params[P_VELOCITY] ? config.params[P_VELOCITY] : DEFAULT_VELOCITY),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     voiced(NO_NOTE), voiced_mask(0), dirty(false), sounding()
 {}
 
@@ -199,14 +206,14 @@ void Chord::shape(int16_t* pitch, uint8_t n) const {
 // Every voice of one chord, recorded against `source` so that one release
 // takes all of it down at the pitches it was actually sent at.
 void Chord::emit_chord(BusManager& bus, uint8_t source, uint8_t base, uint8_t tonic,
-                       uint16_t mask, uint8_t velocity_out, uint8_t channel){
+                       uint16_t mask, uint8_t velocity_out, uint8_t send_on){
     int16_t pitch[MAX_VOICES];
     const uint8_t n = build(base, tonic, mask, pitch);
     shape(pitch, n);
     for (uint8_t v = 0; v < n; v++){
         if (pitch[v] < 0 || pitch[v] > 127) continue;          // off the keyboard
         if (v > 0 && pitch[v] == pitch[v - 1]) continue;       // no unisons; sorted, so adjacent
-        sounding.emit(bus, out, source, (uint8_t)pitch[v], velocity_out, channel);
+        sounding.emit(bus, out, source, (uint8_t)pitch[v], velocity_out, send_on);
     }
 }
 
@@ -225,7 +232,7 @@ void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t tonic){
     // Re-voicing is a release and a new chord, both from the ledger, so
     // editing one while it drones cannot strand a note.
     sounding.release_all(bus, out);
-    emit_chord(bus, base, base, tonic, mask, velocity, 1);
+    emit_chord(bus, base, base, tonic, mask, velocity, out_channel(channel, FREE_CHANNEL));
     voiced = base;
     voiced_mask = mask;
     dirty = false;
@@ -247,7 +254,7 @@ void Chord::process(BusManager& bus, uint32_t){
             continue;
         }
         if (!is_note_on(e)){
-            bus.note_write(out, e);
+            bus.note_write(out, readdressed(e, channel));
             continue;
         }
         // The root voice, in key: the note itself in a chromatic one, and the
@@ -256,7 +263,7 @@ void Chord::process(BusManager& bus, uint32_t){
         // (midi/global_key.h). The ledger records the note that *arrived*, so
         // its own note-off still takes the chord down wherever it was put.
         const uint8_t base = scale_quantise(global_key::placed(e.data1, octave), tonic, mask);
-        emit_chord(bus, e.data1, base, tonic, mask, e.data2, e.channel);
+        emit_chord(bus, e.data1, base, tonic, mask, e.data2, out_channel(channel, e.channel));
     }
 }
 

@@ -1334,7 +1334,15 @@ test('parameters are filed by what they do, on every node', async () => {
       for (const group of d.params) {
         if (group?.label && !labels.includes(group.label)) labels.push(group.label);
       }
-      assert.deepEqual(sections.map((s) => s.key), labels, `${d.name}: the firmware's order`);
+      // The labelled groups first, in the order the firmware declares them.
+      // A descriptor may label only some of its groups - Retrigger labels
+      // what a strike is and leaves its output channel out of it - and what
+      // it leaves unlabelled follows, sorted into the standard sections.
+      const keys = sections.map((s) => s.key);
+      assert.deepEqual(keys.slice(0, labels.length), labels, `${d.name}: the firmware's order`);
+      const rest = keys.slice(labels.length).map((k) => order.indexOf(k));
+      assert.ok(rest.every((i) => i >= 0), `${d.name}: the rest are standard sections`);
+      assert.deepEqual(rest, [...rest].sort((a, b) => a - b), `${d.name}: the rest in order`);
     }
   }
 });

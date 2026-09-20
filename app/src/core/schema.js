@@ -66,6 +66,8 @@ const KIND_NOTE = {
   [P.ParamKind.PARAM_MILLIS]: 'milliseconds',
   [P.ParamKind.PARAM_PERCENT]: 'percent',
   [P.ParamKind.PARAM_CHANNEL]: 'a MIDI channel 1..16, or 0 for omni',
+  [P.ParamKind.PARAM_CHANNEL_OUT]:
+    'the MIDI channel this node sends on: 1..16, or 0 to keep the one each note arrived on',
 };
 
 // What a shared parameter definition is called - see `paramLibrary` - so that
@@ -83,6 +85,7 @@ const KIND_SLUG = {
   [P.ParamKind.PARAM_PERCENT]: 'percent',
   [P.ParamKind.PARAM_CHANNEL]: 'channel',
   [P.ParamKind.PARAM_CENTRED]: 'centred',
+  [P.ParamKind.PARAM_CHANNEL_OUT]: 'channel_out',
 };
 
 const defaultText = (pd) => {

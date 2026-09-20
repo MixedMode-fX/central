@@ -6,42 +6,48 @@ static const Domain IN[1] = {Domain::Note};
 static const Domain OUT[1] = {Domain::Note};
 
 static const char* const CURVE_NAMES[4] = {"linear", "soft", "hard", "fixed"};
-static const ParamDescriptor PARAMS[4] = {
+static const ParamDescriptor PARAMS[VelocityCurve::N_PARAMS] = {
     {"curve",  0, 3,   0,   PARAM_ENUM,    CURVE_NAMES},
     {"scale",  1, 255, 100, PARAM_PERCENT, nullptr},
     {"offset", 0, 255, 0,   PARAM_SIGNED,  nullptr},
     {"fixed",  1, 127, 100, PARAM_NUMBER,  nullptr},
+    {"channel", 0, 16,   0, PARAM_CHANNEL_OUT, nullptr},
 };
-static const ParamGroup GROUPS[1] = {{0, 1, 4, PARAMS}};
+static const ParamGroup GROUPS[1] = {{0, 1, VelocityCurve::N_PARAMS, PARAMS}};
 
 static const char* const IN_NAMES[1] = {"notes in"};
 static const char* const OUT_NAMES[1] = {"notes out"};
 
 const AlgorithmDescriptor VelocityCurve::descriptor = {
-    ALGO_VELOCITY, "VelocityCurve", 1, 1, 1, 4, IN, OUT, sizeof(VelocityCurve), false, construct_node<VelocityCurve>,
+    ALGO_VELOCITY, "VelocityCurve", 1, 1, 1, VelocityCurve::N_PARAMS, IN, OUT,
+    sizeof(VelocityCurve), false, construct_node<VelocityCurve>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
     "Reshapes note-on velocity. Pitch is untouched and no note is ever dropped.",
     CATEGORY_MIDI };
 
-// Velocity never changes a pitch and never drops a note, so this is the one
-// modifier whose parameters cannot strand anything: a note-off carries
-// velocity 0 through unchanged whatever the curve has become.
+// Velocity never changes a pitch and never drops a note, so none of the four
+// velocity controls can strand anything: a note-off carries velocity 0
+// through unchanged whatever the curve has become. `channel` is the one that
+// could, and does not, because the note-off is sent where the table says the
+// note-on went rather than where this byte now points.
 bool VelocityCurve::set_param(uint16_t index, uint8_t value){
     switch (index){
-        case 0: if (value > CURVE_FIXED) return false; curve = value; return true;
-        case 1: scale = value ? value : 100; return true;
-        case 2: offset = (int8_t)value; return true;
-        case 3: fixed = value ? value : 100; return true;
+        case P_CURVE: if (value > CURVE_FIXED) return false; curve = value; return true;
+        case P_SCALE: scale = value ? value : 100; return true;
+        case P_OFFSET: offset = (int8_t)value; return true;
+        case P_FIXED: fixed = value ? value : 100; return true;
+        case P_CHANNEL: if (value > 16) return false; channel = value; return true;
         default: return false;
     }
 }
 
 uint8_t VelocityCurve::get_param(uint16_t index) const {
     switch (index){
-        case 0: return curve;
-        case 1: return scale;
-        case 2: return (uint8_t)offset;
-        case 3: return fixed;
+        case P_CURVE:   return curve;
+        case P_SCALE:   return scale;
+        case P_OFFSET:  return (uint8_t)offset;
+        case P_FIXED:   return fixed;
+        case P_CHANNEL: return channel;
         default: return 0;
     }
 }
@@ -49,10 +55,12 @@ uint8_t VelocityCurve::get_param(uint16_t index) const {
 VelocityCurve::VelocityCurve(const NodeConfig& config) :
     in(config.in_bus[0]),
     out(config.out_bus[0]),
-    curve(config.params[0]),
-    scale(config.params[1] ? config.params[1] : 100),
-    offset((int8_t)config.params[2]),
-    fixed(config.params[3] ? config.params[3] : 100)
+    curve(config.params[P_CURVE]),
+    scale(config.params[P_SCALE] ? config.params[P_SCALE] : 100),
+    offset((int8_t)config.params[P_OFFSET]),
+    fixed(config.params[P_FIXED] ? config.params[P_FIXED] : 100),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
+    sent_on{}
 {}
 
 // Integer square root, for the soft curve. No floating point on a signal path.
@@ -85,7 +93,19 @@ void VelocityCurve::process(BusManager& bus, uint32_t){
     const uint8_t n = bus.note_count(in);
     for (uint8_t i = 0; i < n; i++){
         MidiEvent e = bus.note_read(in, i);
-        if (is_note_on(e)) e.data2 = apply(e.data2);
+        const uint8_t pitch = (uint8_t)(e.data1 & 0x7F);
+        if (is_note_on(e)){
+            e.data2 = apply(e.data2);
+            e.channel = out_channel(channel, e.channel);
+            sent_on[pitch] = e.channel;
+        } else if (is_note_off(e)){
+            // Where the note-on went, not where this node now points: a note
+            // released on a channel it never sounded on never stops.
+            e.channel = sent_on[pitch] ? sent_on[pitch] : out_channel(channel, e.channel);
+            sent_on[pitch] = 0;
+        } else {
+            e.channel = out_channel(channel, e.channel);
+        }
         bus.note_write(out, e);
     }
 }

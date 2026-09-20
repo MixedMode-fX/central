@@ -52,7 +52,8 @@ const SECTION_WORDS = {
 export function paramSection(pd) {
   const name = String(pd.name ?? '').toLowerCase();
   if (pd.kind === P.ParamKind.PARAM_PITCH || pd.kind === P.ParamKind.PARAM_PITCH_CLASS) return 'pitch';
-  if (pd.kind === P.ParamKind.PARAM_CHANNEL) return 'midi';
+  if (pd.kind === P.ParamKind.PARAM_CHANNEL
+      || pd.kind === P.ParamKind.PARAM_CHANNEL_OUT) return 'midi';
   if (pd.kind === P.ParamKind.PARAM_MILLIS) return 'time';
   for (const section of PARAM_SECTIONS) {
     const words = SECTION_WORDS[section.key];

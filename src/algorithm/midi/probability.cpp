@@ -5,29 +5,39 @@
 static const Domain IN[2] = {Domain::Note, Domain::Gate};
 static const Domain OUT[3] = {Domain::Note, Domain::Note, Domain::Gate};
 
-// One group, labelled, because all three controls are one mechanism and an
-// editor sorting them by name would put `condition` under "other"
-// (app/src/views.js).
-static const ParamGroup GROUPS[1] = {
+// The rule's three controls are one mechanism and are labelled as one, so an
+// editor does not sort them by name and file `condition` under "other"
+// (app/src/views.js). The channel is not part of that mechanism and is left
+// out of the label, so it lands under the editor's own MIDI heading.
+static const ParamDescriptor CHANNEL_PARAM[1] = {
+    {"channel", 0, 16, 0, PARAM_CHANNEL_OUT, nullptr},
+};
+static const ParamGroup GROUPS[2] = {
     {0, 1, TrigCondition::N_PARAMS, TrigCondition::PARAMS, "chance"},
+    {Probability::P_CHANNEL, 1, 1, CHANNEL_PARAM},
 };
 
 static const char* const IN_NAMES[2] = {"notes in", "reset"};
 static const char* const OUT_NAMES[3] = {"notes out", "dropped", "decision"};
 
 const AlgorithmDescriptor Probability::descriptor = {
-    ALGO_PROBABILITY, "Probability", 2, 1, 3, TrigCondition::N_PARAMS, IN, OUT,
+    ALGO_PROBABILITY, "Probability", 2, 1, 3, Probability::N_PARAMS, IN, OUT,
     sizeof(Probability), false, construct_node<Probability>,
-    GROUPS, 1, IN_NAMES, OUT_NAMES,
+    GROUPS, 2, IN_NAMES, OUT_NAMES,
     "Lets each note through under a chance and a condition, and keeps its note-off with it.",
     CATEGORY_MIDI };
 
+// Both ledgers release on the channel they recorded, so this may move under
+// a held note.
 bool Probability::set_param(uint16_t index, uint8_t value){
-    return condition.set_param(index, value);
+    if (index != P_CHANNEL) return condition.set_param(index, value);
+    if (value > 16) return false;
+    channel = value;
+    return true;
 }
 
 uint8_t Probability::get_param(uint16_t index) const {
-    return condition.get_param(index);
+    return index == P_CHANNEL ? channel : condition.get_param(index);
 }
 
 Probability::Probability(const NodeConfig& config) :
@@ -35,6 +45,7 @@ Probability::Probability(const NodeConfig& config) :
     out(config.out_bus[0]),
     dropped_out(config.out_bus[1]),
     decision_out(config.out_bus[2]),
+    channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     reset_in(config.in_bus[1]),
     condition(config.params),
     sounding(),
@@ -59,17 +70,18 @@ void Probability::process(BusManager& bus, uint32_t){
             continue;
         }
         if (!is_note_on(e)){
-            bus.note_write(out, e);
+            bus.note_write(out, readdressed(e, channel));
             continue;
         }
         if (!condition.evaluate()){
             // Unrecorded when nothing is patched there: a ledger that filled
             // up with notes nobody can hear would refuse the ones that can.
             if (dropped_out != NO_BUS)
-                refused.emit(bus, dropped_out, e.data1, e.data1, e.data2, e.channel);
+                refused.emit(bus, dropped_out, e.data1, e.data1, e.data2,
+                             out_channel(channel, e.channel));
             continue;
         }
-        sounding.emit(bus, out, e.data1, e.data1, e.data2, e.channel);
+        sounding.emit(bus, out, e.data1, e.data1, e.data2, out_channel(channel, e.channel));
     }
 
     // Latched, not a pulse: a reader clocked in some other pass has to see

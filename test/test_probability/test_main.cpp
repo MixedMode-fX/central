@@ -670,13 +670,14 @@ static void test_a_fill_button_is_a_gate_and_an_and() {
 
 // The point of the shared object: the same three parameters, in the same
 // order, with the same descriptors, so a preset's bytes and an editor's
-// controls mean the same thing on either node.
+// controls mean the same thing on either node. What the note node adds after
+// the block is its own - a gate has no channel to send on.
 static void test_both_nodes_expose_one_block() {
     const AlgorithmDescriptor* notes = registry::find(ALGO_PROBABILITY);
     const AlgorithmDescriptor* gates = registry::find(ALGO_GATE_PROBABILITY);
     TEST_ASSERT_NOT_NULL(notes);
     TEST_ASSERT_NOT_NULL(gates);
-    TEST_ASSERT_EQUAL(TrigCondition::N_PARAMS, notes->n_params);
+    TEST_ASSERT_EQUAL(Probability::N_PARAMS, notes->n_params);
     TEST_ASSERT_EQUAL(TrigCondition::N_PARAMS, gates->n_params);
     for (uint16_t i = 0; i < TrigCondition::N_PARAMS; i++) {
         const ParamDescriptor* a = registry::param(*notes, i);
@@ -684,6 +685,13 @@ static void test_both_nodes_expose_one_block() {
         TEST_ASSERT_NOT_NULL(a);
         TEST_ASSERT_EQUAL_PTR(a, b);                     // literally one table
     }
+    // The block is the whole of the gate node and all but the last parameter
+    // of the note node, so the shared bytes keep their meaning on both.
+    TEST_ASSERT_EQUAL(TrigCondition::N_PARAMS, Probability::P_CHANNEL);
+    const ParamDescriptor* channel = registry::param(*notes, Probability::P_CHANNEL);
+    TEST_ASSERT_NOT_NULL(channel);
+    TEST_ASSERT_EQUAL_STRING("channel", channel->name);
+    TEST_ASSERT_NULL(registry::param(*gates, TrigCondition::N_PARAMS));
     // The reset inlet and the latch outlet are on both, by the same name,
     // and only the signal inlet is required.
     TEST_ASSERT_EQUAL_STRING("reset", notes->in_name[1]);

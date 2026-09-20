@@ -20,7 +20,7 @@ static const ParamDescriptor PARAMS[11] = {
     {"decay",    0, 100, 70,  PARAM_PERCENT, nullptr},
     {"chance",   0, 100, 100, PARAM_PERCENT, nullptr},
     {"spread",   0, 255, 0,   PARAM_SIGNED,  nullptr},
-    {"channel",  0, 16, 0, PARAM_CHANNEL, nullptr},
+    {"channel",  0, 16, 0, PARAM_CHANNEL_OUT, nullptr},
     {"dry",      NoteDelay::ND_PASS, NoteDelay::ND_DRYS, NoteDelay::ND_PASS, PARAM_ENUM, DRY_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 11, PARAMS}};

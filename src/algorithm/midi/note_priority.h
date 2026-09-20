@@ -25,6 +25,9 @@ class NotePriority : public Node{
             PRIORITY_LATEST = NOTE_PRIORITY_LATEST,
         };
 
+        static constexpr uint16_t P_MODE = 0, P_CHANNEL = 1;
+        static constexpr uint8_t N_PARAMS = 2;
+
         static const AlgorithmDescriptor descriptor;
         explicit NotePriority(const NodeConfig& config);
         void process(BusManager& bus, uint32_t) override;
@@ -40,6 +43,7 @@ class NotePriority : public Node{
         uint8_t in;
         uint8_t out;
         uint8_t mode;
+        uint8_t channel;          // 0 keeps the source's
         uint8_t playing;          // HeldNotes::NONE when silent
         HeldNotes held;
         SoundingNotes sounding;

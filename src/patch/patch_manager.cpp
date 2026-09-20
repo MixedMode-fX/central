@@ -107,7 +107,12 @@ ApplyError PatchManager::commit_gate_port(uint8_t jack, const GatePortConfig& co
         leds.error(now_us);
         return error = APPLY_INVALID;
     }
-    live.gate_ports[jack] = config;
+    // A port out of use is stored on no bus. The node has released its own
+    // (node/ports.h); a stored patch that kept them would hand a saved slot
+    // back with a wire on a jack nothing is patched to, and a dump would
+    // report one the module is not reading.
+    live.gate_ports[jack] = config.direction == GATE_PORT_UNUSED
+        ? GatePortConfig{GATE_PORT_UNUSED, BusSet{}} : config;
     store.mark_dirty(now_us);
     return error = APPLY_OK;
 }
@@ -117,7 +122,8 @@ ApplyError PatchManager::commit_midi_in(uint8_t index, const MidiInConfig& confi
         leds.error(now_us);
         return error = APPLY_INVALID;
     }
-    live.midi_in[index] = config;
+    live.midi_in[index] = config.source_mask == 0
+        ? MidiInConfig{0, config.channel, BusSet{}} : config;
     store.mark_dirty(now_us);
     return error = APPLY_OK;
 }
@@ -127,7 +133,8 @@ ApplyError PatchManager::commit_midi_out(uint8_t index, const MidiOutConfig& con
         leds.error(now_us);
         return error = APPLY_INVALID;
     }
-    live.midi_out[index] = config;
+    live.midi_out[index] = config.target_mask == 0
+        ? MidiOutConfig{0, config.channel, BusSet{}} : config;
     store.mark_dirty(now_us);
     return error = APPLY_OK;
 }

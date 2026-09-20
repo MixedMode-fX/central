@@ -360,13 +360,15 @@ export function busWords(buses) {
 }
 
 // The flip, made to the patch. Two ports change: the one being left goes back
-// to unused, and the one being taken up gets everything the other carried.
+// to unused *and off every bus* - a port out of use is on no bus, the same
+// rule `planJackDirection` keeps for a jack - and the one being taken up gets
+// everything the other carried.
 export function applyPortFlip(patch, plan) {
   if (!plan?.ok) return null;
   const from = plan.from.isOut ? patch.midiOut : patch.midiIn;
   const to = plan.to.isOut ? patch.midiOut : patch.midiIn;
   from[plan.from.index] = {
-    ...from[plan.from.index],
+    ...from[plan.from.index], buses: [],
     [plan.from.isOut ? 'targetMask' : 'sourceMask']: 0,
   };
   to[plan.to.index] = {
@@ -492,6 +494,70 @@ export function applyWrite(patch, { blockId, at, isOutlet, buses, modSlot }) {
   if (!port) return null;
   port.buses = set;
   return { kind, index, port };
+}
+
+// --- taking a block out of the patch ----------------------------------------
+//
+// **A wire has two ends, and a block leaving lets go of only one of them.** A
+// bus is the connection, so a source whose last destination has gone is still
+// speaking on the bus it was speaking on, and an inlet whose only source has
+// gone is still listening to it. Neither is drawn - there is no arrow left to
+// draw - so the patch quietly disagrees with the canvas, and the *next* drag
+// from that source lands back on the bus its old destination left behind
+// instead of claiming a free one: a connection that cannot be moved, made out
+// of a wire nobody can see.
+//
+// So of the buses the block leaving was on, the ones with no reader left are
+// dropped from their writers and the ones with no writer left are dropped
+// from their readers. A bus that still has both ends is somebody else's
+// connection and is untouched, which is what keeps deleting one of two
+// destinations a fan-out losing an arrow rather than a source going quiet.
+
+// Every (domain, bus) one block is on, both ends of it: what a removal takes
+// out of the patch, asked before the block goes.
+export function busesOf(blocks, blockId) {
+  const block = findBlock(blocks, blockId);
+  if (!block) return [];
+  return [...block.inlets, ...block.outlets].flatMap(
+    (port) => (port.buses ?? []).map((bus) => ({ domain: port.domain, bus })));
+}
+
+// The ports left holding one end of a wire, and what they are on once they
+// have let go of it. `blocks` is the patch *after* the removal and `was` is
+// what `busesOf` said before it. A port on two dead buses comes back once,
+// off both.
+export function planDanglingWires(blocks, was) {
+  const writers = new Map();
+  const readers = new Map();
+  const index = (into, block, port, isOutlet) => {
+    for (const bus of port.buses ?? []) {
+      const k = key(port.domain, bus);
+      if (!into.has(k)) into.set(k, []);
+      into.get(k).push({ blockId: block.id, at: port.at, isOutlet,
+                         modSlot: port.modSlot, buses: port.buses });
+    }
+  };
+  for (const block of blocks) {
+    for (const port of block.outlets) index(writers, block, port, true);
+    for (const port of block.inlets) index(readers, block, port, false);
+  }
+
+  const cut = new Map();
+  for (const { domain, bus } of was) {
+    const k = key(domain, bus);
+    const ends = writers.get(k) ?? [];
+    const other = readers.get(k) ?? [];
+    if (ends.length && other.length) continue;
+    for (const port of [...ends, ...other]) {
+      const id = `${port.blockId}#${port.isOutlet ? 'out' : 'in'}${port.at}`;
+      if (!cut.has(id)) cut.set(id, { port, buses: new Set() });
+      cut.get(id).buses.add(bus);
+    }
+  }
+  return [...cut.values()].map(({ port, buses }) => ({
+    blockId: port.blockId, at: port.at, isOutlet: port.isOutlet, modSlot: port.modSlot,
+    buses: port.buses.filter((bus) => !buses.has(bus)),
+  }));
 }
 
 // Removing one arrow, and only that one. The reader drops the arrow's bus

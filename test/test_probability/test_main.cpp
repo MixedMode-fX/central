@@ -240,9 +240,9 @@ static void test_the_seed_reseeds_and_the_rest_moves_freely() {
 
 static NodeConfig probability_config() {
     NodeConfig c = node_config(ALGO_PROBABILITY);
-    c.in_bus[0] = B_IN;
-    c.out_bus[0] = B_OUT;
-    c.out_bus[2] = B_DECISION;
+    c.in_buses[0] = one_bus(B_IN);
+    c.out_buses[0] = one_bus(B_OUT);
+    c.out_buses[2] = one_bus(B_DECISION);
     return c;
 }
 
@@ -291,7 +291,7 @@ static void test_other_events_pass_and_do_not_advance_the_count() {
 static void test_the_reset_inlet_returns_the_count_to_the_top() {
     BusManager bus;
     NodeConfig c = probability_config();
-    c.in_bus[1] = B_RESET;
+    c.in_buses[1] = one_bus(B_RESET);
     c.params[P_CONDITION] = TrigCondition::COND_FIRST;
     Probability node(c);
 
@@ -316,7 +316,7 @@ static void test_the_reset_inlet_returns_the_count_to_the_top() {
 static void test_refused_notes_leave_by_the_dropped_outlet() {
     BusManager bus;
     NodeConfig c = probability_config();
-    c.out_bus[1] = B_NOTE_DROPPED;
+    c.out_buses[1] = one_bus(B_NOTE_DROPPED);
     c.params[P_CONDITION] = C_1_2;
     Probability node(c);
 
@@ -360,7 +360,7 @@ static void test_refused_notes_leave_by_the_dropped_outlet() {
 static void test_other_events_are_not_copied_to_dropped() {
     BusManager bus;
     NodeConfig c = probability_config();
-    c.out_bus[1] = B_NOTE_DROPPED;
+    c.out_buses[1] = one_bus(B_NOTE_DROPPED);
     c.params[P_CHANCE] = 1;
     c.params[P_CONDITION] = C_2_2;                       // the 2nd of every 2
     Probability node(c);
@@ -377,7 +377,7 @@ static void test_other_events_are_not_copied_to_dropped() {
 // no bus carries would start refusing the ones that are heard.
 static void test_an_unpatched_dropped_outlet_records_nothing() {
     BusManager bus;
-    NodeConfig c = probability_config();                 // out_bus[1] is NO_BUS
+    NodeConfig c = probability_config();                 // out_buses[1] is unconnected
     c.params[P_CONDITION] = TrigCondition::COND_FIRST;   // one passes, the rest do not
     Probability node(c);
 
@@ -398,7 +398,7 @@ static void test_an_unpatched_dropped_outlet_records_nothing() {
 static void test_a_handover_releases_both_sides() {
     BusManager bus;
     NodeConfig c = probability_config();
-    c.out_bus[1] = B_NOTE_DROPPED;
+    c.out_buses[1] = one_bus(B_NOTE_DROPPED);
     c.params[P_CONDITION] = C_1_2;
     Probability node(c);
 
@@ -429,9 +429,9 @@ static void test_a_handover_releases_both_sides() {
 
 static NodeConfig gate_probability_config() {
     NodeConfig c = node_config(ALGO_GATE_PROBABILITY);
-    c.in_bus[0] = B_IN;
-    c.out_bus[0] = B_OUT;
-    c.out_bus[2] = B_DECISION;
+    c.in_buses[0] = one_bus(B_IN);
+    c.out_buses[0] = one_bus(B_OUT);
+    c.out_buses[2] = one_bus(B_DECISION);
     return c;
 }
 
@@ -494,7 +494,7 @@ static void test_a_gate_node_defaults_to_passing_everything() {
 static void test_the_gate_reset_inlet_returns_the_count_to_the_top() {
     BusManager bus;
     NodeConfig c = gate_probability_config();
-    c.in_bus[1] = B_RESET;
+    c.in_buses[1] = one_bus(B_RESET);
     c.params[P_CONDITION] = TrigCondition::COND_FIRST;
     GateProbability node(c);
 
@@ -516,7 +516,7 @@ static void test_refused_gates_leave_by_the_dropped_outlet() {
     BusManager bus;
     enum : uint8_t { B_DROPPED = 4 };
     NodeConfig c = gate_probability_config();
-    c.out_bus[1] = B_DROPPED;
+    c.out_buses[1] = one_bus(B_DROPPED);
     c.params[P_CONDITION] = C_1_2;                       // pass, drop, pass...
     GateProbability node(c);
 
@@ -545,17 +545,17 @@ static void test_a_dropped_gate_is_the_patch_it_saves() {
     enum : uint8_t { B_DROPPED = 4, B_NOT = 5, B_ANDED = 6 };
 
     NodeConfig c = gate_probability_config();
-    c.out_bus[1] = B_DROPPED;
+    c.out_buses[1] = one_bus(B_DROPPED);
     c.params[P_CHANCE] = 50;
     c.params[P_SEED] = 7;
     GateProbability node(c);
 
     NodeConfig invert = node_config(ALGO_LOGIC_NOT);
-    invert.in_bus[0] = B_DECISION; invert.out_bus[0] = B_NOT;
+    invert.in_buses[0] = one_bus(B_DECISION); invert.out_buses[0] = one_bus(B_NOT);
     LogicNot inverter(invert);
 
     NodeConfig conjoin = node_config(ALGO_LOGIC_AND);
-    conjoin.in_bus[0] = B_IN; conjoin.in_bus[1] = B_NOT; conjoin.out_bus[0] = B_ANDED;
+    conjoin.in_buses[0] = one_bus(B_IN); conjoin.in_buses[1] = one_bus(B_NOT); conjoin.out_buses[0] = one_bus(B_ANDED);
     LogicAND conjunction(conjoin);
 
     uint16_t dropped = 0;
@@ -600,17 +600,17 @@ static void test_a_neighbour_rule_is_the_decision_an_and_and_a_not() {
     GateProbability first(lead);
 
     NodeConfig invert = node_config(ALGO_LOGIC_NOT);
-    invert.in_bus[0] = B_DECISION; invert.out_bus[0] = B_NOT;
+    invert.in_buses[0] = one_bus(B_DECISION); invert.out_buses[0] = one_bus(B_NOT);
     LogicNot inverter(invert);
 
     NodeConfig conjoin = node_config(ALGO_LOGIC_AND);
-    conjoin.in_bus[0] = B_IN; conjoin.in_bus[1] = B_NOT; conjoin.out_bus[0] = B_ANDED;
+    conjoin.in_buses[0] = one_bus(B_IN); conjoin.in_buses[1] = one_bus(B_NOT); conjoin.out_buses[0] = one_bus(B_ANDED);
     LogicAND conjunction(conjoin);
 
     NodeConfig follow = gate_probability_config();
-    follow.in_bus[0] = B_ANDED;
-    follow.out_bus[0] = B_FOLLOW_OUT;
-    follow.out_bus[2] = NO_BUS;                          // a latch it does not need
+    follow.in_buses[0] = one_bus(B_ANDED);
+    follow.out_buses[0] = one_bus(B_FOLLOW_OUT);
+    follow.out_buses[2] = BusSet{};                          // a latch it does not need
     GateProbability second(follow);
 
     for (uint8_t i = 0; i < 8; i++) {
@@ -641,11 +641,11 @@ static void test_a_fill_button_is_a_gate_and_an_and() {
     enum : uint8_t { B_FILL = 4, B_ANDED = 5 };
 
     NodeConfig conjoin = node_config(ALGO_LOGIC_AND);
-    conjoin.in_bus[0] = B_IN; conjoin.in_bus[1] = B_FILL; conjoin.out_bus[0] = B_ANDED;
+    conjoin.in_buses[0] = one_bus(B_IN); conjoin.in_buses[1] = one_bus(B_FILL); conjoin.out_buses[0] = one_bus(B_ANDED);
     LogicAND conjunction(conjoin);
 
     NodeConfig c = gate_probability_config();
-    c.in_bus[0] = B_ANDED;
+    c.in_buses[0] = one_bus(B_ANDED);
     GateProbability node(c);
 
     for (uint8_t i = 0; i < 8; i++) {
@@ -724,8 +724,8 @@ static void test_two_nodes_at_the_same_odds_can_be_made_to_disagree() {
     a.params[P_SEED] = 1;
     NodeConfig b = a;
     b.params[P_SEED] = 200;
-    b.out_bus[0] = 5;
-    b.out_bus[2] = 6;
+    b.out_buses[0] = one_bus(5);
+    b.out_buses[2] = one_bus(6);
     GateProbability left(a);
     GateProbability right(b);
 

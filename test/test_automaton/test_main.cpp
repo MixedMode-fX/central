@@ -26,9 +26,9 @@ static const uint8_t GATE_ADVANCE = 0, GATE_RESEED = 1, LANE_BASE = 2;
 static NodeConfig automaton_config(uint8_t rule, uint8_t seed, uint8_t edges,
                                    uint8_t revive, uint8_t cells){
     NodeConfig c = node_config(ALGO_AUTOMATON);
-    c.in_bus[0] = GATE_ADVANCE;
-    c.in_bus[1] = GATE_RESEED;
-    for (uint8_t i = 0; i < Automaton::LANES; i++) c.out_bus[i] = (uint8_t)(LANE_BASE + i);
+    c.in_buses[0] = one_bus(GATE_ADVANCE);
+    c.in_buses[1] = one_bus(GATE_RESEED);
+    for (uint8_t i = 0; i < Automaton::LANES; i++) c.out_buses[i] = one_bus((uint8_t)(LANE_BASE + i));
     c.params[0] = rule;
     c.params[1] = seed;
     c.params[2] = edges;
@@ -289,7 +289,7 @@ static void test_an_unpatched_lane_still_feeds_its_neighbours() {
     NodeConfig wired = automaton_config(110, 0x81, Automaton::CA_RING,
                                         Automaton::CA_REVIVE_ON, 8);
     NodeConfig sparse = wired;
-    for (uint8_t i = 3; i < Automaton::LANES; i++) sparse.out_bus[i] = NO_BUS;
+    for (uint8_t i = 3; i < Automaton::LANES; i++) sparse.out_buses[i] = BusSet{};
     Automaton a(wired), b(sparse);
     uint32_t now_a = 0, now_b = 0;
     for (uint8_t g = 0; g < 40; g++){

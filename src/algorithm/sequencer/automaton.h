@@ -109,7 +109,7 @@ class Automaton : public Node{
 
         EdgeIn advance_in;
         EdgeIn reseed_in;
-        uint8_t out[LANES];
+        BusSet out[LANES];
         uint8_t rule;
         uint8_t seed;
         uint8_t edges;

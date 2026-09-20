@@ -17,7 +17,7 @@ ModState ModMatrix::idle_state(){
 }
 
 bool ModMatrix::same_route(const ModRoute& a, const ModRoute& b){
-    return a.bus == b.bus
+    return a.buses == b.buses
         && a.target_kind == b.target_kind
         && a.target_index == b.target_index
         && a.param == b.param
@@ -90,14 +90,14 @@ void ModMatrix::apply_one(uint8_t slot, const BusManager& buses, uint32_t now_us
     // editor showing `reported` is showing the matrix's own reasoning rather
     // than a second guess at it that can disagree.
     ModState& said = lane.reported;
-    if (route.bus == NO_BUS || route.bus >= N_CV_BUS){ said = idle_state(); return; }
+    if (!route.buses.any() || !buses_in_range(Domain::CV, route.buses)){ said = idle_state(); return; }
     if (route.depth == 0){                     // a silent route costs a compare
         said = idle_state();
         said.status = MOD_STATUS_SILENT;
         return;
     }
 
-    said.cv = buses.cv_read(route.bus);
+    said.cv = buses.cv_read(route.buses);
 
     uint16_t lo = 0, hi = 0;
     if (!cc.target_range(route.target_kind, route.target_index, route.param, lo, hi)){

@@ -129,20 +129,22 @@ uint16_t registry::last_bad_param(){ return bad_param; }
 ConfigError registry::validate(const NodeConfig& config){
     const AlgorithmDescriptor* d = find(config.algorithm_id);
     if (d == nullptr) return CONFIG_UNKNOWN_ALGORITHM;
+    // A port names a set of buses, so the question is whether every bus in
+    // the set exists in that port's domain - one inlet reading two is as
+    // legal as one reading one.
     for (uint8_t i = 0; i < d->n_in && i < MAX_IN; i++){
-        const uint8_t bus = config.in_bus[i];
-        if (bus == NO_BUS){
+        const BusSet set = config.in_buses[i];
+        if (!set.any()){
             if (i < d->min_in) return CONFIG_INLET_NOT_CONNECTED;
             continue;
         }
-        if (bus >= bus_count(d->in_domain[i])) return CONFIG_INLET_OUT_OF_RANGE;
+        if (!buses_in_range(d->in_domain[i], set)) return CONFIG_INLET_OUT_OF_RANGE;
     }
-    // An outlet left at NO_BUS is unused: the node's writes to it go nowhere
-    // (BusManager ignores the index). A drum sequencer with eight lanes and
-    // three jacks patched is the normal case, not an error.
+    // An outlet on no bus is unused: the node's writes to it go nowhere. A
+    // drum sequencer with eight lanes and three jacks patched is the normal
+    // case, not an error.
     for (uint8_t i = 0; i < d->n_out && i < MAX_OUT; i++){
-        const uint8_t bus = config.out_bus[i];
-        if (bus != NO_BUS && bus >= bus_count(d->out_domain[i])) return CONFIG_OUTLET_OUT_OF_RANGE;
+        if (!buses_in_range(d->out_domain[i], config.out_buses[i])) return CONFIG_OUTLET_OUT_OF_RANGE;
     }
     // Parameters (#20). Bytes beyond n_params are not checked: an algorithm
     // uses the first few and leaves the rest zero, and #11 exploits that by

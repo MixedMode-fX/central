@@ -39,8 +39,8 @@ static int8_t clamp_to(uint8_t stored, int8_t limit){
 }
 
 Transpose::Transpose(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     semitones(clamp_to(config.params[P_SEMITONES], MAX_SEMITONES)),
     octaves(clamp_to(config.params[P_OCTAVES], MAX_OCTAVES)),
     diatonic(config.params[P_DIATONIC] != 0),

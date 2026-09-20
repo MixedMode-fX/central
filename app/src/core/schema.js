@@ -633,10 +633,18 @@ export function patchSchema(device) {
   };
   DOMAIN_KEY.forEach((key, domain) => {
     const n = [caps.gateBuses, caps.noteBuses, caps.cvBuses][domain];
-    $defs[`${key}_bus`] = { type: 'integer', minimum: 0, maximum: n - 1,
-                            description: `one of this module’s ${n} ${key} buses` };
-    $defs[`${key}_bus_or_null`] = { type: ['integer', 'null'], minimum: 0, maximum: n - 1,
-                                    description: `a ${key} bus, or null for "not connected"` };
+    // A port names the *set* of buses it is on: one bus written as the number
+    // itself, several as a list, and none as null. Summing two sources into
+    // one inlet is that list, and it costs the sources nothing.
+    const one = { type: 'integer', minimum: 0, maximum: n - 1 };
+    $defs[`${key}_bus`] = {
+      anyOf: [one, { type: 'array', items: one, minItems: 1, uniqueItems: true }],
+      description: `one of this module’s ${n} ${key} buses, or a list of them to merge`,
+    };
+    $defs[`${key}_bus_or_null`] = {
+      anyOf: [one, { type: 'array', items: one, uniqueItems: true }, { type: 'null' }],
+      description: `a ${key} bus, a list of them to merge, or null for "not connected"`,
+    };
   });
 
   return {
@@ -649,9 +657,11 @@ export function patchSchema(device) {
       + `${P.PATCH_FORMAT_VERSION}, ${algorithms.length} algorithms.`,
       'Nodes do not connect to each other: each reads and writes numbered buses, and a bus is where a '
       + 'writer and a reader meet. There are three kinds - gate (a trigger or a level), note (MIDI notes) '
-      + 'and CV (a value) - and a connection is only ever a bus index of the right kind. The module runs '
-      + 'the nodes in the order the buses connect them, so the order of "nodes" does not matter, a signal '
-      + 'crosses the whole patch in one pass, and feedback costs one pass rather than hanging.',
+      + 'and CV (a value) - and every port names the buses of its own kind that it is on: the bus itself, '
+      + 'a list of them, or null for nothing. A reader on two buses hears both, summed by the kind\u2019s own '
+      + 'rule, and its sources keep whatever else they were driving. The module runs the nodes in the '
+      + 'order the buses connect them, so the order of "nodes" does not matter, a signal crosses the '
+      + 'whole patch in one pass, and feedback costs one pass rather than hanging.',
       `The module has ${caps.jacks} jacks, each either an input that drives a gate bus or an output driven `
       + `by one, ${caps.midiIn} MIDI input ports and ${caps.midiOut} MIDI output ports that read and write `
       + `note buses, and room for ${caps.nodes} nodes.`,

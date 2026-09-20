@@ -143,10 +143,10 @@ function syncDrums(app) {
   const sources = app.module && app.session.usingModule && app.device
     ? drumSources(app.device, app.state.patch) : [];
   app.listener.setDrumSources(sources);
-  const buses = new Set(sources.filter((s) => s.kind === 'note').map((s) => s.bus));
+  const buses = new Set(sources.filter((s) => s.kind === 'note').flatMap((s) => s.buses ?? []));
   let mask = 0;
   for (const port of app.state.patch.midiOut) {
-    if (port.targetMask && buses.has(port.bus)) mask |= port.targetMask;
+    if (port.targetMask && (port.buses ?? []).some((b) => buses.has(b))) mask |= port.targetMask;
   }
   app.listener.setDrumOutMask(mask);
 }

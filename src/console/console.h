@@ -58,6 +58,7 @@ class Console {
         void cmd_clock(uint8_t argc, uint32_t now_us);
         void cmd_clock_route(uint8_t argc, uint32_t now_us);
         void cmd_key(uint8_t argc, uint32_t now_us);
+        void put_buses(BusSet set);
         void cmd_patch();
         void cmd_buses();
         void cmd_errors();

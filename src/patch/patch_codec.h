@@ -32,7 +32,7 @@
 // `.syx` file from one, is refused rather than decoded into the wrong bytes.
 // Bump it whenever anything below moves - including a parameter number or an
 // algorithm id, which change no field here but change what the bytes mean.
-#define PATCH_FORMAT_VERSION 9
+#define PATCH_FORMAT_VERSION 10
 
 // "MMMC", big-endian, at the head of every stored or transmitted image.
 #define PATCH_MAGIC 0x4D4D4D43u

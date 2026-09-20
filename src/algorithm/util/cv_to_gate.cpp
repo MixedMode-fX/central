@@ -32,8 +32,8 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 CvToGate::CvToGate(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     threshold(config.params[0] ? (config.params[0] > 100 ? 100 : config.params[0]) : (uint8_t)50),
     hysteresis(config.params[1] > 50 ? (uint8_t)50 : config.params[1]),
     polarity(clamp_enum(config.params[2], CVG_POLARITIES, CVG_BIPOLAR)),

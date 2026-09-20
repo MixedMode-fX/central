@@ -50,8 +50,8 @@ on iOS, where Web MIDI does not exist at all.
 **patch** — the graph, as a canvas: a box per node, jack and MIDI port, a
 socket per port, an arrow wherever two are on the same bus, and the bar above
 it is where things are added. Selecting a block opens its **details** below
-the picture — every port as a selector, every parameter as a control, and the
-roll of what it read and wrote — in a panel that folds to its title bar and
+the picture — every port with what it is wired to, every parameter as a
+control, and the roll of what it read and wrote — in a panel that folds to its title bar and
 closes with its cross. Parameters are sorted onto the same sections on every
 node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in
 the firmware's order, so a hand that has found *root* on one card finds it in
@@ -155,30 +155,41 @@ module, inside a prompt to hand to something that is not this editor.
 
 ## Rules the app is built on
 
-**An arrow is drawn, not stored.** There is no cable in this machine — an
-outlet writes a bus and an inlet reads one — so an arrow is the *observation*
-that two ports share a bus. The canvas is a rendering of the patch and never a
-second model beside it, so nothing in it can drift. That costs three things a
-cable would have hidden, each shown rather than papered over: one outlet on a
-bus two inlets read is two arrows; two outlets on one bus are dashed arrows and
-a `×2` mark; and disconnecting takes the *inlet* off its bus, saying in words
-what else stopped hearing it.
+**An arrow is drawn, not stored.** There is no cable in this machine — every
+port names the *set* of buses it is on — so an arrow is the observation that a
+writer and a reader share one. The canvas is a rendering of the patch and never
+a second model beside it, so nothing in it can drift. What a cable would have
+hidden is shown rather than papered over: one outlet on a bus two inlets read
+is two arrows, and two writers of one bus are dashed arrows with a `×2` mark.
+Cutting an arrow takes the *reader* off that one bus and leaves the rest of its
+set alone, so removing a connection never removes another.
+
+**Routing is the canvas's, and only the canvas's.** There is no bus selector on
+a card: a dropdown can only ever name one bus, so summing two sources into an
+inlet meant moving their sources onto one bus and taking whatever else that
+merged with it. The cards say what a port is wired to; the drags say what it
+is wired to next.
 
 **Where a block sits is not part of a patch.** The stored patch, the `.syx`
 file and the JSON dialect describe a graph. The canvas lays a patch out from
 its own shape — signal left to right — and a hand-placed block is remembered in
 `localStorage` as a preference about looking at it.
 
-**A block arrives unconnected.** A node is added on no bus at all and the
-wires are the ones you drag; a jack or a MIDI port, which carries a bus index
-whatever it is doing, takes one nothing else is on. A bus chosen for you is an
+**A block arrives unconnected.** A node, a jack and a MIDI port all arrive on
+no bus at all and the wires are the ones you drag. A bus chosen for you is an
 arrow nobody drew. A patch the app's own validator refuses is never sent — a
 node whose required inlet is still empty is one of those — and the first edit
 that makes it valid sends the whole patch (`App.diverged`).
 
-**A drag sends one message**, not a full dump — under the bus model a
-connection change is one byte. Adding or removing a node changes the graph's
-shape, so that is a whole patch.
+**A drag only ever adds.** The source keeps its bus, claiming a free one if
+this is the first thing it has been asked to drive, and the target adds that
+bus to the set it already reads. So a source reaches as many destinations as
+you drag it to, a destination sums as many sources as you drag into it, and
+neither costs the other a connection it already had.
+
+**A drag sends one message**, not a full dump — a connection change is one
+port's set of buses. Adding or removing a node changes the graph's shape, so
+that is a whole patch.
 
 **Which way a port faces is one of its settings**, not a kind of block to add.
 A gate jack's direction is a firmware field, so the toggle writes it; a MIDI
@@ -186,11 +197,12 @@ port's is not, so turning one round moves what the port carries to the first
 free port on the other side. Both rules are in `graph.js`.
 
 **A MIDI port is a source and a destination**, and the card names which is
-which: an input's source is its cables, an output's is its note bus, and the
-legs are labelled rather than left to be read off their order. Fanning a port
-out keeps the source and takes a free port for a second destination — another
-cable for the same bus, another bus from the same cables — which is how one
-signal reaches two places.
+which: an input's source is its cables, an output's is its note buses, and the
+legs are labelled rather than left to be read off their order. Fanning an
+*output* out takes a free port for the same note buses on another cable, which
+is the one thing a second port buys that the first cannot: its own channel.
+There is no such action on an input — an input reaching a second note bus is
+that bus in its own set, which is a drag.
 
 **What can be added is a list you can read** (`picker.js`): rows shelved by the
 **category the module reports**, each with the firmware's own summary, and a
@@ -363,8 +375,8 @@ app/
       dom.js          el and svg
       components/     reusable widgets that know nothing about a patch, each
                       with its stylesheet beside it
-      controls/       controls that read the patch: a bus selector, a
-                      parameter, the learn and CV menus, a modulation route
+      controls/       controls that read the patch: what a port is wired to,
+                      a parameter, the learn and CV menus, a modulation route
       panels/         the cards, the mod matrix and the macro bench;
                       algorithms.js is the one table of algorithm-specific
                       views and inert rules

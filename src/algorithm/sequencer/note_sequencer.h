@@ -179,7 +179,7 @@ class NoteSequencerBase : public Node{
         // many played notes had to be snapped into the scale.
         uint8_t record_cursor() const { return rec_cursor; }
         uint32_t snapped() const { return snap_count; }
-        bool recording() const { return rec_in != NO_BUS; }
+        bool recording() const { return rec_in.any(); }
         bool period_known() const { return have_period; }
         uint32_t period_us() const { return period; }
 
@@ -219,11 +219,11 @@ class NoteSequencerBase : public Node{
 
         EdgeIn advance_in;
         EdgeIn reset_in;
-        uint8_t root_in;
-        uint8_t rec_in;
+        BusSet root_in;
+        BusSet rec_in;
         EdgeIn rec_enable_in;
-        uint8_t rec_enable_bus;    // NO_BUS when nothing gates recording
-        uint8_t out;
+        BusSet rec_enable_bus;    // empty when nothing gates recording
+        BusSet out;
         uint8_t n_voices;
         uint8_t octave;
         // The pitch the root inlet last played, or NO_PITCH until it has:

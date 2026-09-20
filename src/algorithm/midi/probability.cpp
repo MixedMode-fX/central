@@ -41,12 +41,12 @@ uint8_t Probability::get_param(uint16_t index) const {
 }
 
 Probability::Probability(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
-    dropped_out(config.out_bus[1]),
-    decision_out(config.out_bus[2]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
+    dropped_out(config.out_buses[1]),
+    decision_out(config.out_buses[2]),
     channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
-    reset_in(config.in_bus[1]),
+    reset_in(config.in_buses[1]),
     condition(config.params),
     sounding(),
     refused()
@@ -76,7 +76,7 @@ void Probability::process(BusManager& bus, uint32_t){
         if (!condition.evaluate()){
             // Unrecorded when nothing is patched there: a ledger that filled
             // up with notes nobody can hear would refuse the ones that can.
-            if (dropped_out != NO_BUS)
+            if (dropped_out.any())
                 refused.emit(bus, dropped_out, e.data1, e.data1, e.data2,
                              out_channel(channel, e.channel));
             continue;
@@ -86,7 +86,7 @@ void Probability::process(BusManager& bus, uint32_t){
 
     // Latched, not a pulse: a reader clocked in some other pass has to see
     // the last decision rather than nothing.
-    if (decision_out != NO_BUS && condition.decision()) bus.gate_write(decision_out, true);
+    if (decision_out.any() && condition.decision()) bus.gate_write(decision_out, true);
 }
 
 void Probability::silence(BusManager& bus){

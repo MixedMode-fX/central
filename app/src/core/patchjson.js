@@ -33,7 +33,22 @@ const DIRECTIONS = { [P.GatePortDirection.GATE_PORT_UNUSED]: 'unused',
                      [P.GatePortDirection.GATE_PORT_IN]: 'in',
                      [P.GatePortDirection.GATE_PORT_OUT]: 'out' };
 
-const busOrNull = (bus) => (bus === P.NO_BUS || bus === undefined ? null : bus);
+// A port is on a *set* of buses (src/bus/domain.h). In this file that is
+// written as the bus itself when there is one, a list when there are several
+// and null when there are none - `in: [0, [1, 2]]` reads as "inlet 0 from bus
+// 0, inlet 1 from buses 1 and 2", which is what a merge looks like.
+const busesToJson = (buses) => {
+  const list = buses ?? [];
+  if (!list.length) return null;
+  return list.length === 1 ? list[0] : [...list];
+};
+
+const busesFromJson = (value) => {
+  if (value === null || value === undefined) return [];
+  const list = Array.isArray(value) ? value : [value];
+  return [...new Set(list.map(Number).filter((b) => Number.isInteger(b) && b >= 0))]
+    .sort((a, b) => a - b);
+};
 
 // Trailing zeros are not carried: a zero parameter means the descriptor's
 // default, and the emulator only writes the non-zero ones. Same rule the patch
@@ -45,10 +60,10 @@ function usedParams(params) {
 }
 
 // An inlet or outlet array only needs to reach the last connected one - the
-// emulator leaves the rest at NO_BUS.
-function usedBuses(buses, count) {
+// rest are on no bus.
+function usedBuses(sets, count) {
   const out = [];
-  for (let i = 0; i < count; i++) out.push(busOrNull(buses[i]));
+  for (let i = 0; i < count; i++) out.push(busesToJson(sets[i]));
   while (out.length && out[out.length - 1] === null) out.pop();
   return out;
 }
@@ -219,7 +234,7 @@ export function toPatchJson(patch, globals, device) {
   const jacks = [];
   patch.gatePorts.forEach((port, i) => {
     if (port.direction === P.GatePortDirection.GATE_PORT_UNUSED) return;
-    jacks.push({ port: i + 1, dir: DIRECTIONS[port.direction] ?? 'unused', bus: busOrNull(port.bus) });
+    jacks.push({ port: i + 1, dir: DIRECTIONS[port.direction] ?? 'unused', bus: busesToJson(port.buses) });
   });
   if (jacks.length) json.gate_ports = jacks;
 
@@ -229,22 +244,22 @@ export function toPatchJson(patch, globals, device) {
   const midiIn = [];
   patch.midiIn.forEach((p, i) => {
     if (!p.sourceMask) return;
-    midiIn.push({ port: i + 1, sources: portNames(p.sourceMask), channel: p.channel, bus: busOrNull(p.bus) });
+    midiIn.push({ port: i + 1, sources: portNames(p.sourceMask), channel: p.channel, bus: busesToJson(p.buses) });
   });
   if (midiIn.length) json.midi_in = midiIn;
 
   const midiOut = [];
   patch.midiOut.forEach((p, i) => {
     if (!p.targetMask) return;
-    midiOut.push({ port: i + 1, targets: portNames(p.targetMask), channel: p.channel, bus: busOrNull(p.bus) });
+    midiOut.push({ port: i + 1, targets: portNames(p.targetMask), channel: p.channel, bus: busesToJson(p.buses) });
   });
   if (midiOut.length) json.midi_out = midiOut;
 
   json.nodes = patch.nodes.map((node) => {
     const d = device?.byId?.get(node.algorithmId);
     const entry = { algo: d ? d.name : node.algorithmId };
-    const ins = usedBuses(node.inBus, d ? d.nIn : node.inBus.length);
-    const outs = usedBuses(node.outBus, d ? d.nOut : node.outBus.length);
+    const ins = usedBuses(node.inBuses, d ? d.nIn : node.inBuses.length);
+    const outs = usedBuses(node.outBuses, d ? d.nOut : node.outBuses.length);
     if (ins.length) entry.in = ins;
     if (outs.length) entry.out = outs;
     const params = usedParams(node.params);
@@ -268,7 +283,8 @@ export function toPatchJson(patch, globals, device) {
   const routes = [];
   (patch.modMap ?? []).forEach((r, slot) => {
     if (!isRoute(r)) return;
-    const entry = { slot, ...r };
+    const { buses, ...rest } = r;
+    const entry = { slot, ...rest, bus: busesToJson(buses) };
     const named = targetParamName(device, patch, r);
     if (named) entry.target = named;
     routes.push(entry);
@@ -322,7 +338,7 @@ export function fromPatchJson(json, device) {
     }
     const direction = Object.entries(DIRECTIONS).find(([, name]) => name === g.dir)?.[0];
     if (direction === undefined) throw new Error(`jack ${g.port}: dir must be in, out or unused`);
-    patch.gatePorts[jack] = { direction: Number(direction), bus: g.bus ?? P.NO_BUS };
+    patch.gatePorts[jack] = { direction: Number(direction), buses: busesFromJson(g.bus) };
   }
 
   for (const m of json.midi_in ?? []) {
@@ -330,21 +346,21 @@ export function fromPatchJson(json, device) {
     if (!(port >= 0 && port < patch.midiIn.length)) {
       throw new Error(`MIDI in ${m.port} does not exist (1..${patch.midiIn.length})`);
     }
-    patch.midiIn[port] = { sourceMask: maskOf(m.sources), channel: m.channel ?? 0, bus: m.bus ?? P.NO_BUS };
+    patch.midiIn[port] = { sourceMask: maskOf(m.sources), channel: m.channel ?? 0, buses: busesFromJson(m.bus) };
   }
   for (const m of json.midi_out ?? []) {
     const port = Number(m.port) - 1;
     if (!(port >= 0 && port < patch.midiOut.length)) {
       throw new Error(`MIDI out ${m.port} does not exist (1..${patch.midiOut.length})`);
     }
-    patch.midiOut[port] = { targetMask: maskOf(m.targets), channel: m.channel ?? 0, bus: m.bus ?? P.NO_BUS };
+    patch.midiOut[port] = { targetMask: maskOf(m.targets), channel: m.channel ?? 0, buses: busesFromJson(m.bus) };
   }
 
   (json.nodes ?? []).forEach((n, i) => {
     const id = resolveAlgorithm(n.algo, device, i);
     const node = codec.emptyNode(id);
-    (n.in ?? []).forEach((bus, k) => { if (k < node.inBus.length) node.inBus[k] = bus ?? P.NO_BUS; });
-    (n.out ?? []).forEach((bus, k) => { if (k < node.outBus.length) node.outBus[k] = bus ?? P.NO_BUS; });
+    (n.in ?? []).forEach((bus, k) => { if (k < node.inBuses.length) node.inBuses[k] = busesFromJson(bus); });
+    (n.out ?? []).forEach((bus, k) => { if (k < node.outBuses.length) node.outBuses[k] = busesFromJson(bus); });
     (n.params ?? []).forEach((v, k) => { if (k < node.params.length) node.params[k] = v & 0xff; });
     if (n.seq) {
       // Packing needs the algorithm's *name*, since the layout differs between
@@ -380,7 +396,7 @@ export function fromPatchJson(json, device) {
     // The name is not resolved back - a file whose parameter index and name
     // disagree is a file to fix, not one to guess about.
     patch.modMap[slot] = {
-      bus: r.bus ?? P.NO_BUS,
+      buses: busesFromJson(r.bus),
       targetKind: r.targetKind ?? P.CcTargetKind.CC_TARGET_NODE,
       targetIndex: r.targetIndex ?? 0,
       param: r.param ?? 0,

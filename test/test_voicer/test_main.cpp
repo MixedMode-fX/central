@@ -19,8 +19,8 @@ static const uint8_t IN_BUS = 0, OUT_BUS = 1;
 
 static NodeConfig voicer_config(uint8_t mode, uint8_t low = 0, uint8_t high = 0){
     NodeConfig c = node_config(ALGO_VOICER);
-    c.in_bus[0] = IN_BUS;
-    c.out_bus[0] = OUT_BUS;
+    c.in_buses[0] = one_bus(IN_BUS);
+    c.out_buses[0] = one_bus(OUT_BUS);
     c.params[Voicer::P_MODE] = mode;
     c.params[Voicer::P_LOW] = low;
     c.params[Voicer::P_HIGH] = high;
@@ -334,8 +334,8 @@ static void test_a_chord_walked_by_a_root_is_voice_led() {
     global_key::set(SCALE_MAJOR, 0);
 
     NodeConfig cc = node_config(ALGO_CHORD);
-    cc.in_bus[0] = 2;                      // played by the root walking below
-    cc.out_bus[0] = IN_BUS;
+    cc.in_buses[0] = one_bus(2);                      // played by the root walking below
+    cc.out_buses[0] = one_bus(IN_BUS);
     cc.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord chord(cc);
 

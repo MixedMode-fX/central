@@ -18,9 +18,9 @@ static const uint8_t IN_BUS = 0, ROOT_BUS = 2, OUT_BUS = 1;
 
 static NodeConfig mirror_config(uint8_t mode, bool with_root_inlet = false){
     NodeConfig c = node_config(ALGO_MIRROR);
-    c.in_bus[0] = IN_BUS;
-    if (with_root_inlet) c.in_bus[1] = ROOT_BUS;
-    c.out_bus[0] = OUT_BUS;
+    c.in_buses[0] = one_bus(IN_BUS);
+    if (with_root_inlet) c.in_buses[1] = one_bus(ROOT_BUS);
+    c.out_buses[0] = one_bus(OUT_BUS);
     c.params[Mirror::P_MODE] = mode;
     c.params[Mirror::P_SEED] = 7;                  // exact, so a percentage is testable
     return c;

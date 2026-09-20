@@ -83,7 +83,7 @@ class GateSequencer : public Node{
         EdgeIn advance_in;
         EdgeIn reset_in;
         EdgeIn extra_in;
-        uint8_t out;
+        BusSet out;
         uint8_t fallback;                    // the subclass's default length
         uint8_t width_param;                 // as stored, for get_param
         TriggerPulse pulse;

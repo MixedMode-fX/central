@@ -41,9 +41,9 @@ static uint16_t logged = 0;
 static NodeConfig delay_config(uint8_t sync, uint8_t time_tens, uint8_t repeats,
                                uint8_t interval, uint8_t decay){
     NodeConfig c = node_config(ALGO_NOTE_DELAY);
-    c.in_bus[0] = NOTE_IN;
-    c.in_bus[1] = GATE_CLEAR;
-    c.out_bus[0] = NOTE_OUT;
+    c.in_buses[0] = one_bus(NOTE_IN);
+    c.in_buses[1] = one_bus(GATE_CLEAR);
+    c.out_buses[0] = one_bus(NOTE_OUT);
     c.params[0] = sync;
     c.params[3] = time_tens;
     c.params[4] = repeats;

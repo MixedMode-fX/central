@@ -119,8 +119,8 @@ class Voicer : public Node{
         // the notes in both alone.
         void revoice(BusManager& bus);
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t mode;
         uint8_t low;
         uint8_t high;

@@ -98,7 +98,7 @@ class StepMod : public Node{
         Xorshift32 rng;
         EdgeIn trigger_in;
         EdgeIn reset_in;
-        uint8_t out;
+        BusSet out;
         uint8_t shape;
         uint8_t depth;
         uint8_t offset_param;    // as stored: 128..255 are -128..-1

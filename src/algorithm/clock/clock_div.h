@@ -51,7 +51,7 @@ class ClockDiv : public Node{
         uint8_t get_param(uint16_t index) const override;
 
         // Diagnostics / tests
-        bool gate_sourced() const { return source_in != NO_BUS; }
+        bool gate_sourced() const { return source_in.any(); }
         bool multiply_refused() const { return refused; }
         uint32_t period() const { return div_period; }
         uint32_t pulses() const { return pulse_count; }
@@ -72,8 +72,8 @@ class ClockDiv : public Node{
         // edges from a gate source; the arithmetic is identical.
         void advance_to(BusManager& bus, uint32_t position);
 
-        uint8_t source_in;
-        uint8_t out;
+        BusSet source_in;
+        BusSet out;
         uint8_t mode;
         uint8_t amount;
         uint8_t phase_param;     // as stored, so set_param can re-derive

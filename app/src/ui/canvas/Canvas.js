@@ -18,7 +18,7 @@ import { openMenu, MenuItem } from '../components/Menu.js';
 import { Domain, domainName, busCount } from '../../core/validate.js';
 import {
   BlockKind, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear, portOf,
-  planModulation, modulationChoices, isModPort,
+  planModulation, modulationChoices, isModPort, busWords,
 } from '../../core/graph.js';
 import {
   BLOCK_W, HEAD_H, ROW_H, PAD_Y, blockHeight, socketPoint, layoutOf, worldSize, fitView,
@@ -210,9 +210,9 @@ class CanvasView {
 
   socketRow(block, port, isOutlet) {
     const domain = domainName(port.domain);
-    const connected = port.bus !== P.NO_BUS;
+    const connected = port.buses.length > 0;
     const modulated = isModPort(port);
-    const where = connected ? `${domain} bus ${port.bus}` : 'not connected';
+    const where = connected ? `${domain} ${busWords(port.buses)}` : 'not connected';
     const ref = { blockId: block.id, at: port.at, isOutlet };
     const socket = el('button', {
       class: classes('socket', `dom-${domain}`, connected && 'on', modulated && 'mod',
@@ -231,7 +231,7 @@ class CanvasView {
       socket,
       el('span', { class: 'blk-port-name' }, port.name,
         port.required && !connected ? el('span', { class: 'required' }, '*') : null),
-      connected ? el('span', { class: `blk-port-bus dom-${domain}` }, port.bus) : null);
+      connected ? el('span', { class: `blk-port-bus dom-${domain}` }, port.buses.join(',')) : null);
   }
 
   // --- interaction ----------------------------------------------------------
@@ -478,7 +478,9 @@ function capacityLine(app, geom) {
   const free = [Domain.Gate, Domain.Note, Domain.CV].map((domain) => {
     const written = new Set();
     for (const block of geom.blocks) {
-      for (const port of block.outlets) if (port.domain === domain && port.bus !== P.NO_BUS) written.add(port.bus);
+      for (const port of block.outlets) {
+        if (port.domain === domain) for (const bus of port.buses) written.add(bus);
+      }
     }
     return `${domainName(domain)} ${busCount(caps, domain) - written.size}/${busCount(caps, domain)}`;
   });

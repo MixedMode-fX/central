@@ -67,12 +67,12 @@ static int16_t seven_bit_cv(uint8_t value){
 }
 
 MidiToCv::MidiToCv(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    pitch_out(config.out_bus[0]),
-    gate_out(config.out_bus[1]),
-    velocity_out(config.out_bus[2]),
-    mod_out(config.out_bus[3]),
-    trig_out(config.out_bus[4]),
+    in(config.in_buses[0]),
+    pitch_out(config.out_buses[0]),
+    gate_out(config.out_buses[1]),
+    velocity_out(config.out_buses[2]),
+    mod_out(config.out_buses[3]),
+    trig_out(config.out_buses[4]),
     priority(clamp_priority(config.params[0])),
     range(clamp_range(config.params[1])),
     base(config.params[2] ? config.params[2] : (uint8_t)DEFAULT_BASE),
@@ -170,7 +170,7 @@ void MidiToCv::process(BusManager& bus, uint32_t now_us){
 
     // Every outlet is written every pass: a CV bus is summed and cleared by
     // the swap, and a gate bus is a level only for as long as somebody holds
-    // it up. An outlet left at NO_BUS goes nowhere, which is how a patch
+    // it up. An outlet on no bus goes nowhere, which is how a patch
     // takes the gate and ignores the rest.
     bus.cv_write(pitch_out, pitch_cv);
     bus.gate_write(gate_out, gate_level);

@@ -34,9 +34,9 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 Mirror::Mirror(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    root_in(config.in_bus[1]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    root_in(config.in_buses[1]),
+    out(config.out_buses[0]),
     mode(clamp_enum(config.params[P_MODE], MIRROR_MODES, MIRROR_NEGATIVE)),
     root(NO_ROOT),
     amount(config.params[P_AMOUNT] ? (config.params[P_AMOUNT] > 100 ? (uint8_t)100
@@ -121,7 +121,7 @@ uint8_t Mirror::reflect(uint8_t note) const {
 void Mirror::process(BusManager& bus, uint32_t){
     // The root first, so a root and a note arriving in the same pass agree,
     // as in NoteQuantise.
-    if (root_in != NO_BUS){
+    if (root_in.any()){
         const uint8_t rn = bus.note_count(root_in);
         for (uint8_t i = 0; i < rn; i++){
             const MidiEvent e = bus.note_read(root_in, i);

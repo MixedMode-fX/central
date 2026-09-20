@@ -253,24 +253,24 @@ test('every algorithm arrives on a shelf the app has a name for', async () => {
 
 function samplePatch() {
   const patch = codec.emptyPatch();
-  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_OUT, bus: 1 };
-  patch.gatePorts[7] = { direction: P.GatePortDirection.GATE_PORT_IN, bus: 0 };
-  patch.midiIn[0] = { sourceMask: 0x11, channel: 2, bus: 0 };
-  patch.midiOut[1] = { targetMask: 0x30, channel: 0, bus: 1 };
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_OUT, buses: [1] };
+  patch.gatePorts[7] = { direction: P.GatePortDirection.GATE_PORT_IN, buses: [0] };
+  patch.midiIn[0] = { sourceMask: 0x11, channel: 2, buses: [0] };
+  patch.midiOut[1] = { targetMask: 0x30, channel: 0, buses: [1] };
 
   const euclid = device.algorithms.find((a) => a.name === 'EuclidianSequencer');
   const transpose = device.algorithms.find((a) => a.name === 'Transpose');
 
   const a = codec.emptyNode(euclid.id);
-  a.inBus[0] = 0;
-  a.outBus[0] = 1;
+  a.inBuses[0] = [0];
+  a.outBuses[0] = [1];
   a.params[0] = 16;
   a.params[3] = 5;
   a.params[4] = 2;
 
   const b = codec.emptyNode(transpose.id);
-  b.inBus[0] = 0;
-  b.outBus[0] = 1;
+  b.inBuses[0] = [0];
+  b.outBuses[0] = [1];
   b.params[0] = P.PARAM_CENTRE + 7;        // seven semitones up, as a centred byte
 
   patch.nodes = [a, b];
@@ -321,8 +321,8 @@ test('a patch the editor accepts is never rejected by the firmware', async () =>
   for (const descriptor of device.algorithms) {
     const one = codec.emptyPatch();
     const node = codec.emptyNode(descriptor.id);
-    for (let i = 0; i < descriptor.nIn; i++) node.inBus[i] = 0;
-    for (let i = 0; i < descriptor.nOut; i++) node.outBus[i] = 0;
+    for (let i = 0; i < descriptor.nIn; i++) node.inBuses[i] = [0];
+    for (let i = 0; i < descriptor.nOut; i++) node.outBuses[i] = [0];
     one.nodes = [node];
     const problems = validate(device, one);
     assert.deepEqual(problems, [], `${descriptor.name}: ${JSON.stringify(problems)}`);
@@ -332,8 +332,17 @@ test('a patch the editor accepts is never rejected by the firmware', async () =>
 
 test('the editor refuses what the firmware would refuse', async () => {
   const cases = [
-    ['a bus that does not exist', (p) => { p.nodes[0].inBus[0] = 200; }],
-    ['a required inlet left unconnected', (p) => { p.nodes[0].inBus[0] = P.NO_BUS; }],
+    // Gate and note fill the sixteen bits a port's set has, so the CV domain
+    // is the one where a set can name a bus the module has not got.
+    ['a CV bus that does not exist', (p) => {
+      const slew = device.algorithms.find((a) => a.name === 'Slew');
+      const node = codec.emptyNode(slew.id);
+      node.inBuses[0] = [device.capabilities.cvBuses];
+      node.outBuses[0] = [0];
+      p.nodes = [node];
+      p.ccMap[0] = null;
+    }],
+    ['a required inlet left unconnected', (p) => { p.nodes[0].inBuses[0] = []; }],
     ['a parameter outside its range', (p) => { p.nodes[0].params[1] = 99; }],
     ['a binding to a node that is not there', (p) => { p.ccMap[0].targetIndex = 9; }],
     ['a binding on the control cable', (p) => { p.ccMap[0].sourceMask = P.MIDI_CONTROL_PORT; }],
@@ -355,14 +364,14 @@ test('the editor refuses what the firmware would refuse', async () => {
 
 test('dragging a connection is one message, not a full dump', async () => {
   await device.sendPatch(samplePatch(), codec.emptyGlobals());
-  await device.setConnection(1, true, 0, 3);
+  await device.setConnection(1, true, 0, [3]);
   const dumped = await device.dump();
-  assert.equal(dumped.patch.nodes[1].outBus[0], 3);
+  assert.deepEqual(dumped.patch.nodes[1].outBuses[0], [3]);
 
-  await device.setConnection(1, true, 0, P.NO_BUS);
-  assert.equal((await device.dump()).patch.nodes[1].outBus[0], P.NO_BUS);
+  await device.setConnection(1, true, 0, []);
+  assert.deepEqual((await device.dump()).patch.nodes[1].outBuses[0], []);
 
-  await assert.rejects(() => device.setConnection(9, false, 0, 1));
+  await assert.rejects(() => device.setConnection(9, false, 0, [1]));
 });
 
 test('a parameter edit takes effect and reads back', async () => {
@@ -377,8 +386,8 @@ test('pattern data reads and writes in runs', async () => {
   const poly = device.algorithms.find((a) => a.name === 'PolySequencer');
   const patch = codec.emptyPatch();
   const node = codec.emptyNode(poly.id);
-  node.inBus[0] = 0;
-  node.outBus[0] = 0;
+  node.inBuses[0] = [0];
+  node.outBuses[0] = [0];
   patch.nodes = [node];
   await device.sendPatch(patch, codec.emptyGlobals());
 
@@ -412,8 +421,8 @@ test('a node the editor adds arrives on no bus, and is sent once it is wired', a
   // A ClockDiv needs no inlet - free, it divides the master clock - so added
   // and left alone it is a patch, and it is on no bus either way.
   const clock = add('ClockDiv');
-  assert.deepEqual(clock.node.inBus, clock.node.inBus.map(() => P.NO_BUS), 'on no bus');
-  assert.deepEqual(clock.node.outBus, clock.node.outBus.map(() => P.NO_BUS), 'writing nothing');
+  assert.deepEqual(clock.node.inBuses, clock.node.inBuses.map(() => []), 'on no bus');
+  assert.deepEqual(clock.node.outBuses, clock.node.outBuses.map(() => []), 'writing nothing');
   assert.deepEqual(validate(device, patch), [], 'a clock on its own must be valid');
   await device.sendPatch(patch, codec.emptyGlobals());
 
@@ -422,7 +431,7 @@ test('a node the editor adds arrives on no bus, and is sent once it is wired', a
   // incremental edit addressing a node the module really has.
   const inverter = add('NOT');
   assert.ok(inverter.d.minIn > 0, 'a NOT has to read something');
-  assert.equal(inverter.node.inBus[0], P.NO_BUS, 'and it does not land on the clock');
+  assert.deepEqual(inverter.node.inBuses[0], [], 'and it does not land on the clock');
   const waiting = validate(device, patch);
   assert.equal(waiting.length, 1, JSON.stringify(waiting));
   assert.match(waiting[0].message, /must be connected/);
@@ -431,17 +440,17 @@ test('a node the editor adds arrives on no bus, and is sent once it is wired', a
 
   // Wired - which on the canvas is a drag, and here is the bus each port is
   // put on.
-  clock.node.outBus[0] = 0;
-  inverter.node.inBus[0] = 0;
-  inverter.node.outBus[0] = 1;
+  clock.node.outBuses[0] = [0];
+  inverter.node.inBuses[0] = [0];
+  inverter.node.outBuses[0] = [1];
   assert.deepEqual(validate(device, patch), []);
   await device.sendPatch(patch, codec.emptyGlobals());
 
   // And now an incremental edit addresses a node the module really has.
-  await device.setConnection(1, false, 0, clock.node.outBus[0]);
+  await device.setConnection(1, false, 0, clock.node.outBuses[0]);
   const dumped = await device.dump();
   assert.equal(dumped.patch.nodes.length, 2);
-  assert.equal(dumped.patch.nodes[1].inBus[0], clock.node.outBus[0]);
+  assert.deepEqual(dumped.patch.nodes[1].inBuses[0], clock.node.outBuses[0]);
 
   // Every algorithm, added into an empty patch the same way: unconnected is
   // refused when the algorithm needs an inlet and accepted when it does not,
@@ -451,7 +460,7 @@ test('a node the editor adds arrives on no bus, and is sent once it is wired', a
     const node = codec.emptyNode(d.id);
     one.nodes.push(node);
     assert.equal(validate(device, one).length, d.minIn, `${d.name}: one problem per required inlet`);
-    for (let i = 0; i < d.minIn && i < d.nIn && i < P.MAX_IN; i++) node.inBus[i] = 0;
+    for (let i = 0; i < d.minIn && i < d.nIn && i < P.MAX_IN; i++) node.inBuses[i] = [0];
     const problems = validate(device, one);
     assert.deepEqual(problems, [], `${d.name}: ${JSON.stringify(problems)}`);
     await device.sendPatch(one, codec.emptyGlobals());
@@ -465,8 +474,8 @@ test('a parameter above 127 survives the round trip', async () => {
   const seq = device.algorithms.find((a) => a.name === 'StepSequencer');
   const patch = codec.emptyPatch();
   const node = codec.emptyNode(seq.id);
-  node.inBus[0] = 0;
-  node.outBus[0] = 0;
+  node.inBuses[0] = [0];
+  node.outBuses[0] = [0];
   patch.nodes = [node];
   await device.sendPatch(patch, codec.emptyGlobals());
 
@@ -486,10 +495,10 @@ test('a parameter above 127 survives the round trip', async () => {
 test('a patch exports as the emulator JSON and comes back unchanged', async () => {
   const patch = samplePatch();
   const globals = { ...codec.emptyGlobals(), bpm: 96, pcEnabled: 1 };
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 2, bus: 0 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 2, buses: [0] };
   // Deliberately not the first one: a port is numbered in the file, so a patch
   // that uses only MIDI out 2 does not come back on MIDI out 1.
-  patch.midiOut[1] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 1 };
+  patch.midiOut[1] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [1] };
 
   const json = toPatchJson(patch, globals, device);
   // The dialect is the emulator's: named algorithms, jacks from 1, named ports.
@@ -581,13 +590,13 @@ function modulationPatch() {
   const divider = device.algorithms.find((a) => a.name === 'ClockDiv');
 
   const a = codec.emptyNode(lfo.id);
-  a.outBus[0] = 0;                       // a CV bus
+  a.outBuses[0] = [0];                       // a CV bus
   a.params[0] = 3;                       // ramp up
   a.params[1] = 1;                       // free-running
   a.params[2] = 10;                      // 1 Hz
 
   const b = codec.emptyNode(divider.id);
-  b.outBus[0] = 0;                       // a gate bus
+  b.outBuses[0] = [0];                       // a gate bus
   b.params[1] = 4;
   patch.nodes = [a, b];
   return patch;
@@ -606,7 +615,7 @@ test('the module reports how much modulation it holds', () => {
 test('a modulation route can be written and read back', async () => {
   await device.sendPatch(modulationPatch(), codec.emptyGlobals());
   const route = {
-    bus: 0,
+    buses: [0],
     targetKind: P.CcTargetKind.CC_TARGET_NODE,
     targetIndex: 1,
     param: 1,
@@ -626,7 +635,7 @@ test('a modulation route can be written and read back', async () => {
 test('a route can be cleared, and the module says so', async () => {
   await device.sendPatch(modulationPatch(), codec.emptyGlobals());
   await device.setModRoute(2, {
-    bus: 1, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    buses: [1], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
     param: 1, min: 0, max: 0, depth: 255, flags: 0,
   });
   assert.ok(await device.getModRoute(2));
@@ -637,7 +646,7 @@ test('a route can be cleared, and the module says so', async () => {
 test('the module accepts two routes on one parameter', async () => {
   await device.sendPatch(modulationPatch(), codec.emptyGlobals());
   const route = (bus) => ({
-    bus, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    buses: [bus], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
     param: 1, min: 0, max: 0, depth: 255, flags: 0,
   });
   await device.setModRoute(0, route(0));
@@ -647,7 +656,7 @@ test('the module accepts two routes on one parameter', async () => {
   // once (src/control/control_sum.h). Macros forced it - a destination that
   // rises and then falls back is two windows on one parameter.
   await device.setModRoute(1, route(1));
-  assert.equal((await device.getModRoute(1)).bus, 1);
+  assert.deepEqual((await device.getModRoute(1)).buses, [1]);
 });
 
 test('the editor refuses a route the firmware would refuse', async () => {
@@ -657,25 +666,25 @@ test('the editor refuses a route the firmware would refuse', async () => {
     patch.modMap[0] = route;
     return validate(device, patch);
   };
-  assert.ok(bad({ bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 9,
+  assert.ok(bad({ buses: [0], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 9,
                   param: 1, min: 0, max: 0, depth: 255, flags: 0 }).length,
             'a route to a node that is not there');
-  assert.ok(bad({ bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+  assert.ok(bad({ buses: [0], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
                   param: 900, min: 0, max: 0, depth: 255, flags: 0 }).length,
             'a route to a parameter that is not there');
-  assert.ok(bad({ bus: 0, targetKind: P.CcTargetKind.CC_TARGET_TRANSPORT, targetIndex: 0,
+  assert.ok(bad({ buses: [0], targetKind: P.CcTargetKind.CC_TARGET_TRANSPORT, targetIndex: 0,
                   param: 0, min: 0, max: 0, depth: 255, flags: 0 }).length,
             'a modulator cannot press the transport');
-  assert.ok(bad({ bus: 99, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
-                  param: 1, min: 0, max: 0, depth: 255, flags: 0 }).length,
+  assert.ok(bad({ buses: [device.capabilities.cvBuses], targetKind: P.CcTargetKind.CC_TARGET_NODE,
+                  targetIndex: 1, param: 1, min: 0, max: 0, depth: 255, flags: 0 }).length,
             'a CV bus that does not exist');
 
   // And each of them really is refused by the module, which is the point of
   // checking it here rather than trusting the two rule sets to agree.
   for (const route of [
-    { bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 9, param: 1,
+    { buses: [0], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 9, param: 1,
       min: 0, max: 0, depth: 255, flags: 0 },
-    { bus: 0, targetKind: P.CcTargetKind.CC_TARGET_TRANSPORT, targetIndex: 0, param: 0,
+    { buses: [0], targetKind: P.CcTargetKind.CC_TARGET_TRANSPORT, targetIndex: 0, param: 0,
       min: 0, max: 0, depth: 255, flags: 0 },
   ]) {
     await device.sendPatch(modulationPatch(), codec.emptyGlobals());
@@ -686,7 +695,7 @@ test('the editor refuses a route the firmware would refuse', async () => {
 test('a modulated parameter is a socket, and the rest are not', async () => {
   const patch = modulationPatch();
   patch.modMap[0] = {
-    bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    buses: [0], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
     param: 1, min: 0, max: 0, depth: 255, flags: P.ModFlags.MOD_BIPOLAR,
   };
   await device.readParams(patch.nodes[1].algorithmId);
@@ -696,7 +705,7 @@ test('a modulated parameter is a socket, and the rest are not', async () => {
   const mod = divider.inlets.filter(isModPort);
   assert.equal(mod.length, 1, 'one route, one socket');
   assert.equal(mod[0].name, 'amount', 'the socket is named after the parameter');
-  assert.equal(mod[0].bus, 0);
+  assert.deepEqual(mod[0].buses, [0]);
   // ClockDiv has five parameters and one real inlet. Only the modulated one
   // is drawn - the block would otherwise be a list of every parameter.
   assert.equal(divider.inlets.length - mod.length, 1);
@@ -731,7 +740,7 @@ test('dragging a control signal onto a block plans a route', async () => {
                               'node:1', amount.param, { device });
   assert.ok(plan.ok, plan.why);
   assert.equal(plan.routes.length, 1);
-  assert.equal(plan.routes[0].route.bus, 0, 'the signal is already on a bus, so that is the bus');
+  assert.deepEqual(plan.routes[0].route.buses, [0], 'the signal is already on a bus, so that is the bus');
   assert.equal(plan.routes[0].route.targetIndex, 1);
   assert.equal(plan.routes[0].route.param, amount.param);
 
@@ -751,9 +760,9 @@ test('a note bus cannot be pointed at a parameter', async () => {
   const patch = modulationPatch();
   const arp = device.algorithms.find((a) => a.name === 'Arpeggiator');
   const node = codec.emptyNode(arp.id);
-  node.inBus[0] = 0;
-  node.inBus[1] = 0;
-  node.outBus[0] = 1;
+  node.inBuses[0] = [0];
+  node.inBuses[1] = [0];
+  node.outBuses[0] = [1];
   patch.nodes.push(node);
   await device.readParams(patch.nodes[1].algorithmId);
   const blocks = patchBlocks(device, patch);
@@ -768,7 +777,7 @@ test('a note bus cannot be pointed at a parameter', async () => {
 test('modulation survives the JSON dialect', async () => {
   const patch = modulationPatch();
   patch.modMap[1] = {
-    bus: 0, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
+    buses: [0], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: 1,
     param: 1, min: 0, max: 0, depth: 128,
     flags: P.ModFlags.MOD_BIPOLAR | P.ModMode.MOD_OFFSET,
   };

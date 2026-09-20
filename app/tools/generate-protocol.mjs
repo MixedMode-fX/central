@@ -102,7 +102,6 @@ const constants = {
 // PATCH_MAGIC and PATCH_SLOT_BYTES are expressions, not plain numbers.
 constants.PATCH_MAGIC = 0x4d4d4d43;
 constants.PATCH_SLOT_BYTES = Math.floor(constants.EEPROM_BYTES / constants.PATCH_SLOTS);
-constants.NO_BUS = 0xff;
 
 // The scale masks are a `switch` rather than a table, so they get a reader of
 // their own. They are needed here because a patch written by hand names its

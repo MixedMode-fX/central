@@ -92,20 +92,31 @@ struct Rig {
     }
 };
 
+// A port's set of buses, as SYSEX_SET_CONNECTION and the port messages carry
+// it: three seven-bit bytes, low septet first (bus/domain.h).
+static std::vector<uint8_t> wire(BusSet set) {
+    return {(uint8_t)(set.bits & 0x7F), (uint8_t)((set.bits >> 7) & 0x7F),
+            (uint8_t)((set.bits >> 14) & 0x7F)};
+}
+static std::vector<uint8_t> args_with(std::vector<uint8_t> head, BusSet set) {
+    for (uint8_t b : wire(set)) head.push_back(b);
+    return head;
+}
+
 static Patch two_node_patch() {
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{0x01, 0, 0};
+    p.midi_in[0] = MidiInConfig{0x01, 0, one_bus(0)};
     p.nodes[0] = node_config(ALGO_TRANSPOSE);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[0].params[0] = PARAM_CENTRE + 12;
     p.nodes[1] = node_config(ALGO_STEP_SEQ);
-    p.nodes[1].in_bus[0] = 0;             // advance, gate bus 0
-    p.nodes[1].out_bus[0] = 2;
+    p.nodes[1].in_buses[0] = one_bus(0);             // advance, gate bus 0
+    p.nodes[1].out_buses[0] = one_bus(2);
     p.nodes[1].params[0] = 8;
     p.nodes[1].params[3] = 0xFF;
     p.n_nodes = 2;
-    p.midi_out[0] = MidiOutConfig{0x01, 0, 1};
+    p.midi_out[0] = MidiOutConfig{0x01, 0, one_bus(1)};
     return p;
 }
 
@@ -113,17 +124,17 @@ static bool patches_equal(const Patch& a, const Patch& b) {
     if (a.n_nodes != b.n_nodes) return false;
     for (uint8_t n = 0; n < a.n_nodes; n++) {
         if (a.nodes[n].algorithm_id != b.nodes[n].algorithm_id) return false;
-        for (uint8_t i = 0; i < MAX_IN; i++) if (a.nodes[n].in_bus[i] != b.nodes[n].in_bus[i]) return false;
-        for (uint8_t i = 0; i < MAX_OUT; i++) if (a.nodes[n].out_bus[i] != b.nodes[n].out_bus[i]) return false;
+        for (uint8_t i = 0; i < MAX_IN; i++) if (a.nodes[n].in_buses[i] != b.nodes[n].in_buses[i]) return false;
+        for (uint8_t i = 0; i < MAX_OUT; i++) if (a.nodes[n].out_buses[i] != b.nodes[n].out_buses[i]) return false;
         for (uint16_t i = 0; i < N_PARAM; i++) if (a.nodes[n].params[i] != b.nodes[n].params[i]) return false;
     }
     for (uint8_t i = 0; i < GPIO_N; i++) {
         if (a.gate_ports[i].direction != b.gate_ports[i].direction) return false;
-        if (a.gate_ports[i].bus != b.gate_ports[i].bus) return false;
+        if (a.gate_ports[i].buses != b.gate_ports[i].buses) return false;
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) {
         if (a.midi_in[i].source_mask != b.midi_in[i].source_mask) return false;
-        if (a.midi_in[i].bus != b.midi_in[i].bus) return false;
+        if (a.midi_in[i].buses != b.midi_in[i].buses) return false;
     }
     return true;
 }
@@ -489,8 +500,8 @@ static void test_a_truncated_transfer_leaves_the_active_patch_alone() {
     // Build a big enough image that it needs more than one chunk.
     Patch big = two_node_patch();
     big.nodes[0] = node_config(ALGO_POLY_SEQ);
-    big.nodes[0].in_bus[0] = 0;
-    big.nodes[0].out_bus[0] = 0;
+    big.nodes[0].in_buses[0] = one_bus(0);
+    big.nodes[0].out_buses[0] = one_bus(0);
     for (uint16_t p = 16; p < 300; p++) big.nodes[0].params[p] = (uint8_t)(p & 0x7F) | 1u;
     static uint8_t buffer[PATCH_SLOT_BYTES];
     size_t written = 0;
@@ -542,8 +553,9 @@ static void test_a_lost_chunk_abandons_the_transfer() {
 
     Patch big = default_patch();
     big.nodes[0] = node_config(ALGO_POLY_SEQ);
-    big.nodes[0].in_bus[0] = 0;
-    big.nodes[0].out_bus[0] = 0;
+    big.nodes[0].in_buses[0] = one_bus(0);
+    big.nodes[0].out_buses[0] = one_bus(0);
+    big.n_nodes = 1;
     for (uint16_t p = 16; p < 320; p++) big.nodes[0].params[p] = (uint8_t)((p & 0x7F) | 1u);
     static uint8_t buffer[PATCH_SLOT_BYTES];
     size_t written = 0;
@@ -612,16 +624,16 @@ static void test_one_bus_change_leaves_every_other_node_undisturbed() {
     const uint32_t steps_before = seq->steps_taken();
 
     // Re-route node 0's output. Only node 0 is reconstructed.
-    rig.send(SYSEX_SET_CONNECTION, {0, 1, 0, 3});
+    rig.send(SYSEX_SET_CONNECTION, args_with({0, 1, 0}, one_bus(3)));
     TEST_ASSERT_TRUE(rig.acked());
-    TEST_ASSERT_EQUAL(3, rig.patches.active().nodes[0].out_bus[0]);
+    TEST_ASSERT_EQUAL(one_bus(3).bits, rig.patches.active().nodes[0].out_buses[0].bits);
     TEST_ASSERT_EQUAL(steps_before, seq->steps_taken());
     TEST_ASSERT_EQUAL_PTR(seq, rig.master.node(1));       // the same object
 
-    // 0x7F on the wire means "disconnect".
-    rig.send(SYSEX_SET_CONNECTION, {0, 1, 0, 0x7F});
+    // The empty set is "connected to nothing".
+    rig.send(SYSEX_SET_CONNECTION, args_with({0, 1, 0}, BusSet{}));
     TEST_ASSERT_TRUE(rig.acked());
-    TEST_ASSERT_EQUAL(NO_BUS, rig.patches.active().nodes[0].out_bus[0]);
+    TEST_ASSERT_FALSE(rig.patches.active().nodes[0].out_buses[0].any());
 }
 
 static void test_an_invalid_connection_is_refused_and_changes_nothing() {
@@ -629,12 +641,28 @@ static void test_an_invalid_connection_is_refused_and_changes_nothing() {
     GlobalSettings g = default_globals();
     rig.patches.apply(two_node_patch(), g, 0);
 
-    rig.send(SYSEX_SET_CONNECTION, {0, 0, 0, 100});       // no such note bus
+    // Node 0 is a Transpose, whose note inlet must be connected: clearing it
+    // leaves a patch the validator refuses, and the running one is untouched.
+    rig.send(SYSEX_SET_CONNECTION, args_with({0, 0, 0}, BusSet{}));
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_REJECTED));
-    TEST_ASSERT_EQUAL(0, rig.patches.active().nodes[0].in_bus[0]);
+    TEST_ASSERT_EQUAL(one_bus(0).bits, rig.patches.active().nodes[0].in_buses[0].bits);
 
-    rig.send(SYSEX_SET_CONNECTION, {9, 0, 0, 1});         // no such node
+    rig.send(SYSEX_SET_CONNECTION, args_with({9, 0, 0}, one_bus(1)));   // no such node
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_BAD_ARGUMENT));
+
+    // A set naming a bus the domain has not got. Gate and note fill the
+    // sixteen bits a set has, so only a CV port can say this - here a Slew,
+    // whose inlet is a control signal.
+    Rig cv;
+    Patch p = empty_patch();
+    p.nodes[0] = node_config(ALGO_SLEW);
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(1);
+    p.n_nodes = 1;
+    cv.patches.apply(p, g, 0);
+    cv.send(SYSEX_SET_CONNECTION, args_with({0, 0, 0}, BusSet{1u << N_CV_BUS}));
+    TEST_ASSERT_TRUE(cv.naked_with(SYSEX_ERR_REJECTED));
+    TEST_ASSERT_EQUAL(one_bus(0).bits, cv.patches.active().nodes[0].in_buses[0].bits);
 }
 
 static void test_a_parameter_edit_preserves_all_node_state() {
@@ -688,7 +716,7 @@ static void test_a_modulation_route_reports_what_it_is_doing() {
     // With a route on it and the matrix having run: the range it may write,
     // and the value the target is at.
     ModRoute r = unused_route();
-    r.bus = 0;
+    r.buses = one_bus(0);
     r.target_kind = CC_TARGET_NODE;
     r.target_index = 0;
     r.param = 0;
@@ -766,21 +794,21 @@ static void test_port_edits_reconstruct_nothing() {
     rig.patches.apply(two_node_patch(), g, 0);
     Node* node0 = rig.master.node(0);
 
-    rig.send(SYSEX_SET_GATE_PORT, {2, GATE_PORT_OUT, 5});
+    rig.send(SYSEX_SET_GATE_PORT, args_with({2, GATE_PORT_OUT}, one_bus(5)));
     TEST_ASSERT_TRUE(rig.acked());
     TEST_ASSERT_EQUAL(GATE_PORT_OUT, rig.patches.active().gate_ports[2].direction);
-    TEST_ASSERT_EQUAL(5, rig.patches.active().gate_ports[2].bus);
+    TEST_ASSERT_EQUAL(one_bus(5).bits, rig.patches.active().gate_ports[2].buses.bits);
     TEST_ASSERT_EQUAL_PTR(node0, rig.master.node(0));
 
     // The MIDI port mask reaches 0x80, so its top bit rides in the direction
     // byte; check that round-trips.
-    rig.send(SYSEX_SET_MIDI_PORT, {1, 0x02, 0x01, 3, 4});   // in, mask 0x81, ch 3, bus 4
+    rig.send(SYSEX_SET_MIDI_PORT, args_with({1, 0x02, 0x01, 3}, one_bus(4)));  // in, mask 0x81, ch 3, bus 4
     TEST_ASSERT_TRUE(rig.acked());
     TEST_ASSERT_EQUAL(0x81, rig.patches.active().midi_in[1].source_mask);
     TEST_ASSERT_EQUAL(3, rig.patches.active().midi_in[1].channel);
-    TEST_ASSERT_EQUAL(4, rig.patches.active().midi_in[1].bus);
+    TEST_ASSERT_EQUAL(one_bus(4).bits, rig.patches.active().midi_in[1].buses.bits);
 
-    rig.send(SYSEX_SET_GATE_PORT, {2, GATE_PORT_OUT, 99});
+    rig.send(SYSEX_SET_GATE_PORT, args_with({GPIO_N, GATE_PORT_OUT}, one_bus(0)));   // no such jack
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_REJECTED));
 }
 
@@ -830,7 +858,7 @@ static void test_replacing_one_node_releases_the_notes_it_owned() {
     for (int i = 0; i < 2; i++) { rig.master.pass(now); now += 1000; }
     rig.midi.clear();
 
-    rig.send(SYSEX_SET_CONNECTION, {0, 1, 0, 3});
+    rig.send(SYSEX_SET_CONNECTION, args_with({0, 1, 0}, one_bus(3)));
     for (int i = 0; i < 2; i++) { rig.master.pass(now); now += 1000; }
 
     uint8_t offs = 0;
@@ -879,7 +907,7 @@ static void test_program_change_is_ignored_unless_it_is_addressed_to_us() {
     // Recall is off by default: a Program Change meant for a downstream synth
     // must not switch the user's patch.
     TEST_ASSERT_FALSE(rig.sysex.program_change(0x01, 1, 1, 2000));
-    TEST_ASSERT_EQUAL(ALGO_SUSTAIN, rig.patches.active().nodes[0].algorithm_id);
+    TEST_ASSERT_EQUAL(0, rig.patches.active().n_nodes);       // the defaults are empty
 
     // Turned on, on channel 5, on port 0x01 only.
     g = rig.patches.globals();
@@ -891,9 +919,9 @@ static void test_program_change_is_ignored_unless_it_is_addressed_to_us() {
     rig.sysex.set_swap_timing(SysexHandler::SWAP_IMMEDIATE);
 
     TEST_ASSERT_FALSE(rig.sysex.program_change(0x01, 2, 1, 3000));   // wrong channel
-    TEST_ASSERT_EQUAL(ALGO_SUSTAIN, rig.patches.active().nodes[0].algorithm_id);
+    TEST_ASSERT_EQUAL(0, rig.patches.active().n_nodes);
     TEST_ASSERT_FALSE(rig.sysex.program_change(0x10, 5, 1, 3000));   // wrong port
-    TEST_ASSERT_EQUAL(ALGO_SUSTAIN, rig.patches.active().nodes[0].algorithm_id);
+    TEST_ASSERT_EQUAL(0, rig.patches.active().n_nodes);
 
     TEST_ASSERT_TRUE(rig.sysex.program_change(0x01, 5, 1, 4000));
     TEST_ASSERT_EQUAL(ALGO_TRANSPOSE, rig.patches.active().nodes[0].algorithm_id);
@@ -943,14 +971,14 @@ static void test_quantised_recall_swaps_on_the_next_bar_and_not_before() {
     TEST_ASSERT_TRUE(rig.sysex.program_change(0x01, 1, 1, 1000));
     TEST_ASSERT_TRUE(rig.sysex.swap_pending());
     rig.sysex.service(1000);
-    TEST_ASSERT_EQUAL_MESSAGE(ALGO_SUSTAIN, rig.patches.active().nodes[0].algorithm_id,
+    TEST_ASSERT_EQUAL_MESSAGE(0, rig.patches.active().n_nodes,
                               "the swap must not happen before the boundary");
 
     // Advance to just before the bar line: still nothing.
     const uint32_t bar = (uint32_t)CLOCK_SUBTICKS_PER_QUARTER * SysexHandler::BEATS_PER_BAR;
     while (rig.master.clock().count() + 1u < bar) rig.master.clock().advance();
     rig.sysex.service(2000);
-    TEST_ASSERT_EQUAL(ALGO_SUSTAIN, rig.patches.active().nodes[0].algorithm_id);
+    TEST_ASSERT_EQUAL(0, rig.patches.active().n_nodes);
 
     // And now the bar line arrives.
     rig.master.clock().advance();
@@ -1042,7 +1070,7 @@ static void test_restore_defaults_over_sysex() {
     rig.patches.apply(two_node_patch(), g, 0);
     rig.send(SYSEX_RESTORE_DEFAULTS);
     TEST_ASSERT_TRUE(rig.acked());
-    TEST_ASSERT_EQUAL(ALGO_SUSTAIN, rig.patches.active().nodes[0].algorithm_id);
+    TEST_ASSERT_EQUAL(0, rig.patches.active().n_nodes);
 }
 
 static void test_globals_can_be_set_and_come_back_in_a_dump() {
@@ -1188,8 +1216,8 @@ static void test_dump_chunks_stay_within_the_wire_budget() {
     GlobalSettings g = default_globals();
     Patch big = two_node_patch();
     big.nodes[0] = node_config(ALGO_DRUM_SEQ_MIDI);
-    big.nodes[0].in_bus[0] = 0;
-    big.nodes[0].out_bus[0] = 0;
+    big.nodes[0].in_buses[0] = one_bus(0);
+    big.nodes[0].out_buses[0] = one_bus(0);
     // A full velocity grid: the widest thing a patch can carry, and every
     // byte inside its descriptor's range so the patch actually validates.
     for (uint16_t p = DrumSeqMidi::VELOCITY_BASE; p < DrumSeqMidi::PARAM_COUNT; p++){
@@ -1227,8 +1255,8 @@ static void test_dump_chunks_stay_within_the_wire_budget() {
 static Patch big_patch() {
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_POLY_SEQ);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(0);
     // Every step byte non-zero and legal for every field, so the image is
     // several chunks long and the validator accepts it at the end.
     for (uint16_t i = 16; i < 300; i++) p.nodes[0].params[i] = 1;
@@ -1258,7 +1286,7 @@ static void test_learn_over_sysex_binds_after_twenty_seconds_of_uptime() {
     GlobalSettings g = default_globals();
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.n_nodes = 1;
     rig.patches.apply(p, g, 0);
 
@@ -1276,7 +1304,7 @@ static void test_a_sysex_edit_is_autosaved_after_the_settle_time_not_at_once() {
     GlobalSettings g = default_globals();
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.n_nodes = 1;
     rig.patches.apply(p, g, 0);
     rig.patches.service(PatchStore::AUTOSAVE_SETTLE_US + 1u);   // the load's own save

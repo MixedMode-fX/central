@@ -46,8 +46,8 @@ class VelocityCurve : public Node{
         uint8_t apply(uint8_t velocity) const;
 
     private:
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t curve;
         uint8_t scale;
         int8_t offset;

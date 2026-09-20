@@ -119,8 +119,8 @@ class Turing : public Node{
 
         EdgeIn advance_in;
         EdgeIn reset_in;
-        uint8_t gate_out;
-        uint8_t cv_out;
+        BusSet gate_out;
+        BusSet cv_out;
         uint8_t len;
         uint8_t chaos;
         uint8_t bits;

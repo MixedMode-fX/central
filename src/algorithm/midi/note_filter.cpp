@@ -36,8 +36,8 @@ const AlgorithmDescriptor NoteFilter::descriptor = {
     CATEGORY_MIDI };
 
 NoteFilter::NoteFilter(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     channel(config.params[P_CHANNEL]),
     low(config.params[P_LOW]),
     high(config.params[P_HIGH] ? config.params[P_HIGH] : DEFAULT_HIGH),

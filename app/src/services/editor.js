@@ -9,9 +9,9 @@
 
 import * as P from '../protocol/generated.js';
 import * as codec from '../protocol/codec.js';
-import { validate, Domain } from '../core/validate.js';
+import { validate } from '../core/validate.js';
 import {
-  BlockKind, patchBlocks, unusedBus, applyWrite,
+  BlockKind, applyWrite,
   planJackDirection, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation, planCcBinding,
 } from '../core/graph.js';
 import {
@@ -119,24 +119,20 @@ export class Editor {
     this.render();
   }
 
-  setConnection(index, isOutlet, at, bus) {
+  setConnection(index, isOutlet, at, buses) {
     const node = this.patch.nodes[index];
-    if (isOutlet) node.outBus[at] = bus; else node.inBus[at] = bus;
-    this.edit(() => this.device.setConnection(index, isOutlet, at, bus), 'connection');
+    if (isOutlet) node.outBuses[at] = buses; else node.inBuses[at] = buses;
+    this.edit(() => this.device.setConnection(index, isOutlet, at, buses), 'connection');
     this.render();
   }
 
-  // A jack's direction and bus are one edit: `planJackDirection` says which
-  // bus the jack ends up on, so "turn it round" and "move it" cannot grow two
-  // rules that disagree.
-  setJack(index, direction, bus) {
-    const moved = {
-      ...this.patch,
-      gatePorts: this.patch.gatePorts.map((p, i) => (i === index ? { ...p, bus } : p)),
-    };
-    const chosen = planJackDirection(moved, this.caps, index, direction).bus;
-    this.patch.gatePorts[index] = { direction, bus: chosen };
-    this.edit(() => this.device.setGatePort(index, direction, chosen), 'jack');
+  // A jack's direction and buses are one edit: `planJackDirection` says which
+  // buses the jack ends up on, so "turn it round" and "put it away" cannot
+  // grow two rules that disagree.
+  setJack(index, direction) {
+    const buses = planJackDirection(this.patch, this.caps, index, direction).buses;
+    this.patch.gatePorts[index] = { direction, buses };
+    this.edit(() => this.device.setGatePort(index, direction, buses), 'jack');
     this.render();
   }
 
@@ -145,7 +141,7 @@ export class Editor {
     const ports = portsOf(this.patch, isOut);
     ports[index] = { ...ports[index], ...changes };
     const port = ports[index];
-    this.edit(() => this.device.setMidiPort(index, isOut, maskOf(port, isOut), port.channel, port.bus),
+    this.edit(() => this.device.setMidiPort(index, isOut, maskOf(port, isOut), port.channel, port.buses),
               portWhat(isOut));
     if (!maskOf(port, isOut)) this.state.status = `${portWhat(isOut)} ${index + 1} is unused`;
     this.render();
@@ -252,7 +248,7 @@ export class Editor {
       return;
     }
     const d = this.device?.byId.get(algorithmId);
-    // Unconnected, every port at NO_BUS: the wires are the ones you drag
+    // Unconnected, every port on no bus: the wires are the ones you drag
     // (core/graph.js). A node whose required inlets are still empty makes the
     // patch incomplete, which the problems notice says and `sendWhole` acts
     // on, so the module is never handed a patch it would refuse.
@@ -283,51 +279,45 @@ export class Editor {
 
   // A jack or a MIDI port is not added so much as *taken into use*: the
   // module has a fixed number of each, so this claims the first unused one.
-  // It lands on a bus nothing else is on, because a jack always carries a bus
-  // index and that is what unconnected looks like for one.
+  // It arrives on no bus, exactly as a node does: the wires are the ones you
+  // drag (core/graph.js).
   addEndpoint(endpoint) {
     if (endpoint.kind !== BlockKind.Jack) { this.addMidiPort(endpoint.kind === BlockKind.MidiOut); return; }
-    const blocks = patchBlocks(this.device, this.patch);
     const index = this.patch.gatePorts.findIndex(
       (port) => port.direction === P.GatePortDirection.GATE_PORT_UNUSED);
     if (index < 0) { this.fail('every jack is already in use'); return; }
     const writesGate = endpoint.direction === P.GatePortDirection.GATE_PORT_IN;
-    const bus = unusedBus(blocks, this.caps, Domain.Gate);
-    if (bus === null) { this.fail('every gate bus is already in use'); return; }
-    this.patch.gatePorts[index] = { direction: endpoint.direction, bus };
+    this.patch.gatePorts[index] = { direction: endpoint.direction, buses: [] };
     this.state.ui.canvas.selected = selectBlock(`jack:${index}`);
-    this.edit(() => this.device.setGatePort(index, endpoint.direction, bus), 'jack');
-    this.say(`jack ${index + 1} ${writesGate ? 'in' : 'out'}, on gate bus ${bus}`);
+    this.edit(() => this.device.setGatePort(index, endpoint.direction, []), 'jack');
+    this.say(`jack ${index + 1} ${writesGate ? 'in' : 'out'} — drag it to connect it`);
   }
 
-  // One MIDI port, taken into use: the first free one, on USB 1, and on a note
-  // bus nothing else is on - so it arrives connected to nothing, like a node.
+  // One MIDI port, taken into use: the first free one, on USB 1, on no note
+  // bus - so it arrives connected to nothing, like a node.
   addMidiPort(isOut) {
-    const blocks = patchBlocks(this.device, this.patch);
     const ports = portsOf(this.patch, isOut);
     const limit = (isOut ? this.caps?.midiOut : this.caps?.midiIn) ?? ports.length;
     const index = ports.findIndex((port, i) => i < limit && !maskOf(port, isOut));
     if (index < 0) { this.fail(`every MIDI ${isOut ? 'output' : 'input'} port is already in use`); return; }
-    const bus = unusedBus(blocks, this.caps, Domain.Note);
-    if (bus === null) { this.fail('every note bus is already in use'); return; }
-    this.takeMidiPort(index, isOut, P.MidiPort.mmMIDI_USB_0, ports[index].channel, bus,
-                      `${portWhat(isOut)} ${index + 1} on USB 1, note bus ${bus}`);
+    this.takeMidiPort(index, isOut, P.MidiPort.mmMIDI_USB_0, ports[index].channel, [],
+                      `${portWhat(isOut)} ${index + 1} on USB 1 — drag it to connect it`);
   }
 
-  // The same source, reaching one more destination.
-  fanOutMidiPort(index, isOut) {
-    const plan = planPortFanOut(this.device, this.patch, this.caps, index, isOut);
+  // The same note buses, played down another cable on its own channel.
+  fanOutMidiPort(index) {
+    const plan = planPortFanOut(this.patch, this.caps, index);
     if (!plan.ok) { this.fail(plan.why); return; }
-    this.takeMidiPort(plan.index, isOut, plan.mask, plan.channel, plan.bus, plan.said);
+    this.takeMidiPort(plan.index, true, plan.mask, plan.channel, plan.buses, plan.said);
   }
 
   // A MIDI port written, sent and selected, which is what every way of
   // taking one into use ends in.
-  takeMidiPort(index, isOut, mask, channel, bus, said) {
+  takeMidiPort(index, isOut, mask, channel, buses, said) {
     const ports = portsOf(this.patch, isOut);
-    ports[index] = { ...ports[index], channel, bus, [maskKey(isOut)]: mask };
+    ports[index] = { ...ports[index], channel, buses, [maskKey(isOut)]: mask };
     this.state.ui.canvas.selected = selectBlock(`${portKind(isOut)}:${index}`);
-    this.edit(() => this.device.setMidiPort(index, isOut, mask, channel, bus), portWhat(isOut));
+    this.edit(() => this.device.setMidiPort(index, isOut, mask, channel, buses), portWhat(isOut));
     this.say(said);
   }
 
@@ -341,8 +331,8 @@ export class Editor {
     applyPortFlip(this.patch, plan);
     this.state.ui.canvas.selected = selectBlock(`${portKind(plan.wantOut)}:${plan.to.index}`);
     this.edit(async () => {
-      await this.device.setMidiPort(index, isOut, 0, left.channel, left.bus);
-      await this.device.setMidiPort(plan.to.index, plan.wantOut, plan.mask, plan.channel, plan.bus);
+      await this.device.setMidiPort(index, isOut, 0, left.channel, left.buses);
+      await this.device.setMidiPort(plan.to.index, plan.wantOut, plan.mask, plan.channel, plan.buses);
     }, 'MIDI port direction');
     this.say(plan.said);
   }
@@ -353,7 +343,7 @@ export class Editor {
     if (block.kind === BlockKind.Node) { this.removeNode(block.index); return; }
     this.state.ui.canvas.selected = null;
     if (block.kind === BlockKind.Jack) {
-      this.setJack(block.index, P.GatePortDirection.GATE_PORT_UNUSED, P.NO_BUS);
+      this.setJack(block.index, P.GatePortDirection.GATE_PORT_UNUSED);
       this.say(`jack ${block.index + 1} is unused`);
       return;
     }
@@ -372,13 +362,13 @@ export class Editor {
     if (kind === 'mod') {
       this.edit(() => this.device.setModRoute(index, port), 'modulation route');
     } else if (kind === BlockKind.Node) {
-      this.edit(() => this.device.setConnection(index, Boolean(write.isOutlet), write.at, write.bus),
+      this.edit(() => this.device.setConnection(index, Boolean(write.isOutlet), write.at, write.buses),
                 'connection');
     } else if (kind === BlockKind.Jack) {
-      this.edit(() => this.device.setGatePort(index, port.direction, port.bus), 'jack');
+      this.edit(() => this.device.setGatePort(index, port.direction, port.buses), 'jack');
     } else {
       const isOut = kind === BlockKind.MidiOut;
-      this.edit(() => this.device.setMidiPort(index, isOut, maskOf(port, isOut), port.channel, port.bus),
+      this.edit(() => this.device.setMidiPort(index, isOut, maskOf(port, isOut), port.channel, port.buses),
                 portWhat(isOut));
     }
   }

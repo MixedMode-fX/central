@@ -99,11 +99,11 @@ class Arpeggiator : public Node{
         // Everything the figure holds that no key is holding.
         void drop_latch(BusManager& bus);
 
-        uint8_t held_in;
-        uint8_t advance_in;
-        uint8_t reset_in;
-        uint8_t hold_in;
-        uint8_t out;
+        BusSet held_in;
+        BusSet advance_in;
+        BusSet reset_in;
+        BusSet hold_in;
+        BusSet out;
         uint8_t mode;
         uint8_t octaves;
         uint16_t gate_ms;

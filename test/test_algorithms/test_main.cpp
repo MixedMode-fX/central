@@ -18,23 +18,23 @@ void tearDown() {}
 // Inputs are written, swapped in, the node runs, and the result is swapped
 // out - exactly what one master pass does around the node.
 
-static NodeConfig gate_config(uint8_t id, uint8_t n_in, uint8_t out_bus) {
+static NodeConfig gate_config(uint8_t id, uint8_t n_in, uint8_t out_buses) {
     NodeConfig c = node_config(id);
-    for (uint8_t i = 0; i < n_in; i++) c.in_bus[i] = i;   // inputs on gate buses 0..n-1
-    c.out_bus[0] = out_bus;
+    for (uint8_t i = 0; i < n_in; i++) c.in_buses[i] = one_bus(i);   // inputs on gate buses 0..n-1
+    c.out_buses[0] = one_bus(out_buses);
     return c;
 }
 
 template <class T>
-static bool run_gate(const uint8_t* inputs, uint8_t n_in, uint8_t id, uint8_t out_bus) {
+static bool run_gate(const uint8_t* inputs, uint8_t n_in, uint8_t id, uint8_t out_buses) {
     BusManager bus;
-    NodeConfig c = gate_config(id, n_in, out_bus);
+    NodeConfig c = gate_config(id, n_in, out_buses);
     T node(c);
     for (uint8_t i = 0; i < n_in; i++) bus.gate_write(i, inputs[i] != 0);
     bus.swap();
     node.process(bus, 0);
     bus.swap();
-    return bus.gate_read(out_bus);
+    return bus.gate_read(out_buses);
 }
 
 template <class T>
@@ -91,7 +91,7 @@ static uint8_t sustain_messages(BusManager& bus, uint8_t note_bus) { return bus.
 static void test_sustain_debounce_yields_exactly_one_cc() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_SUSTAIN);
-    c.in_bus[0] = 0; c.out_bus[0] = 0;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(0);
     Sustain node(c);
 
     uint32_t now = 0;
@@ -119,7 +119,7 @@ static void test_sustain_debounce_yields_exactly_one_cc() {
 static void test_sustain_params_channel_controller_invert() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_SUSTAIN);
-    c.in_bus[0] = 0; c.out_bus[0] = 3;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(3);
     c.params[0] = 5; c.params[1] = 66; c.params[2] = 1;
     Sustain node(c);
     uint32_t now = 0;
@@ -139,7 +139,7 @@ static void test_sustain_params_channel_controller_invert() {
 static void test_gate_to_note_edges() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_GATE_TO_NOTE);
-    c.in_bus[0] = 1; c.out_bus[0] = 2; c.params[0] = 48; c.params[1] = 90; c.params[2] = 3;
+    c.in_buses[0] = one_bus(1); c.out_buses[0] = one_bus(2); c.params[0] = 48; c.params[1] = 90; c.params[2] = 3;
     GateToNote node(c);
     bus.gate_write(1, true); bus.swap(); node.process(bus, 0); bus.swap();
     TEST_ASSERT_EQUAL(1, bus.note_count(2));
@@ -157,7 +157,7 @@ static void test_gate_to_note_edges() {
 static void test_transpose_shifts_notes_and_passes_the_rest() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = PARAM_CENTRE - 12;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[0] = PARAM_CENTRE - 12;
     Transpose node(c);
     bus.note_write(0, MidiEvent{MIDI_NOTE_ON, 1, 60, 100});
     bus.note_write(0, MidiEvent{MIDI_CONTROL_CHANGE, 1, 64, 127});
@@ -172,7 +172,7 @@ static void test_transpose_shifts_notes_and_passes_the_rest() {
 static void test_arpeggiator_plays_held_chord_ascending_on_each_edge() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 1;   // note bus 0 held, gate bus 0 advance
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.out_buses[0] = one_bus(1);   // note bus 0 held, gate bus 0 advance
     Arpeggiator node(c);
     bus.note_write(0, MidiEvent{MIDI_NOTE_ON, 2, 67, 100});
     bus.note_write(0, MidiEvent{MIDI_NOTE_ON, 2, 60, 100});

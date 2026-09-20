@@ -23,9 +23,9 @@ const AlgorithmDescriptor NoteQuantise::descriptor = {
     true };   // reads_key: every pitch it plays comes from the key
 
 NoteQuantise::NoteQuantise(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    root_in(config.in_bus[1]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    root_in(config.in_buses[1]),
+    out(config.out_buses[0]),
     root(NO_ROOT),
     channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     sounding()
@@ -55,7 +55,7 @@ uint8_t NoteQuantise::active_root() const {
 
 void NoteQuantise::process(BusManager& bus, uint32_t){
     // The root first, so a root and a note arriving in the same pass agree.
-    if (root_in != NO_BUS){
+    if (root_in.any()){
         const uint8_t rn = bus.note_count(root_in);
         for (uint8_t i = 0; i < rn; i++){
             const MidiEvent e = bus.note_read(root_in, i);

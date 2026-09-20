@@ -67,11 +67,11 @@ uint8_t Arpeggiator::get_param(uint16_t index) const {
 }
 
 Arpeggiator::Arpeggiator(const NodeConfig& config) :
-    held_in(config.in_bus[0]),
-    advance_in(config.in_bus[1]),
-    reset_in(config.in_bus[2]),
-    hold_in(config.in_bus[3]),
-    out(config.out_bus[0]),
+    held_in(config.in_buses[0]),
+    advance_in(config.in_buses[1]),
+    reset_in(config.in_buses[2]),
+    hold_in(config.in_buses[3]),
+    out(config.out_buses[0]),
     mode(config.params[0]),
     octaves(config.params[1] == 0 ? 1 : (config.params[1] > MAX_OCTAVES ? MAX_OCTAVES : config.params[1])),
     gate_ms(config.params[2]),
@@ -195,7 +195,7 @@ void Arpeggiator::step(BusManager& bus, uint32_t now_us){
 void Arpeggiator::process(BusManager& bus, uint32_t now_us){
     // Hold is the parameter or the inlet: either one on its own latches, so
     // a footswitch and an editor do not have to agree about who owns it.
-    const bool hold_now = hold != 0 || (hold_in != NO_BUS && bus.gate_read(hold_in));
+    const bool hold_now = hold != 0 || (hold_in.any() && bus.gate_read(hold_in));
     // On the falling edge, before this pass's note events, so a note-off
     // arriving in the same pass as the release still takes its key away.
     if (holding && !hold_now) drop_latch(bus);
@@ -237,7 +237,7 @@ void Arpeggiator::process(BusManager& bus, uint32_t now_us){
         }
     }
 
-    if (reset_in != NO_BUS){
+    if (reset_in.any()){
         const bool level = bus.gate_read(reset_in);
         if (level && !last_reset){ cursor = 0; descending = false; }
         last_reset = level;

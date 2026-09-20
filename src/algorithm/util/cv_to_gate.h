@@ -74,8 +74,8 @@ class CvToGate : public Node{
         uint32_t crossings() const { return count; }
 
     private:
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t threshold;
         uint8_t hysteresis;
         uint8_t polarity;

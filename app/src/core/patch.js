@@ -11,11 +11,11 @@ import { Domain } from './validate.js';
 import { KEY_TARGETS } from '../protocol/names.js';
 import { MACRO_NONE } from '../protocol/codec.js';
 
-// A slot in the modulation table holds a route only while it names a bus
-// (src/control/mod_matrix.h); a slot in the binding table holds a binding only
-// while it names a source cable (src/control/cc_mapper.h). Everything that
-// reads either table reads it through these two.
-export const isRoute = (r) => Boolean(r) && r.bus !== P.NO_BUS && r.bus !== null && r.bus !== undefined;
+// A slot in the modulation table holds a route only while it reads at least
+// one bus (src/control/mod_matrix.h); a slot in the binding table holds a
+// binding only while it names a source cable (src/control/cc_mapper.h).
+// Everything that reads either table reads it through these two.
+export const isRoute = (r) => Boolean(r) && (r.buses ?? []).length > 0;
 export const isBinding = (m) => Boolean(m) && Boolean(m.sourceMask);
 // A macro exists while it has a name - the name is what makes several
 // destinations one gesture rather than several bindings that happen to share
@@ -178,7 +178,8 @@ export function renumberNodeKeys(entries, removed) {
 export function writtenBuses(device, patch) {
   const written = new Set();
   for (const peer of everyPeer(device, patch)) {
-    if (peer.writes) written.add(`${peer.domain}:${peer.bus}`);
+    if (!peer.writes) continue;
+    for (const bus of peer.buses) written.add(`${peer.domain}:${bus}`);
   }
   return written;
 }
@@ -191,28 +192,33 @@ function* everyPeer(device, patch) {
     const d = device?.byId.get(node.algorithmId);
     if (!d) continue;
     for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
-      if (node.outBus[i] === P.NO_BUS) continue;
+      const buses = node.outBuses[i] ?? [];
+      if (!buses.length) continue;
       yield { id: `node:${index}#out${i}`, label: `${d.name} ${index} ${outletName(d, i)}`,
-              domain: d.outDomain[i], bus: node.outBus[i], writes: true };
+              domain: d.outDomain[i], buses, writes: true };
     }
     for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
-      if (node.inBus[i] === P.NO_BUS) continue;
+      const buses = node.inBuses[i] ?? [];
+      if (!buses.length) continue;
       yield { id: `node:${index}#in${i}`, label: `${d.name} ${index} ${inletName(d, i)}`,
-              domain: d.inDomain[i], bus: node.inBus[i], writes: false };
+              domain: d.inDomain[i], buses, writes: false };
     }
   }
   for (const [i, port] of patch.gatePorts.entries()) {
-    if (port.direction === P.GatePortDirection.GATE_PORT_UNUSED || port.bus === P.NO_BUS) continue;
-    yield { id: `jack:${i}`, label: `jack ${i + 1}`, domain: Domain.Gate, bus: port.bus,
+    if (port.direction === P.GatePortDirection.GATE_PORT_UNUSED) continue;
+    if (!(port.buses ?? []).length) continue;
+    yield { id: `jack:${i}`, label: `jack ${i + 1}`, domain: Domain.Gate, buses: port.buses,
             writes: port.direction === P.GatePortDirection.GATE_PORT_IN };
   }
   for (const [i, port] of patch.midiIn.entries()) {
-    if (!port.sourceMask || port.bus === P.NO_BUS) continue;
-    yield { id: `midiIn:${i}`, label: `MIDI in ${i + 1}`, domain: Domain.Note, bus: port.bus, writes: true };
+    if (!port.sourceMask || !(port.buses ?? []).length) continue;
+    yield { id: `midiIn:${i}`, label: `MIDI in ${i + 1}`, domain: Domain.Note,
+            buses: port.buses, writes: true };
   }
   for (const [i, port] of patch.midiOut.entries()) {
-    if (!port.targetMask || port.bus === P.NO_BUS) continue;
-    yield { id: `midiOut:${i}`, label: `MIDI out ${i + 1}`, domain: Domain.Note, bus: port.bus, writes: false };
+    if (!port.targetMask || !(port.buses ?? []).length) continue;
+    yield { id: `midiOut:${i}`, label: `MIDI out ${i + 1}`, domain: Domain.Note,
+            buses: port.buses, writes: false };
   }
 }
 
@@ -220,12 +226,14 @@ function* everyPeer(device, patch) {
 // the thing a patch cable would have shown - what this inlet is actually
 // listening to - has to be said. `self` is the asking port's own id, left out
 // of its own answer.
-export function busPeers(device, patch, domain, bus, self = null) {
+export function busPeers(device, patch, domain, buses, self = null) {
   const writers = [];
   const readers = [];
-  if (bus === P.NO_BUS) return { writers, readers };
+  const wanted = new Set(Array.isArray(buses) ? buses : [buses]);
+  if (!wanted.size) return { writers, readers };
   for (const peer of everyPeer(device, patch)) {
-    if (peer.domain !== domain || peer.bus !== bus || peer.id === self) continue;
+    if (peer.domain !== domain || peer.id === self) continue;
+    if (!peer.buses.some((b) => wanted.has(b))) continue;
     (peer.writes ? writers : readers).push(peer.label);
   }
   return { writers, readers };
@@ -235,9 +243,13 @@ export function busPeers(device, patch, domain, bus, self = null) {
 // reading it.
 export function usedBuses(device, patch, domain) {
   const used = new Set();
-  for (const peer of everyPeer(device, patch)) if (peer.domain === domain) used.add(peer.bus);
+  for (const peer of everyPeer(device, patch)) {
+    if (peer.domain === domain) for (const bus of peer.buses) used.add(bus);
+  }
   if (domain === Domain.CV) {
-    for (const route of patch.modMap ?? []) if (isRoute(route)) used.add(route.bus);
+    for (const route of patch.modMap ?? []) {
+      if (isRoute(route)) for (const bus of route.buses) used.add(bus);
+    }
   }
   return used;
 }

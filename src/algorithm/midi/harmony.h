@@ -278,8 +278,8 @@ class Harmony : public Node{
 
         EdgeIn advance_in;
         EdgeIn reset_in;
-        uint8_t note_out;
-        uint8_t cv_out;
+        BusSet note_out;
+        BusSet cv_out;
         uint8_t phrase;
         uint8_t cadence;
         uint8_t gravity;

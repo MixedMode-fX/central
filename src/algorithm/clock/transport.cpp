@@ -30,7 +30,7 @@ Transport::Transport(const NodeConfig& config) :
     out(), width_param(config.params[0]), now(0), counts(), pulse()
 {
     for (uint8_t w = 0; w < OUTLETS; w++){
-        out[w] = config.out_bus[w];
+        out[w] = config.out_buses[w];
         if (width_param) pulse[w].set_width_us((uint32_t)width_param * 1000u);
     }
 }
@@ -53,7 +53,7 @@ void Transport::fire(BusManager& bus, uint8_t which){
     // is no older than the pass it was fired in.
     pulse[which].fire(now);
     counts[which]++;
-    bus.gate_write(out[which], true);          // NO_BUS is ignored by the bus
+    bus.gate_write(out[which], true);          // an unpatched outlet writes nowhere
 }
 
 void Transport::transport_event(BusManager& bus, uint8_t edges){

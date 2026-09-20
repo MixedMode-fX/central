@@ -7,7 +7,6 @@
 import { el } from '../dom.js';
 import { IconButton } from '../components/IconButton.js';
 import { KeyBadge } from '../components/KeyBadge.js';
-import { BusSelect } from '../controls/BusSelect.js';
 import { BusNeighbours } from '../controls/BusNeighbours.js';
 import { ParamSections } from '../controls/ParamControl.js';
 import { ModRoutes } from '../controls/ModRoute.js';
@@ -16,23 +15,27 @@ import { domainName } from '../../core/validate.js';
 import { algorithmGrid } from './algorithms.js';
 import './cards.css';
 
+// One port of one node: what it is called, and what it is wired to.
+//
+// **There is no bus selector here.** Routing is the canvas's, and a dropdown
+// per port was the rigid half of it: it could only ever say *one* bus, so
+// summing two sources into an inlet meant moving their sources onto one bus
+// and taking whatever else that merged with it. A port is a set of buses now
+// (src/bus/domain.h), and a set is made by dragging.
 function Port(app, index, isOutlet, i) {
   const node = app.state.patch.nodes[index];
   const d = app.device.byId.get(node.algorithmId);
   const domain = isOutlet ? d.outDomain[i] : d.inDomain[i];
-  const bus = isOutlet ? node.outBus[i] : node.inBus[i];
+  const buses = (isOutlet ? node.outBuses[i] : node.inBuses[i]) ?? [];
   const name = isOutlet ? outletName(d, i) : inletName(d, i);
   const optional = isOutlet || i >= d.minIn;
 
   return el('div', { class: `port dom-${domainName(domain)}` },
-    el('label', { class: 'port-head' },
-      el('span', { class: 'port-name' }, name, optional ? null : el('span', { class: 'required' }, '*')),
-      BusSelect({
-        caps: app.device.capabilities, domain, value: bus,
-        none: optional ? 'not connected' : '— must be connected',
-        onChange: (chosen) => app.editor.setConnection(index, isOutlet, i, chosen),
-      })),
-    BusNeighbours(app, { domain, bus, self: `node:${index}#${isOutlet ? 'out' : 'in'}${i}`, writes: isOutlet }));
+    el('div', { class: 'port-head' },
+      el('span', { class: 'port-name' }, name, optional ? null : el('span', { class: 'required' }, '*'))),
+    BusNeighbours(app, { domain, buses, self: `node:${index}#${isOutlet ? 'out' : 'in'}${i}`,
+                         writes: isOutlet,
+                         unused: optional ? 'not connected' : 'must be connected' }));
 }
 
 // The header is the details panel's when the card is the details panel: the

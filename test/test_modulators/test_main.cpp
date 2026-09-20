@@ -52,9 +52,9 @@ static void pass(T& node, BusManager& bus, uint32_t now_us){
 
 static NodeConfig hold_config(uint8_t mode, uint8_t hold_ms, bool with_reset){
     NodeConfig c = node_config(ALGO_GATE_HOLD);
-    c.in_bus[0] = 0;                                  // set
-    if (with_reset) c.in_bus[1] = 1;                  // reset
-    c.out_bus[0] = 2;
+    c.in_buses[0] = one_bus(0);                                  // set
+    if (with_reset) c.in_buses[1] = one_bus(1);                  // reset
+    c.out_buses[0] = one_bus(2);
     c.params[0] = mode;
     c.params[1] = hold_ms;
     return c;
@@ -148,7 +148,7 @@ static void test_limit_cuts_a_long_gate_and_needs_a_new_edge() {
 static void test_the_gate_parameter_holds_a_level_with_nothing_patched() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_GATE_HOLD);
-    c.out_bus[0] = 2;                                 // both inlets stay NO_BUS
+    c.out_buses[0] = one_bus(2);                                 // both inlets stay unconnected
     c.params[0] = GateHold::HOLD_LATCH;
     c.params[GateHold::P_GATE] = 1;                   // stored up: it loads up
     GateHold node(c);
@@ -203,7 +203,7 @@ static void test_a_mode_change_does_not_drop_a_held_gate() {
 
 static NodeConfig lfo_config(uint8_t shape, uint8_t sync, uint8_t rate, uint8_t polarity){
     NodeConfig c = node_config(ALGO_LFO);
-    c.out_bus[0] = 0;
+    c.out_buses[0] = one_bus(0);
     c.params[0] = shape;
     c.params[1] = sync;
     c.params[2] = rate;
@@ -321,7 +321,7 @@ static void test_a_triplet_lfo_is_a_whole_number_of_subticks() {
 static void test_a_reset_edge_restarts_the_cycle() {
     BusManager bus;
     NodeConfig c = lfo_config(Lfo::LFO_RAMP_UP, Lfo::LFO_FREE, 10, Lfo::LFO_UNIPOLAR);
-    c.in_bus[0] = 0;                                      // reset, on gate bus 0
+    c.in_buses[0] = one_bus(0);                                      // reset, on gate bus 0
     Lfo node(c);
     for (uint32_t t = 0; t <= 500000u; t += 1000u) pass(node, bus, t);
     TEST_ASSERT_GREATER_THAN_INT16(CV_HALF - 200, bus.cv_read(0));
@@ -371,9 +371,9 @@ static void test_a_random_step_lfo_holds_one_level_per_cycle() {
 
 static NodeConfig sh_config(uint8_t source, uint8_t mode, uint8_t steps, bool with_signal){
     NodeConfig c = node_config(ALGO_SAMPLE_HOLD);
-    c.in_bus[0] = 0;                                      // trigger, gate bus 0
-    if (with_signal) c.in_bus[1] = 1;                     // signal, CV bus 1
-    c.out_bus[0] = 2;
+    c.in_buses[0] = one_bus(0);                                      // trigger, gate bus 0
+    if (with_signal) c.in_buses[1] = one_bus(1);                     // signal, CV bus 1
+    c.out_buses[0] = one_bus(2);
     c.params[0] = source;
     c.params[1] = mode;
     c.params[2] = steps;
@@ -449,9 +449,9 @@ static void test_steps_quantise_the_held_level_and_requantise_on_edit() {
 static NodeConfig step_config(uint8_t shape, uint8_t steps, uint8_t direction,
                               uint8_t polarity, bool with_reset){
     NodeConfig c = node_config(ALGO_STEP_MOD);
-    c.in_bus[0] = 0;                                      // trigger, gate bus 0
-    if (with_reset) c.in_bus[1] = 1;                      // reset, gate bus 1
-    c.out_bus[0] = 2;
+    c.in_buses[0] = one_bus(0);                                      // trigger, gate bus 0
+    if (with_reset) c.in_buses[1] = one_bus(1);                      // reset, gate bus 1
+    c.out_buses[0] = one_bus(2);
     c.params[0] = shape;
     c.params[1] = steps;
     c.params[2] = direction;
@@ -650,8 +650,8 @@ static void test_random_glide_steps_between_two_levels_over_one_period() {
 static void test_slew_takes_the_first_reading_whole() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_SLEW);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(1);
     c.params[0] = 100;                                    // one second per full scale
     Slew node(c);
     bus.cv_write(0, 2000);
@@ -664,8 +664,8 @@ static void test_slew_takes_the_first_reading_whole() {
 static void test_slew_takes_its_time_and_arrives() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_SLEW);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(1);
     c.params[0] = 100;                                    // one second, full scale
     c.params[1] = 100;
     Slew node(c);
@@ -695,8 +695,8 @@ static void test_slew_takes_its_time_and_arrives() {
 static void test_rise_and_fall_are_separate() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_SLEW);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(1);
     c.params[0] = 0;                                      // instant up
     c.params[1] = 100;                                    // one second down
     Slew node(c);
@@ -757,13 +757,13 @@ static Patch modulation_patch(uint8_t lfo_shape = Lfo::LFO_RAMP_UP,
                              uint8_t polarity = Lfo::LFO_UNIPOLAR){
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_LFO);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[0] = lfo_shape;
     p.nodes[0].params[1] = Lfo::LFO_FREE;
     p.nodes[0].params[2] = 10;                            // 1 Hz
     p.nodes[0].params[8] = polarity;
     p.nodes[1] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[1].out_bus[0] = 0;                            // a gate bus
+    p.nodes[1].out_buses[0] = one_bus(0);                            // a gate bus
     p.nodes[1].params[1] = 4;                             // amount
     p.n_nodes = 2;
     return p;
@@ -771,7 +771,7 @@ static Patch modulation_patch(uint8_t lfo_shape = Lfo::LFO_RAMP_UP,
 
 static ModRoute route_to(uint8_t node, uint16_t param, uint8_t flags, uint8_t depth = 255){
     ModRoute r = unused_route();
-    r.bus = 0;
+    r.buses = one_bus(0);
     r.target_kind = CC_TARGET_NODE;
     r.target_index = node;
     r.param = param;
@@ -986,7 +986,7 @@ static void test_a_route_says_why_it_is_doing_nothing() {
     // and the parameter is pinned to the bottom of its range.
     Patch nowhere = modulation_patch();
     nowhere.mod_map[0] = route_to(1, 1, MOD_ABSOLUTE);
-    nowhere.mod_map[0].bus = N_CV_BUS - 1;                 // the LFO writes bus 0
+    nowhere.mod_map[0].buses = one_bus(N_CV_BUS - 1);                 // the LFO writes bus 0
     TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(nowhere, default_globals(), 0));
     for (uint32_t t = 0; t <= 20000u; t += 1000u) rig.turn(t);
     TEST_ASSERT_TRUE(rig.mod.state(0, s));
@@ -1045,7 +1045,7 @@ static void test_a_route_to_a_parameter_that_does_not_exist_is_refused() {
     p.mod_map[0] = route_to(9, 0, MOD_ABSOLUTE);           // no such node
     TEST_ASSERT_EQUAL(APPLY_INVALID, rig.patches.apply(p, default_globals(), 0));
     p.mod_map[0] = route_to(1, 1, MOD_ABSOLUTE);
-    p.mod_map[0].bus = N_CV_BUS;                           // no such bus
+    p.mod_map[0].buses = one_bus(N_CV_BUS);                           // no such bus
     TEST_ASSERT_EQUAL(APPLY_INVALID, rig.patches.apply(p, default_globals(), 0));
 }
 
@@ -1053,7 +1053,7 @@ static void test_a_route_cannot_press_the_transport() {
     Rig rig;
     Patch p = modulation_patch();
     ModRoute r = unused_route();
-    r.bus = 0;
+    r.buses = one_bus(0);
     r.target_kind = CC_TARGET_TRANSPORT;
     r.param = CC_TRANSPORT_START;
     r.depth = 255;
@@ -1065,7 +1065,7 @@ static void test_a_route_can_drive_the_tempo() {
     Rig rig;
     Patch p = modulation_patch();
     ModRoute r = unused_route();
-    r.bus = 0;
+    r.buses = one_bus(0);
     r.target_kind = CC_TARGET_CLOCK;
     r.param = CC_CLOCK_TEMPO;
     r.depth = 255;
@@ -1111,7 +1111,7 @@ static void test_routes_round_trip_through_the_codec() {
     p.mod_map[0].min = 10;
     p.mod_map[0].max = 90;
     p.mod_map[5] = route_to(1, 2, MOD_ABSOLUTE, 128);
-    p.mod_map[5].bus = 3;
+    p.mod_map[5].buses = one_bus(3);
 
     static uint8_t image[2048];
     size_t written = 0;
@@ -1121,16 +1121,16 @@ static void test_routes_round_trip_through_the_codec() {
     Patch back = empty_patch();
     GlobalSettings g = default_globals();
     TEST_ASSERT_EQUAL(CODEC_OK, patch_codec::decode(image, written, back, g));
-    TEST_ASSERT_EQUAL_UINT8(0, back.mod_map[0].bus);
+    TEST_ASSERT_EQUAL_UINT16(one_bus(0).bits, back.mod_map[0].buses.bits);
     TEST_ASSERT_EQUAL_UINT16(1, back.mod_map[0].param);
     TEST_ASSERT_EQUAL_UINT8(200, back.mod_map[0].depth);
     TEST_ASSERT_EQUAL_UINT8(MOD_OFFSET | MOD_BIPOLAR | MOD_INVERT, back.mod_map[0].flags);
     TEST_ASSERT_EQUAL_UINT16(10, back.mod_map[0].min);
     TEST_ASSERT_EQUAL_UINT16(90, back.mod_map[0].max);
-    TEST_ASSERT_EQUAL_UINT8(3, back.mod_map[5].bus);
+    TEST_ASSERT_EQUAL_UINT16(one_bus(3).bits, back.mod_map[5].buses.bits);
     TEST_ASSERT_EQUAL_UINT8(128, back.mod_map[5].depth);
     // Every other slot is unused, and stays that way.
-    TEST_ASSERT_EQUAL_UINT8(NO_BUS, back.mod_map[1].bus);
+    TEST_ASSERT_FALSE(back.mod_map[1].buses.any());
 }
 
 // An image from another build carries the same fields with different meanings

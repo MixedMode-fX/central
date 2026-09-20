@@ -22,8 +22,8 @@ const AlgorithmDescriptor GateToNote::descriptor = {
     CATEGORY_MIDI };
 
 GateToNote::GateToNote(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     note(config.params[0] ? config.params[0] : 60),
     velocity(config.params[1] ? config.params[1] : 100),
     channel(config.params[2] ? config.params[2] : 1),

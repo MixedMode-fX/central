@@ -59,7 +59,7 @@ import { gateHits } from '../src/runtime/audio/listener.js';
 import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/runtime/audio/drums.js';
 import {
   patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
-  applyWrite, freeBus, unusedBus, planJackDirection, planPortFlip, applyPortFlip,
+  applyWrite, freeBus, planJackDirection, planPortFlip, applyPortFlip,
   planPortFanOut, planModulation, planBusModulation, planCcBinding, CC_MAX,
 } from '../src/core/graph.js';
 import { catalogue, filterGroups, optionsOf, ENDPOINTS } from '../src/core/catalogue.js';
@@ -84,7 +84,7 @@ test('a saved patch comes back as the patch it was', async () => {
   const library = new Library(fakeStorage());
   const patch = codec.emptyPatch();
   patch.nodes.push(codec.emptyNode(1));
-  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_OUT, bus: 3 };
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_OUT, buses: [3] };
   const globals = codec.emptyGlobals();
   globals.bpm = 137;
 
@@ -93,7 +93,7 @@ test('a saved patch comes back as the patch it was', async () => {
   const back = fromPatchJson(read.patch, device);
   assert.equal(back.globals.bpm, 137);
   assert.equal(back.patch.nodes.length, 1);
-  assert.equal(back.patch.gatePorts[0].bus, 3);
+  assert.deepEqual(back.patch.gatePorts[0].buses, [3]);
 });
 
 // The reason the library holds words and not bytes. The image is versioned and
@@ -571,7 +571,7 @@ test('a note bus can be listened to, event by event', async () => {
   // MIDI in on USB 1 onto note bus 0, and *nothing* patched to a MIDI output:
   // the module sends not one byte, and the bus carries everything.
   const patch = codec.emptyPatch();
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
   await device.sendPatch(patch, codec.emptyGlobals());
 
   const sent = [];
@@ -792,8 +792,8 @@ test('what the module plays reaches whoever is listening', async () => {
   // MIDI in on USB 1 onto a note bus, and that bus out to DIN 1: the smallest
   // patch that makes the module send something.
   const patch = codec.emptyPatch();
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
-  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, bus: 0 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, buses: [0] };
   await device.sendPatch(patch, codec.emptyGlobals());
 
   module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 60, 100);
@@ -844,8 +844,8 @@ test('what the module plays leaves by the port its cable is routed to', async ()
   // The module is the one in the page, playing a real patch: in on USB 1, out
   // on DIN 1, which is the cable the synth is on.
   const patch = codec.emptyPatch();
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
-  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, bus: 0 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, buses: [0] };
   await device.sendPatch(patch, codec.emptyGlobals());
 
   module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 60, 100);
@@ -970,8 +970,8 @@ test('the output panel asks once per cable the patch plays to', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
-  patch.midiOut[1] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, bus: 1 };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.midiOut[1] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, buses: [1] };
   assert.deepEqual(cablesOut(patch, device.capabilities).map((c) => c.label), ['USB 1', 'DIN 1']);
 
   const { outputs, sent } = routed(['a synth']);
@@ -1359,8 +1359,8 @@ test('a route from the parameter side is the route a drag makes, and moves rathe
   for (const d of [lfo, transpose]) patched(device, patch, d);
   const semitones = transpose.params[0].fields.findIndex((pd) => pd.name === 'semitones');
   assert.ok(semitones >= 0, 'Transpose has a semitones parameter');
-  const cvBus = patch.nodes[0].outBus[0];
-  assert.notEqual(cvBus, P.NO_BUS, 'the LFO arrived on a CV bus');
+  const [cvBus] = patch.nodes[0].outBuses[0];
+  assert.notEqual(cvBus, undefined, 'the LFO arrived on a CV bus');
 
   const fromButton = planBusModulation(patch, caps, 1, semitones, cvBus, { device });
   assert.ok(fromButton.ok, fromButton.why);
@@ -1378,7 +1378,7 @@ test('a route from the parameter side is the route a drag makes, and moves rathe
   const moved = planBusModulation(patch, caps, 1, semitones, cvBus + 1, { device });
   assert.ok(moved.ok, moved.why);
   assert.equal(moved.routes[0].slot, fromButton.routes[0].slot, 'the same slot');
-  assert.equal(moved.routes[0].route.bus, cvBus + 1);
+  assert.deepEqual(moved.routes[0].route.buses, [cvBus + 1]);
   assert.match(moved.said, /now reads/);
 
   // And the answer to "what is not possible" is a sentence, not a throw.
@@ -1399,7 +1399,7 @@ test('a modulation route shows what it is doing, and says why when it is doing n
   const transpose = device.algorithms.find((d) => d?.name === 'Transpose');
   for (const d of [lfo, transpose]) patched(device, patch, d);
   const semitones = transpose.params[0].fields.findIndex((pd) => pd.name === 'semitones');
-  const bus = patch.nodes[0].outBus[0];
+  const [bus] = patch.nodes[0].outBuses[0];
   const plan = planBusModulation(patch, device.capabilities, 1, semitones, bus, { device });
   assert.ok(plan.ok, plan.why);
   const slot = plan.routes[0].slot;
@@ -1440,8 +1440,9 @@ test('a modulation route shows what it is doing, and says why when it is doing n
     // And the one the module cannot report, because from the matrix's side a
     // bus nobody writes is a perfectly good signal that happens to be zero.
     const empty = P.N_CV_BUS - 1;
-    assert.ok(!patch.nodes.some((n) => n.outBus.includes(empty)), 'a bus with no writer');
-    patch.modMap[slot] = { ...patch.modMap[slot], bus: empty, depth: 255 };
+    assert.ok(!patch.nodes.some((n) => n.outBuses.some((set) => set.includes(empty))),
+              'a bus with no writer');
+    patch.modMap[slot] = { ...patch.modMap[slot], buses: [empty], depth: 255 };
     await device.setModRoute(slot, patch.modMap[slot]);
     module.advance(20_000);
     document.body.children.length = 0;
@@ -1478,11 +1479,11 @@ test('the key badge names the key, and names the chord a cable roots a node on',
   const transpose = device.algorithms.find((d) => d?.name === 'Transpose');
 
   const sequencer = codec.emptyNode(seq.id);
-  sequencer.inBus[rootInlet(seq)] = 3;               // a cable on the root inlet
-  sequencer.outBus[0] = 1;
+  sequencer.inBuses[rootInlet(seq)] = [3];               // a cable on the root inlet
+  sequencer.outBuses[0] = [1];
   const shifter = codec.emptyNode(transpose.id);
-  shifter.inBus[0] = 1;
-  shifter.outBus[0] = 2;
+  shifter.inBuses[0] = [1];
+  shifter.outBuses[0] = [2];
   patch.nodes.push(sequencer, shifter);
 
   const globals = { ...codec.emptyGlobals(), root: 2, scale: scaleIdOf('minor') };
@@ -1556,7 +1557,7 @@ test('a control signal reaches the scope, and the scope lists it', async () => {
   const node = patched(device, patch, lfo);
   await device.sendPatch(patch, codec.emptyGlobals());
   module.advance(1_500_000);
-  const bus = node.outBus[0];
+  const [bus] = node.outBuses[0];
   const trace = module.trace;
   let low = Infinity;
   let high = -Infinity;
@@ -1581,10 +1582,10 @@ test('a node\'s roll lists what it reads and writes, in the domain\'s colour', a
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 2 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [2] };
   const chord = device.algorithms.find((d) => d?.name === 'Chord');
   const node = patched(device, patch, chord);
-  node.inBus[0] = 2;                     // the chord is optional to patch; here it is patched
+  node.inBuses[0] = [2];                     // the chord is optional to patch; here it is patched
   const sources = nodeRollSources({ patch, device }, 0);
   assert.equal(sources.filter((s) => s.role === 'in').length, 1, 'the held chord, once');
   assert.equal(sources.filter((s) => s.role === 'out').length, 1, 'the chord it makes, once');
@@ -2015,7 +2016,8 @@ test('the Euclidean ring is the pattern the node derived, with the hand on the s
 // is why the generator's own vocabulary is written out here.
 const KEYWORDS = new Set([
   '$schema', '$id', '$ref', '$defs', 'title', 'description', 'type', 'enum', 'const',
-  'minimum', 'maximum', 'minItems', 'maxItems', 'minLength', 'maxLength', 'prefixItems', 'items',
+  'minimum', 'maximum', 'minItems', 'maxItems', 'uniqueItems', 'minLength', 'maxLength',
+  'prefixItems', 'items',
   'properties', 'required', 'additionalProperties', 'allOf', 'anyOf', 'oneOf', 'if', 'then',
 ]);
 
@@ -2062,6 +2064,9 @@ function schemaProblems(schema, value, root = schema, at = 'the patch') {
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) bad(`needs ${schema.minItems} entries`);
     if (schema.maxItems !== undefined && value.length > schema.maxItems) bad(`holds at most ${schema.maxItems}`);
+    if (schema.uniqueItems && new Set(value.map((v) => JSON.stringify(v))).size !== value.length) {
+      bad('repeats an entry');
+    }
     value.forEach((item, i) => {
       const sub = schema.prefixItems?.[i] ?? schema.items;
       if (sub !== undefined) found.push(...schemaProblems(sub, item, root, `${at}[${i}]`));
@@ -2422,11 +2427,11 @@ test('the arrows are the buses, not a second model of the patch', async () => {
   assert.equal(arrows.length, 1, 'the sequencer reads the divider');
   assert.equal(arrows[0].from.blockId, 'node:0');
   assert.equal(arrows[0].to.blockId, 'node:1');
-  assert.equal(arrows[0].bus, patch.nodes[0].outBus[0]);
+  assert.deepEqual([arrows[0].bus], patch.nodes[0].outBuses[0]);
 
-  // Move the outlet off its bus from a selector, as the inspector does, and
-  // the arrow is gone: there was never anything else holding it there.
-  patch.nodes[0].outBus[0] = P.NO_BUS;
+  // Take the outlet off its bus and the arrow is gone: there was never
+  // anything else holding it there.
+  patch.nodes[0].outBuses[0] = [];
   assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0);
 });
 
@@ -2434,10 +2439,10 @@ test('a jack and a MIDI port are blocks with one socket each', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, bus: 2 };
-  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_OUT, bus: 2 };
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 1 };
-  patch.midiOut[3] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, bus: 1 };
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, buses: [2] };
+  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_OUT, buses: [2] };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [1] };
+  patch.midiOut[3] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, buses: [1] };
 
   const blocks = patchBlocks(device, patch);
   assert.deepEqual(blocks.map((b) => b.id), ['midiIn:0', 'jack:0', 'jack:1', 'midiOut:3'],
@@ -2450,7 +2455,7 @@ test('a jack and a MIDI port are blocks with one socket each', async () => {
 
   // An unused jack is not a block: eight empty boxes around every patch is not
   // a drawing of it.
-  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_UNUSED, bus: P.NO_BUS };
+  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_UNUSED, buses: [] };
   assert.equal(patchBlocks(device, patch).length, 3);
 });
 
@@ -2466,7 +2471,7 @@ test('a drag from an outlet to an inlet is a patch the firmware takes', async ()
     { blockId: 'node:1', at: 0, isOutlet: false });
   assert.ok(plan.ok, plan.why);
   assert.equal(plan.writes.length, 2, 'neither end was on a bus, so both moved');
-  assert.equal(patch.nodes[0].outBus[0], patch.nodes[1].inBus[0]);
+  assert.deepEqual(patch.nodes[0].outBuses[0], patch.nodes[1].inBuses[0]);
 
   assert.deepEqual(validate(device, patch), []);
   await device.sendPatch(patch, codec.emptyGlobals());     // throws if it is refused
@@ -2486,7 +2491,7 @@ test('one outlet, two readers, one bus', async () => {
                                         { blockId: 'node:2', at: 0, isOutlet: false });
   assert.ok(second.ok, second.why);
   assert.equal(second.writes.length, 1, 'the outlet was already on a bus; only the reader moved');
-  assert.equal(patch.nodes[1].inBus[0], patch.nodes[2].inBus[0], 'both read the same bus');
+  assert.deepEqual(patch.nodes[1].inBuses[0], patch.nodes[2].inBuses[0], 'both read the same bus');
 
   const arrows = connectionsOf(patchBlocks(device, patch));
   assert.equal(arrows.length, 2);
@@ -2515,8 +2520,8 @@ test('a drag the module would refuse is refused before it is made', async () => 
   assert.match(twoOutlets.why, /two outlets/);
 
   // And neither of them touched the patch.
-  assert.equal(patch.nodes[0].outBus[0], P.NO_BUS);
-  assert.equal(patch.nodes[1].inBus[0], P.NO_BUS);
+  assert.deepEqual(patch.nodes[0].outBuses[0], []);
+  assert.deepEqual(patch.nodes[1].inBuses[0], []);
 });
 
 test('which end the drag started at does not change what it connects', async () => {
@@ -2539,37 +2544,70 @@ test('which end the drag started at does not change what it connects', async () 
                    [...codec.encodePatch(forwards, codec.emptyGlobals())]);
 });
 
-test('disconnecting one arrow says what else the inlet stops hearing', async () => {
+test('disconnecting one arrow leaves the inlet\'s other sources alone', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
   patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));
   patch.nodes.push(codec.emptyNode(idOf('Metronome', device)));
   patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
-  // Two sources merged onto one bus, which the bus model allows and a cable
-  // would not: both drivers write gate bus 4, the sequencer reads it.
-  patch.nodes[0].outBus[0] = 4;
-  patch.nodes[1].outBus[0] = 4;
-  patch.nodes[2].inBus[0] = 4;
+  // Two sources on buses of their own, merged by the reader: the sequencer's
+  // advance inlet listens to both. This is the shape one bus per port could
+  // not hold without moving one of the sources onto the other's bus.
+  patch.nodes[0].outBuses[0] = [4];
+  patch.nodes[1].outBuses[0] = [5];
+  patch.nodes[2].inBuses[0] = [4, 5];
 
   const blocks = patchBlocks(device, patch);
   const arrows = connectionsOf(blocks);
   assert.equal(arrows.length, 2, 'two writers, one reader');
   const plan = planDisconnect(blocks, arrows[0]);
   assert.ok(plan.ok);
-  assert.match(plan.said, /other source was on gate bus 4/);
+  assert.match(plan.said, /still reading bus 5/);
   for (const write of plan.writes) applyWrite(patch, write);
-  assert.equal(patch.nodes[2].inBus[0], P.NO_BUS);
-  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0,
-               'the reader came off the bus, so both arrows went with it');
+  assert.deepEqual(patch.nodes[2].inBuses[0], [5]);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 1,
+               'only the arrow that was cut went; the other source is untouched');
 
-  // And clearing a socket directly is the same edit from the other end.
-  patch.nodes[2].inBus[0] = 4;
-  const cleared = planClear(patchBlocks(device, patch), { blockId: 'node:0', at: 0, isOutlet: true });
+  // And clearing a socket directly takes every arrow at it at once.
+  patch.nodes[2].inBuses[0] = [4, 5];
+  const cleared = planClear(patchBlocks(device, patch), { blockId: 'node:2', at: 0, isOutlet: false });
   assert.ok(cleared.ok);
   for (const write of cleared.writes) applyWrite(patch, write);
-  assert.equal(patch.nodes[0].outBus[0], P.NO_BUS);
-  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 1, 'the other source is still there');
+  assert.deepEqual(patch.nodes[2].inBuses[0], []);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0);
+});
+
+// The drag that could not be made at all before: a second source into an
+// inlet that already has one, with neither source losing what it was already
+// driving.
+test('a second source dragged into an inlet is summed, not swapped', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));      // gate out
+  patch.nodes.push(codec.emptyNode(idOf('Metronome', device)));     // gate out
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device))); // gate in
+  patch.nodes.push(codec.emptyNode(idOf('EuclidianSequencer', device)));
+
+  // The divider drives both sequencers; the metronome drives the first as well.
+  dragged(device, patch, { blockId: 'node:0', at: 0, isOutlet: true },
+                         { blockId: 'node:2', at: 0, isOutlet: false });
+  dragged(device, patch, { blockId: 'node:0', at: 0, isOutlet: true },
+                         { blockId: 'node:3', at: 0, isOutlet: false });
+  const merge = dragged(device, patch, { blockId: 'node:1', at: 0, isOutlet: true },
+                                       { blockId: 'node:2', at: 0, isOutlet: false });
+  assert.ok(merge.ok, merge.why);
+  assert.match(merge.said, /summed with/);
+
+  const divider = patch.nodes[0].outBuses[0][0];
+  const metronome = patch.nodes[1].outBuses[0][0];
+  assert.notEqual(divider, metronome, 'each source kept a bus of its own');
+  assert.deepEqual(patch.nodes[2].inBuses[0], [divider, metronome].sort((a, b) => a - b));
+  assert.deepEqual(patch.nodes[3].inBuses[0], [divider], 'the other reader is untouched');
+
+  assert.deepEqual(validate(device, patch), []);
+  await device.sendPatch(patch, codec.emptyGlobals());
 });
 
 test('a free bus is one nothing writes, and running out says so', async () => {
@@ -2578,7 +2616,7 @@ test('a free bus is one nothing writes, and running out says so', async () => {
   const patch = codec.emptyPatch();
   for (let i = 0; i < device.capabilities.gateBuses; i++) {
     const node = codec.emptyNode(idOf('ClockDiv', device));
-    node.outBus[0] = i;
+    node.outBuses[0] = [i];
     patch.nodes.push(node);
   }
   const blocks = patchBlocks(device, patch);
@@ -2593,54 +2631,50 @@ test('a free bus is one nothing writes, and running out says so', async () => {
   assert.match(plan.why, /every gate bus/);
 });
 
-test('a jack and a MIDI port are never taken off their bus', async () => {
+test('a jack and a MIDI port are disconnected like any other port', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
-  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
   const blocks = patchBlocks(device, patch);
   const arrow = connectionsOf(blocks)[0];
 
-  // The module validates the pair: a port in use and on no bus is a patch it
-  // refuses, so there is nothing here to disconnect - the block goes out of
-  // use, or it moves to another bus.
+  // A port in use and on no bus is a patch the module takes: it is what every
+  // block starts as. So there is nothing special about cutting one.
   const cut = planDisconnect(blocks, arrow);
-  assert.equal(cut.ok, false);
-  assert.match(cut.why, /only in the patch while it is on a bus/);
-  const cleared = planClear(blocks, { blockId: 'midiIn:0', at: 0, isOutlet: true });
-  assert.equal(cleared.ok, false);
+  assert.ok(cut.ok, cut.why);
+  for (const write of cut.writes) applyWrite(patch, write);
+  assert.deepEqual(patch.midiOut[0].buses, []);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0);
+  assert.deepEqual(validate(device, patch), [], 'in use, wired to nothing, and still legal');
 
-  // Which is worth checking against the rule itself rather than against the
-  // wording: taking it off the bus is what the firmware would reject.
-  patch.midiOut[0].bus = P.NO_BUS;
-  assert.notDeepEqual(validate(device, patch), []);
+  const cleared = planClear(patchBlocks(device, patch), { blockId: 'midiIn:0', at: 0, isOutlet: true });
+  assert.ok(cleared.ok, cleared.why);
+  for (const write of cleared.writes) applyWrite(patch, write);
+  assert.deepEqual(patch.midiIn[0].buses, []);
+  assert.deepEqual(validate(device, patch), []);
 });
 
-test('a port taken into use lands on a bus nothing else is on', async () => {
+test('a port taken into use arrives on no bus at all', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const patch = codec.emptyPatch();
   // A MIDI output on note bus 0 that nothing writes - which `advise` flags,
   // and which adding a MIDI input must *not* silently answer: a source that
   // lands on whatever was waiting is a wire nobody drew.
-  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
-  const blocks = patchBlocks(device, patch);
-  assert.equal(unusedBus(blocks, device.capabilities, 1), 1, 'note bus 0 is taken, 1 is not');
-  assert.equal(unusedBus(blocks, device.capabilities, 0), 0, 'and no gate bus is in use');
-
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0,
-                      bus: unusedBus(blocks, device.capabilities, 1) };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [] };
   assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0, 'two blocks, no arrow');
   assert.deepEqual(validate(device, patch), []);
 
-  // Every note bus in use is the one case there is no answer to, and it is a
-  // refusal rather than a bus chosen for you.
-  const full = codec.emptyPatch();
-  for (let b = 0; b < device.capabilities.noteBuses; b++) {
-    full.nodes.push({ ...codec.emptyNode(idOf('Transpose', device)), inBus: [0], outBus: [b] });
-  }
-  assert.equal(unusedBus(patchBlocks(device, full), device.capabilities, 1), null);
+  // And a drag is what connects it - to the bus the output is already on,
+  // because that is the one the reader is listening to.
+  const plan = dragged(device, patch, { blockId: 'midiIn:0', at: 0, isOutlet: true },
+                                      { blockId: 'midiOut:0', at: 0, isOutlet: false });
+  assert.ok(plan.ok, plan.why);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 1);
+  assert.deepEqual(validate(device, patch), []);
 });
 
 // --- the patch's edges, and the list you add them from ------------------------
@@ -2724,22 +2758,22 @@ test('a jack turned round keeps its bus, and an unused one lands on a real one',
   const device = await connected(module);
   const caps = device.capabilities;
   const patch = codec.emptyPatch();
-  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, bus: 3 };
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, buses: [3] };
 
   const turned = planJackDirection(patch, caps, 0, P.GatePortDirection.GATE_PORT_OUT);
-  assert.deepEqual(turned, { index: 0, direction: P.GatePortDirection.GATE_PORT_OUT, bus: 3 });
+  assert.deepEqual(turned, { index: 0, direction: P.GatePortDirection.GATE_PORT_OUT, buses: [3] });
 
-  // Off, and the bus goes with it: a jack in use is one the module validates
-  // against its bus count, and an unused one carries NO_BUS.
+  // Off, and the buses go with it: a jack put away lets go of what it was
+  // patched to, so putting it back does not silently reconnect it.
   const off = planJackDirection(patch, caps, 0, P.GatePortDirection.GATE_PORT_UNUSED);
-  assert.equal(off.bus, P.NO_BUS);
-  patch.gatePorts[0] = { direction: off.direction, bus: off.bus };
+  assert.deepEqual(off.buses, []);
+  patch.gatePorts[0] = { direction: off.direction, buses: off.buses };
   assert.deepEqual(validate(device, patch), []);
 
-  // And back on: NO_BUS is not a bus, so it lands on the first.
+  // And back on: in use, on no bus, waiting to be dragged.
   const on = planJackDirection(patch, caps, 0, P.GatePortDirection.GATE_PORT_IN);
-  assert.equal(on.bus, 0);
-  patch.gatePorts[0] = { direction: on.direction, bus: on.bus };
+  assert.deepEqual(on.buses, []);
+  patch.gatePorts[0] = { direction: on.direction, buses: on.buses };
   assert.deepEqual(validate(device, patch), [], 'the module takes what the toggle wrote');
 });
 
@@ -2752,7 +2786,7 @@ test('a MIDI port turned round takes its cables, channel and bus with it', async
   const device = await connected(module);
   const caps = device.capabilities;
   const patch = codec.emptyPatch();
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, bus: 2 };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, buses: [2] };
 
   const plan = planPortFlip(patch, caps, 0, false);
   assert.equal(plan.ok, true);
@@ -2760,8 +2794,8 @@ test('a MIDI port turned round takes its cables, channel and bus with it', async
   applyPortFlip(patch, plan);
   assert.equal(patch.midiIn[0].sourceMask, 0, 'the input it left is unused');
   assert.deepEqual(
-    { mask: patch.midiOut[0].targetMask, channel: patch.midiOut[0].channel, bus: patch.midiOut[0].bus },
-    { mask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, bus: 2 });
+    { mask: patch.midiOut[0].targetMask, channel: patch.midiOut[0].channel, buses: patch.midiOut[0].buses },
+    { mask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, buses: [2] });
   assert.deepEqual(validate(device, patch), []);
 
   // The patch says one MIDI port, pointing the other way - not two.
@@ -2772,9 +2806,9 @@ test('a MIDI port turned round takes its cables, channel and bus with it', async
   // failure with a reason, not a silently dropped edit.
   const full = codec.emptyPatch();
   for (let i = 0; i < caps.midiOut; i++) {
-    full.midiOut[i] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+    full.midiOut[i] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
   }
-  full.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+  full.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
   const refused = planPortFlip(full, caps, 0, false);
   assert.equal(refused.ok, false);
   assert.match(refused.why, /every MIDI output port/);
@@ -2784,41 +2818,30 @@ test('a MIDI port turned round takes its cables, channel and bus with it', async
 // outputs naming one note bus is two cables carrying the same music - but the
 // only way to build it was to know that a spare port slot was where to go. The
 // half that travels is the source, and it is a different half each way round.
-test('a MIDI port fans out to a second destination, never to the same one', async () => {
+test('a MIDI output fans out to a second cable, never to the same one', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const caps = device.capabilities;
   const patch = codec.emptyPatch();
-  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 3, bus: 2 };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 3, buses: [2] };
 
-  const out = planPortFanOut(device, patch, caps, 0, true);
+  const out = planPortFanOut(patch, caps, 0);
   assert.equal(out.ok, true, out.why);
-  assert.equal(out.bus, 2, 'the note bus is the source, so it travels');
+  assert.deepEqual(out.buses, [2], 'the note buses are the source, so they travel');
   assert.equal(out.channel, 3);
   assert.notEqual(out.mask & P.MidiPort.mmMIDI_USB_0, P.MidiPort.mmMIDI_USB_0,
                   'not the cable it is already playing: that would be every note twice');
-  patch.midiOut[out.index] = { targetMask: out.mask, channel: out.channel, bus: out.bus };
+  patch.midiOut[out.index] = { targetMask: out.mask, channel: out.channel, buses: out.buses };
   assert.deepEqual(validate(device, patch), []);
   assert.equal(patchBlocks(device, patch).filter((b) => b.kind === 'midiOut').length, 2);
-
-  // An input's source is its cables, so they stay and the bus is the new part:
-  // the same keyboard reaching a second chain.
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 5, bus: 0 };
-  const into = planPortFanOut(device, patch, caps, 0, false);
-  assert.equal(into.ok, true, into.why);
-  assert.equal(into.mask, P.MidiPort.mmMIDI_SERIAL_1);
-  assert.equal(into.channel, 5);
-  assert.notEqual(into.bus, 0, 'a bus of its own, or it is the first port again');
-  patch.midiIn[into.index] = { sourceMask: into.mask, channel: into.channel, bus: into.bus };
-  assert.deepEqual(validate(device, patch), []);
   await device.sendPatch(patch, codec.emptyGlobals());     // throws if it is refused
 
   // And it refuses with a reason rather than writing over a port in use.
   const full = codec.emptyPatch();
   for (let i = 0; i < caps.midiOut; i++) {
-    full.midiOut[i] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 0 };
+    full.midiOut[i] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
   }
-  const refused = planPortFanOut(device, full, caps, 0, true);
+  const refused = planPortFanOut(full, caps, 0);
   assert.equal(refused.ok, false);
   assert.match(refused.why, /every MIDI output port/);
 });
@@ -2841,7 +2864,7 @@ test('the layout runs the signal left to right, and a loop does not hang it', as
   // A sequencer resetting the divider that advances it is a legal patch - a
   // bus is read and written once a pass - and a layout that walked it looking
   // for the furthest-left source would never come back.
-  patch.nodes[0].inBus[0] = patch.nodes[1].outBus[0];
+  patch.nodes[0].inBuses[0] = [patch.nodes[1].outBuses[0]];
   const looped = patchBlocks(device, patch);
   const round = autoLayout(looped, connectionsOf(looped));
   assert.equal(round.size, looped.length, 'every block still got a position');
@@ -2984,17 +3007,17 @@ test('the drum sequencers of a patch are found, with the buses they speak on', a
   const midi = patched(device, patch, idOf('DrumSeqMidi', device));
   const gate = patched(device, patch, idOf('DrumSeqGate', device));
   // Three lanes out, five left alone - the ordinary shape of a drum patch.
-  gate.outBus[0] = 4; gate.outBus[1] = 5; gate.outBus[2] = 6;
+  gate.outBuses[0] = [4]; gate.outBuses[1] = [5]; gate.outBuses[2] = [6];
 
   const sources = drumSources(device, patch);
   assert.equal(sources.length, 2, 'both drum sequencers should be found');
   assert.deepEqual(sources.map((s) => s.key), ['node:0', 'node:1'],
                    'a drum voice is keyed by node index, like everything else addressed');
   assert.equal(sources[0].kind, 'note');
-  assert.equal(sources[0].bus, midi.outBus[0], 'the MIDI variant speaks on its note outlet');
+  assert.deepEqual(sources[0].buses, midi.outBuses[0], 'the MIDI variant speaks on its note outlet');
   assert.equal(sources[1].kind, 'gate');
-  assert.deepEqual(sources[1].lanes.map((lane) => [lane.bus, lane.piece]),
-                   [[4, 'kick'], [5, 'snare'], [6, 'hatClosed']],
+  assert.deepEqual(sources[1].lanes.map((lane) => [lane.buses, lane.piece]),
+                   [[[4], 'kick'], [[5], 'snare'], [[6], 'hatClosed']],
                    'a gate lane is the drum the firmware means by that lane');
   assert.equal(sources[1].lanes.length, 3, 'a lane on no bus is not a lane to listen to');
 
@@ -3022,7 +3045,7 @@ test('a drum note is played by its own sequencer, not by the player that carried
   assert.equal(listener.drums.get('other').hits, 1, 'a bus nobody listens to stays silent');
 
   listener.setDrumSources([
-    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
+    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', buses: [3], lanes: [] },
   ]);
   assert.equal(module.watches.get(3), 1, 'a drum sequencer’s bus is read without a player on it');
 
@@ -3059,7 +3082,7 @@ test('a node set to channel 10 is a drum machine, whatever algorithm it runs', a
   assert.ok(source, 'a Euclidean pattern through a GateToNote on channel 10 is drums');
   assert.equal(source.key, 'node:0');
   assert.equal(source.kind, 'note');
-  assert.equal(source.bus, node.outBus[0], 'heard on the bus it writes');
+  assert.deepEqual(source.buses, node.outBuses[0], 'heard on the bus it writes');
   assert.equal(source.channel, 10, 'and only the notes on that channel are its own');
 
   // A drum sequencer is drums because of what it is rather than where it
@@ -3071,14 +3094,14 @@ test('a node set to channel 10 is a drum machine, whatever algorithm it runs', a
 
   // An outlet on no bus is nothing to listen to, and a node with no note
   // outlet at all cannot be one however its channel is set.
-  node.outBus[0] = P.NO_BUS;
+  node.outBuses[0] = [];
   assert.equal(drumSources(device, patch).length, 1);
 });
 
 test('a bus that is drums by its channel is drums only on that channel', async () => {
   const { listener, module } = await listening();
   listener.setDrumSources([
-    { key: 'node:0', index: 0, label: 'GateToNote 0', kind: 'note', channel: 10, bus: 3, lanes: [] },
+    { key: 'node:0', index: 0, label: 'GateToNote 0', kind: 'note', channel: 10, buses: [3], lanes: [] },
   ]);
   assert.equal(module.watches.get(3), 1, 'its bus is read without a player on it');
 
@@ -3098,7 +3121,7 @@ test('a bus that is drums by its channel is drums only on that channel', async (
 
   // The other kind: a drum sequencer's bus is drums on every channel.
   listener.setDrumSources([
-    { key: 'node:1', index: 1, label: 'DrumSeqMidi 1', kind: 'note', channel: null, bus: 5, lanes: [] },
+    { key: 'node:1', index: 1, label: 'DrumSeqMidi 1', kind: 'note', channel: null, buses: [5], lanes: [] },
   ]);
   listener.noteBus({ t: 0, bus: 5, type: 0x90, channel: 1, d1: 38, d2: 100 });
   assert.equal(listener.drums.get('node:1').hits, 1);
@@ -3107,7 +3130,7 @@ test('a bus that is drums by its channel is drums only on that channel', async (
 test('a hit already heard on its bus is not heard again off the cable', async () => {
   const { listener } = await listening();
   listener.setDrumSources([
-    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
+    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', buses: [3], lanes: [] },
   ]);
   // The app says which MIDI targets carry a drum sequencer this page is
   // already listening to on its own bus.
@@ -3127,8 +3150,8 @@ test('a hit already heard on its bus is not heard again off the cable', async ()
 test('a gate lane plays its drum on the edge, not while the gate is high', async () => {
   const { listener, module } = await listening();
   listener.setDrumSources([
-    { key: 'node:1', index: 1, label: 'DrumSeqGate 1', kind: 'gate', bus: P.NO_BUS,
-      lanes: [{ lane: 0, bus: 4, piece: 'kick' }, { lane: 1, bus: 5, piece: 'snare' }] },
+    { key: 'node:1', index: 1, label: 'DrumSeqGate 1', kind: 'gate', buses: [],
+      lanes: [{ lane: 0, buses: [4], piece: 'kick' }, { lane: 1, buses: [5], piece: 'snare' }] },
   ]);
   const voice = listener.drums.get('node:1');
 
@@ -3212,7 +3235,7 @@ test('a note sounds at its own time, wherever the module had got to', async () =
 test('what is being listened to survives a reload', async () => {
   const { listener } = await listening();
   listener.setDrumSources([
-    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', bus: 3, lanes: [] },
+    { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', buses: [3], lanes: [] },
   ]);
   listener.drums.get('node:0').setKit('808');
   listener.drums.get('node:0').setVolume(0.25);

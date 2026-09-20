@@ -21,8 +21,8 @@ const AlgorithmDescriptor Slew::descriptor = {
     CATEGORY_MODULATOR };
 
 Slew::Slew(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     rise(config.params[0]),
     fall(config.params[1]),
     link(config.params[2]),
@@ -42,7 +42,7 @@ int32_t Slew::step_for(uint8_t rate, uint32_t dt) const {
 }
 
 void Slew::process(BusManager& bus, uint32_t now_us){
-    const int32_t target = ((int32_t)(in == NO_BUS ? 0 : bus.cv_read(in))) << SUB_BITS;
+    const int32_t target = ((int32_t)(!in.any() ? 0 : bus.cv_read(in))) << SUB_BITS;
 
     if (!have_time){
         // The first pass takes the input as it is: a node that started at

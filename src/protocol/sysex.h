@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 14
+#define SYSEX_PROTOCOL_VERSION 15
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -65,7 +65,7 @@ enum SysexCommand : uint8_t {
     // seven and then the eighth. SYSEX_PARAM_VALUE answers the same way.
     SYSEX_SET_PARAM        = 0x10,
     SYSEX_GET_PARAM        = 0x11,
-    SYSEX_SET_CONNECTION   = 0x12,   // one inlet or outlet of one node
+    SYSEX_SET_CONNECTION   = 0x12,   // the buses one inlet or outlet of one node is on
     SYSEX_SET_GATE_PORT    = 0x13,
     SYSEX_SET_MIDI_PORT    = 0x14,
     SYSEX_SET_GLOBALS      = 0x15,
@@ -76,7 +76,7 @@ enum SysexCommand : uint8_t {
     SYSEX_SET_PATTERN      = 0x1A,   // a run of one node's parameter bytes (#22)
     SYSEX_GET_PATTERN      = 0x1B,
     SYSEX_GET_CONTROL      = 0x1C,   // read any target, by kind and index
-    SYSEX_SET_MOD_ROUTE    = 0x1D,   // one modulation route: a CV bus to a parameter
+    SYSEX_SET_MOD_ROUTE    = 0x1D,   // one modulation route: CV buses to a parameter
     SYSEX_GET_MOD_ROUTE    = 0x1E,
     // <slot>: what that route is doing right now, and why it is doing
     // nothing when it is. A route is the one thing in the module whose

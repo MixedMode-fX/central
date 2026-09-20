@@ -13,8 +13,59 @@ enum class Domain : uint8_t {
     CV,     // int16_t. Fan-in: sum with saturation. Modulators and #8's jacks.
 };
 
-// "Not connected" marker for an optional inlet.
-#define NO_BUS 0xFF
+// ---------------------------------------------------------------------------
+// What a port is connected to.
+//
+// **Every port names a set of buses, not a bus.** An outlet writes all of
+// them, an inlet reads all of them, and the empty set is "not connected".
+// That single rule is what makes the patch a graph rather than a chain:
+//
+//   * one outlet on a bus any number of inlets read is a fan-out, and always
+//     was - a bus has never cared how many readers it has;
+//   * an inlet reading two buses is a **merge**, under its domain's own
+//     fan-in rule, and it costs its sources nothing: each keeps its own bus
+//     and whatever else was already listening to it;
+//   * an outlet on two buses is the same freedom from the writing end, for
+//     the patch where a signal has to join two merges that are otherwise
+//     unrelated.
+//
+// Before this, a port held one bus index, so two signals could only be summed
+// by putting their sources on one bus - which silently merged everything else
+// those sources were driving. Connecting anything could therefore disconnect
+// something somewhere else, and that is the rigidity this replaces.
+//
+// A set is a bit per bus. Every domain has at most sixteen buses (the
+// static_asserts below), so one is sixteen bits: two bytes per port in the
+// preset format and in RAM.
+// Plain data with no constructors of its own, so a NodeConfig holding one is
+// still the aggregate the preset format treats it as: `BusSet{}` is the empty
+// set and `BusSet{bits}` names one directly.
+struct BusSet {
+    uint16_t bits;
+
+    bool any() const { return bits != 0; }
+    bool has(uint8_t bus) const { return bus < 16 && (bits & (uint16_t)(1u << bus)) != 0; }
+    void add(uint8_t bus){ if (bus < 16) bits = (uint16_t)(bits | (1u << bus)); }
+    void remove(uint8_t bus){ if (bus < 16) bits = (uint16_t)(bits & ~(1u << bus)); }
+    uint8_t count() const {
+        uint8_t n = 0;
+        for (uint16_t b = bits; b != 0; b &= (uint16_t)(b - 1u)) n++;
+        return n;
+    }
+    // The lowest bus in the set, or 0xFF when it is empty. What a caller
+    // wants when a set is known to hold at most one - a jack's direction
+    // toggle, a console listing.
+    uint8_t first() const {
+        for (uint8_t b = 0; b < 16; b++) if (has(b)) return b;
+        return 0xFF;
+    }
+};
+
+inline bool operator==(BusSet a, BusSet b){ return a.bits == b.bits; }
+inline bool operator!=(BusSet a, BusSet b){ return a.bits != b.bits; }
+
+// The set holding one bus, which is what a single connection is.
+inline BusSet one_bus(uint8_t bus){ BusSet s{}; s.add(bus); return s; }
 
 // ---------------------------------------------------------------------------
 // What a number on a CV bus means.
@@ -78,6 +129,18 @@ inline uint8_t bus_count(Domain d){
     }
 }
 
+// Every bus a domain has, as a set: what a port's set is checked against.
+inline BusSet all_buses(Domain d){
+    const uint8_t n = bus_count(d);
+    return BusSet{(uint16_t)((n >= 16) ? 0xFFFFu : ((1u << n) - 1u))};
+}
+
+// True when every bus in `set` exists in `domain`. The validator's whole
+// question about a port.
+inline bool buses_in_range(Domain domain, BusSet set){
+    return (set.bits & ~all_buses(domain).bits) == 0;
+}
+
 // What travels on a note bus: any channel-voice MIDI message, so CC, pitch
 // bend, aftertouch and program change share the bus with notes (#5).
 struct MidiEvent {
@@ -86,5 +149,9 @@ struct MidiEvent {
     uint8_t data1;
     uint8_t data2;
 };
+
+static_assert(N_GATE_BUS <= 16, "a BusSet is sixteen bits");
+static_assert(N_NOTE_BUS <= 16, "a BusSet is sixteen bits");
+static_assert(N_CV_BUS <= 16, "a BusSet is sixteen bits");
 
 #endif

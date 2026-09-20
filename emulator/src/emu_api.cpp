@@ -76,7 +76,6 @@ EMU_EXPORT uint32_t emu_const_max_out(){ return MAX_OUT; }
 EMU_EXPORT uint32_t emu_const_n_param(){ return N_PARAM; }
 EMU_EXPORT uint32_t emu_const_n_midi_in(){ return N_MIDI_IN_NODES; }
 EMU_EXPORT uint32_t emu_const_n_midi_out(){ return N_MIDI_OUT_NODES; }
-EMU_EXPORT uint32_t emu_const_no_bus(){ return NO_BUS; }
 EMU_EXPORT uint32_t emu_const_master_ppqn(){ return MASTER_PPQN; }
 EMU_EXPORT uint32_t emu_const_clock_subtick(){ return CLOCK_SUBTICK; }
 EMU_EXPORT uint32_t emu_const_min_bpm(){ return CLOCK_MIN_BPM; }
@@ -115,14 +114,21 @@ EMU_EXPORT uint32_t emu_algo_out_domain(uint32_t i, uint32_t k){
 // Patch under construction ------------------------------------------------
 
 EMU_EXPORT void emu_patch_reset(){ patch = empty_patch(); }
-EMU_EXPORT void emu_patch_gate_port(uint32_t port, uint32_t direction, uint32_t bus){
-    if (port < GPIO_N) patch.gate_ports[port] = GatePortConfig{(uint8_t)direction, (uint8_t)bus};
+// Every port names the set of buses it is on (bus/domain.h), and these take
+// that set as a bit per bus - the same sixteen bits the patch image carries,
+// so the page never has to spell a connection out one bus at a time.
+EMU_EXPORT void emu_patch_gate_port(uint32_t port, uint32_t direction, uint32_t buses){
+    if (port < GPIO_N) patch.gate_ports[port] = GatePortConfig{(uint8_t)direction, BusSet{(uint16_t)buses}};
 }
-EMU_EXPORT void emu_patch_midi_in(uint32_t i, uint32_t source_mask, uint32_t channel, uint32_t bus){
-    if (i < N_MIDI_IN_NODES) patch.midi_in[i] = MidiInConfig{(uint8_t)source_mask, (uint8_t)channel, (uint8_t)bus};
+EMU_EXPORT void emu_patch_midi_in(uint32_t i, uint32_t source_mask, uint32_t channel, uint32_t buses){
+    if (i < N_MIDI_IN_NODES){
+        patch.midi_in[i] = MidiInConfig{(uint8_t)source_mask, (uint8_t)channel, BusSet{(uint16_t)buses}};
+    }
 }
-EMU_EXPORT void emu_patch_midi_out(uint32_t i, uint32_t target_mask, uint32_t channel, uint32_t bus){
-    if (i < N_MIDI_OUT_NODES) patch.midi_out[i] = MidiOutConfig{(uint8_t)target_mask, (uint8_t)channel, (uint8_t)bus};
+EMU_EXPORT void emu_patch_midi_out(uint32_t i, uint32_t target_mask, uint32_t channel, uint32_t buses){
+    if (i < N_MIDI_OUT_NODES){
+        patch.midi_out[i] = MidiOutConfig{(uint8_t)target_mask, (uint8_t)channel, BusSet{(uint16_t)buses}};
+    }
 }
 // Resets node i to node_config(algorithm_id); n_nodes grows to include it.
 EMU_EXPORT void emu_patch_node(uint32_t i, uint32_t algorithm_id){
@@ -130,24 +136,24 @@ EMU_EXPORT void emu_patch_node(uint32_t i, uint32_t algorithm_id){
     patch.nodes[i] = node_config((uint8_t)algorithm_id);
     if (patch.n_nodes <= i) patch.n_nodes = (uint8_t)(i + 1);
 }
-EMU_EXPORT void emu_patch_node_in(uint32_t i, uint32_t k, uint32_t bus){
-    if (i < N_NODE && k < MAX_IN) patch.nodes[i].in_bus[k] = (uint8_t)bus;
+EMU_EXPORT void emu_patch_node_in(uint32_t i, uint32_t k, uint32_t buses){
+    if (i < N_NODE && k < MAX_IN) patch.nodes[i].in_buses[k] = BusSet{(uint16_t)buses};
 }
-EMU_EXPORT void emu_patch_node_out(uint32_t i, uint32_t k, uint32_t bus){
-    if (i < N_NODE && k < MAX_OUT) patch.nodes[i].out_bus[k] = (uint8_t)bus;
+EMU_EXPORT void emu_patch_node_out(uint32_t i, uint32_t k, uint32_t buses){
+    if (i < N_NODE && k < MAX_OUT) patch.nodes[i].out_buses[k] = BusSet{(uint16_t)buses};
 }
 EMU_EXPORT void emu_patch_node_param(uint32_t i, uint32_t k, uint32_t value){
     if (i < N_NODE && k < N_PARAM) patch.nodes[i].params[k] = (uint8_t)value;
 }
-// One modulation route in the patch under construction: a CV bus reaching a
-// parameter (control/mod_matrix.h). A bus of NO_BUS clears the slot.
-EMU_EXPORT void emu_patch_mod_route(uint32_t slot, uint32_t bus, uint32_t target_kind,
+// One modulation route in the patch under construction: CV buses reaching a
+// parameter (control/mod_matrix.h). An empty set clears the slot.
+EMU_EXPORT void emu_patch_mod_route(uint32_t slot, uint32_t buses, uint32_t target_kind,
                                     uint32_t target_index, uint32_t param,
                                     uint32_t depth, uint32_t flags){
     if (slot >= N_MOD_ROUTE) return;
     ModRoute r = unused_route();
-    if (bus < N_CV_BUS){
-        r.bus = (uint8_t)bus;
+    if (buses != 0){
+        r.buses = BusSet{(uint16_t)buses};
         r.target_kind = (uint8_t)target_kind;
         r.target_index = (uint8_t)target_index;
         r.param = (uint16_t)param;

@@ -121,6 +121,13 @@ class SysexHandler : public ISysexIn {
         static constexpr uint8_t SUMMARY_MAX = 96;
         void put_string(const char* text, uint8_t limit = TEXT_MAX);
         void put_u14(uint16_t value){ put((uint8_t)(value & 0x7F)); put((uint8_t)((value >> 7) & 0x7F)); }
+        // A port's set of buses (bus/domain.h): sixteen bits, so three data
+        // bytes rather than a u14's two.
+        void put_set(BusSet set){
+            put((uint8_t)(set.bits & 0x7F));
+            put((uint8_t)((set.bits >> 7) & 0x7F));
+            put((uint8_t)((set.bits >> 14) & 0x7F));
+        }
         // A signed value: its magnitude as a u14, then its sign on its own.
         // Biasing would halve a range the target's own units already fill,
         // and a sign bit borrowed from a flags byte is one more place for

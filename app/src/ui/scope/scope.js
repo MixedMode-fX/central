@@ -305,16 +305,18 @@ export function nodeRollSources({ patch, device }, index) {
   const sources = [];
   const seen = new Set();
   const add = (bus, role, name) => {
-    if (bus === P.NO_BUS || seen.has(bus)) return;
+    if (bus === undefined || seen.has(bus)) return;
     seen.add(bus);
     sources.push({ key: `bus${bus}`, bus, role, colour: noteBusColour(bus),
                    label: `${role === 'in' ? 'reads' : 'writes'} ${name} · bus ${bus}` });
   };
   for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
-    if (d.inDomain[i] === Domain.Note) add(node.inBus[i], 'in', inletName(d, i));
+    if (d.inDomain[i] !== Domain.Note) continue;
+    for (const bus of node.inBuses[i] ?? []) add(bus, 'in', inletName(d, i));
   }
   for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
-    if (d.outDomain[i] === Domain.Note) add(node.outBus[i], 'out', outletName(d, i));
+    if (d.outDomain[i] !== Domain.Note) continue;
+    for (const bus of node.outBuses[i] ?? []) add(bus, 'out', outletName(d, i));
   }
   return sources;
 }

@@ -23,8 +23,8 @@ class GateToNote : public Node{
         uint8_t get_param(uint16_t index) const override;
 
     private:
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t note;
         uint8_t velocity;
         uint8_t channel;

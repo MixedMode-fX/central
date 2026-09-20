@@ -71,17 +71,17 @@ struct Rig {
 // A patch with something worth turning: a Euclidean sequencer and a transpose.
 static Patch mappable_patch() {
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, 0};
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, one_bus(0)};
     p.nodes[0] = node_config(ALGO_EUCLID_SEQ);
-    p.nodes[0].in_bus[0] = 0;              // advance, gate bus 0
-    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0);              // advance, gate bus 0
+    p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[0].params[0] = 8;              // eight steps
     p.nodes[0].params[3] = 3;              // E(3,8)
     p.nodes[1] = node_config(ALGO_TRANSPOSE);
-    p.nodes[1].in_bus[0] = 0;              // note bus 0
-    p.nodes[1].out_bus[0] = 1;
+    p.nodes[1].in_buses[0] = one_bus(0);              // note bus 0
+    p.nodes[1].out_buses[0] = one_bus(1);
     p.n_nodes = 2;
-    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, 1};
+    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, one_bus(1)};
     return p;
 }
 
@@ -240,13 +240,13 @@ static void test_a_pass_through_cc_reaches_the_graph_as_well() {
 static void test_a_sustain_output_is_not_affected_by_a_mapping() {
     Rig rig;
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
     p.nodes[0] = node_config(ALGO_SUSTAIN);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 20;                    // it emits CC 20
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, 0};
+    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, one_bus(0)};
     // ... and CC 20 is also bound to the node's own controller parameter.
     p.cc_map[0] = node_mapping(20, 0, 1, 0, 0, 0);
     GlobalSettings g = default_globals();
@@ -702,12 +702,12 @@ static void test_learn_can_be_cancelled() {
 static void test_a_sweep_under_a_held_chord_hangs_nothing() {
     Rig rig;
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, 0};
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, one_bus(0)};
     p.nodes[0] = node_config(ALGO_TRANSPOSE);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(1);
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, 1};
+    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, one_bus(1)};
     p.cc_map[0] = node_mapping(20, 0, 0);            // the transpose offset
     GlobalSettings g = default_globals();
     TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(p, g, 0));

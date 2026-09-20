@@ -158,7 +158,7 @@ class Chord : public Node{
 
         uint8_t sounding_count() const { return sounding.count(); }
         // True when this node plays itself: nothing is patched to `note in`.
-        bool free_running() const { return in == NO_BUS; }
+        bool free_running() const { return !in.any(); }
         // The root a self-playing chord is sounding, or NO_NOTE.
         uint8_t voiced_note() const { return voiced; }
         uint32_t refused() const { return sounding.refused(); }
@@ -183,8 +183,8 @@ class Chord : public Node{
         // playing and re-voices only if that has moved.
         void play_free(BusManager& bus, uint16_t mask, uint8_t tonic);
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t quality;
         uint8_t voicing;
         uint8_t inversion;

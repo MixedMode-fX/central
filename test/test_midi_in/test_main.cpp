@@ -73,8 +73,8 @@ static void test_din_in_to_usb_out_once_and_only_there() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -95,7 +95,7 @@ static void test_unrouted_din_input_produces_no_din_output() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};      // in, going nowhere
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};      // in, going nowhere
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -111,8 +111,8 @@ static void test_explicit_thru_patch_echoes() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 2};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, 2};
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(2)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, one_bus(2)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -129,9 +129,9 @@ static void test_fan_out_from_one_input_event() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_HOST_1, 0, 1};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 1};
-    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 0, 1};
+    p.midi_in[0] = MidiInConfig{mmMIDI_HOST_1, 0, one_bus(1)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(1)};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -148,8 +148,8 @@ static void test_source_and_channel_filters() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{(uint8_t)(mmMIDI_SERIAL_1 | mmMIDI_SERIAL_2), 0, 0};  // omni
-    p.midi_in[1] = MidiInConfig{mmMIDI_USB_0, 5, 1};                                  // channel 5
+    p.midi_in[0] = MidiInConfig{(uint8_t)(mmMIDI_SERIAL_1 | mmMIDI_SERIAL_2), 0, one_bus(0)};  // omni
+    p.midi_in[1] = MidiInConfig{mmMIDI_USB_0, 5, one_bus(1)};                                  // channel 5
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -168,8 +168,8 @@ static void test_non_note_messages_share_the_bus() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_USB_1, 0, 0};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, 0};
+    p.midi_in[0] = MidiInConfig{mmMIDI_USB_1, 0, one_bus(0)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -191,8 +191,8 @@ static void test_realtime_never_reaches_a_note_bus() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
     master.clock().set_source(MasterClock::CLOCK_MIDI);
@@ -212,8 +212,8 @@ static void test_system_messages_never_reach_a_note_bus() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 

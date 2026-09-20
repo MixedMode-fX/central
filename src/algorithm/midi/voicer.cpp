@@ -47,8 +47,8 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 Voicer::Voicer(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     mode(clamp_enum(config.params[P_MODE], VOICE_MODES, VOICE_CLOSEST)),
     low(config.params[P_LOW] ? config.params[P_LOW] : DEFAULT_LOW),
     high(config.params[P_HIGH] ? config.params[P_HIGH] : DEFAULT_HIGH),

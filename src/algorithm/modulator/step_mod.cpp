@@ -46,9 +46,9 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 StepMod::StepMod(const NodeConfig& config) :
     engine(),
     rng(entropy::seed()),
-    trigger_in(config.in_bus[0]),
-    reset_in(config.in_bus[1]),
-    out(config.out_bus[0]),
+    trigger_in(config.in_buses[0]),
+    reset_in(config.in_buses[1]),
+    out(config.out_buses[0]),
     shape(clamp_enum(config.params[0], CV_SHAPES, CV_SHAPE_SINE)),
     depth(config.params[3] ? config.params[3] : 255),
     offset_param(config.params[4]),

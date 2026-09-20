@@ -154,7 +154,7 @@ ApplyError PatchManager::commit_mod_route(uint8_t slot, uint32_t now_us){
     if (slot >= N_MOD_ROUTE) return error = APPLY_INVALID;
     const ModRoute route = stage.mod_map[slot];
     // An empty slot is always legal: clearing a route must never fail.
-    if (route.bus != NO_BUS && !MixedModeMaster::route_valid(live, slot, route)){
+    if (route.buses.any() && !MixedModeMaster::route_valid(live, slot, route)){
         leds.error(now_us);
         return error = APPLY_INVALID;
     }

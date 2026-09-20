@@ -91,9 +91,9 @@ class Mirror : public Node{
         uint8_t reflect(uint8_t note) const;
 
     private:
-        uint8_t in;
-        uint8_t root_in;
-        uint8_t out;
+        BusSet in;
+        BusSet root_in;
+        BusSet out;
         uint8_t mode;
         // What the axis root inlet last wrote, or NO_ROOT until it has.
         static constexpr uint8_t NO_ROOT = 0xFF;

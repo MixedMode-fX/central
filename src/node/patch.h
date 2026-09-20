@@ -14,21 +14,26 @@ enum GatePortDirection : uint8_t {
     GATE_PORT_OUT    = 2,   // gate bus -> jack
 };
 
+// A hardware port is a port like any other: it names the set of buses it is
+// on (bus/domain.h), and the empty set is "in use, but wired to nothing".
+// That is a legal patch and a deliberate one - a jack taken into use before
+// it has been patched is the state every new block starts in.
+
 struct GatePortConfig {
     uint8_t direction;   // GatePortDirection
-    uint8_t bus;         // gate bus index
+    BusSet  buses;       // gate buses: driven when IN, read when OUT
 };
 
 struct MidiInConfig {
     uint8_t source_mask; // MidiPort bits; 0 = unused
     uint8_t channel;     // 0 = omni
-    uint8_t bus;         // note bus index
+    BusSet  buses;       // note buses it plays
 };
 
 struct MidiOutConfig {
     uint8_t target_mask; // MidiPort bits; 0 = unused
     uint8_t channel;     // 0 = keep the event's channel
-    uint8_t bus;         // note bus index
+    BusSet  buses;       // note buses it sends
 };
 
 // What a controller binding reaches (#21).
@@ -174,7 +179,10 @@ enum ModFlags : uint8_t {
 // transport - through the same applier, so a modulator and a knob are refused
 // identically when they ask for something out of range.
 struct ModRoute {
-    uint8_t  bus;           // CV bus index; NO_BUS = unused slot
+    // The CV buses the route reads, summed as any inlet's set is
+    // (bus/domain.h). The empty set is an unused slot: a route with no source
+    // is not a route.
+    BusSet   buses;
     uint8_t  target_kind;   // CcTargetKind
     uint8_t  target_index;  // node index, or unused
     uint16_t param;         // parameter index, or a clock / transport target
@@ -189,7 +197,6 @@ struct ModRoute {
 
 inline ModRoute unused_route(){
     ModRoute r = {};
-    r.bus = NO_BUS;
     return r;
 }
 
@@ -275,17 +282,15 @@ struct Patch {
 inline NodeConfig node_config(uint8_t algorithm_id){
     NodeConfig c = {};
     c.algorithm_id = algorithm_id;
-    for (uint8_t i = 0; i < MAX_IN; i++) c.in_bus[i] = NO_BUS;
-    for (uint8_t i = 0; i < MAX_OUT; i++) c.out_bus[i] = NO_BUS;
     return c;
 }
 
 // An empty patch: every port unused, no nodes.
 inline Patch empty_patch(){
     Patch p = {};
-    for (uint8_t i = 0; i < GPIO_N; i++) p.gate_ports[i] = GatePortConfig{GATE_PORT_UNUSED, NO_BUS};
-    for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) p.midi_in[i] = MidiInConfig{0, 0, NO_BUS};
-    for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) p.midi_out[i] = MidiOutConfig{0, 0, NO_BUS};
+    for (uint8_t i = 0; i < GPIO_N; i++) p.gate_ports[i] = GatePortConfig{GATE_PORT_UNUSED, BusSet{}};
+    for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) p.midi_in[i] = MidiInConfig{0, 0, BusSet{}};
+    for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) p.midi_out[i] = MidiOutConfig{0, 0, BusSet{}};
     for (uint8_t i = 0; i < N_CC_MAP; i++) p.cc_map[i] = unused_mapping();
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++) p.mod_map[i] = unused_route();
     for (uint8_t i = 0; i < N_MACRO; i++) p.macros[i] = unused_macro();

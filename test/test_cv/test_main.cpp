@@ -43,9 +43,9 @@ static const uint8_t NOTE_OUT = 0;
 static NodeConfig cvn_config(uint8_t map, uint8_t octave, uint8_t range,
                              uint8_t mode, bool with_trigger){
     NodeConfig c = node_config(ALGO_CV_TO_NOTE);
-    c.in_bus[0] = CV_SIGNAL;
-    if (with_trigger) c.in_bus[1] = GATE_TRIG;
-    c.out_bus[0] = NOTE_OUT;
+    c.in_buses[0] = one_bus(CV_SIGNAL);
+    if (with_trigger) c.in_buses[1] = one_bus(GATE_TRIG);
+    c.out_buses[0] = one_bus(NOTE_OUT);
     c.params[0] = map;
     c.params[1] = octave;
     c.params[2] = range;
@@ -273,7 +273,7 @@ static void test_a_velocity_inlet_outranks_the_parameter() {
     BusManager bus;
     NodeConfig c = cvn_config(CvToNote::CVN_DEGREE, 4, 1,
                               CvToNote::CVN_TRIGGER, true);
-    c.in_bus[2] = CV_VELOCITY;
+    c.in_buses[2] = one_bus(CV_VELOCITY);
     c.params[7] = 100;
     CvToNote node(c);
 
@@ -322,8 +322,8 @@ static void test_bipolar_is_how_the_matrix_reads_a_signal() {
 
 static NodeConfig cvg_config(uint8_t threshold, uint8_t hysteresis, uint8_t mode){
     NodeConfig c = node_config(ALGO_CV_TO_GATE);
-    c.in_bus[0] = CV_SIGNAL;
-    c.out_bus[0] = GATE_OUT;
+    c.in_buses[0] = one_bus(CV_SIGNAL);
+    c.out_buses[0] = one_bus(GATE_OUT);
     c.params[0] = threshold;
     c.params[1] = hysteresis;
     c.params[2] = CvToGate::CVG_UNIPOLAR;
@@ -401,7 +401,7 @@ static void test_an_lfo_alone_becomes_a_melody_and_a_rhythm() {
     BusManager bus;
 
     NodeConfig lc = node_config(ALGO_LFO);
-    lc.out_bus[0] = CV_SIGNAL;
+    lc.out_buses[0] = one_bus(CV_SIGNAL);
     lc.params[0] = Lfo::LFO_TRIANGLE;
     lc.params[1] = Lfo::LFO_FREE;
     lc.params[2] = 20;                       // 2 Hz
@@ -414,7 +414,7 @@ static void test_an_lfo_alone_becomes_a_melody_and_a_rhythm() {
     global_key::set(SCALE_PENTATONIC_MINOR, 0);
     NodeConfig nc = cvn_config(CvToNote::CVN_DEGREE, 4, 2,
                                CvToNote::CVN_TRIGGER, true);
-    nc.in_bus[1] = GATE_OUT;                 // the comparator plays the quantiser
+    nc.in_buses[1] = one_bus(GATE_OUT);                 // the comparator plays the quantiser
     CvToNote quantiser(nc);
 
     uint8_t notes = 0;

@@ -15,6 +15,7 @@ import { ClockFields } from '../controls/ClockFields.js';
 import { Meters } from '../panels/Meters.js';
 import { ScopePanel, RollPanel } from '../scope/ScopePanels.js';
 import { busPeers } from '../../core/patch.js';
+import { busWords } from '../../core/graph.js';
 import { Domain } from '../../core/validate.js';
 import { noteName } from '../../core/music.js';
 import { portNames } from '../../protocol/names.js';
@@ -279,13 +280,15 @@ function DrumRow(app, { source, voice }) {
 function drumHint(app, source) {
   if (!source) return null;
   if (source.kind === 'note') {
-    if (source.bus === P.NO_BUS) return 'on no bus';
-    const { readers } = peers(app, Domain.Note, source.bus);
-    const where = source.channel ? `ch ${source.channel} on note bus ${source.bus}` : `note bus ${source.bus}`;
-    return `${where}${readers.length ? ` · to ${readers.join(', ')}` : ''}`;
+    if (!source.buses.length) return 'on no bus';
+    const { readers } = peers(app, Domain.Note, source.buses);
+    const where = `note ${busWords(source.buses)}`;
+    return `${source.channel ? `ch ${source.channel} on ` : ''}${where}`
+         + `${readers.length ? ` · to ${readers.join(', ')}` : ''}`;
   }
   if (!source.lanes.length) return 'on no bus';
-  return source.lanes.map((lane) => `lane ${lane.lane + 1}: ${PIECE_LABELS[lane.piece]} on gate bus ${lane.bus}`).join(' · ');
+  return source.lanes.map((lane) =>
+    `lane ${lane.lane + 1}: ${PIECE_LABELS[lane.piece]} on gate ${busWords(lane.buses)}`).join(' · ');
 }
 
 // --- the gate listener --------------------------------------------------------

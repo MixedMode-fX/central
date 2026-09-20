@@ -27,6 +27,14 @@
 //   Note: append in arrival order; a full queue drops the newest event and
 //         counts it in note_overflows().
 //   CV:   sum with saturation to int16_t.
+//
+// **A port names a set of buses (bus/domain.h), so the same rules apply
+// across a set.** Reading a BusSet is the OR of its gates, the sum of its CV
+// and the concatenation of its note queues in bus order; writing one writes
+// every bus in it. The merge a reader sees is therefore the domain's own,
+// whether the sources shared a bus or the reader listens to two - which is
+// what makes fan-in a property of the *reader* rather than a rearrangement
+// of everything its sources drive.
 class BusManager {
     public:
         BusManager();
@@ -34,21 +42,36 @@ class BusManager {
         // Gate ------------------------------------------------------------
         bool gate_read(uint8_t bus) const;
         void gate_write(uint8_t bus, bool level);
+        // A port's set: the OR of its buses, and a write to every one of them.
+        bool gate_read(BusSet set) const;
+        void gate_write(BusSet set, bool level);
 
         // Note ------------------------------------------------------------
         uint8_t note_count(uint8_t bus) const;
         const MidiEvent& note_read(uint8_t bus, uint8_t index) const;
         bool note_write(uint8_t bus, const MidiEvent& event);
+        // A port's set. The events of the lowest bus come first, then the
+        // next: within a bus arrival order is kept, and across buses the
+        // order is the set's, so a merge is deterministic for the tests.
+        uint8_t note_count(BusSet set) const;
+        const MidiEvent& note_read(BusSet set, uint8_t index) const;
+        bool note_write(BusSet set, const MidiEvent& event);
         // Events the bus can still take this pass before note_write() starts
         // dropping. What the input drain asks before it delivers, so a burst
         // larger than the bus waits in the queue rather than being counted
         // as overflow (#5).
         uint8_t note_room(uint8_t bus) const;
+        // The room on the **tightest** bus of the set: a port writing several
+        // buses can only take what all of them can hold.
+        uint8_t note_room(BusSet set) const;
         uint32_t note_overflows(uint8_t bus) const;
 
         // CV --------------------------------------------------------------
         int16_t cv_read(uint8_t bus) const;
         void cv_write(uint8_t bus, int16_t value);
+        // A port's set: the saturating sum of its buses, and a write to each.
+        int16_t cv_read(BusSet set) const;
+        void cv_write(BusSet set, int16_t value);
 
         // Publishes the selected buses - one bit per bus, per domain - and
         // clears their back buffers. The first publish of a bus in a pass

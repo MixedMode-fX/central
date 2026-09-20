@@ -71,8 +71,8 @@ class Channel : public Node{
         uint8_t allocate();
         bool busy(uint8_t midi_channel) const;
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t first;
         uint8_t count;
         uint8_t next;             // cursor into the span, 0 .. count - 1

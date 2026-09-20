@@ -35,6 +35,14 @@ void BusManager::gate_write(uint8_t bus, bool level){
     if (level) gate_back |= (1u << bus);
 }
 
+bool BusManager::gate_read(BusSet set) const {
+    return (gate_front & set.bits) != 0;
+}
+
+void BusManager::gate_write(BusSet set, bool level){
+    if (level) gate_back |= (uint32_t)(set.bits & all_buses(Domain::Gate).bits);
+}
+
 // Note --------------------------------------------------------------------
 
 uint8_t BusManager::note_count(uint8_t bus) const {
@@ -59,9 +67,46 @@ bool BusManager::note_write(uint8_t bus, const MidiEvent& event){
     return true;
 }
 
+uint8_t BusManager::note_count(BusSet set) const {
+    uint16_t total = 0;
+    for (uint8_t b = 0; b < N_NOTE_BUS; b++){
+        if (set.has(b)) total = (uint16_t)(total + note_front[b].count);
+    }
+    return total > 0xFFu ? (uint8_t)0xFFu : (uint8_t)total;
+}
+
+const MidiEvent& BusManager::note_read(BusSet set, uint8_t index) const {
+    static const MidiEvent none = {0, 0, 0, 0};
+    uint8_t at = index;
+    for (uint8_t b = 0; b < N_NOTE_BUS; b++){
+        if (!set.has(b)) continue;
+        if (at < note_front[b].count) return note_front[b].events[at];
+        at = (uint8_t)(at - note_front[b].count);
+    }
+    return none;
+}
+
+bool BusManager::note_write(BusSet set, const MidiEvent& event){
+    bool all = true;
+    for (uint8_t b = 0; b < N_NOTE_BUS; b++){
+        if (set.has(b) && !note_write(b, event)) all = false;
+    }
+    return all;
+}
+
 uint8_t BusManager::note_room(uint8_t bus) const {
     if (bus >= N_NOTE_BUS) return 0;
     return (uint8_t)(NOTE_QUEUE_DEPTH - note_back[bus].count);
+}
+
+uint8_t BusManager::note_room(BusSet set) const {
+    uint8_t room = NOTE_QUEUE_DEPTH;
+    for (uint8_t b = 0; b < N_NOTE_BUS; b++){
+        if (!set.has(b)) continue;
+        const uint8_t here = note_room(b);
+        if (here < room) room = here;
+    }
+    return room;
 }
 
 uint32_t BusManager::note_overflows(uint8_t bus) const {
@@ -82,6 +127,18 @@ void BusManager::cv_write(uint8_t bus, int16_t value){
     if (sum > INT16_MAX)      cv_back[bus] = INT16_MAX;
     else if (sum < INT16_MIN) cv_back[bus] = INT16_MIN;
     else                      cv_back[bus] = (int16_t)sum;
+}
+
+int16_t BusManager::cv_read(BusSet set) const {
+    int32_t sum = 0;
+    for (uint8_t b = 0; b < N_CV_BUS; b++) if (set.has(b)) sum += (int32_t)cv_front[b];
+    if (sum > INT16_MAX) return INT16_MAX;
+    if (sum < INT16_MIN) return INT16_MIN;
+    return (int16_t)sum;
+}
+
+void BusManager::cv_write(BusSet set, int16_t value){
+    for (uint8_t b = 0; b < N_CV_BUS; b++) if (set.has(b)) cv_write(b, value);
 }
 
 // -------------------------------------------------------------------------

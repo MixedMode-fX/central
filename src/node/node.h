@@ -106,13 +106,15 @@ class Node {
 };
 
 // One pool node's configuration. This is also the preset format.
-// Bus indices are interpreted in the domain the algorithm's descriptor
-// declares for that inlet/outlet. NO_BUS marks an unconnected optional inlet,
+//
+// Each port names the **set** of buses it is on (bus/domain.h), read in the
+// domain the algorithm's descriptor declares for that inlet or outlet. An
+// empty set is a port connected to nothing: an optional inlet nobody drives,
 // or an outlet the node writes nowhere (a drum lane with no jack).
 struct NodeConfig {
     uint8_t algorithm_id;
-    uint8_t in_bus[MAX_IN];
-    uint8_t out_bus[MAX_OUT];
+    BusSet  in_buses[MAX_IN];
+    BusSet  out_buses[MAX_OUT];
     uint8_t params[N_PARAM];
 };
 
@@ -150,7 +152,7 @@ struct AlgorithmDescriptor {
     uint8_t       id;
     const char*   name;
     uint8_t       n_in;         // inlets the node has
-    uint8_t       min_in;       // inlets that must be connected (the rest may be NO_BUS)
+    uint8_t       min_in;       // inlets that must be connected (the rest may be empty)
     uint8_t       n_out;
     uint16_t      n_params;
     const Domain* in_domain;    // n_in entries

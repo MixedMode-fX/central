@@ -40,8 +40,8 @@ class NotePriority : public Node{
     private:
         void follow(BusManager& bus);
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t mode;
         uint8_t channel;          // 0 keeps the source's
         uint8_t playing;          // HeldNotes::NONE when silent

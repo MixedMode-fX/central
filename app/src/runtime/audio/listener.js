@@ -382,11 +382,14 @@ export class Listener {
       voice.label = source.label;
       voice.kind = source.kind;
       if (source.kind === 'note') {
-        if (source.bus === P.NO_BUS) continue;
-        wanted.add(source.bus);
-        this.noteRoute.set(source.bus, { key: source.key, channel: source.channel ?? null });
+        for (const bus of source.buses ?? []) {
+          wanted.add(bus);
+          this.noteRoute.set(bus, { key: source.key, channel: source.channel ?? null });
+        }
       } else {
-        for (const lane of source.lanes) this.gateRoute.set(lane.bus, { key: source.key, piece: lane.piece });
+        for (const lane of source.lanes) {
+          for (const bus of lane.buses ?? []) this.gateRoute.set(bus, { key: source.key, piece: lane.piece });
+        }
       }
     }
     for (const bus of [...this.watched]) {

@@ -16,17 +16,17 @@ LoadError MixedModeMaster::validate(const Patch& patch){
     for (uint8_t i = 0; i < GPIO_N; i++){
         const GatePortConfig& c = patch.gate_ports[i];
         if (c.direction == GATE_PORT_UNUSED) continue;
-        if (c.bus >= N_GATE_BUS) return LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
+        if (!buses_in_range(Domain::Gate, c.buses)) return LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         const MidiInConfig& c = patch.midi_in[i];
         if (c.source_mask == 0) continue;
-        if (c.bus >= N_NOTE_BUS) return LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
+        if (!buses_in_range(Domain::Note, c.buses)) return LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
     }
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++){
         const MidiOutConfig& c = patch.midi_out[i];
         if (c.target_mask == 0) continue;
-        if (c.bus >= N_NOTE_BUS) return LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
+        if (!buses_in_range(Domain::Note, c.buses)) return LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
     }
     for (uint8_t i = 0; i < patch.n_nodes; i++){
         const ConfigError e = registry::validate(patch.nodes[i]);
@@ -55,7 +55,7 @@ LoadError MixedModeMaster::validate(const Patch& patch){
         }
     }
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
-        if (patch.mod_map[i].bus == NO_BUS) continue;
+        if (!patch.mod_map[i].buses.any()) continue;
         if (!route_valid(patch, i, patch.mod_map[i])){
             route_error_index = i;
             return LOAD_MOD_ROUTE_INVALID;
@@ -106,8 +106,8 @@ static bool target_exists(const Patch& patch, uint8_t kind, uint8_t index, uint1
 
 bool MixedModeMaster::route_valid(const Patch& patch, uint8_t slot, const ModRoute& r){
     if (slot >= N_MOD_ROUTE) return false;
-    if (r.bus == NO_BUS) return true;                   // an unused slot is fine
-    if (r.bus >= N_CV_BUS) return false;
+    if (!r.buses.any()) return true;                    // an unused slot is fine
+    if (!buses_in_range(Domain::CV, r.buses)) return false;
     if (r.min > r.max) return false;
     // A transport target is momentary - it fires, it does not hold a value -
     // so there is nothing for a continuous signal to set. A modulator that
@@ -155,16 +155,16 @@ LoadError MixedModeMaster::load(const Patch& patch){
 
     for (uint8_t i = 0; i < GPIO_N; i++){
         const GatePortConfig& c = patch.gate_ports[i];
-        if (c.direction == GATE_PORT_IN)  gate_in[i].configure(&gpio, i, c.bus);
-        if (c.direction == GATE_PORT_OUT) gate_out[i].configure(&gpio, i, c.bus);
+        if (c.direction == GATE_PORT_IN)  gate_in[i].configure(&gpio, i, c.buses);
+        if (c.direction == GATE_PORT_OUT) gate_out[i].configure(&gpio, i, c.buses);
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         const MidiInConfig& c = patch.midi_in[i];
-        if (c.source_mask != 0) midi_in[i].configure(c.source_mask, c.channel, c.bus);
+        if (c.source_mask != 0) midi_in[i].configure(c.source_mask, c.channel, c.buses);
     }
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++){
         const MidiOutConfig& c = patch.midi_out[i];
-        if (c.target_mask != 0) midi_out[i].configure(&midi, c.target_mask, c.channel, c.bus);
+        if (c.target_mask != 0) midi_out[i].configure(&midi, c.target_mask, c.channel, c.buses);
     }
     sched.clear();
     for (uint8_t i = 0; i < patch.n_nodes; i++){
@@ -334,7 +334,7 @@ LoadError MixedModeMaster::replace_node(uint8_t index, const NodeConfig& config)
 
 LoadError MixedModeMaster::set_gate_port(uint8_t jack, const GatePortConfig& config){
     if (jack >= GPIO_N) return error = LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
-    if (config.direction != GATE_PORT_UNUSED && config.bus >= N_GATE_BUS){
+    if (config.direction != GATE_PORT_UNUSED && !buses_in_range(Domain::Gate, config.buses)){
         return error = LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
     }
     // A jack changing direction must stop driving before it starts reading,
@@ -342,10 +342,10 @@ LoadError MixedModeMaster::set_gate_port(uint8_t jack, const GatePortConfig& con
     gate_in[jack].release();
     gate_out[jack].release();
     if (config.direction == GATE_PORT_IN){
-        gate_in[jack].configure(&gpio, jack, config.bus);
+        gate_in[jack].configure(&gpio, jack, config.buses);
         gate_in[jack].setup();
     } else if (config.direction == GATE_PORT_OUT){
-        gate_out[jack].configure(&gpio, jack, config.bus);
+        gate_out[jack].configure(&gpio, jack, config.buses);
         gate_out[jack].setup();
     }
     return error = LOAD_OK;
@@ -353,21 +353,21 @@ LoadError MixedModeMaster::set_gate_port(uint8_t jack, const GatePortConfig& con
 
 LoadError MixedModeMaster::set_midi_in(uint8_t index, const MidiInConfig& config){
     if (index >= N_MIDI_IN_NODES) return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
-    if (config.source_mask != 0 && config.bus >= N_NOTE_BUS){
+    if (config.source_mask != 0 && !buses_in_range(Domain::Note, config.buses)){
         return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
     }
     if (config.source_mask == 0) midi_in[index].release();
-    else midi_in[index].configure(config.source_mask, config.channel, config.bus);
+    else midi_in[index].configure(config.source_mask, config.channel, config.buses);
     return error = LOAD_OK;
 }
 
 LoadError MixedModeMaster::set_midi_out(uint8_t index, const MidiOutConfig& config){
     if (index >= N_MIDI_OUT_NODES) return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
-    if (config.target_mask != 0 && config.bus >= N_NOTE_BUS){
+    if (config.target_mask != 0 && !buses_in_range(Domain::Note, config.buses)){
         return error = LOAD_MIDI_PORT_BUS_OUT_OF_RANGE;
     }
     if (config.target_mask == 0) midi_out[index].release();
-    else midi_out[index].configure(&midi, config.target_mask, config.channel, config.bus);
+    else midi_out[index].configure(&midi, config.target_mask, config.channel, config.buses);
     return error = LOAD_OK;
 }
 
@@ -412,7 +412,7 @@ bool MixedModeMaster::has_room(uint8_t source, const MidiEvent& event) const {
     if (event.type >= 0xF0) return true;
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         if (!midi_in[i].accepts(source, event)) continue;
-        if (bus.note_room(midi_in[i].note_bus()) == 0) return false;
+        if (bus.note_room(midi_in[i].note_buses()) == 0) return false;
     }
     return true;
 }

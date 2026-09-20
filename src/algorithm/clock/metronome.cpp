@@ -36,8 +36,8 @@ static uint8_t clamp_feel(uint8_t stored){
 }
 
 Metronome::Metronome(const NodeConfig& config) :
-    reset_in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    reset_in(config.in_buses[0]),
+    out(config.out_buses[0]),
     div(clamp_division(config.params[0])),
     how(clamp_feel(config.params[1])),
     width_param(config.params[2]),
@@ -124,7 +124,7 @@ void Metronome::advance_to(BusManager& bus, uint32_t position){
 void Metronome::process(BusManager& bus, uint32_t now_us){
     now = now_us;
 
-    if (reset_in != NO_BUS){
+    if (reset_in.any()){
         const bool level = bus.gate_read(reset_in);
         if (level && !last_gate) pending_reset = true;
         last_gate = level;

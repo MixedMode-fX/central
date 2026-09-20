@@ -106,9 +106,9 @@ class GateHold : public Node{
         }
 
     private:
-        uint8_t set_in;
-        uint8_t reset_in;
-        uint8_t out;
+        BusSet set_in;
+        BusSet reset_in;
+        BusSet out;
         uint8_t how;             // Mode
         uint8_t hold_param;      // milliseconds, as stored
         uint32_t since_us;       // when the timed modes started counting

@@ -55,6 +55,13 @@ pull request.
 Algorithms never bind to hardware. They read and write **buses**; the jacks
 and MIDI endpoints are nodes too. A bus is a virtual patch cable.
 
+**Every port names a set of buses** (`BusSet`, `src/bus/domain.h`): an outlet
+writes all of them, an inlet reads all of them, and the empty set is "not
+connected". One outlet with any number of readers is a fan-out; an inlet
+reading two buses is a merge under its domain's own fan-in rule, and it costs
+its sources nothing — each keeps its own bus and whatever else was listening to
+it. Connecting one thing therefore never disconnects another.
+
 | Domain | Carries | Count | Fan-in |
 |---|---|---|---|
 | Gate | a level (`bool`) | `N_GATE_BUS` | OR of all writers |
@@ -90,8 +97,9 @@ Every pass, `MixedModeMaster` runs:
 `AlgorithmDescriptor` in `src/node/registry.cpp`: id, name, summary, category,
 inlets and outlets with names and domains, parameter count, state size and a
 placement-new constructor. A `NodeConfig` selects an algorithm by id and gives
-a bus index per port; `NO_BUS` leaves an optional inlet unconnected. Algorithm
-ids are part of the preset format: append, never renumber.
+the set of buses each port is on; an empty set leaves an optional inlet
+unconnected. Algorithm ids are part of the preset format: append, never
+renumber.
 
 **Allocation.** All algorithm code is resident. Instances live in a static pool
 of `N_NODE` slots of `NODE_SLOT_SIZE` bytes (checked per class with
@@ -469,22 +477,24 @@ brightness is part of the vocabulary. Nothing in the LED path blocks.
 
 ### Boot
 
-Slot 0 is loaded if it validates. Otherwise the **built-in default patch** runs
-— MIDI thru across every musical transport, a `Metronome` at a quarter note on
-jack 1, a sustain pedal input on jack 8 — so a freshly flashed module is
-observably alive. A corrupt stored patch also lights the red LED; an empty
-store does not. Restoring defaults is host-side (`defaults`, or SysEx).
+Slot 0 is loaded if it validates. Otherwise the **built-in default patch**
+runs, and it is **empty**: no jack in use, no MIDI port in use, nothing
+patched. A module that booted playing something would have decided which jacks
+face which way and what is thru'd to where, and every one of those is a wire
+the user has to find and undo. A corrupt stored patch also lights the red LED;
+an empty store does not. Restoring defaults is host-side (`defaults`, or
+SysEx).
 
 ### Patch storage
 
-A patch is the node list, the bus per port, and the global settings. It is
+A patch is the node list, the buses each port is on, and the global settings. It is
 stored in flash-emulated EEPROM (`EEPROM_BYTES`) as `PATCH_SLOTS` independent
 images, each with its own magic, format version and CRC. Slot 0 is current; the
 rest are Program Change presets. A slot failing CRC cannot affect the others.
 
-The stored image trims each node's parameter block at its last non-zero byte,
-and the same encoding goes on the wire, so a patch round-trips through the
-store and over SysEx byte for byte.
+The stored image trims each node's parameter block at its last non-zero byte
+and its port lists at the last connected one, and the same encoding goes on the
+wire, so a patch round-trips through the store and over SysEx byte for byte.
 
 Nothing writes flash on a parameter change: an edit marks the patch dirty and
 the autosave writes slot 0 once, two seconds later.

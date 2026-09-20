@@ -43,15 +43,15 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 Retrigger::Retrigger(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     length(clamp_enum(config.params[P_LENGTH], DIVISIONS, DIV_16TH)),
     how(clamp_enum(config.params[P_FEEL], FEELS, FEEL_STRAIGHT)),
     release(clamp_enum(config.params[P_RELEASE], RT_RELEASES, RT_LENGTH)),
     fixed_velocity((uint8_t)(config.params[P_VELOCITY] & 0x7F)),
     channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     subtick(0), off_at(0), struck(0),
-    trigger_in(config.in_bus[1]),
+    trigger_in(config.in_buses[1]),
     held(), sounding()
 {}
 

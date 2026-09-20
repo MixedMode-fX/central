@@ -36,8 +36,8 @@ void tearDown() {}
 
 static NodeConfig node(uint8_t id, uint8_t in0, uint8_t out0) {
     NodeConfig c = node_config(id);
-    c.in_bus[0] = in0;
-    c.out_bus[0] = out0;
+    c.in_buses[0] = one_bus(in0);
+    c.out_buses[0] = one_bus(out0);
     return c;
 }
 
@@ -157,8 +157,8 @@ static void test_every_parameter_accepts_its_bounds_and_rejects_beyond() {
         patch.nodes[0] = node_config(d->id);
         // Connect every inlet and outlet the algorithm has, on bus 0 of its
         // own domain, so a required inlet does not fail the load.
-        for (uint8_t in = 0; in < d->n_in && in < MAX_IN; in++) patch.nodes[0].in_bus[in] = 0;
-        for (uint8_t out = 0; out < d->n_out && out < MAX_OUT; out++) patch.nodes[0].out_bus[out] = 0;
+        for (uint8_t in = 0; in < d->n_in && in < MAX_IN; in++) patch.nodes[0].in_buses[in] = one_bus(0);
+        for (uint8_t out = 0; out < d->n_out && out < MAX_OUT; out++) patch.nodes[0].out_buses[out] = one_bus(0);
         patch.n_nodes = 1;
         TEST_ASSERT_EQUAL_MESSAGE(LOAD_OK, master.load(patch), d->name);
         master.setup();
@@ -232,8 +232,8 @@ static void test_euclid_pulses_change_the_pattern_without_moving_the_cursor() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_EUCLID_SEQ);
-    p.nodes[0].in_bus[0] = 0;          // advance
-    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0);          // advance
+    p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[0].params[0] = 8;          // 8 steps
     p.nodes[0].params[3] = 3;          // E(3,8)
     p.n_nodes = 1;
@@ -266,8 +266,8 @@ static void test_euclid_pulses_change_the_pattern_without_moving_the_cursor() {
 // immediately, which is what keeps a running sequence from stumbling.
 static void test_shortening_a_sequence_clamps_on_the_next_advance() {
     NodeConfig c = node_config(ALGO_STEP_SEQ);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(1);
     c.params[0] = 16;
     c.params[3] = 0xFF; c.params[4] = 0xFF;    // steps 1..16 all on
     StepSequencer seq(c);
@@ -291,7 +291,7 @@ static void test_shortening_a_sequence_clamps_on_the_next_advance() {
 // not masked away, so shortening and lengthening from a knob is lossless.
 static void test_step_pattern_bytes_round_trip() {
     NodeConfig c = node_config(ALGO_STEP_SEQ);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[0] = 4;
     StepSequencer seq(c);
     TEST_ASSERT_TRUE(seq.set_param(6, 0xA5));      // steps 25..32
@@ -307,7 +307,7 @@ static void test_step_pattern_bytes_round_trip() {
 // ---------------------------------------------------------------------------
 static void test_clock_div_amount_rederives_the_period() {
     NodeConfig c = node_config(ALGO_CLOCK_DIV);
-    c.out_bus[0] = 0;
+    c.out_buses[0] = one_bus(0);
     c.params[1] = 4;                                  // /4 from the tick source
     ClockDiv div(c);
     TEST_ASSERT_EQUAL_UINT32(4u * CLOCK_SUBTICK, div.period());
@@ -329,8 +329,8 @@ static void test_clock_div_amount_rederives_the_period() {
 
 static void test_clock_div_multiply_from_a_gate_is_still_refused() {
     NodeConfig c = node_config(ALGO_CLOCK_DIV);
-    c.in_bus[0] = 0;                                  // gate source
-    c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0);                                  // gate source
+    c.out_buses[0] = one_bus(1);
     c.params[1] = 2;
     ClockDiv div(c);
     TEST_ASSERT_TRUE(div.gate_sourced());
@@ -346,7 +346,7 @@ static void test_clock_div_multiply_from_a_gate_is_still_refused() {
 static void test_clock_div_amount_change_lets_the_current_period_complete() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CLOCK_DIV);
-    c.out_bus[0] = 0;
+    c.out_buses[0] = one_bus(0);
     c.params[1] = 4;                                  // a pulse every 4 ticks
     ClockDiv div(c);
 
@@ -369,7 +369,7 @@ static void test_clock_div_amount_change_lets_the_current_period_complete() {
 // ---------------------------------------------------------------------------
 static void test_out_of_range_parameter_is_rejected_by_the_validator() {
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 0;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.out_buses[0] = one_bus(0);
     c.params[1] = 9;                                  // octaves, max 4
     TEST_ASSERT_EQUAL(CONFIG_PARAM_OUT_OF_RANGE, registry::validate(c));
     TEST_ASSERT_EQUAL(1, registry::last_bad_param());
@@ -393,7 +393,7 @@ static void test_a_bad_parameter_leaves_the_running_patch_alone() {
 
     Patch bad = empty_patch();
     bad.nodes[0] = node_config(ALGO_CHORD);
-    bad.nodes[0].in_bus[0] = 0; bad.nodes[0].out_bus[0] = 1;
+    bad.nodes[0].in_buses[0] = one_bus(0); bad.nodes[0].out_buses[0] = one_bus(1);
     bad.nodes[0].params[Chord::P_QUALITY] = Chord::QUALITY_COUNT + 3;   // no such quality
     bad.n_nodes = 1;
     TEST_ASSERT_EQUAL(LOAD_NODE_INVALID, master.load(bad));
@@ -441,10 +441,10 @@ static void modifier_under_held_notes(uint8_t algorithm, uint16_t param, uint8_t
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{0x01, 0, 0};
+    p.midi_in[0] = MidiInConfig{0x01, 0, one_bus(0)};
     p.nodes[0] = node(algorithm, 0, 1);
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{0x01, 0, 1};
+    p.midi_out[0] = MidiOutConfig{0x01, 0, one_bus(1)};
     TEST_ASSERT_EQUAL_MESSAGE(LOAD_OK, master.load(p), what);
     master.setup();
 
@@ -484,11 +484,11 @@ static void test_gate_to_note_releases_the_note_it_sent() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
     p.nodes[0] = node(ALGO_GATE_TO_NOTE, 0, 0);
     p.nodes[0].params[0] = 60;
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{0x01, 0, 0};
+    p.midi_out[0] = MidiOutConfig{0x01, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -514,10 +514,10 @@ static void test_note_sequencer_root_moving_hangs_nothing() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
     p.nodes[0] = node_config(ALGO_NOTE_SEQ);
-    p.nodes[0].in_bus[0] = 0;                       // advance from jack 1
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].in_buses[0] = one_bus(0);                       // advance from jack 1
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[NoteSequencerBase::P_LENGTH] = 4;
     for (uint8_t s = 0; s < 4; s++) {
         uint8_t* step = &p.nodes[0].params[NoteSequencerBase::STEP_BASE + s * 4];
@@ -526,7 +526,7 @@ static void test_note_sequencer_root_moving_hangs_nothing() {
         step[2] = 2;        // two edges long, so notes overlap the change
     }
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{0x01, 0, 0};
+    p.midi_out[0] = MidiOutConfig{0x01, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -549,12 +549,12 @@ static void test_set_param_never_allocates() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_EUCLID_SEQ);
-    p.nodes[0].in_bus[0] = 0; p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0); p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[0].params[0] = 16;
     p.nodes[1] = node_config(ALGO_POLY_SEQ);
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].out_bus[0] = 0;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].out_buses[0] = one_bus(0);
     p.nodes[2] = node_config(ALGO_DRUM_SEQ_MIDI);
-    p.nodes[2].in_bus[0] = 0; p.nodes[2].out_bus[0] = 0;
+    p.nodes[2].in_buses[0] = one_bus(0); p.nodes[2].out_buses[0] = one_bus(0);
     p.n_nodes = 3;
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();

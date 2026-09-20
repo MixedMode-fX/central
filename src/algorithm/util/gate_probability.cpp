@@ -27,11 +27,11 @@ uint8_t GateProbability::get_param(uint16_t index) const {
 }
 
 GateProbability::GateProbability(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
-    dropped_out(config.out_bus[1]),
-    decision_out(config.out_bus[2]),
-    reset_in(config.in_bus[1]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
+    dropped_out(config.out_buses[1]),
+    decision_out(config.out_buses[2]),
+    reset_in(config.in_buses[1]),
     condition(config.params),
     last_in(false),
     passing(false)
@@ -52,8 +52,8 @@ void GateProbability::process(BusManager& bus, uint32_t){
     if (passing) bus.gate_write(out, true);
     // The other half of the same gate: high while an input gate the rule
     // refused is up, and never between two of them.
-    if (dropped_out != NO_BUS && level && !passing) bus.gate_write(dropped_out, true);
+    if (dropped_out.any() && level && !passing) bus.gate_write(dropped_out, true);
     // Latched, not a pulse: a reader clocked in some other pass has to see
     // the last decision rather than nothing.
-    if (decision_out != NO_BUS && condition.decision()) bus.gate_write(decision_out, true);
+    if (decision_out.any() && condition.decision()) bus.gate_write(decision_out, true);
 }

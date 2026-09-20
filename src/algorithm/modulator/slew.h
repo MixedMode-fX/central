@@ -57,8 +57,8 @@ class Slew : public Node{
         // sub-units. Zero rate is instant, and is reported as the whole range.
         int32_t step_for(uint8_t rate, uint32_t dt) const;
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t rise;
         uint8_t fall;
         uint8_t link;

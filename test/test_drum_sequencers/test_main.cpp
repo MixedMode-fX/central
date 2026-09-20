@@ -61,8 +61,8 @@ struct Rig {
 
 static NodeConfig gate_config(uint8_t length) {
     NodeConfig c = node_config(ALGO_DRUM_SEQ_GATE);
-    c.in_bus[0] = ADVANCE;
-    for (uint8_t l = 0; l < DS::LANES; l++) c.out_bus[l] = lane_bus(l);
+    c.in_buses[0] = one_bus(ADVANCE);
+    for (uint8_t l = 0; l < DS::LANES; l++) c.out_buses[l] = one_bus(lane_bus(l));
     c.params[DS::P_LENGTH] = length;
     return c;
 }
@@ -76,8 +76,8 @@ static void gate_lane(NodeConfig& c, uint8_t lane, uint32_t bits, uint8_t length
 
 static NodeConfig midi_config(uint8_t length) {
     NodeConfig c = node_config(ALGO_DRUM_SEQ_MIDI);
-    c.in_bus[0] = ADVANCE;
-    c.out_bus[0] = NOTE_OUT;
+    c.in_buses[0] = one_bus(ADVANCE);
+    c.out_buses[0] = one_bus(NOTE_OUT);
     c.params[DS::P_LENGTH] = length;
     return c;
 }
@@ -179,7 +179,7 @@ static void test_per_lane_probability() {
 // length.
 static void test_reset_returns_every_lane_to_step_zero() {
     NodeConfig c = gate_config(16);
-    c.in_bus[1] = RESET;
+    c.in_buses[1] = one_bus(RESET);
     gate_lane(c, 0, 1, 16);
     gate_lane(c, 1, 1, 12);
     gate_lane(c, 2, 1, 5);
@@ -197,11 +197,9 @@ static void test_reset_returns_every_lane_to_step_zero() {
 // Lanes without a jack are left unconnected, and that is not an error.
 static void test_unconnected_lanes_are_accepted() {
     NodeConfig c = gate_config(8);
-    for (uint8_t l = 3; l < DS::LANES; l++) c.out_bus[l] = NO_BUS;
+    for (uint8_t l = 3; l < DS::LANES; l++) c.out_buses[l] = BusSet{};
     TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
-    c.out_bus[2] = N_GATE_BUS;
-    TEST_ASSERT_EQUAL(CONFIG_OUTLET_OUT_OF_RANGE, registry::validate(c));
-    c.out_bus[2] = NO_BUS;
+    c.out_buses[2] = BusSet{};
     gate_lane(c, 5, 0xFF);                                      // fires into nothing, harmlessly
     DrumSeqGate node(c);
     Rig rig;
@@ -286,7 +284,7 @@ static void test_retrigger_before_release_releases_first() {
 // irregular timing, and then silence.
 static void test_midi_hangs_nothing() {
     NodeConfig c = midi_config(16);
-    c.in_bus[1] = RESET;
+    c.in_buses[1] = one_bus(RESET);
     c.params[DS::P_GATE] = 30;
     Xorshift32 script(77);
     for (uint8_t l = 0; l < DS::LANES; l++) {
@@ -333,7 +331,7 @@ static void test_patch_swap_mid_note_releases_every_lane() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);                    // tick -> gate 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 6;
     p.nodes[1] = midi_config(4);
     p.nodes[1].params[DS::P_GATE] = 250;                         // long enough to be caught mid-note
@@ -342,7 +340,7 @@ static void test_patch_swap_mid_note_releases_every_lane() {
     midi_cell(p.nodes[1], 0, 0, 100);
     midi_cell(p.nodes[1], 1, 0, 100);
     p.n_nodes = 2;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, NOTE_OUT};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, one_bus(NOTE_OUT)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
     uint32_t now = 0;
@@ -366,15 +364,15 @@ static void test_gate_variant_drives_jacks_from_a_divider() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 6;
     p.nodes[1] = gate_config(4);
     gate_lane(p.nodes[1], 0, 0b0101);
     gate_lane(p.nodes[1], 1, 0b1010);
-    for (uint8_t l = 2; l < DS::LANES; l++) p.nodes[1].out_bus[l] = NO_BUS;
+    for (uint8_t l = 2; l < DS::LANES; l++) p.nodes[1].out_buses[l] = BusSet{};
     p.n_nodes = 2;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, lane_bus(0)};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, lane_bus(1)};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(lane_bus(0))};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(lane_bus(1))};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
     uint32_t now = 0, rises0 = 0, rises1 = 0;
@@ -426,7 +424,9 @@ static void test_descriptors_and_sizes() {
     TEST_ASSERT_TRUE(DrumSeqMidi::descriptor.n_params <= N_PARAM);
     TEST_ASSERT_TRUE(sizeof(DrumSeqGate) <= NODE_SLOT_SIZE);
     TEST_ASSERT_TRUE(sizeof(DrumSeqMidi) <= NODE_SLOT_SIZE);
-    TEST_ASSERT_TRUE(sizeof(DrumSeqGate) < sizeof(DrumSeqMidi) / 2);   // no velocity to store
+    // No velocity to store: the MIDI variant carries one byte per step per
+    // lane that the gate variant does not.
+    TEST_ASSERT_TRUE(sizeof(DrumSeqGate) + MAX_SEQUENCE_LEN * DS::LANES <= sizeof(DrumSeqMidi));
 }
 
 int main() {

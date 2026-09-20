@@ -52,7 +52,7 @@ static MidiEvent on(uint8_t note, uint8_t channel = 1){
 
 static NodeConfig key_config(uint8_t channel = 0, uint8_t from = 0){
     NodeConfig c = node_config(ALGO_KEY);
-    c.in_bus[0] = NOTE_ROOT;
+    c.in_buses[0] = one_bus(NOTE_ROOT);
     c.params[Key::P_CHANNEL] = channel;
     c.params[Key::P_FROM] = from;
     return c;
@@ -145,7 +145,7 @@ static void test_the_node_moves_the_live_key_and_not_the_stored_one() {
     PatchManager patches(master, store, leds);
 
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, NOTE_ROOT};
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, one_bus(NOTE_ROOT)};
     p.nodes[0] = key_config();
     p.n_nodes = 1;
     GlobalSettings g = default_globals();
@@ -200,8 +200,8 @@ static void test_the_key_node_runs_before_every_node_that_plays_in_the_key() {
     Schedule sched;
     // Deliberately the wrong way round in the patch: the Chord is node 0.
     NodeConfig chord = node_config(ALGO_CHORD);
-    chord.in_bus[0] = NOTE_ROOT;
-    chord.out_bus[0] = NOTE_OUT;
+    chord.in_buses[0] = one_bus(NOTE_ROOT);
+    chord.out_buses[0] = one_bus(NOTE_OUT);
     NodeConfig key = key_config();
     sched.set(0, chord, *registry::find(ALGO_CHORD));
     sched.set(1, key, *registry::find(ALGO_KEY));
@@ -220,10 +220,10 @@ static void test_a_key_change_is_heard_in_the_pass_that_made_it() {
     MixedModeMaster master(gpio, midi);
 
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, NOTE_ROOT};
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, one_bus(NOTE_ROOT)};
     p.nodes[0] = node_config(ALGO_CHORD);              // listed first, runs second
-    p.nodes[0].in_bus[0] = NO_BUS;                     // self-playing
-    p.nodes[0].out_bus[0] = NOTE_OUT;
+    p.nodes[0].in_buses[0] = BusSet{};                     // self-playing
+    p.nodes[0].out_buses[0] = one_bus(NOTE_OUT);
     p.nodes[0].params[Chord::P_OCTAVE] = 5;
     p.nodes[1] = key_config();
     p.n_nodes = 2;
@@ -363,7 +363,7 @@ static void test_a_modulation_route_moves_the_key_without_wearing_the_store() {
 
     Patch p = empty_patch();
     p.mod_map[0] = unused_route();
-    p.mod_map[0].bus = 0;
+    p.mod_map[0].buses = one_bus(0);
     p.mod_map[0].target_kind = CC_TARGET_KEY;
     p.mod_map[0].param = CC_KEY_ROOT;
     p.mod_map[0].depth = 255;

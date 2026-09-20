@@ -131,8 +131,8 @@ uint8_t Chord::get_param(uint16_t index) const {
 }
 
 Chord::Chord(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     quality(config.params[P_QUALITY] >= QUALITY_TRIAD && config.params[P_QUALITY] < QUALITY_COUNT
             ? config.params[P_QUALITY] : (uint8_t)QUALITY_TRIAD),
     voicing(config.params[P_VOICING] < VOICING_COUNT ? config.params[P_VOICING] : (uint8_t)VOICING_CLOSE),
@@ -241,7 +241,7 @@ void Chord::play_free(BusManager& bus, uint16_t mask, uint8_t tonic){
 void Chord::process(BusManager& bus, uint32_t){
     const uint16_t mask = active_mask();
     const uint8_t tonic = active_root();
-    if (in == NO_BUS){
+    if (!in.any()){
         play_free(bus, mask, tonic);
         return;
     }

@@ -118,7 +118,7 @@ class DrumSeqGate : public DrumSequencer{
         void run(BusManager& bus, uint32_t now_us) override;
 
     private:
-        uint8_t out[LANES];
+        BusSet out[LANES];
         uint32_t bits[LANES];
         uint8_t width_param;
         TriggerPulse pulse[LANES];
@@ -169,7 +169,7 @@ class DrumSeqMidi : public DrumSequencer{
     private:
         void release(BusManager& bus, uint8_t lane);
 
-        uint8_t out;
+        BusSet out;
         uint32_t gate_us;
         uint8_t note[LANES];
         uint8_t channel[LANES];

@@ -86,7 +86,7 @@ function openCcMenu(app, anchor, index, at, name, binding) {
 // and `planModulation` build the same object).
 export function CvButton(app, index, at, name, route) {
   const what = route
-    ? `${name} is modulated from CV bus ${route.bus} - change or remove the route`
+    ? `${name} is modulated from CV ${route.buses.join(' + ')} - change or remove the route`
     : `modulate ${name} from a CV bus`;
   return menuButton({
     what, glyph: icon('cv'), klass: ['cv', route && 'bound'],
@@ -109,12 +109,12 @@ function openBusMenu(app, anchor, index, at, name, route) {
 
   openMenu({
     at: anchor.getBoundingClientRect(), kind: 'cv',
-    head: route ? `${name} reads CV bus ${route.bus}` : `modulate ${name} from`,
+    head: route ? `${name} reads CV ${route.buses.join(' + ')}` : `modulate ${name} from`,
     items: [
       ...buses.map(({ bus, writers }) => MenuItem({
         label: `CV bus ${bus}`,
         hint: writers.length ? `from ${writers.join(', ')}` : 'nothing writes it',
-        class: route?.bus === bus && 'chosen',
+        class: route?.buses?.includes(bus) && 'chosen',
         onPick: () => app.editor.routeParam(index, at, bus),
       })),
       route ? MenuItem({ label: 'remove the route', class: 'danger',

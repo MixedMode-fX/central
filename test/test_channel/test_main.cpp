@@ -163,14 +163,14 @@ struct Rig {
     Rig(const Rig&) = delete;
     Rig& operator=(const Rig&) = delete;
 
-    Rig(const Driven& what, uint8_t override_channel, uint8_t dropped_bus = NO_BUS)
+    Rig(const Driven& what, uint8_t override_channel, BusSet dropped_bus = BusSet{})
         : bus(), pool(), node(nullptr), clocked(what.clocked), now(0) {
         const AlgorithmDescriptor* d = registry::find(what.id);
         NodeConfig c = node_config(what.id);
-        c.in_bus[0] = B_NOTES;
-        if (what.clocked) c.in_bus[1] = B_GATE;
-        c.out_bus[0] = B_OUT;
-        if (dropped_bus != NO_BUS && d->n_out > 1) c.out_bus[1] = dropped_bus;
+        c.in_buses[0] = one_bus(B_NOTES);
+        if (what.clocked) c.in_buses[1] = one_bus(B_GATE);
+        c.out_buses[0] = one_bus(B_OUT);
+        if (dropped_bus.any() && d->n_out > 1) c.out_buses[1] = dropped_bus;
         c.params[channel_param(*d, PARAM_CHANNEL_OUT)] = override_channel;
         node = pool.load(c);
     }
@@ -354,7 +354,7 @@ static void test_the_override_refuses_a_channel_that_is_not_one() {
 // passed: a ghost part is a part, and it plays where this node plays.
 static void test_probability_moves_both_of_its_outlets() {
     const Driven what = {ALGO_PROBABILITY, false};
-    Rig rig(what, WANTED_CHANNEL, B_DROPPED);
+    Rig rig(what, WANTED_CHANNEL, one_bus(B_DROPPED));
     TEST_ASSERT_TRUE(rig.node->set_param(0, 1));     // 1% chance: nearly all refused
     rig.play(on(60, SOURCE_CHANNEL));
     rig.play(on(64, SOURCE_CHANNEL));

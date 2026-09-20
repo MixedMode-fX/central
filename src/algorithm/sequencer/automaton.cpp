@@ -39,8 +39,8 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 Automaton::Automaton(const NodeConfig& config) :
-    advance_in(config.in_bus[0]),
-    reseed_in(config.in_bus[1]),
+    advance_in(config.in_buses[0]),
+    reseed_in(config.in_buses[1]),
     out(),
     rule(config.params[0] ? config.params[0] : DEFAULT_RULE),
     seed(config.params[1] ? config.params[1] : DEFAULT_SEED),
@@ -53,7 +53,7 @@ Automaton::Automaton(const NodeConfig& config) :
     rng(entropy::seed()),
     pulse()
 {
-    for (uint8_t i = 0; i < LANES; i++) out[i] = config.out_bus[i];
+    for (uint8_t i = 0; i < LANES; i++) out[i] = config.out_buses[i];
     if (n_cells < MIN_CELLS) n_cells = MIN_CELLS;
     if (config.params[6]) pulse.set_width_us((uint32_t)config.params[6] * 1000u);
     reseed();

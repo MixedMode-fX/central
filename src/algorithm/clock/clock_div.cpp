@@ -24,8 +24,8 @@ const AlgorithmDescriptor ClockDiv::descriptor = {
     CATEGORY_CLOCK };
 
 ClockDiv::ClockDiv(const NodeConfig& config) :
-    source_in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    source_in(config.in_buses[0]),
+    out(config.out_buses[0]),
     mode(config.params[0]),
     amount(config.params[1] ? config.params[1] : 1),
     phase_param(0), delay_param(0), width_param(0),
@@ -42,7 +42,7 @@ ClockDiv::ClockDiv(const NodeConfig& config) :
 }
 
 void ClockDiv::derive(){
-    const bool from_gate = (source_in != NO_BUS);
+    const bool from_gate = (source_in.any());
     const bool multiply = (mode != 0);
 
     refused = false;
@@ -156,7 +156,7 @@ void ClockDiv::advance_to(BusManager& bus, uint32_t position){
 void ClockDiv::process(BusManager& bus, uint32_t now_us){
     now = now_us;
 
-    if (source_in != NO_BUS){
+    if (source_in.any()){
         const bool level = bus.gate_read(source_in);
         const bool rising = level && !last_gate;
         last_gate = level;
@@ -171,6 +171,6 @@ void ClockDiv::process(BusManager& bus, uint32_t now_us){
 }
 
 void ClockDiv::tick(BusManager& bus, uint32_t count){
-    if (source_in != NO_BUS) return;        // gate-sourced: the tick is not ours
+    if (source_in.any()) return;        // gate-sourced: the tick is not ours
     advance_to(bus, count);
 }

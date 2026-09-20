@@ -29,9 +29,9 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 SampleHold::SampleHold(const NodeConfig& config) :
-    trigger_in(config.in_bus[0]),
-    signal_in(config.in_bus[1]),
-    out(config.out_bus[0]),
+    trigger_in(config.in_buses[0]),
+    signal_in(config.in_buses[1]),
+    out(config.out_buses[0]),
     source(clamp_enum(config.params[0], SH_SOURCES, SH_AUTO)),
     mode(clamp_enum(config.params[1], SH_MODES, SH_SAMPLE)),
     steps(config.params[2]),
@@ -60,9 +60,9 @@ int16_t SampleHold::quantise(int16_t v) const {
 
 int16_t SampleHold::take(BusManager& bus){
     const bool from_signal = (source == SH_SIGNAL)
-                          || (source == SH_AUTO && signal_in != NO_BUS);
+                          || (source == SH_AUTO && signal_in.any());
     if (from_signal){
-        return signal_in == NO_BUS ? (int16_t)0 : bus.cv_read(signal_in);
+        return !signal_in.any() ? (int16_t)0 : bus.cv_read(signal_in);
     }
     // Unipolar noise at the bus's own resolution: a random level, not a
     // random bit.
@@ -70,7 +70,7 @@ int16_t SampleHold::take(BusManager& bus){
 }
 
 void SampleHold::process(BusManager& bus, uint32_t){
-    const bool level = (trigger_in == NO_BUS) ? false : bus.gate_read(trigger_in);
+    const bool level = (!trigger_in.any()) ? false : bus.gate_read(trigger_in);
 
     if (mode == SH_TRACK){
         // Follow while the gate is up; whatever was there when it fell is

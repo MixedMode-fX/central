@@ -75,9 +75,9 @@ class SampleHold : public Node{
         // One reading of whatever the source is.
         int16_t take(BusManager& bus);
 
-        uint8_t trigger_in;
-        uint8_t signal_in;
-        uint8_t out;
+        BusSet trigger_in;
+        BusSet signal_in;
+        BusSet out;
         uint8_t source;
         uint8_t mode;
         uint8_t steps;

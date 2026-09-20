@@ -8,12 +8,13 @@ void GateInPort::setup(){
 
 void GateInPort::release(){
     if (enabled()) gpio->mode(port, GPIO_MODE_INPUT_PULLUP);
-    bus = NO_BUS;
+    gpio = nullptr;
+    buses = BusSet{};
 }
 
-void GateInPort::process(BusManager& buses, uint32_t){
+void GateInPort::process(BusManager& bus, uint32_t){
     if (!enabled()) return;
-    buses.gate_write(bus, gpio->read(port) != GPIO_LOW);
+    bus.gate_write(buses, gpio->read(port) != GPIO_LOW);
 }
 
 // GateOutPort ---------------------------------------------------------------
@@ -29,12 +30,13 @@ void GateOutPort::release(){
         gpio->write(port, GPIO_LOW);
         gpio->mode(port, GPIO_MODE_INPUT_PULLUP);
     }
-    bus = NO_BUS;
+    gpio = nullptr;
+    buses = BusSet{};
 }
 
-void GateOutPort::process(BusManager& buses, uint32_t){
+void GateOutPort::process(BusManager& bus, uint32_t){
     if (!enabled()) return;
-    gpio->write(port, buses.gate_read(bus) ? GPIO_HIGH : GPIO_LOW);
+    gpio->write(port, bus.gate_read(buses) ? GPIO_HIGH : GPIO_LOW);
 }
 
 // MidiInPort ----------------------------------------------------------------
@@ -46,19 +48,19 @@ bool MidiInPort::accepts(uint8_t source, const MidiEvent& event) const {
     return true;
 }
 
-bool MidiInPort::deliver(BusManager& buses, uint8_t source, const MidiEvent& event) const {
+bool MidiInPort::deliver(BusManager& bus, uint8_t source, const MidiEvent& event) const {
     if (!accepts(source, event)) return false;
-    buses.note_write(bus, event);
+    bus.note_write(buses, event);
     return true;
 }
 
 // MidiOutPort ---------------------------------------------------------------
 
-void MidiOutPort::process(BusManager& buses, uint32_t){
+void MidiOutPort::process(BusManager& bus, uint32_t){
     if (!enabled()) return;
-    const uint8_t n = buses.note_count(bus);
+    const uint8_t n = bus.note_count(buses);
     for (uint8_t i = 0; i < n; i++){
-        const MidiEvent& e = buses.note_read(bus, i);
+        const MidiEvent& e = bus.note_read(buses, i);
         midi->send(target_mask, e.type, e.data1, e.data2, channel ? channel : e.channel);
     }
 }

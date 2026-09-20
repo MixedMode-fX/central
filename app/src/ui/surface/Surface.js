@@ -17,7 +17,7 @@
 //     read from - and between gestures it says what patch is loaded and at
 //     what tempo, which is what you want to see when your hands are still.
 //   * **Silkscreen, not prose.** One short line per control, in the panel
-//     type: its caption, or what it sends when it has no caption. Whether it
+//     type: its caption, the macro it drives, or what it sends. Whether it
 //     is bound is a lamp, not the words "not bound" under all eight.
 //   * **Nothing is rebuilt under your thumb.** Pressing a pad writes to the
 //     DOM directly and re-renders nothing: a latch that rebuilt the page
@@ -266,15 +266,20 @@ function Pot(app, index, say) {
       el('span', { class: 'silk pot-name' }, name)));
 }
 
-// What the panel is silkscreened with: the caption somebody wrote, or what
-// the control sends. Never a sentence - the eight of them are read at a
-// glance or not at all.
+// What the panel is silkscreened with: the caption somebody wrote, the macro
+// the control drives, or what it sends. Never a sentence - the eight of them
+// are read at a glance or not at all.
 function potName(app, pot, bound) {
-  if (pot.label) return pot.label;
-  if (bound?.mapping.targetKind === P.CcTargetKind.CC_TARGET_MACRO) {
-    return app.state.patch.macros?.[bound.mapping.targetIndex]?.name || `macro ${bound.mapping.targetIndex + 1}`;
-  }
-  return `cc ${pot.cc}`;
+  return pot.label || macroName(app, bound) || `cc ${pot.cc}`;
+}
+
+// The name of the macro a control is bound to, if it is bound to one. A
+// control on a macro *is* that macro to whoever is playing it, which is why
+// the name is worth the lookup - and why a pad reads it too.
+function macroName(app, bound) {
+  if (bound?.mapping.targetKind !== P.CcTargetKind.CC_TARGET_MACRO) return null;
+  const index = bound.mapping.targetIndex;
+  return app.state.patch.macros?.[index]?.name || `macro ${index + 1}`;
 }
 
 // The macro a control is driving, or null. Only a macro reads back; every
@@ -303,6 +308,11 @@ function Pad(app, index, say) {
   const where = { kind: 'pad', index };
   const latches = pad.mode === PadMode.TOGGLE && pad.kind !== PadKind.PROGRAM;
   const editing = app.state.ui.surface.edit;
+  // Only a CC pad has a binding to read: a note goes into the patch and a
+  // launch is answered by the module itself, so neither of them is on a
+  // macro whatever number happens to be sitting in the pad's `cc`.
+  const bound = pad.kind === PadKind.CC ? surface.bindingOf(pad) : null;
+  const name = padName(app, pad, bound);
 
   // A toggle shows what it **last sent**, which is not the same as what the
   // module holds: bind a pad to a macro, sweep that macro with an LFO, and
@@ -318,15 +328,15 @@ function Pad(app, index, say) {
                    pad.kind === PadKind.PROGRAM && 'launch',
                    surface.armedOn(where) && 'armed'),
     'aria-pressed': !editing && latches ? String(Boolean(pad.on)) : null,
-    'aria-label': editing ? `set up pad ${index + 1}` : padSaid(pad, index),
+    'aria-label': editing ? `set up pad ${index + 1}` : padSaid(pad, index, name),
     title: latches ? 'a latch shows what it last sent — the module is not asked' : null,
   },
     el('span', { class: 'pad-index' }, String(index + 1)),
-    el('span', { class: 'pad-name' }, pad.label || padWhat(pad)),
+    el('span', { class: 'pad-name' }, name),
     // The second line only when it says something the first does not: a pad
     // captioned "kick" needs to say it sends C2, and one already showing C2
     // does not need the word "note" under it sixteen times.
-    padUnder(pad) ? el('span', { class: 'pad-what silk' }, padUnder(pad)) : null,
+    padUnder(pad, name) ? el('span', { class: 'pad-what silk' }, padUnder(pad, name)) : null,
     latch);
 
   // Pressed, and nothing rebuilt: the latch is written straight into this
@@ -340,7 +350,7 @@ function Pad(app, index, say) {
   const press = () => {
     buzz();
     button.classList.add('hit');
-    say(pad.label || padWhat(pad), surface.press(index));
+    say(name, surface.press(index));
     show();
   };
   const release = () => {
@@ -368,16 +378,24 @@ function padWhat(pad) {
   return noteLabel(pad.note);
 }
 
-const padUnder = (pad) => (pad.label ? padWhat(pad)
+// A pad is silkscreened the way a pot is: the caption, then the macro it
+// drives, then the number it sends. A pad put on a macro is that macro, and
+// reading "cc 40" off sixteen of them is reading a wiring diagram.
+function padName(app, pad, bound) {
+  return pad.label || macroName(app, bound) || padWhat(pad);
+}
+
+const padUnder = (pad, name) => (name !== padWhat(pad) ? padWhat(pad)
   : pad.kind === PadKind.PROGRAM ? 'launch' : null);
 
 const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const noteLabel = (pitch) => `${NAMES[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
 
-function padSaid(pad, index) {
+function padSaid(pad, index, name) {
   const mode = pad.kind === PadKind.PROGRAM ? 'launch'
     : pad.mode === PadMode.TOGGLE ? 'latching' : 'momentary';
-  return `pad ${index + 1}: ${pad.label ? `${pad.label}, ` : ''}${padWhat(pad)}, ${mode}`;
+  const what = padWhat(pad);
+  return `pad ${index + 1}: ${name === what ? '' : `${name}, `}${what}, ${mode}`;
 }
 
 // --- the gesture ----------------------------------------------------------

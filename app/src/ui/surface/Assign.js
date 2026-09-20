@@ -15,8 +15,10 @@
 // The sheet is a panel like the surface behind it: the caption first and
 // biggest, because it is the silkscreen and what will be read at arm's
 // length; the labels in the panel face; the fields in pairs rather than a
-// column of stacked labels; and numbers as steppers, because a native
-// spinner's arrows are three pixels wide under a thumb.
+// column of stacked labels; and a number is a stepper with a field in the
+// middle of it - the arrows because a native spinner's are three pixels wide
+// under a thumb, and the field because the number you already know is typed
+// in one gesture rather than nudged in sixty.
 //
 // **The cable is not here.** Which of the module's inputs a control arrives on
 // decides what hears it - a MIDI input takes a port mask, a binding filters by
@@ -30,6 +32,7 @@ import { Field, Fields } from '../components/Field.js';
 import { Row, Hint } from '../components/Panel.js';
 import { Segmented } from '../components/Segmented.js';
 import { Select, range } from '../components/Select.js';
+import { NumberField } from '../components/NumberField.js';
 import { openMenu, MenuItem } from '../components/Menu.js';
 import { PadKind, PadMode, COLOURS } from '../../services/surface.js';
 import { SWAP_TIMINGS, channelLabel, portNames } from '../../protocol/names.js';
@@ -39,7 +42,7 @@ import { noteName } from '../../core/music.js';
 
 const KINDS = [
   { value: PadKind.NOTE, label: 'note', hint: 'a note on while it is held' },
-  { value: PadKind.CC, label: 'CC', hint: '127 down, 0 up' },
+  { value: PadKind.CC, label: 'CC', hint: 'one value down, another up' },
   { value: PadKind.PROGRAM, label: 'launch', hint: 'a Program Change: recall a stored patch' },
 ];
 
@@ -89,8 +92,10 @@ const ChannelField = (value, onChange) => Select({
   options: range(17, channelLabel, 1), value, onChange, 'aria-label': 'channel',
 });
 
-// A number, as two big targets either side of a readout. Everything set here
-// is set with a thumb, over a surface that is being played with one.
+// A number, as two big targets either side of the value. Everything set here
+// can be set with a thumb, over a surface that is being played with one - and
+// the value itself is a field, because a CC that has to be walked from 40 to
+// 102 one press at a time is a number nobody sets.
 function Stepper({ value, min, max, label, onChange }) {
   const at = Math.max(min, Math.min(max, value));
   const step = (by) => el('button', {
@@ -100,7 +105,7 @@ function Stepper({ value, min, max, label, onChange }) {
   }, by > 0 ? '+' : '−');
   return el('div', { class: 'stepper', role: 'group', 'aria-label': label },
     step(-1),
-    el('span', { class: 'stepper-value' }, String(at)),
+    NumberField({ value: at, min, max, fallback: at, class: 'stepper-value', 'aria-label': label, onChange }),
     step(1));
 }
 
@@ -150,10 +155,23 @@ function PadFields(app, where, pad, set) {
     })));
     what.push(channel);
   } else {
+    const latches = pad.mode === PadMode.TOGGLE;
     what.push(Field({ label: 'sends cc' }, Stepper({
       value: pad.cc, min: 0, max: 119, label: 'CC number', onChange: (cc) => set({ cc }),
     })));
     what.push(channel);
+    // Both ends of it, because a CC pad is not always a switch: a latch that
+    // alternates 64 and 20 is two positions of a parameter, and 127/0 is only
+    // the commonest pair. Named for what the pad does - a latch is on and
+    // off, a momentary pad is pressed and released.
+    what.push(Field({ label: latches ? 'on' : 'pressed' }, Stepper({
+      value: pad.ccOn, min: 0, max: 127, label: 'the value it sends on',
+      onChange: (ccOn) => set({ ccOn }),
+    })));
+    what.push(Field({ label: latches ? 'off' : 'released' }, Stepper({
+      value: pad.ccOff, min: 0, max: 127, label: 'the value it sends off',
+      onChange: (ccOff) => set({ ccOff }),
+    })));
   }
   return el('div', { class: 'stack' },
     kind,

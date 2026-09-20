@@ -306,18 +306,23 @@
 
 /* A number is a stepper here, not a spinner: on a phone, two big targets
    either side of the value beat a native field with arrows three pixels
-   wide. */
+   wide. The value between them is a field of its own - typing 102 beats
+   sixty presses - with the browser's own arrows taken off it, since that is
+   what the two big ones are for. */
 .stepper { display: flex; align-items: stretch; gap: .3rem; }
 .stepper button {
   flex: 0 0 auto; width: 2.2rem; min-height: 2.2rem; padding: 0;
   background: var(--engrave); border: 1px solid var(--line); border-radius: var(--radius);
   font-family: var(--mono); color: var(--ink);
 }
-.stepper-value {
-  flex: 1 1 auto; min-width: 2.5rem; display: flex; align-items: center; justify-content: center;
+input.stepper-value {
+  flex: 1 1 auto; width: auto; min-width: 2.5rem; padding: .35rem .25rem; text-align: center;
   font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1rem;
   background: var(--engrave); border: 1px solid var(--line); border-radius: var(--radius);
+  -moz-appearance: textfield; appearance: textfield;
 }
+input.stepper-value::-webkit-outer-spin-button,
+input.stepper-value::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 .sheet-binds { display: grid; gap: .35rem; }
 .bind-what { margin: 0; font-size: .9rem; }

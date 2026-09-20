@@ -8,6 +8,7 @@
 import { EmbeddedModule } from '../runtime/module.js';
 import { loadWasm } from '../runtime/wasm.js';
 import { Listener } from '../runtime/audio/listener.js';
+import { Heartbeat } from '../runtime/heartbeat.js';
 import { Controller } from '../runtime/controller.js';
 import { MidiOutputs } from '../runtime/midiout.js';
 import { describeSupport, access, discover, WebMidiTransport } from '../runtime/webmidi.js';
@@ -32,6 +33,7 @@ export function createApp({ root, view, wasmUrl }) {
     listener: null,         // the audio standing in for what is downstream
     controller: null,       // a MIDI controller plugged into this computer
     outputs: null,          // where what the module plays leaves this computer
+    heartbeat: null,        // what keeps the module running while the page is hidden
     get device() { return session.device; },
   };
   const render = () => renderer.render();
@@ -102,6 +104,12 @@ export function createApp({ root, view, wasmUrl }) {
       patches.listener = app.listener;
       app.controller = new Controller(app.module);
       app.outputs = new MidiOutputs(app.module, library);
+      // What runs the module while the page is hidden. It arms itself on the
+      // first press anywhere and asks the user for nothing: a machine that
+      // stops when you look at something else is not running
+      // (`runtime/heartbeat.js`).
+      app.heartbeat = new Heartbeat(app.module);
+      app.heartbeat.arm();
       await app.useModule({ silent: true });
       patches.restoreWorking();
     } catch (error) {

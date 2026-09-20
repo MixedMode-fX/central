@@ -49,7 +49,9 @@ const PASS_US = 1000;
 // The passes are run from a timer while the page is visible as well as from
 // the animation frame, so the module is never more than a few milliseconds
 // behind between frames; the frame is where the page paints what they did.
-const TICK_MS = 4;
+// Hidden, the page has neither, and the heartbeat runs them at this rate
+// instead (`runtime/heartbeat.js`).
+export const TICK_MS = 4;
 // Further behind than this the module skips rather than catches up: a tab
 // coming back from the background does not run a minute of passes at once,
 // and a stall long enough to be a hole is a hole rather than every note of
@@ -249,23 +251,29 @@ export class EmbeddedModule {
   // SysEx and do nothing else: no beat on the green LED, no sequencer moving,
   // no debounced autosave, no quantised patch swap ever arriving.
   //
-  // Two drivers, one job. The timer keeps the module within a few
-  // milliseconds of the wall clock whether or not a frame is due, which is
-  // what puts its outputs on their clocks early (`OUTPUT_LATENCY_MS`). The
-  // animation frame runs the same catch-up and then lets the page paint what
-  // the passes did. Neither runs a hidden page: the animation frame does not
-  // fire there, and the timer looks before it runs, so a tab left in the
-  // background finds the module where it left it and skips forward.
+  // Three clocks, one job, and only ever one of them running.
+  //
+  //   * **the timer**, while the page is visible. It keeps the module within
+  //     a few milliseconds of the wall clock whether or not a frame is due,
+  //     which is what puts its outputs on their clocks early
+  //     (`OUTPUT_LATENCY_MS`).
+  //   * **the animation frame**, which runs the same catch-up and then lets
+  //     the page paint what the passes did.
+  //   * **the heartbeat** (`runtime/heartbeat.js`), while the page is hidden.
+  //     Neither of the other two is a clock there - the animation frame does
+  //     not fire in a hidden page at all, and its timers are clamped to a
+  //     wake-up a second - so the timer stands aside rather than running a
+  //     quarter-second burst of passes once a second, and the heartbeat, whose
+  //     clock is the audio render thread, runs them at real time instead.
+  //
+  // Where the heartbeat cannot beat (no gesture yet, no AudioWorklet, a phone
+  // that suspends a backgrounded tab's audio outright) a hidden page has no
+  // clock at all: the module is found where it was left and skips forward.
   start() {
     if (this.running) return;
     this.running = true;
     this.syncTo(performance.now());
-    const tick = () => {
-      if (!this.running || globalThis.document?.hidden) return;
-      this.advanceTo(performance.now());
-      this.drainEvents();
-    };
-    this.timer = setInterval(tick, TICK_MS);
+    this.timer = setInterval(() => { if (!globalThis.document?.hidden) this.tick(); }, TICK_MS);
     const frame = () => {
       if (!this.running) return;
       this.advanceTo(performance.now());
@@ -274,6 +282,14 @@ export class EmbeddedModule {
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
+  }
+
+  // One round of catch-up, from whichever clock is driving the module. The
+  // heartbeat calls this and nothing else.
+  tick() {
+    if (!this.running) return;
+    this.advanceTo(performance.now());
+    this.drainEvents();
   }
 
   stop() {

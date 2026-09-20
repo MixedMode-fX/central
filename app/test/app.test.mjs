@@ -5,8 +5,9 @@
 // checks the three things the merge added, and it checks them the same way -
 // against the real module where a module is involved:
 //
-//   * a patch saved in the browser comes back byte for byte, and a full quota
-//     says so rather than losing a patch quietly;
+//   * a patch saved in the browser comes back as the patch it was - in words,
+//     so it survives the next change to the image - and a full quota says so
+//     rather than losing a patch quietly;
 //   * an incoming CC takes main.cpp's path through the control plane, which is
 //     what makes learn work from a controller plugged into the browser;
 //   * a slider does not take a value from a finger that was scrolling past it;
@@ -20,7 +21,10 @@ import { test } from 'vitest';
 
 import * as P from '../src/protocol/generated.js';
 import * as codec from '../src/protocol/codec.js';
-import { Library, toBase64, fromBase64, ago } from '../src/services/storage.js';
+import { Library, ago } from '../src/services/storage.js';
+import { createState } from '../src/services/state.js';
+import { Arrangement } from '../src/services/arrangement.js';
+import { Patches } from '../src/services/patches.js';
 import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/core/patchjson.js';
 import { validate } from '../src/core/validate.js';
 import {
@@ -74,35 +78,54 @@ import {
 
 // --- the library ------------------------------------------------------------
 
-test('a saved patch comes back as the same image', async () => {
+test('a saved patch comes back as the patch it was', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
   const library = new Library(fakeStorage());
   const patch = codec.emptyPatch();
   patch.nodes.push(codec.emptyNode(1));
   patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_OUT, bus: 3 };
   const globals = codec.emptyGlobals();
   globals.bpm = 137;
-  const bytes = codec.encodePatch(patch, globals);
 
-  const entry = library.save({ name: 'a patch', bytes, nodes: patch.nodes.length });
+  const entry = library.save({ name: 'a patch', patch: toPatchJson(patch, globals, device), nodes: 1 });
   const read = library.get(entry.id);
-  assert.deepEqual([...read.bytes], [...bytes], 'the image changed on the way through');
-  const back = codec.decodePatch(read.bytes);
+  const back = fromPatchJson(read.patch, device);
   assert.equal(back.globals.bpm, 137);
   assert.equal(back.patch.nodes.length, 1);
   assert.equal(back.patch.gatePorts[0].bus, 3);
 });
 
+// The reason the library holds words and not bytes. The image is versioned and
+// this project renumbers ids and moves fields whenever the shape is wrong, so
+// a library of images empties itself on the next such change. A stored patch
+// names its algorithms, so the same file still loads on the other side of one.
+test('a stored patch does not depend on the image it was saved from', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const library = new Library(fakeStorage());
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(device.algorithms.find(Boolean).id));
+  const stored = toPatchJson(patch, codec.emptyGlobals(), device);
+  library.save({ name: 'named', patch: stored, nodes: 1 });
+
+  const [row] = library.read();
+  assert.equal(typeof row.patch.nodes[0].algo, 'string',
+               'the node is stored by name, not by an id the next firmware may renumber');
+  assert.equal(row.image, undefined, 'no image is kept beside it');
+});
+
 test('the library lists, renames, duplicates and deletes', async () => {
   const library = new Library(fakeStorage());
-  const bytes = codec.encodePatch(codec.emptyPatch(), codec.emptyGlobals());
-  const first = library.save({ name: 'one', bytes, nodes: 0 });
-  const second = library.save({ name: 'two', bytes, nodes: 2 });
+  const doc = { nodes: [] };
+  const first = library.save({ name: 'one', patch: doc, nodes: 0 });
+  const second = library.save({ name: 'two', patch: doc, nodes: 2 });
 
   // Newest first: the list exists to answer "what was I just working on?".
   assert.deepEqual(library.list().map((e) => e.name), ['two', 'one']);
-  // And it carries no images: a list of patches must not drag every patch
+  // And it carries no patches: a list of patches must not drag every patch
   // through the render path.
-  assert.ok(library.list().every((e) => e.image === undefined));
+  assert.ok(library.list().every((e) => e.patch === undefined));
 
   library.rename(first.id, 'renamed');
   assert.ok(library.list().some((e) => e.name === 'renamed'));
@@ -117,19 +140,19 @@ test('the library lists, renames, duplicates and deletes', async () => {
   assert.equal(library.get(second.id), null);
 
   // Saving with an id overwrites rather than making another entry.
-  library.save({ id: first.id, name: 'renamed', bytes, nodes: 1 });
+  library.save({ id: first.id, name: 'renamed', patch: doc, nodes: 1 });
   assert.equal(library.list().length, 2);
 });
 
 test('a full quota is reported, not swallowed', async () => {
   const library = new Library(fakeStorage({ limit: 40 }));
   assert.ok(library.available, 'the probe write fits');
-  const bytes = codec.encodePatch(codec.emptyPatch(), codec.emptyGlobals());
-  assert.throws(() => library.save({ name: 'too big', bytes, nodes: 0 }),
+  const doc = { nodes: [{ algo: 'Metronome' }] };
+  assert.throws(() => library.save({ name: 'too big', patch: doc, nodes: 1 }),
                 /delete a patch, or export it to a file/);
   // The working patch is autosaved on every edit, so it must never throw: a
   // full quota may not be allowed to break editing.
-  library.saveWorking({ id: null, name: 'working', bytes });
+  library.saveWorking({ id: null, name: 'working', patch: doc });
 });
 
 test('a browser that stores nothing is a message, not a crash', async () => {
@@ -144,22 +167,71 @@ test('a browser that stores nothing is a message, not a crash', async () => {
   assert.deepEqual(library.list(), []);
   assert.equal(library.readWorking(), null);
   // Autosave is called on every render, including in this browser.
-  library.saveWorking({ id: null, name: 'x', bytes: new Uint8Array([1, 2, 3]) });
+  library.saveWorking({ id: null, name: 'x', patch: { nodes: [] } });
 });
 
 test('the working patch survives a reload', async () => {
   const storage = fakeStorage();
-  const bytes = codec.encodePatch(codec.emptyPatch(), codec.emptyGlobals());
-  new Library(storage).saveWorking({ id: 'p1', name: 'in progress', bytes });
+  const doc = { nodes: [{ algo: 'Metronome' }], globals: { bpm: 91 } };
+  new Library(storage).saveWorking({ id: 'p1', name: 'in progress', patch: doc });
   const restored = new Library(storage).readWorking();
   assert.equal(restored.name, 'in progress');
   assert.equal(restored.id, 'p1');
-  assert.deepEqual([...restored.bytes], [...bytes]);
+  assert.deepEqual(restored.patch, doc);
 });
 
-test('base64 survives every byte value, and ago() reads as English', async () => {
-  const all = Uint8Array.from({ length: 256 }, (_, i) => i);
-  assert.deepEqual([...fromBase64(toBase64(all))], [...all]);
+// The library, driven the way the library tab drives it. Enough of the app for
+// `Patches` to run headless: a real library over a fake browser storage, and
+// an editor that sends nowhere.
+function patchService({ storage, device }) {
+  const state = createState();
+  const library = new Library(storage);
+  const editor = { device, sendWhole: () => {}, say: () => {}, fail: (m) => { state.error = m; } };
+  const arrangement = new Arrangement({ state, library });
+  return { state, library, patches: new Patches({ state, library, editor, arrangement, render: () => {} }) };
+}
+
+// What the whole change is for: a patch saved in one session opens in the
+// next. Saved, then read back by a page that shares nothing with the one that
+// saved it but the browser's storage.
+test('a patch saved in the library opens again in a new page', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const storage = fakeStorage();
+  const [name, example] = Object.entries(EXAMPLES).find(([, e]) => e.category === 'performance');
+  const { patch, globals } = fromPatchJson(example.patch, device);
+
+  const first = patchService({ storage, device });
+  first.state.patch = patch;
+  first.state.globals = globals;
+  first.state.current.name = name;
+  first.patches.save();
+  const id = first.state.current.id;
+  assert.ok(id, `saving ${name} failed: ${first.state.error}`);
+  assert.equal(first.state.current.dirty, false);
+
+  const next = patchService({ storage, device });
+  next.patches.load(id);
+  assert.equal(next.state.error, null, `loading ${name} back failed`);
+  assert.deepEqual([...codec.encodePatch(next.state.patch, next.state.globals)],
+                   [...codec.encodePatch(patch, globals)], `${name} changed on the way through`);
+  // And it says so: a patch nobody has touched since it was loaded must not
+  // claim there is something to save.
+  next.patches.autosave({ now: true });
+  assert.equal(next.state.current.dirty, false, 'a patch just loaded already says it has changed');
+
+  // The reload: the working patch comes back, still attached to the entry it
+  // was loaded from.
+  const reopened = patchService({ storage, device });
+  reopened.patches.restoreWorking();
+  assert.equal(reopened.state.current.id, id);
+  assert.equal(reopened.state.current.name, name);
+  assert.equal(reopened.state.current.dirty, false);
+  assert.deepEqual([...codec.encodePatch(reopened.state.patch, reopened.state.globals)],
+                   [...codec.encodePatch(patch, globals)]);
+});
+
+test('ago() reads as English', async () => {
   const now = Date.now();
   assert.equal(ago(now, now), 'just now');
   assert.equal(ago(now - 120000, now), '2 min ago');
@@ -1964,7 +2036,7 @@ test('the schema refuses what the firmware refuses', async () => {
   refuses('more nodes than the module holds',
           { nodes: Array.from({ length: caps.nodes + 1 }, () => ({ algo: 'NOT', in: [0], out: [0] })) });
   refuses('a MIDI port that is not on this module',
-          { midi_in: [{ sources: ['DIN 9'], channel: 0, bus: 0 }] });
+          { midi_in: [{ port: 1, sources: ['DIN 9'], channel: 0, bus: 0 }] });
 
   refuses('a macro name longer than the field the patch holds',
           { macros: [{ index: 0, name: 'x'.repeat(caps.macroNameBytes + 1) }] });
@@ -1992,7 +2064,7 @@ test('a MIDI port is read however it is spelled', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const mask = (name) => fromPatchJson(
-    { midi_in: [{ sources: [name], channel: 0, bus: 0 }] }, device).patch.midiIn[0].sourceMask;
+    { midi_in: [{ port: 1, sources: [name], channel: 0, bus: 0 }] }, device).patch.midiIn[0].sourceMask;
   const canonical = mask('USB host');
   assert.equal(mask('USB Host'), canonical, 'case matters, and it should not');
   assert.equal(mask('usb_host'), canonical, 'spacing matters, and it should not');
@@ -2693,14 +2765,14 @@ test('a block dragged somewhere is remembered beside the patch, not in it', asyn
   const library = new Library(fakeStorage());
   const patch = codec.emptyPatch();
   patch.nodes.push(codec.emptyNode(12));
-  const bytes = codec.encodePatch(patch, codec.emptyGlobals());
-  const entry = library.save({ name: 'arranged', bytes, nodes: 1 });
+  const doc = toPatchJson(patch, codec.emptyGlobals(), null);
+  const entry = library.save({ name: 'arranged', patch: doc, nodes: 1 });
 
   library.saveLayout(entry.id, { 'node:0': [400, 120] });
   assert.deepEqual(library.layoutFor(entry.id), { 'node:0': [400, 120] });
-  // The image is the patch, and a coordinate is not part of one: what a `.syx`
-  // file carries and what the module stores are untouched by arranging it.
-  assert.deepEqual([...library.get(entry.id).bytes], [...bytes]);
+  // A coordinate is not part of a patch: what the library keeps, what a file
+  // carries and what the module stores are untouched by arranging it.
+  assert.deepEqual(library.get(entry.id).patch, doc);
 
   // An unsaved patch keeps its arrangement under the same name the autosave
   // uses, and the arrangement follows it into the library.

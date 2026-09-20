@@ -129,7 +129,7 @@ export function createApp({ root, view, wasmUrl }) {
     play.detach();
     await session.adopt(app.module, { usingModule: true });
     state.current = noPatch();
-    state.savedImage = null;
+    state.savedJson = null;
     arrangement.reset();
     stopLive?.();
     stopLive = app.module.onFrame(app.refreshLive);
@@ -162,7 +162,7 @@ export function createApp({ root, view, wasmUrl }) {
       // would be a second permission prompt for something already allowed.
       play.attach({ access: midi, control: port.output, name: port.name });
       state.current = { id: null, name: `on ${port.name}`, dirty: true, savedAt: 0 };
-      state.savedImage = null;
+      state.savedJson = null;
       arrangement.reset();
       if (kept) state.status += ` — kept “${kept.name}”`;
     } catch (error) {

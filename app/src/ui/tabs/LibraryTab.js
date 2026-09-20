@@ -1,7 +1,7 @@
 // The library tab: what a patch is kept in, and every way of moving one.
 // Three places - this browser, a file, the module's preset slots - and the
-// examples to start from. The patch never changes shape on the way: it is
-// the image in all of them.
+// examples to start from. This browser and a `.json` file keep the patch in
+// words; the module and a `.syx` file take the image (services/patches.js).
 
 import { el, classes } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
@@ -51,7 +51,7 @@ function SavedPanel(app) {
                  + `${entry.id === currentId ? ' · open' : ''}`),
               IconButton({ icon: 'copy', label: `duplicate ${entry.name}`, class: 'ghost',
                            onclick: () => app.patches.duplicate(entry.id) }),
-              IconButton({ icon: 'download', label: `export ${entry.name} as .syx`, class: 'ghost',
+              IconButton({ icon: 'download', label: `export ${entry.name} as .json`, class: 'ghost',
                            onclick: () => app.patches.exportSaved(entry.id) }),
               IconButton({ icon: 'trash', label: `delete ${entry.name}`, class: 'ghost danger',
                            onclick: () => app.patches.remove(entry.id) })))))
@@ -82,8 +82,8 @@ function FilesPanel(app) {
   const box = el('textarea', { class: 'json', spellcheck: 'false', rows: '12', 'aria-label': 'this patch as JSON' }, json);
   return Panel('files',
     Row(
-      el('button', { onclick: () => app.patches.exportSyx() }, 'export .syx'),
       el('button', { onclick: () => app.patches.exportJson() }, 'export .json'),
+      el('button', { onclick: () => app.patches.exportSyx() }, 'export .syx'),
       el('label', { class: 'file' }, 'import',
         el('input', { type: 'file', accept: '.syx,.bin,.json',
                       onchange: (e) => { if (e.target.files[0]) app.patches.importFile(e.target.files[0]); } }))),

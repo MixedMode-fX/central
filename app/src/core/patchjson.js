@@ -223,14 +223,21 @@ export function toPatchJson(patch, globals, device) {
   });
   if (jacks.length) json.gate_ports = jacks;
 
-  const midiIn = patch.midiIn
-    .filter((p) => p.sourceMask)
-    .map((p) => ({ sources: portNames(p.sourceMask), channel: p.channel, bus: busOrNull(p.bus) }));
+  // Numbered like the jacks, and for the same reason: a patch that uses only
+  // MIDI in 3 says so, rather than arriving back on MIDI in 1 because it was
+  // the only entry in the list.
+  const midiIn = [];
+  patch.midiIn.forEach((p, i) => {
+    if (!p.sourceMask) return;
+    midiIn.push({ port: i + 1, sources: portNames(p.sourceMask), channel: p.channel, bus: busOrNull(p.bus) });
+  });
   if (midiIn.length) json.midi_in = midiIn;
 
-  const midiOut = patch.midiOut
-    .filter((p) => p.targetMask)
-    .map((p) => ({ targets: portNames(p.targetMask), channel: p.channel, bus: busOrNull(p.bus) }));
+  const midiOut = [];
+  patch.midiOut.forEach((p, i) => {
+    if (!p.targetMask) return;
+    midiOut.push({ port: i + 1, targets: portNames(p.targetMask), channel: p.channel, bus: busOrNull(p.bus) });
+  });
   if (midiOut.length) json.midi_out = midiOut;
 
   json.nodes = patch.nodes.map((node) => {
@@ -318,14 +325,20 @@ export function fromPatchJson(json, device) {
     patch.gatePorts[jack] = { direction: Number(direction), bus: g.bus ?? P.NO_BUS };
   }
 
-  (json.midi_in ?? []).forEach((m, i) => {
-    if (i >= patch.midiIn.length) throw new Error(`at most ${patch.midiIn.length} MIDI in ports`);
-    patch.midiIn[i] = { sourceMask: maskOf(m.sources), channel: m.channel ?? 0, bus: m.bus ?? P.NO_BUS };
-  });
-  (json.midi_out ?? []).forEach((m, i) => {
-    if (i >= patch.midiOut.length) throw new Error(`at most ${patch.midiOut.length} MIDI out ports`);
-    patch.midiOut[i] = { targetMask: maskOf(m.targets), channel: m.channel ?? 0, bus: m.bus ?? P.NO_BUS };
-  });
+  for (const m of json.midi_in ?? []) {
+    const port = Number(m.port) - 1;
+    if (!(port >= 0 && port < patch.midiIn.length)) {
+      throw new Error(`MIDI in ${m.port} does not exist (1..${patch.midiIn.length})`);
+    }
+    patch.midiIn[port] = { sourceMask: maskOf(m.sources), channel: m.channel ?? 0, bus: m.bus ?? P.NO_BUS };
+  }
+  for (const m of json.midi_out ?? []) {
+    const port = Number(m.port) - 1;
+    if (!(port >= 0 && port < patch.midiOut.length)) {
+      throw new Error(`MIDI out ${m.port} does not exist (1..${patch.midiOut.length})`);
+    }
+    patch.midiOut[port] = { targetMask: maskOf(m.targets), channel: m.channel ?? 0, bus: m.bus ?? P.NO_BUS };
+  }
 
   (json.nodes ?? []).forEach((n, i) => {
     const id = resolveAlgorithm(n.algo, device, i);

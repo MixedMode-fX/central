@@ -6,8 +6,9 @@
 // values, and the descriptor has no way to say them:
 //
 //   * a **grid**: nobody enters a drum pattern as a list of numbers, so a
-//     sequencer gets a purpose-built view of its table, and a harmony gets
-//     its circle of fifths;
+//     sequencer gets a purpose-built view of its table, a Euclidean one the
+//     ring its pulses are spread round, and a harmony gets its circle of
+//     fifths;
 //   * a control that is **inert** right now, and why. A knob that moves and
 //     changes nothing is the most confusing thing a module can offer, and the
 //     reason is never in the parameter: `leading` is a real control in a
@@ -22,6 +23,7 @@ import { scaleMaskById } from '../../protocol/names.js';
 import { chromatic, hasLeadingTone } from '../../core/music.js';
 import { StepGrid, DrumGrid, NoteLane } from './grids/Sequencers.js';
 import { HarmonyCircle } from './grids/HarmonyCircle.js';
+import { EuclidCircle } from './grids/EuclidCircle.js';
 
 // Tonnetz's fourth cycle, and the LFO's clock-locked sync. The descriptors
 // number their options from their own minimum and the page reads the names
@@ -37,6 +39,7 @@ const inert = (param, when) => ({ param, when });
 
 const ALGORITHMS = {
   StepSequencer: { grid: StepGrid },
+  EuclidianSequencer: { grid: EuclidCircle },
   DrumSeqGate: { grid: (app, index) => DrumGrid(app, index, false) },
   DrumSeqMidi: { grid: (app, index) => DrumGrid(app, index, true) },
   NoteSequencer: { grid: (app, index) => NoteLane(app, index, false) },

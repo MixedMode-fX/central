@@ -1,0 +1,25 @@
+/* A Euclidean sequencer's beat: its steps as a ring, the pulses joined into
+   the necklace whose shape is the rhythm, and a hand on the step sounding.
+   Capped and centred like the circle of fifths - a bigger circle is not a
+   clearer one, and on a phone it has to share the card with the knobs. */
+.euclid .euclid-ring { display: block; width: 100%; max-width: 300px; margin: .2rem auto; }
+.euclid-guide { fill: none; stroke: var(--line); }
+.euclid-top { stroke: var(--dim); stroke-width: 1.5; }
+
+/* The pulses are gates, so they are the gate colour, here and on the jack. */
+.necklace {
+  fill: color-mix(in srgb, var(--gate) 9%, transparent);
+  stroke: var(--gate); stroke-width: 1.5; stroke-opacity: .5;
+  stroke-linejoin: round;
+}
+.step-dot circle { fill: var(--panel); stroke: var(--dim); stroke-width: 1.5; stroke-opacity: .55; }
+.step-dot.on circle { fill: var(--gate); stroke: var(--gate); }
+/* The downbeat, so the necklace can be seen to turn against something. */
+.step-dot.first circle { stroke-opacity: 1; }
+.step-dot.on.first circle { stroke: var(--ink); }
+/* The step being played, marked the way every other step display marks it. */
+.step-dot.playing circle { stroke: var(--accent); stroke-width: 3; }
+.euclid .hand { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+
+.euclid-caption { display: grid; justify-items: center; gap: .1rem; text-align: center; }
+.euclid-bits { font-family: var(--mono); letter-spacing: .14em; font-size: .75rem; word-break: break-all; }

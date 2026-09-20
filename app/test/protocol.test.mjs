@@ -487,14 +487,16 @@ test('a patch exports as the emulator JSON and comes back unchanged', async () =
   const patch = samplePatch();
   const globals = { ...codec.emptyGlobals(), bpm: 96, pcEnabled: 1 };
   patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 2, bus: 0 };
-  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 1 };
+  // Deliberately not the first one: a port is numbered in the file, so a patch
+  // that uses only MIDI out 2 does not come back on MIDI out 1.
+  patch.midiOut[1] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, bus: 1 };
 
   const json = toPatchJson(patch, globals, device);
   // The dialect is the emulator's: named algorithms, jacks from 1, named ports.
   assert.equal(typeof json.nodes[0].algo, 'string');
   assert.ok(device.algorithms.some((a) => a.name === json.nodes[0].algo));
-  assert.deepEqual(json.midi_in[0].sources, ['DIN 1']);
-  assert.deepEqual(json.midi_out[0].targets, ['USB 1']);
+  assert.deepEqual(json.midi_in[0], { port: 1, sources: ['DIN 1'], channel: 2, bus: 0 });
+  assert.deepEqual(json.midi_out[0], { port: 2, targets: ['USB 1'], channel: 0, bus: 1 });
   for (const jack of json.gate_ports ?? []) {
     assert.ok(jack.port >= 1 && jack.port <= P.GPIO_N, 'jacks are numbered from 1');
     assert.ok(['in', 'out', 'unused'].includes(jack.dir));
@@ -509,6 +511,7 @@ test('a patch exports as the emulator JSON and comes back unchanged', async () =
                    Array.from(patch.nodes[0].params.subarray(0, 8)));
   assert.deepEqual(back.patch.gatePorts, patch.gatePorts);
   assert.equal(back.patch.midiIn[0].sourceMask, patch.midiIn[0].sourceMask);
+  assert.deepEqual(back.patch.midiOut, patch.midiOut, 'a MIDI out port stayed on the port it was on');
   assert.equal(back.globals.bpm, 96);
   assert.equal(back.globals.pcEnabled, 1);
   assert.equal(back.patch.ccMap[0].cc, patch.ccMap[0].cc);
@@ -523,8 +526,10 @@ test('the JSON importer refuses what it cannot resolve', () => {
                 /no algorithm "Nonexistent"/);
   assert.throws(() => fromPatchJson({ gate_ports: [{ port: 99, dir: 'in', bus: 0 }] }, device),
                 /jack 99 does not exist/);
-  assert.throws(() => fromPatchJson({ midi_in: [{ sources: ['DIN 9'], bus: 0 }] }, device),
+  assert.throws(() => fromPatchJson({ midi_in: [{ port: 1, sources: ['DIN 9'], bus: 0 }] }, device),
                 /no MIDI port called DIN 9/);
+  assert.throws(() => fromPatchJson({ midi_in: [{ port: 99, sources: ['DIN 1'], bus: 0 }] }, device),
+                /MIDI in 99 does not exist/);
 });
 
 // --- Presets --------------------------------------------------------------

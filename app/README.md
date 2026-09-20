@@ -164,7 +164,7 @@ bus two inlets read is two arrows; two outlets on one bus are dashed arrows and
 a `×2` mark; and disconnecting takes the *inlet* off its bus, saying in words
 what else stopped hearing it.
 
-**Where a block sits is not part of a patch.** The stored image, the `.syx`
+**Where a block sits is not part of a patch.** The stored patch, the `.syx`
 file and the JSON dialect describe a graph. The canvas lays a patch out from
 its own shape — signal left to right — and a hand-placed block is remembered in
 `localStorage` as a preference about looking at it.
@@ -228,18 +228,21 @@ and the CV button beside a control makes the same route from the other end.
 Both build the route through `graph.js`, so neither can disagree about what a
 new route does.
 
-**Patches live in the browser**, and what is stored is the patch **image** —
-the same bytes a `.syx` file carries and a slot holds, not a third format to
-keep in step with the firmware. The working patch is written back on every
-change; anything unsaved is put in the library before something replaces it.
-Example patches ship with it, shelved by what each is for: most exercise one
-part of the machine, and the performance shelf holds finished pieces whose
-macros arrive already on the surface's pots.
+**Patches live in the browser**, and what is stored is the patch **in words** —
+the JSON dialect, algorithms by name. Not the image: the image is a versioned
+binary layout, and this project renumbers ids and moves fields whenever the
+shape is wrong (CLAUDE.md, *Compatibility*), so a library of images is a
+library that empties itself on the next such change. The words survive it. The
+working patch is written back on every change; anything unsaved is put in the
+library before something replaces it. Example patches ship with it, shelved by
+what each is for: most exercise one part of the machine, and the performance
+shelf holds finished pieces whose macros arrive already on the surface's pots.
 
-**Two file formats, for two readers.** `.syx` is the image, which is what
-hardware and a librarian want and what nobody can read — and the fallback for a
-browser with no Web MIDI. `.json` is the same patch in words, and it imports
-back.
+**Two file formats, for two readers.** `.json` is the patch in words: what the
+library keeps, what a saved patch exports as, and what a person can read, diff
+and write by hand. `.syx` is the image, which is what hardware and a librarian
+want and what nobody can read — and the fallback for a browser with no Web
+MIDI. Both import back.
 
 **The schema is generated from the device**, so it describes the module in
 front of you, including firmware the app has never heard of. It is written with

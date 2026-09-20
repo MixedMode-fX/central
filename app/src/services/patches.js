@@ -1,15 +1,24 @@
 // Where a patch lives, and every way of moving one: this browser, a file, the
-// module's preset slots, the examples. The patch never changes shape on the
-// way - it is the image (`codec.encodePatch`) in all of them.
+// module's preset slots, the examples.
+//
+// Two shapes, and which is used where is not a taste: the image
+// (`codec.encodePatch`) is what the module and a `.syx` file take, and the
+// JSON dialect (`core/patchjson.js`) is what this browser and a `.json` file
+// keep. The image is versioned and this project renumbers ids and moves
+// fields freely, so anything stored for longer than a session is stored in
+// words (services/storage.js).
 
 import * as P from '../protocol/generated.js';
 import * as codec from '../protocol/codec.js';
-import { toPatchJsonText, fromPatchJson } from '../core/patchjson.js';
+import { toPatchJson, fromPatchJson } from '../core/patchjson.js';
 import { EXAMPLES } from '../core/examples.js';
-import { toBase64 } from './storage.js';
 import { noPatch, UNTITLED } from './state.js';
 
 const AUTOSAVE_MS = 400;
+
+// One spelling of a patch document, so a comparison for the dirty mark is a
+// comparison of patches and not of whitespace.
+const jsonText = (json) => `${JSON.stringify(json, null, 2)}\n`;
 
 // A patch called "my patch (2)" must not become a file with a slash in it.
 const fileName = (name) => (name || 'patch').replace(/[^\w .-]+/g, '-').slice(0, 60).trim() || 'patch';
@@ -25,9 +34,13 @@ export class Patches {
     this.autosaveTimer = null;
   }
 
+  // The bytes: what the module is sent and what a `.syx` file carries.
   image() { return codec.encodePatch(this.state.patch, this.state.globals); }
 
-  patchJson() { return toPatchJsonText(this.state.patch, this.state.globals, this.editor.device); }
+  // The words: what this browser keeps and what a `.json` file carries.
+  json() { return toPatchJson(this.state.patch, this.state.globals, this.editor.device); }
+
+  patchJson() { return jsonText(this.json()); }
 
   // --- replacing what is on screen -------------------------------------------
 
@@ -35,11 +48,11 @@ export class Patches {
   // recalled, dumped off a module. One routine, so nothing that has to happen
   // on the way - the arrangement, the tab, the autosave, the send - is
   // forgotten by one of the six doors a patch can arrive through.
-  replace({ patch, globals, current, savedImage = null, said, goToPatch = true }) {
+  replace({ patch, globals, current, savedJson = null, said, goToPatch = true }) {
     this.state.patch = patch;
     this.state.globals = globals;
     this.state.current = current;
-    this.state.savedImage = savedImage;
+    this.state.savedJson = savedJson;
     this.arrangement.reset();
     if (goToPatch) this.state.ui.tab = this.state.ui.editingTab = 'patch';
     this.autosave({ now: true });
@@ -56,7 +69,7 @@ export class Patches {
       return this.library.save({
         id: null,
         name: current.id ? `${current.name} (unsaved)` : current.name,
-        bytes: this.image(),
+        patch: this.json(),
         nodes: patch.nodes.length,
       });
     } catch {
@@ -73,10 +86,10 @@ export class Patches {
     clearTimeout(this.autosaveTimer);
     const write = () => {
       if (!this.library.available) return;
-      const bytes = this.image();
+      const json = this.json();
       const { current } = this.state;
-      this.library.saveWorking({ id: current.id, name: current.name, bytes });
-      const dirty = this.state.savedImage !== null && toBase64(bytes) !== this.state.savedImage;
+      this.library.saveWorking({ id: current.id, name: current.name, patch: json });
+      const dirty = this.state.savedJson !== null && jsonText(json) !== this.state.savedJson;
       if (dirty !== current.dirty) {
         current.dirty = dirty;
         this.render();
@@ -98,26 +111,27 @@ export class Patches {
     const working = this.library.readWorking();
     if (!working) return;
     try {
-      const { patch, globals } = codec.decodePatch(working.bytes);
+      const { patch, globals } = fromPatchJson(working.patch, this.editor.device);
       // Whether it counts as changed is decided against the library entry it
       // came from: reopening a patch nobody touched must not claim there is
       // something to save.
       const entry = working.id ? this.library.get(working.id) : null;
-      const savedImage = entry ? toBase64(entry.bytes) : null;
+      const savedJson = entry ? jsonText(entry.patch) : null;
       this.replace({
-        patch, globals, savedImage,
+        patch, globals, savedJson,
         current: {
           id: entry ? entry.id : null,
           name: working.name ?? UNTITLED,
-          dirty: entry ? toBase64(working.bytes) !== savedImage : false,
+          dirty: entry ? jsonText(working.patch) !== savedJson : false,
           savedAt: entry?.updated ?? 0,
         },
         said: `restored “${working.name ?? UNTITLED}”`,
         goToPatch: false,
       });
     } catch (error) {
-      // An image this build's decoder refuses is not a crash: it is a patch
-      // this build cannot read, and saying so beats an empty page.
+      // A patch this firmware cannot make sense of - an algorithm it has not
+      // got - is not a crash: it is a patch this build cannot read, and saying
+      // so beats an empty page.
       this.state.status = `could not reopen the last patch: ${error.message}`;
       this.library.clearWorking();
     }
@@ -127,17 +141,17 @@ export class Patches {
 
   save({ asNew = false } = {}) {
     const { current, patch } = this.state;
-    const bytes = this.image();
+    const json = this.json();
     try {
       const entry = this.library.save({
         id: asNew ? null : current.id,
         name: asNew ? `${current.name} copy` : current.name,
-        bytes,
+        patch: json,
         nodes: patch.nodes.length,
       });
       this.arrangement.follow(entry.id);
       this.state.current = { id: entry.id, name: entry.name, dirty: false, savedAt: entry.updated };
-      this.state.savedImage = toBase64(bytes);
+      this.state.savedJson = jsonText(json);
       this.state.status = `saved “${entry.name}”`;
       this.autosave({ now: true });
     } catch (error) {
@@ -150,9 +164,9 @@ export class Patches {
     const entry = this.library.get(id);
     if (!entry) { this.editor.fail('that patch is no longer in this browser'); return; }
     try {
-      const { patch, globals } = codec.decodePatch(entry.bytes);
+      const { patch, globals } = fromPatchJson(entry.patch, this.editor.device);
       this.replace({
-        patch, globals, savedImage: toBase64(entry.bytes),
+        patch, globals, savedJson: jsonText(entry.patch),
         current: { id: entry.id, name: entry.name, dirty: false, savedAt: entry.updated },
         said: `loaded “${entry.name}”`,
       });
@@ -177,13 +191,17 @@ export class Patches {
   remove(id) {
     this.library.remove(id);
     this.arrangement.drop(id);
-    if (this.state.current.id === id) { this.state.current.id = null; this.state.savedImage = null; }
+    if (this.state.current.id === id) { this.state.current.id = null; this.state.savedJson = null; }
     this.editor.say('deleted');
   }
 
+  // A saved patch, out of the browser as the browser keeps it. No conversion
+  // and no module needed: what comes out is what went in.
   exportSaved(id) {
     const entry = this.library.get(id);
-    if (entry) this.downloadSyx(entry.bytes, `${fileName(entry.name)}.syx`);
+    if (!entry) return;
+    this.download(`${fileName(entry.name)}.json`, jsonText(entry.patch), 'application/json');
+    this.editor.say(`exported ${fileName(entry.name)}.json`);
   }
 
   // An example is loaded exactly as a file is: through the JSON dialect,

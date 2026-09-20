@@ -678,8 +678,10 @@ export function patchSchema(device) {
         type: 'array', maxItems: caps.midiIn,
         description: 'MIDI coming in: each port filters by cable and channel and writes a note bus',
         items: {
-          type: 'object', additionalProperties: false, required: ['sources', 'bus'],
+          type: 'object', additionalProperties: false, required: ['port', 'sources', 'bus'],
           properties: {
+            port: { type: 'integer', minimum: 1, maximum: caps.midiIn,
+                    description: 'which of the MIDI in ports this is, numbered from 1' },
             sources: { $ref: '#/$defs/midi_ports' },
             channel: { $ref: '#/$defs/channel' },
             bus: { $ref: '#/$defs/note_bus' },
@@ -690,8 +692,10 @@ export function patchSchema(device) {
         type: 'array', maxItems: caps.midiOut,
         description: 'MIDI going out: each port reads a note bus and sends it to the cables named',
         items: {
-          type: 'object', additionalProperties: false, required: ['targets', 'bus'],
+          type: 'object', additionalProperties: false, required: ['port', 'targets', 'bus'],
           properties: {
+            port: { type: 'integer', minimum: 1, maximum: caps.midiOut,
+                    description: 'which of the MIDI out ports this is, numbered from 1' },
             targets: { $ref: '#/$defs/midi_ports' },
             channel: { type: 'integer', minimum: 0, maximum: 16,
                        description: 'the channel to send on; 0 keeps each note’s own' },

@@ -21,8 +21,9 @@ export function createState() {
     globals: codec.emptyGlobals(),
     // The patch being edited: its name, and where it came from in the library.
     current: noPatch(),
-    // The image as last saved, for the dirty mark.
-    savedImage: null,
+    // The patch as last saved, in the words the library keeps it in, for the
+    // dirty mark.
+    savedJson: null,
     status: 'starting the module…',
     // Something that went wrong, shown until dismissed.
     error: null,

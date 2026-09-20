@@ -7,16 +7,22 @@
 // module, no cable and no file manager - which is the case the whole app is
 // built for.
 //
-// **What is stored is the patch image**: the same bytes `encodePatch()`
-// produces, the same bytes a `.syx` file carries and the module writes to a
-// slot. Not a JavaScript object of the app's own shape - that would be a
-// third format to keep in step with the firmware, and the one that would
-// silently rot. So a stored patch can be exported, sent to hardware or loaded
-// into a slot without conversion, and a patch format version change is caught
-// by the same decoder that catches it in a file.
+// **What is stored is the patch in words**: the JSON dialect of
+// `core/patchjson.js`, algorithms by name and jacks numbered as on the panel.
+// Not the patch image. The image is a versioned binary layout that this
+// project changes whenever the shape is wrong (see CLAUDE.md, Compatibility),
+// and `PATCH_FORMAT_VERSION` is a mismatch detector rather than a
+// compatibility window - so a library of images is a library that empties
+// itself on the next layout change, which is exactly what happened. The JSON
+// names what it means, so a patch saved before an id was renumbered or a field
+// moved still loads afterwards.
+//
+// The price is that a stored patch is resolved through the attached module's
+// registry on the way in, and that it is one conversion away from the bytes
+// hardware wants. The `.syx` export is where those bytes are still produced.
 
-const LIBRARY_KEY = 'mmmc.library.v1';
-const WORKING_KEY = 'mmmc.working.v1';
+const LIBRARY_KEY = 'mmmc.library.v2';
+const WORKING_KEY = 'mmmc.working.v2';
 const LISTEN_KEY = 'mmmc.listen.v1';
 const CANVAS_KEY = 'mmmc.canvas.v1';
 // The performance surface: what each pad and pot does, what it is called and
@@ -32,19 +38,6 @@ const MIDI_OUT_KEY = 'mmmc.midiout.v1';
 // and only exists for a patch somebody arranged by hand, but the store must
 // not grow without a bound either, so the least recently arranged fall off.
 const LAYOUTS_KEPT = 24;
-
-export const toBase64 = (bytes) => {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
-export const fromBase64 = (text) => {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-};
 
 const newId = () => `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
@@ -91,11 +84,11 @@ export class Library {
     }
   }
 
-  // Newest first, without the images: a list of fifty patches should not carry
-  // fifty patch images through the render path.
+  // Newest first, without the patches themselves: a list of fifty patches
+  // should not carry fifty patch documents through the render path.
   list() {
     return this.read()
-      .map(({ image, ...rest }, at) => ({ ...rest, at }))
+      .map(({ patch, ...rest }, at) => ({ ...rest, at }))
       // Newest first, and for two saved in the same millisecond the later one
       // first: "duplicate" then puts the copy above the original, where the
       // eye is already looking.
@@ -104,20 +97,18 @@ export class Library {
   }
 
   get(id) {
-    const found = this.read().find((entry) => entry.id === id);
-    return found ? { ...found, bytes: fromBase64(found.image) } : null;
+    return this.read().find((entry) => entry.id === id) ?? null;
   }
 
   // Upsert. A save with no id makes a new patch; a save with one overwrites
   // it, which is what the "save" button on an already-named patch does.
-  save({ id, name, bytes, nodes }) {
+  save({ id, name, patch, nodes }) {
     const entries = this.read();
     const now = Date.now();
-    const image = toBase64(bytes);
     const at = id ? entries.findIndex((entry) => entry.id === id) : -1;
     const entry = at >= 0
-      ? { ...entries[at], name, image, nodes, updated: now }
-      : { id: id ?? newId(), name, image, nodes, created: now, updated: now };
+      ? { ...entries[at], name, patch, nodes, updated: now }
+      : { id: id ?? newId(), name, patch, nodes, created: now, updated: now };
     if (at >= 0) entries[at] = entry; else entries.push(entry);
     this.write(entries);
     return entry;
@@ -152,7 +143,7 @@ export class Library {
     if (!this.available) return;
     try {
       this.storage.setItem(WORKING_KEY, JSON.stringify({
-        id: state.id ?? null, name: state.name, image: toBase64(state.bytes), updated: Date.now(),
+        id: state.id ?? null, name: state.name, patch: state.patch, updated: Date.now(),
       }));
     } catch { /* a full quota must never break editing */ }
   }
@@ -163,7 +154,7 @@ export class Library {
       const raw = this.storage.getItem(WORKING_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      return { ...parsed, bytes: fromBase64(parsed.image) };
+      return parsed?.patch ? parsed : null;
     } catch {
       return null;
     }

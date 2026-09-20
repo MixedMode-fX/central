@@ -44,7 +44,7 @@ export const EXAMPLES = {
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 8, dir: 'in', bus: 0 }],
       nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }, { algo: 'Metronome', out: [1], seq: { division: '1/4' } }],
-      midi_out: [{ targets: ['ALL'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['ALL'], channel: 0, bus: 0 }],
     },
   },
   'Metronome': {
@@ -58,7 +58,7 @@ export const EXAMPLES = {
         { algo: 'GateToNote', in: [0], out: [0], params: [72, 80, 1] },
         { algo: 'GateToNote', in: [1], out: [0], params: [60, 127, 1] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'MIDI thru with a pedal': {
@@ -66,43 +66,43 @@ export const EXAMPLES = {
     about: 'DIN 1 goes straight to USB 1. Enable audio under play, hold a key on the on-screen keyboard, hold jack 8 high and release the key: the note holds until the pedal comes up.',
     patch: {
       gate_ports: [{ port: 8, dir: 'in', bus: 0 }],
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'MIDI router': {
     category: 'routing & MIDI',
     about: 'Pure routing, no nodes. Play into DIN 1 under play and both USB 1 and DIN 2 receive; switch "into" to USB 1 and only DIN 1 receives; play into DIN 2 and nothing is accepted.',
     patch: {
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }, { sources: ['USB 1'], channel: 0, bus: 1 }],
-      midi_out: [{ targets: ['USB 1', 'DIN 2'], channel: 0, bus: 0 }, { targets: ['DIN 1'], channel: 0, bus: 1 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }, { port: 2, sources: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1', 'DIN 2'], channel: 0, bus: 0 }, { port: 2, targets: ['DIN 1'], channel: 0, bus: 1 }],
     },
   },
   'Channel split and merge': {
     category: 'routing & MIDI',
     about: 'Two input ports read the same DIN with different channel filters; a third merges the USB host into the first bus. Change the channel under play and watch which port the MIDI log says received it.',
     patch: {
-      midi_in: [{ sources: ['DIN 1'], channel: 1, bus: 0 }, { sources: ['DIN 1'], channel: 2, bus: 1 }, { sources: ['USB host'], channel: 0, bus: 0 }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }, { targets: ['USB 2'], channel: 0, bus: 1 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 1, bus: 0 }, { port: 2, sources: ['DIN 1'], channel: 2, bus: 1 }, { port: 3, sources: ['USB host'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }, { port: 2, targets: ['USB 2'], channel: 0, bus: 1 }],
     },
   },
   'Chord and transpose': {
     category: 'harmony',
     about: 'DIN 1 → Chord → Transpose +12 → USB 1. Nothing names a key, so the triad is the plain major one: root, +4, +7. Every note-on becomes three, and every note-off releases exactly those three.',
     patch: {
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [{ algo: 'Chord', in: [0], out: [1] }, { algo: 'Transpose', in: [1], out: [2], params: [140] }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
   'Mono bass': {
     category: 'routing & MIDI',
     about: 'DIN 1 → NotePriority (lowest) → USB 1. Hold several keys: only the lowest sounds, and releasing it hands the voice to the next lowest.',
     patch: {
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [{ algo: 'NotePriority', in: [0], out: [1], params: [0] }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Arpeggiator': {
@@ -110,12 +110,12 @@ export const EXAMPLES = {
     about: 'A metronome at a sixteenth advances the arpeggiator, up-down over two octaves with 60 ms gates. Enable audio under play and hold two or three keys. Change the tempo while it plays — or turn the hold parameter on and let go of the keys.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'Arpeggiator', in: [0, 0], out: [1], params: [2, 2, 60, 0] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'In key': {
@@ -123,13 +123,13 @@ export const EXAMPLES = {
     about: 'The module is in A minor, and nothing in the patch names a scale - so the chord voicer follows it. One key becomes a diatonic triad — the “triad” quality is steps of the scale, so it is minor here — the arpeggiator holds it, and a sixteenth-note metronome plays it. Press one key and let go: it keeps running. Change the key under \u201ckey\u201d and the whole patch moves.',
     patch: {
       globals: { scale: 'minor', root: 9 },
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'Chord', in: [0], out: [1] },
         { algo: 'Arpeggiator', in: [1, 0], out: [2], params: [0, 2, 60, 0, 1] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
   'Self-playing chord': {
@@ -147,7 +147,7 @@ export const EXAMPLES = {
         { algo: 'Chord', in: [0], out: [1], params: [1, 0, 0, 4] },
         { algo: 'Arpeggiator', in: [1, 2], out: [2], params: [0, 2, 60, 0] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 2 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 2 }],
     },
   },
   'Chord stabs': {
@@ -162,7 +162,7 @@ export const EXAMPLES = {
         { algo: 'Chord', in: [null], out: [0], params: [1, 0, 0, 4] },
         { algo: 'Retrigger', in: [0, 1], out: [1], params: [9, 1, 1, 0] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Euclidean drums': {
@@ -179,7 +179,7 @@ export const EXAMPLES = {
         { algo: 'GateToNote', in: [2], out: [0], params: [42, 80, 10] },
         { algo: 'GateToNote', in: [3], out: [0], params: [38, 110, 10] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Step sequencer': {
@@ -193,7 +193,7 @@ export const EXAMPLES = {
         { algo: 'GateToNote', in: [1], out: [0], params: [60, 100, 1] },
         { algo: 'Probability', in: [0], out: [1], params: [70, 0] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Trig conditions': {
@@ -209,7 +209,7 @@ export const EXAMPLES = {
         { algo: 'GateToNote', in: [1], out: [0], params: [36, 120, 10] },
         { algo: 'GateToNote', in: [3], out: [0], params: [42, 90, 10] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Call and response': {
@@ -223,7 +223,7 @@ export const EXAMPLES = {
         { algo: 'GateToNote', in: [1], out: [0], params: [36, 120, 10] },
         { algo: 'GateToNote', in: [2], out: [0], params: [42, 90, 10] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Note sequencer': {
@@ -232,13 +232,13 @@ export const EXAMPLES = {
     patch: {
       globals: { scale: 'minor', root: 0 },
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'NoteSequencer', in: [0, null, 0], out: [1], seq: { octave: 4, channel: 1,
             steps: [0, { deg: 0, accent: true }, '-', 3, { deg: 5, len: 2 }, '-', { deg: 4, vel: 80 }, '='] } },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Poly sequencer': {
@@ -252,7 +252,7 @@ export const EXAMPLES = {
         { algo: 'PolySequencer', in: [0], out: [1], seq: { octave: 5, gate: 60,
             steps: [{ deg: [0, 2, 4, 7] }, { deg: [3, 5, 7], vel: [90, 70, 70] }, { deg: [4, 6, 8, 11], vel: [100, 80, 80, 60] }, { deg: [3, 5, 7, 9], len: 1, accent: true }] } },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Drum sequencer to jacks': {
@@ -281,7 +281,7 @@ export const EXAMPLES = {
             { note: 46, hits: '..o...o...o...x.', prob: 60 },
             { note: 39, hits: '..............x.', channel: 10 } ] } },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Random sequencer': {
@@ -294,7 +294,7 @@ export const EXAMPLES = {
         { algo: 'RandomSequencer', in: [0, 6, 5], out: [1], params: [16, 0, 0, 40, 0] },
         { algo: 'GateToNote', in: [1], out: [0], params: [48, 100, 1] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Locked to the transport': {
@@ -310,7 +310,7 @@ export const EXAMPLES = {
         { algo: 'GateToNote', in: [3], out: [0], params: [36, 127, 10] },
         { algo: 'GateToNote', in: [4], out: [0], params: [42, 80, 10] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Divider chain': {
@@ -354,7 +354,7 @@ export const EXAMPLES = {
       ],
       mod_map: [{ slot: 0, bus: 0, targetKind: 0, targetIndex: 1, param: 3,
                   min: 0, max: 0, depth: 255, flags: 0 }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 0 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
   'Sample and hold': {
@@ -373,7 +373,7 @@ export const EXAMPLES = {
       ],
       mod_map: [{ slot: 0, bus: 1, targetKind: 0, targetIndex: 5, param: 0,
                   min: 128, max: 140, depth: 255, flags: 0 }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Stepped modulation': {
@@ -391,7 +391,7 @@ export const EXAMPLES = {
       ],
       mod_map: [{ slot: 0, bus: 0, targetKind: 0, targetIndex: 4, param: 0,
                   min: 128, max: 140, depth: 255, flags: 0 }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'MIDI to CV and gate': {
@@ -399,14 +399,14 @@ export const EXAMPLES = {
     about: 'The converter that makes everything upstream reach something that is not a MIDI instrument. Play the keyboard under play: jack 1 is the gate, held for as long as a key is, and jack 2 is the trigger it fires on every attack. The pitch outlet is a control signal \u2014 twelve bits, one of them a fraction of a semitone so the wheel is not stepped \u2014 and a modulation route reads it straight back into a note here, which is what the DAC will do in volts. Five octaves of range from C2, so the note that comes back is the note you played; bend the wheel and it bends with you.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }, { port: 2, dir: 'out', bus: 1 }],
-      midi_in: [{ sources: ['DIN 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'MidiToCV', in: [0], out: [0, 0, 1, 2, 1], params: [3, 5, 36, 2, 1, 0, 1, 1] },
         { algo: 'GateToNote', in: [0], out: [1], params: [36, 100, 1] },
       ],
       mod_map: [{ slot: 0, bus: 0, targetKind: 0, targetIndex: 1, param: 0,
                   min: 36, max: 96, depth: 255, flags: 0 }],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
   'Generative': {
@@ -427,7 +427,7 @@ export const EXAMPLES = {
         { algo: 'LFO', out: [2], params: [1, 2, 0, 3, 1, 255, 0, 0, 2] },
         { algo: 'CvToGate', in: [2], out: [6], params: [90, 10, 2, 2, 0, 0] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 1 }, { targets: ['USB 1'], channel: 0, bus: 3 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }, { port: 2, targets: ['USB 1'], channel: 0, bus: 3 }],
     },
   },
   // --- the played ones ---------------------------------------------------
@@ -459,7 +459,7 @@ export const EXAMPLES = {
     patch: {
       globals: { scale: 'lydian', root: 4, bpm: 84 },
       gate_ports: [{ port: 1, dir: 'out', bus: 2 }, { port: 2, dir: 'out', bus: 3 }, { port: 3, dir: 'out', bus: 0 }],
-      midi_in: [{ sources: ['USB 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['USB 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1 bar' } },
         { algo: 'Metronome', out: [1], seq: { division: '1/16' } },
@@ -477,7 +477,7 @@ export const EXAMPLES = {
         { algo: 'Key', in: [2], params: [0, 1] },
         { algo: 'NoteDelay', in: [3, null], out: [7], params: [1, 7, 2, 0, 4, 254, 70, 100, 12, 0, 1] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 7 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 7 }],
       macros: [
         { index: 0, name: 'bloom' }, { index: 1, name: 'drift' }, { index: 2, name: 'colour' },
         { index: 3, name: 'tempo' }, { index: 4, name: 'echo' }, { index: 5, name: 'lift' },
@@ -514,7 +514,7 @@ export const EXAMPLES = {
     patch: {
       globals: { scale: 'phrygian', root: 2, bpm: 132 },
       gate_ports: [{ port: 1, dir: 'out', bus: 6 }, { port: 2, dir: 'out', bus: 7 }, { port: 3, dir: 'out', bus: 9 }],
-      midi_in: [{ sources: ['USB 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['USB 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'NoteFilter', in: [0], out: [1], params: [0, 36, 36, 1, 127, 1] },
@@ -539,8 +539,8 @@ export const EXAMPLES = {
         { algo: 'Turing', in: [0, null], out: [8, 0], params: [16, 14, 8, 1, 0, 0, 1] },
         { algo: 'CvToNote', in: [0, 9, null], out: [7], params: [1, 4, 2, 3, 2, 0, 95, 1] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 5 }, { targets: ['USB 1'], channel: 0, bus: 6 },
-                 { targets: ['USB 1'], channel: 0, bus: 7 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 5 }, { port: 2, targets: ['USB 1'], channel: 0, bus: 6 },
+                 { port: 3, targets: ['USB 1'], channel: 0, bus: 7 }],
       macros: [
         { index: 0, name: 'drive' }, { index: 1, name: 'stutter' }, { index: 2, name: 'lead' },
         { index: 3, name: 'tempo' }, { index: 4, name: 'mutate' }, { index: 5, name: 'scale' },
@@ -576,7 +576,7 @@ export const EXAMPLES = {
     patch: {
       globals: { scale: 'whole tone', root: 7, bpm: 76 },
       gate_ports: [{ port: 1, dir: 'out', bus: 0 }, { port: 2, dir: 'out', bus: 1 }],
-      midi_in: [{ sources: ['USB 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['USB 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1 bar' } },
         { algo: 'Metronome', out: [1], seq: { division: '1/16' } },
@@ -591,7 +591,7 @@ export const EXAMPLES = {
         { algo: 'NoteDelay', in: [6, null], out: [7], params: [1, 8, 1, 0, 3, 0, 60, 80, 40, 0, 1] },
         { algo: 'LFO', out: [1], params: [1, 2, 0, 3, 1, 255, 0, 0, 2] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 7 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 7 }],
       mod_map: [{ slot: 0, bus: 1, targetKind: 0, targetIndex: 10, param: 7,
                   min: 40, max: 100, depth: 255, flags: 0 }],
       macros: [
@@ -630,7 +630,7 @@ export const EXAMPLES = {
       globals: { scale: 'harmonic minor', root: 9, bpm: 152 },
       gate_ports: [{ port: 1, dir: 'out', bus: 2 }, { port: 2, dir: 'out', bus: 3 },
                    { port: 3, dir: 'out', bus: 4 }, { port: 4, dir: 'out', bus: 5 }],
-      midi_in: [{ sources: ['USB 1'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['USB 1'], channel: 0, bus: 0 }],
       nodes: [
         { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
         { algo: 'Metronome', out: [1], seq: { division: '1 bar' } },
@@ -647,8 +647,8 @@ export const EXAMPLES = {
         { algo: 'Turing', in: [0, null], out: [6, 0], params: [12, 18, 8, 1, 0, 0, 1] },
         { algo: 'CvToNote', in: [0, 6, null], out: [6], params: [1, 2, 2, 3, 2, 0, 100, 1] },
       ],
-      midi_out: [{ targets: ['USB 1'], channel: 0, bus: 4 }, { targets: ['USB 1'], channel: 0, bus: 5 },
-                 { targets: ['USB 1'], channel: 0, bus: 6 }],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 4 }, { port: 2, targets: ['USB 1'], channel: 0, bus: 5 },
+                 { port: 3, targets: ['USB 1'], channel: 0, bus: 6 }],
       macros: [
         { index: 0, name: 'rule' }, { index: 1, name: 'swarm' }, { index: 2, name: 'tempo' },
         { index: 3, name: 'scale' }, { index: 4, name: 'tilt' }, { index: 5, name: 'bass' },

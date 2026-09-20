@@ -131,6 +131,16 @@ export function layoutOf(blocks, arrows, saved) {
   return positions;
 }
 
+// Where a copy of a block goes: directly under the block it came from, one gap
+// down, so a duplicate reads as another one of the same thing instead of
+// landing on top of what it was copied from. Null when the block has no
+// position to be under, which is a copy the automatic layout places from the
+// shape of the patch like any other block.
+export function underBlock(positions, block) {
+  const at = positions.get(block.id);
+  return at ? { x: at.x, y: at.y + blockHeight(block) + GAP_Y } : null;
+}
+
 // How big the canvas has to be to hold all of it.
 export function worldSize(blocks, positions) {
   let width = 0;

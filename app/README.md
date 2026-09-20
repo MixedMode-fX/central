@@ -52,7 +52,10 @@ socket per port, an arrow wherever two are on the same bus, and the bar above
 it is where things are added. Selecting a block opens its **details** below
 the picture — every port with what it is wired to, every parameter as a
 control, and the roll of what it read and wrote — in a panel that folds to its title bar and
-closes with its cross. Parameters are sorted onto the same sections on every
+closes with its cross, beside the buttons that copy, duplicate and remove the
+block whole. The picture takes the **whole window** from the button in the bar
+or **F** — the canvas and the details of what is selected, and nothing else —
+and **Esc** gives it back. Parameters are sorted onto the same sections on every
 node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in
 the firmware's order, so a hand that has found *root* on one card finds it in
 the same place on the next — unless the algorithm labels its own groups
@@ -180,6 +183,18 @@ no bus at all and the wires are the ones you drag. A bus chosen for you is an
 arrow nobody drew. A patch the app's own validator refuses is never sent — a
 node whose required inlet is still empty is one of those — and the first edit
 that makes it valid sends the whole patch (`App.diverged`).
+
+**A copy carries settings, not a place in the patch.** Copying a block takes
+its algorithm, its parameters and the buses it *reads*, so a paste or a
+duplicate arrives writing nothing: reading a bus twice is fan-out and changes
+nothing that was already playing, where writing one twice is a merge — a change
+to the sound of the patch, made by a gesture that only asked for another of
+something. The routes and bindings pointing at the original stay with it, since
+a parameter two knobs reach because a block was duplicated is a patch nobody
+can read. Only a node is copied: a jack and a MIDI port are fixed resources of
+the module, taken into use from the add bar. Copy, paste, duplicate and delete
+are ⌘/Ctrl-C, V, D and Delete on the canvas, and buttons in the details bar and
+the canvas bar besides, because a phone has no keyboard.
 
 **A drag only ever adds.** The source keeps its bus, claiming a free one if
 this is the first thing it has been asked to drive, and the target adds that

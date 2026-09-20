@@ -35,6 +35,12 @@ const ICONS = {
   schema: { d: 'M8 4c-2 0-3 1-3 3v3c0 1-1 2-2 2 1 0 2 1 2 2v3c0 2 1 3 3 3 '
              + 'M16 4c2 0 3 1 3 3v3c0 1 1 2 2 2-1 0-2 1-2 2v3c0 2-1 3-3 3' },
   copy: { d: 'M9 9h11v11H9z M5 15V5h10' },
+  // A copy with a plus in it: one more of this, here.
+  duplicate: { d: 'M9 9h11v11H9z M5 15V5h10 M14.5 11.5v6 M11.5 14.5h6' },
+  paste: { d: 'M9 5H6v15h12V5h-3 M9 3h6v4H9z' },
+  // Four arrows out of the corners, and four back into them.
+  expand: { d: 'M14 4h6v6 M20 4l-7 7 M10 20H4v-6 M4 20l7-7' },
+  shrink: { d: 'M20 4l-7 7 M13 10h6 M19 4v6 M4 20l7-7 M11 20v-6 M5 14h6' },
   flip: { d: 'M3 9h14 M14 6l3 3-3 3 M21 15H7 M10 12l-3 3 3 3' },
   download: { d: 'M12 4v11 M7 10l5 5 5-5 M4 19h16' },
   upload: { d: 'M12 15V4 M7 9l5-5 5 5 M4 19h16' },

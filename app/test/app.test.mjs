@@ -24,6 +24,7 @@ import * as codec from '../src/protocol/codec.js';
 import { Library, ago } from '../src/services/storage.js';
 import { createState } from '../src/services/state.js';
 import { Arrangement } from '../src/services/arrangement.js';
+import { Editor } from '../src/services/editor.js';
 import { Patches } from '../src/services/patches.js';
 import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/core/patchjson.js';
 import { validate } from '../src/core/validate.js';
@@ -39,6 +40,7 @@ import { paramSections, paramSection, PARAM_SECTIONS } from '../src/ui/controls/
 import { Slider } from '../src/ui/components/Slider.js';
 import { LearnButton } from '../src/ui/controls/LearnButton.js';
 import { NodeCard } from '../src/ui/panels/NodeCard.js';
+import { CanvasPanel, geometry, canvasKey } from '../src/ui/canvas/Canvas.js';
 import { KeyBadge, rootInlet } from '../src/ui/components/KeyBadge.js';
 import { NO_STEP } from '../src/ui/panels/grids/playhead.js';
 import { describeTarget, RouteTable } from '../src/ui/panels/ModMatrix.js';
@@ -61,10 +63,11 @@ import {
   patchBlocks, connectionsOf, planConnection, planDisconnect, planClear,
   applyWrite, freeBus, planJackDirection, planPortFlip, applyPortFlip,
   planPortFanOut, planModulation, planBusModulation, planCcBinding, CC_MAX,
+  copyNode, nodeFromCopy,
 } from '../src/core/graph.js';
 import { catalogue, filterGroups, optionsOf, ENDPOINTS } from '../src/core/catalogue.js';
 import {
-  autoLayout, layoutOf, socketPoint, blockHeight, forgetNode, BLOCK_W, ROW_H,
+  autoLayout, layoutOf, socketPoint, blockHeight, forgetNode, underBlock, BLOCK_W, ROW_H,
 } from '../src/core/layout.js';
 import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js';
 import { OUTPUT_LATENCY_MS } from '../src/runtime/module.js';
@@ -2931,6 +2934,176 @@ test('a hand-placed block stays where it was put', async () => {
   assert.deepEqual(placed.get('node:1'), { x: 777, y: 333 });
   assert.deepEqual(placed.get('node:0'), autoLayout(blocks, arrows).get('node:0'),
                    'and nothing else moved because of it');
+});
+
+// --- copying a block ---------------------------------------------------------
+//
+// What a copy is worth is the settings: a sequencer somebody spent ten minutes
+// on, wanted twice. What it must not carry is a bus its outlet writes, because
+// two writers on one bus is a merge - the copy would change the sound of the
+// patch it was copied in, before anybody had drawn a thing.
+
+// An editor over the real module, with the arrangement stubbed: what a test
+// reads back is the patch it wrote and where it asked a block to go.
+function editorOn(device, patch) {
+  const state = createState();
+  state.patch = patch;
+  const placed = [];
+  const editor = new Editor({
+    state,
+    session: { device, offline: false },
+    arrangement: { place: (id, at) => placed.push([id, at]), forgetNode: () => {} },
+    render: () => {},
+  });
+  return { state, editor, placed };
+}
+
+test('a copied node carries its settings and what it listens to, and writes nothing', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+  patch.nodes[0].outBuses[0] = [3];
+  patch.nodes[1].inBuses[0] = [3];
+  patch.nodes[1].outBuses[0] = [5];
+  patch.nodes[1].params[0] = 12;
+
+  const { state, editor } = editorOn(device, patch);
+  const sequencer = patchBlocks(device, patch).find((b) => b.id === 'node:1');
+  editor.copyBlock(sequencer);
+  assert.ok(state.ui.canvas.clipboard, 'the clipboard is the page\'s, not the system\'s');
+  editor.paste();
+
+  assert.equal(patch.nodes.length, 3);
+  const made = patch.nodes[2];
+  assert.equal(made.algorithmId, patch.nodes[1].algorithmId);
+  assert.deepEqual([...made.params], [...patch.nodes[1].params], 'the settings are the point of a copy');
+  assert.deepEqual(made.inBuses[0], [3], 'still advanced by what advanced the original');
+  assert.deepEqual(made.outBuses.flat(), [], 'and says nothing until a wire is drawn from it');
+  assert.deepEqual(state.ui.canvas.selected, { kind: 'block', id: 'node:2' },
+                   'what was just pasted is what the details are showing');
+  assert.deepEqual(validate(device, patch), []);
+  await device.sendPatch(patch, state.globals);
+});
+
+test('a duplicate goes under the block it came from and leaves the clipboard alone', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('ClockDiv', device)));
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+
+  const { state, editor, placed } = editorOn(device, patch);
+  const blocks = patchBlocks(device, patch);
+  editor.copyBlock(blocks[0]);
+  const kept = state.ui.canvas.clipboard;
+
+  const positions = layoutOf(blocks, connectionsOf(blocks), {});
+  const under = underBlock(positions, blocks[1]);
+  assert.equal(under.x, positions.get('node:1').x, 'in the same column');
+  assert.ok(under.y > positions.get('node:1').y, 'and below it');
+
+  editor.duplicateBlock(blocks[1], under);
+  assert.equal(patch.nodes[2].algorithmId, patch.nodes[1].algorithmId);
+  assert.deepEqual(placed.at(-1), ['node:2', under]);
+  assert.equal(state.ui.canvas.clipboard, kept, 'duplicating one thing does not lose the copy of another');
+
+  // A jack is not a thing a patch has more of: the add bar takes the next
+  // free one into use.
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, buses: [] };
+  const jack = patchBlocks(device, patch).find((b) => b.id === 'jack:0');
+  editor.duplicateBlock(jack);
+  assert.equal(patch.nodes.length, 3, 'nothing was added');
+  assert.match(state.status, /add bar/);
+});
+
+test('a copy the module could not hold is refused rather than pasted', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.nodes.push(codec.emptyNode(idOf('StepSequencer', device)));
+  patch.nodes[0].inBuses[0] = [1];
+
+  // A bus this module has not got - the clipboard outlives the patch it came
+  // from, and the next module may be smaller.
+  const wide = copyNode(patch, 0);
+  wide.inBuses[0] = [1, 200];
+  assert.deepEqual(nodeFromCopy(device, wide).inBuses[0], [1]);
+
+  // An algorithm it does not run at all is not a node it can make.
+  assert.equal(nodeFromCopy(device, { ...wide, algorithmId: 0xfe }), null);
+  const { state, editor } = editorOn(device, patch);
+  state.ui.canvas.clipboard = { ...wide, algorithmId: 0xfe };
+  editor.paste();
+  assert.equal(patch.nodes.length, 1);
+  assert.match(state.error, /has not got that algorithm/);
+});
+
+test('the canvas keys act on what is selected, and only on the canvas', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patched(device, patch, idOf('ClockDiv', device));
+  patched(device, patch, idOf('StepSequencer', device));
+  const app = fakeApp({ patch, device });
+  const press = (key, extra = {}) => canvasKey(app, { key, preventDefault() {}, ...extra });
+  const last = () => app.calls.at(-1)?.[0];
+
+  // Nothing selected: the key that removes something removes nothing.
+  assert.equal(press('Delete'), 'delete');
+  assert.equal(last(), 'say');
+
+  app.state.ui.canvas.selected = { kind: 'block', id: 'node:1' };
+  assert.equal(press('c', { metaKey: true }), 'copy');
+  assert.equal(last(), 'copyBlock');
+  assert.equal(press('d', { ctrlKey: true }), 'duplicate');
+  assert.equal(last(), 'duplicateBlock');
+  assert.equal(press('v', { metaKey: true }), 'paste');
+  assert.equal(last(), 'paste');
+  assert.equal(press('Backspace'), 'delete');
+  assert.equal(last(), 'removeBlock');
+
+  // An arrow is the one bus its reader stops reading, which is the cut button.
+  const arrow = connectionsOf(patchBlocks(device, patch))[0];
+  app.state.ui.canvas.selected = { kind: 'arrow', id: arrow.id };
+  assert.equal(press('Delete'), 'delete');
+  assert.equal(last(), 'applyPlan');
+  assert.equal(app.calls.at(-1)[1].ok, true);
+
+  // A key typed into a field is a character; a held key is one press; and
+  // another tab is not the canvas.
+  assert.equal(press('c', { metaKey: true, target: { tagName: 'INPUT' } }), null);
+  assert.equal(press('c', { metaKey: true, repeat: true }), null);
+  assert.equal(press('d', { metaKey: true, altKey: true }), null);
+  app.state.ui.tab = 'midi';
+  assert.equal(press('c', { metaKey: true }), null);
+});
+
+test('the canvas takes the whole window, and gives it back', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patched(device, patch, idOf('ClockDiv', device));
+  const app = fakeApp({ patch, device });
+
+  withDom(() => {
+    const press = (key) => canvasKey(app, { key, preventDefault() {} });
+    assert.equal(press('f'), 'full');
+    assert.equal(app.state.ui.canvas.full, true);
+    assert.equal(app.state.ui.canvas.fit, true, 'the window changed shape under the patch');
+
+    const panel = CanvasPanel(app, geometry(app));
+    assert.ok(String(panel.className).split(/\s+/).includes('full'));
+    const paste = find(panel, (n) => String(n.attrs['aria-label'] ?? '').startsWith('paste'));
+    assert.ok(paste, 'the paste is a button too: a phone has no keyboard');
+    assert.ok(paste.attrs.disabled, 'and is dead while nothing has been copied');
+
+    assert.equal(press('Escape'), 'full');
+    assert.equal(app.state.ui.canvas.full, false);
+    // Escape with nothing to leave and nothing selected is not the canvas's.
+    assert.equal(press('Escape'), null);
+  });
 });
 
 // --- the drums ---------------------------------------------------------------

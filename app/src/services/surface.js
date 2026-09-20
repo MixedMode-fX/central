@@ -61,6 +61,12 @@ const emptyPad = (i) => ({
   kind: PadKind.NOTE,
   note: FIRST_PAD_NOTE + i,
   cc: 40 + i,
+  // What a CC pad sends at each end of itself. A switch is 127 and 0, and it
+  // is only the commonest pair of values rather than the only one: a latch
+  // alternating between two points of a parameter is the same pad with two
+  // other numbers in it.
+  ccOn: 127,
+  ccOff: 0,
   program: 1,
   velocity: 100,
   channel: 1,
@@ -157,11 +163,18 @@ export class Surface {
       pad.on = !pad.on;
       this.emit(pad, pad.on);
       this.save();
-      return pad.on ? 'on' : 'off';
+      return this.reading(pad, pad.on);
     }
     pad.on = true;
     this.emit(pad, true);
-    return pad.kind === PadKind.NOTE ? String(pad.velocity) : '127';
+    return this.reading(pad, true);
+  }
+
+  // What the display says a press did: the number that went out, because the
+  // number is what the display is for and a CC pad's is its own.
+  reading(pad, on) {
+    if (pad.kind === PadKind.CC) return String(on ? pad.ccOn : pad.ccOff);
+    return on ? String(pad.velocity) : 'off';
   }
 
   release(index) {
@@ -178,7 +191,7 @@ export class Surface {
       else this.play.noteOff(pad.note, this.wire(pad));
       return;
     }
-    this.play.cc(pad.cc, on ? 127 : 0, this.wire(pad));
+    this.play.cc(pad.cc, on ? pad.ccOn : pad.ccOff, this.wire(pad));
   }
 
   // What hitting a launch pad does, in words, including the part that is not

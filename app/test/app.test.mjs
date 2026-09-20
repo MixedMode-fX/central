@@ -48,7 +48,7 @@ import { Macros } from '../src/ui/panels/Macros.js';
 import { Keyboard } from '../src/ui/components/Keyboard.js';
 import { Surface as SurfaceView } from '../src/ui/surface/Surface.js';
 import { AssignSheet } from '../src/ui/surface/Assign.js';
-import { Surface as SurfaceDoc, PadKind } from '../src/services/surface.js';
+import { Surface as SurfaceDoc, PadKind, PadMode } from '../src/services/surface.js';
 import { Play } from '../src/services/play.js';
 import { Transport } from '../src/services/transport.js';
 import { Transport as TransportView } from '../src/ui/components/Transport.js';
@@ -3664,6 +3664,78 @@ test('the lead is chosen once, in the bar, and the sheet says which it is', asyn
   const bar = withDom(() => SurfaceView(app));
   const picker = find(bar, (n) => n.attrs['aria-label'] === 'the module input this surface plays into');
   assert.ok(picker, 'the surface names its own cable in the bar');
+});
+
+test('a number in the sheet is typed as well as nudged', async () => {
+  const app = surfaced();
+  app.surface.setPad(0, { kind: PadKind.CC });
+  const field = (label) => find(withDom(() => AssignSheet(app, { kind: 'pad', index: 0 })),
+                                (n) => n.tag === 'input' && n.attrs['aria-label'] === label);
+
+  // Walking a CC from 40 to 102 one press at a time is not editing, it is
+  // waiting: the value between the two targets is a field.
+  field('CC number').fire('change', { target: { value: '102' } });
+  assert.equal(app.surface.pad(0).cc, 102);
+  // What is typed is clamped rather than sent: the number is a CC.
+  field('CC number').fire('change', { target: { value: '400' } });
+  assert.equal(app.surface.pad(0).cc, 119);
+
+  // And the thumb targets are still either side of it, because the sheet is
+  // read over a surface being played with one hand.
+  const sheet = withDom(() => AssignSheet(app, { kind: 'pad', index: 0 }));
+  find(sheet, (n) => n.attrs['aria-label'] === 'CC number down').fire('click');
+  assert.equal(app.surface.pad(0).cc, 118);
+});
+
+test('a CC pad sends the two values it was given', async () => {
+  const app = surfaced();
+  // 127 and 0 is the commonest pair, not the only one: a latch alternating
+  // between two points of a parameter is the same pad with two other numbers
+  // in it.
+  app.surface.setPad(0, { kind: PadKind.CC, mode: PadMode.TOGGLE, ccOn: 64, ccOff: 20 });
+  assert.equal(app.surface.press(0), '64', 'the display says the number that went out');
+  assert.equal(app.surface.press(0), '20');
+  app.surface.setPad(1, { kind: PadKind.CC, ccOn: 100, ccOff: 5 });
+  app.surface.press(1);
+  app.surface.release(1);
+  assert.deepEqual(app.heard.map((e) => [e.d1, e.d2]),
+                   [[40, 64], [40, 20], [41, 100], [41, 5]],
+                   'a momentary pad is the same pair, one on the way down and one on the way up');
+
+  // Named for what the pad does: a latch is on and off, a momentary pad is
+  // pressed and released.
+  const latch = withDom(() => AssignSheet(app, { kind: 'pad', index: 0 }));
+  assert.ok(find(latch, (n) => n.attrs['aria-label'] === 'the value it sends on'));
+  assert.ok(words(latch).includes('on') && words(latch).includes('off'));
+  const held = withDom(() => AssignSheet(app, { kind: 'pad', index: 1 }));
+  assert.ok(words(held).includes('pressed') && words(held).includes('released'));
+});
+
+test('a pad on a macro is silkscreened with the macro’s name', async () => {
+  const app = surfaced();
+  app.state.patch.macros[0] = { name: 'sweep' };
+  app.surface.setPad(0, { kind: PadKind.CC });
+  const pad = app.surface.pad(0);
+  app.state.patch.ccMap[0] = {
+    sourceMask: app.surface.port, channel: 0, cc: pad.cc,
+    targetKind: P.CcTargetKind.CC_TARGET_MACRO, targetIndex: 0, param: 0,
+    min: 0, max: 0, flags: 0,
+  };
+
+  // A pad put on a macro *is* that macro to whoever is playing it, exactly as
+  // a pot on one is: reading "cc 40" off sixteen pads is reading a wiring
+  // diagram. What it sends stays on the line underneath.
+  const first = findAll(withDom(() => SurfaceView(app)),
+                        (n) => String(n.className).split(/\s+/).includes('pad'))[0];
+  assert.ok(words(first).includes('sweep'), 'the pad names the macro it drives');
+  assert.ok(words(first).includes(`cc ${pad.cc}`), 'and still says what it sends');
+
+  // A note pad has no binding to read whatever number is sitting in its `cc`:
+  // a note goes into the patch, not through the binding table.
+  app.surface.setPad(0, { kind: PadKind.NOTE });
+  const note = findAll(withDom(() => SurfaceView(app)),
+                       (n) => String(n.className).split(/\s+/).includes('pad'))[0];
+  assert.ok(!words(note).includes('sweep'));
 });
 
 // --- the keyboard --------------------------------------------------------------

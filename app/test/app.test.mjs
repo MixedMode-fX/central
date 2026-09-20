@@ -1905,6 +1905,99 @@ test("Tonnetz's walk is shown as one section, not scattered by name", async () =
   assert.deepEqual(output.params.map(({ pd }) => pd.name), ['octave', 'velocity', 'channel']);
 });
 
+// --- the Euclidean ring -------------------------------------------------------
+//
+// A Euclidean sequencer's pattern is not in its parameters: they say k, n and
+// a rotation, and Bjorklund turns them into steps inside the node. The ring is
+// the only view of it, so what it has to get right is that it draws the
+// *node's* pattern and not a second Bjorklund in JavaScript - checked here
+// against the reference tables euclid.h is written to agree with.
+
+test('the Euclidean ring is the pattern the node derived, with the hand on the step sounding', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const euclid = device.algorithms.find((d) => d?.name === 'EuclidianSequencer');
+  const metronome = device.algorithms.find((d) => d?.name === 'Metronome');
+  assert.ok(euclid && metronome, 'both algorithms are in this firmware');
+
+  const patch = codec.emptyPatch();
+  patched(device, patch, metronome);                 // something to advance it
+  const node = patched(device, patch, euclid);
+  const length = paramNamed(euclid, 'length');
+  const pulses = paramNamed(euclid, 'pulses');
+  const rotation = paramNamed(euclid, 'rotation');
+  node.params[length.at] = 8;
+  node.params[pulses.at] = 3;
+  await device.sendPatch(patch, codec.emptyGlobals());
+
+  const app = fakeApp({ patch, device, module });
+  const at = patch.nodes.length - 1;
+
+  await withDom(async () => {
+    document.body.append(NodeCard(app, at));
+    const dots = document.body.querySelectorAll('.step-dot');
+    const bits = () => [...document.body.querySelectorAll('.step-dot')]
+      .map((dot) => (dot.classList.contains('on') ? '1' : '0')).join('');
+    const paint = () => app.live.tick({ module, activity: module.takeActivity() });
+
+    assert.equal(dots.length, 8, 'a dot per step of the ring');
+    // E(3,8) as Bjorklund published it. A one-line approximation gives a
+    // rotation of this, which is exactly the drift the ring must not add.
+    assert.equal(bits(), '10010010', 'the ring is E(3,8)');
+    assert.equal(document.body.querySelector('.euclid-bits').textContent, '10010010',
+                 'and it says so in words');
+    assert.match(words(document.body.querySelector('.euclid-caption')), /3 pulses over 8 steps/);
+    assert.match(words(document.body.querySelector('.euclid-caption')), /gaps\s+3 3 2/,
+                 'the inter-onset intervals, which is how the rhythm is counted');
+
+    // Rotation turns the necklace under a downbeat that does not move, so the
+    // picture is the node's rotated pattern - not the same picture spun round.
+    await device.setParam(at, rotation.at, 1);
+    paint();
+    assert.equal(bits(), '00100101', 'the ring followed the rotation');
+
+    // Pulses and length are the other two knobs, and neither rebuilds the card.
+    await device.setParam(at, pulses.at, 5);
+    await device.setParam(at, length.at, 16);
+    paint();
+    assert.equal(document.body.querySelectorAll('.step-dot').length, 16, 'the ring grew with the length');
+    assert.equal(bits().split('1').length - 1, 5, 'five pulses over sixteen steps');
+
+    // The hand and the lit dot are the step sounding, checked against the node
+    // every quarter of a second rather than once.
+    const lit = () => [...document.body.querySelectorAll('.step-dot')]
+      .flatMap((dot, step) => (dot.classList.contains('playing') ? [step] : []));
+    assert.equal(lit().length, 0, 'nothing is lit before the first advance');
+    assert.equal(document.body.querySelector('.hand').getAttribute('opacity'), '0',
+                 'and the hand is not pointing anywhere yet');
+
+    const seen = new Set();
+    for (let i = 0; i < 60; i++) {
+      module.advance(250_000);
+      paint();
+      const on = lit();
+      const step = module.seqPosition(at, 0);
+      if (step === NO_STEP) continue;
+      assert.deepEqual(on, [step], `the ring lit ${on} while the node was on step ${step}`);
+      seen.add(step);
+    }
+    assert.ok(seen.size > 1, `the hand never moved: it sat on ${[...seen]}`);
+    assert.equal(document.body.querySelector('.hand').getAttribute('opacity'), '1',
+                 'the hand points at the step once there is one');
+
+    // The state a node added from the add bar is in: `pulses` defaults to
+    // zero, so the empty ring is the first one anybody sees and it has to say
+    // what is missing rather than count gaps that are not there.
+    await device.setParam(at, pulses.at, 0);
+    paint();
+    assert.equal(bits(), '0'.repeat(16), 'no pulses is an empty ring');
+    assert.equal(document.body.querySelector('.necklace'), null, 'and no necklace joining nothing');
+    assert.match(words(document.body.querySelector('.euclid-caption')), /no pulses over 16 steps/);
+    assert.doesNotMatch(words(document.body.querySelector('.euclid-caption')), /gaps/,
+                        'a silent ring has no gaps to count');
+  });
+});
+
 // --- the patch format, as a schema -------------------------------------------
 //
 // `schema.js` turns what the device reported into a JSON Schema, so that

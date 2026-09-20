@@ -658,6 +658,14 @@ export class EmbeddedModule {
   seqKind(node) { return this.E.emu_seq_kind(node); }
   seqLanes(node) { return this.E.emu_seq_lanes(node); }
   seqPosition(node, lane) { return this.E.emu_seq_position(node, lane); }
+
+  // The pattern a sequencer is actually holding, which for the ones that
+  // derive it - Euclid's Bjorklund, the random sequencer's draw - is the only
+  // place it exists: the parameters say k, n and a rotation, and the steps
+  // they come out as are the node's own. A cell is 1/0 for a gate pattern and
+  // the stored velocity for a note or MIDI drum cell.
+  seqLength(node, lane) { return this.E.emu_seq_length(node, lane); }
+  seqCell(node, lane, step) { return this.E.emu_seq_cell(node, lane, step); }
   nodeCount() { return this.E.emu_node_count(); }
 
   // What a Harmony node would play, read from the node itself: where the

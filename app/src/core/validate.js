@@ -9,7 +9,7 @@
 // accepts to the real firmware and asserts it is accepted.
 
 import * as P from '../protocol/generated.js';
-import { isMacro, isDest } from './patch.js';
+import { isMacro, isDest, isRoute } from './patch.js';
 
 export const Domain = Object.freeze({ Gate: 0, Note: 1, CV: 2 });
 
@@ -35,16 +35,20 @@ export function validateNode(device, patch, index) {
   }
   const caps = device.capabilities;
 
+  // A port names the set of buses it is on, so the question is whether every
+  // bus in the set exists: an inlet reading two is as legal as one reading
+  // one (src/bus/domain.h).
   for (let i = 0; i < descriptor.nIn && i < P.MAX_IN; i++) {
-    const bus = node.inBus[i];
-    if (bus === P.NO_BUS) {
+    const buses = node.inBuses[i] ?? [];
+    if (!buses.length) {
       if (i < descriptor.minIn) {
         found.push(problem(`${descriptor.name} ${index} inlet ${i}`, 'this inlet must be connected'));
       }
       continue;
     }
     const domain = descriptor.inDomain[i];
-    if (bus >= busCount(caps, domain)) {
+    for (const bus of buses) {
+      if (bus < busCount(caps, domain)) continue;
       found.push(problem(`${descriptor.name} ${index} inlet ${i}`,
         `${domainName(domain)} bus ${bus} does not exist; this module has ${busCount(caps, domain)}`));
     }
@@ -53,10 +57,9 @@ export function validateNode(device, patch, index) {
   // An outlet left unconnected is normal - a drum sequencer with eight lanes
   // and three jacks patched is the usual case, not an error.
   for (let i = 0; i < descriptor.nOut && i < P.MAX_OUT; i++) {
-    const bus = node.outBus[i];
-    if (bus === P.NO_BUS) continue;
     const domain = descriptor.outDomain[i];
-    if (bus >= busCount(caps, domain)) {
+    for (const bus of node.outBuses[i] ?? []) {
+      if (bus < busCount(caps, domain)) continue;
       found.push(problem(`${descriptor.name} ${index} outlet ${i}`,
         `${domainName(domain)} bus ${bus} does not exist`));
     }
@@ -153,11 +156,12 @@ function targetProblems(device, patch, entry, where, refuse = []) {
 // enforces - so a route the editor accepts is never one the module refuses.
 export function validateRoute(device, patch, slot) {
   const r = patch.modMap?.[slot];
-  if (!r || r.bus === P.NO_BUS) return [];
+  if (!isRoute(r)) return [];
   const where = `modulation ${slot}`;
   const found = [];
-  if (r.bus >= (device.capabilities?.cvBuses ?? P.N_CV_BUS)) {
-    found.push(problem(where, `CV bus ${r.bus} does not exist`));
+  for (const bus of r.buses) {
+    if (bus < (device.capabilities?.cvBuses ?? P.N_CV_BUS)) continue;
+    found.push(problem(where, `CV bus ${bus} does not exist`));
   }
   if (r.min > r.max) found.push(problem(where, 'the low end of the range is above the high end'));
   // A transport target fires; it does not hold a value, so there is nothing
@@ -165,8 +169,8 @@ export function validateRoute(device, patch, slot) {
   found.push(...targetProblems(device, patch, r, where, [P.CcTargetKind.CC_TARGET_TRANSPORT]));
   // Two writers racing over one value has no defined result. Two modulators
   // reaching one parameter is two writers on one CV bus, which the bus sums.
-  const clash = (patch.modMap ?? []).findIndex((other, i) => i !== slot && other
-    && other.bus !== P.NO_BUS && other.targetKind === r.targetKind
+  const clash = (patch.modMap ?? []).findIndex((other, i) => i !== slot && isRoute(other)
+    && other.targetKind === r.targetKind
     && other.targetIndex === r.targetIndex && other.param === r.param);
   if (clash >= 0 && clash < slot) {
     found.push(problem(where, `modulation ${clash} already reaches that parameter — `
@@ -198,19 +202,21 @@ export function validate(device, patch) {
   if (patch.nodes.length > caps.nodes) {
     found.push(problem('patch', `${patch.nodes.length} nodes; this module holds ${caps.nodes}`));
   }
+  const portBuses = (where, buses, limit, domain) => {
+    for (const bus of buses ?? []) {
+      if (bus < limit) continue;
+      found.push(problem(where, `${domainName(domain)} bus ${bus} does not exist`));
+    }
+  };
   patch.gatePorts.forEach((port, i) => {
     if (port.direction === P.GatePortDirection.GATE_PORT_UNUSED) return;
-    if (port.bus >= caps.gateBuses) {
-      found.push(problem(`jack ${i + 1}`, `gate bus ${port.bus} does not exist`));
-    }
+    portBuses(`jack ${i + 1}`, port.buses, caps.gateBuses, Domain.Gate);
   });
   patch.midiIn.forEach((port, i) => {
-    if (!port.sourceMask) return;
-    if (port.bus >= caps.noteBuses) found.push(problem(`midi in ${i}`, `note bus ${port.bus} does not exist`));
+    if (port.sourceMask) portBuses(`midi in ${i}`, port.buses, caps.noteBuses, Domain.Note);
   });
   patch.midiOut.forEach((port, i) => {
-    if (!port.targetMask) return;
-    if (port.bus >= caps.noteBuses) found.push(problem(`midi out ${i}`, `note bus ${port.bus} does not exist`));
+    if (port.targetMask) portBuses(`midi out ${i}`, port.buses, caps.noteBuses, Domain.Note);
   });
 
   patch.nodes.forEach((_, i) => found.push(...validateNode(device, patch, i)));
@@ -240,21 +246,24 @@ export function advise(device, patch) {
     const d = device.byId.get(node.algorithmId);
     if (!d) return;
     for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
-      if (node.outBus[i] !== P.NO_BUS) written.add(`${d.outDomain[i]}:${node.outBus[i]}`);
+      for (const bus of node.outBuses[i] ?? []) written.add(`${d.outDomain[i]}:${bus}`);
     }
   });
   patch.gatePorts.forEach((port) => {
-    if (port.direction === P.GatePortDirection.GATE_PORT_IN) written.add(`${Domain.Gate}:${port.bus}`);
+    if (port.direction !== P.GatePortDirection.GATE_PORT_IN) return;
+    for (const bus of port.buses ?? []) written.add(`${Domain.Gate}:${bus}`);
   });
-  patch.midiIn.forEach((port) => { if (port.sourceMask) written.add(`${Domain.Note}:${port.bus}`); });
+  patch.midiIn.forEach((port) => {
+    if (!port.sourceMask) return;
+    for (const bus of port.buses ?? []) written.add(`${Domain.Note}:${bus}`);
+  });
 
   patch.nodes.forEach((node, index) => {
     const d = device.byId.get(node.algorithmId);
     if (!d) return;
     for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
-      const bus = node.inBus[i];
-      if (bus === P.NO_BUS) continue;
-      if (!written.has(`${d.inDomain[i]}:${bus}`)) {
+      for (const bus of node.inBuses[i] ?? []) {
+        if (written.has(`${d.inDomain[i]}:${bus}`)) continue;
         notes.push(problem(`${d.name} ${index} inlet ${i}`,
           `nothing writes ${domainName(d.inDomain[i])} bus ${bus}`));
       }

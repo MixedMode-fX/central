@@ -76,12 +76,12 @@ static void test_rotation_is_separate_from_the_pattern() {
 // Two passes per edge, 20 ms apart, so a 5 ms trigger is up on the first and
 // down by the next edge.
 static bool advance_once(BusManager& bus, Node& node, uint8_t advance_bus,
-                         uint8_t out_bus, uint32_t& now) {
+                         uint8_t out_buses, uint32_t& now) {
     bus.gate_write(advance_bus, true);
     bus.swap();
     node.process(bus, now);
     bus.swap();
-    const bool fired = bus.gate_read(out_bus);
+    const bool fired = bus.gate_read(out_buses);
     now += 20000;
 
     bus.swap();
@@ -92,18 +92,18 @@ static bool advance_once(BusManager& bus, Node& node, uint8_t advance_bus,
 }
 
 static std::string run_sequence(Node& node, uint8_t steps, uint8_t advance_bus = 0,
-                                uint8_t out_bus = 1) {
+                                uint8_t out_buses = 1) {
     BusManager bus;
     uint32_t now = 0;
     std::string out;
-    for (uint8_t i = 0; i < steps; i++) out += advance_once(bus, node, advance_bus, out_bus, now) ? '1' : '0';
+    for (uint8_t i = 0; i < steps; i++) out += advance_once(bus, node, advance_bus, out_buses, now) ? '1' : '0';
     return out;
 }
 
 static NodeConfig seq_config(uint8_t id, uint8_t length) {
     NodeConfig c = node_config(id);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(1);
     c.params[0] = length;
     return c;
 }
@@ -177,7 +177,7 @@ static void test_reset_returns_to_step_zero() {
     // All three take a reset inlet, and it is the same inlet in each.
     for (uint8_t id = ALGO_STEP_SEQ; id <= ALGO_RANDOM_SEQ; id++) {
         NodeConfig c = seq_config(id, 4);
-        c.in_bus[1] = 2;
+        c.in_buses[1] = one_bus(2);
         TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
         const AlgorithmDescriptor* d = registry::find(id);
         TEST_ASSERT_NOT_NULL(d);
@@ -187,7 +187,7 @@ static void test_reset_returns_to_step_zero() {
 
     // Driven concretely on the one whose pattern makes the position visible.
     NodeConfig c = seq_config(ALGO_STEP_SEQ, 4);
-    c.in_bus[1] = 2;
+    c.in_buses[1] = one_bus(2);
     c.params[3] = 0b0001;                           // only step 0 fires
     StepSequencer node(c);
 
@@ -236,7 +236,7 @@ static void test_random_sequencer_shred_and_power_cycles() {
 // The shred inlet: another node throws the pattern away mid-performance.
 static void test_random_sequencer_shred_inlet() {
     NodeConfig c = seq_config(ALGO_RANDOM_SEQ, 16);
-    c.in_bus[2] = 3;
+    c.in_buses[2] = one_bus(3);
     c.params[3] = 50;
     RandomSequencer node(c);
     const uint32_t before = node.pattern();
@@ -334,22 +334,22 @@ static void test_two_sequencers_behind_dividers_stay_locked() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);            // tick -> gate 0, /1
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 1;
     p.nodes[1] = node_config(ALGO_CLOCK_DIV);            // tick -> gate 1, /4
-    p.nodes[1].out_bus[0] = 1;
+    p.nodes[1].out_buses[0] = one_bus(1);
     p.nodes[1].params[1] = 4;
     // One step, on: a sequencer that passes every advance edge through, so
     // what the jacks show is the divider's pattern and nothing else.
     p.nodes[2] = node_config(ALGO_STEP_SEQ);             // gate 0 -> gate 2
-    p.nodes[2].in_bus[0] = 0; p.nodes[2].out_bus[0] = 2;
+    p.nodes[2].in_buses[0] = one_bus(0); p.nodes[2].out_buses[0] = one_bus(2);
     p.nodes[2].params[0] = 1; p.nodes[2].params[3] = 1;
     p.nodes[3] = node_config(ALGO_STEP_SEQ);             // gate 1 -> gate 3
-    p.nodes[3].in_bus[0] = 1; p.nodes[3].out_bus[0] = 3;
+    p.nodes[3].in_buses[0] = one_bus(1); p.nodes[3].out_buses[0] = one_bus(3);
     p.nodes[3].params[0] = 1; p.nodes[3].params[3] = 1;
     p.n_nodes = 4;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 2};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 3};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(2)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(3)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -392,15 +392,15 @@ static void test_sequencer_advanced_by_a_logic_gate() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};   // jack 1 -> gate 0
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};   // jack 1 -> gate 0
     p.nodes[0] = node_config(ALGO_LOGIC_AND);            // gate 0 -> gate 1
-    p.nodes[0].in_bus[0] = 0; p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0); p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[1] = node_config(ALGO_STEP_SEQ);             // gate 1 -> gate 2
-    p.nodes[1].in_bus[0] = 1; p.nodes[1].out_bus[0] = 2;
+    p.nodes[1].in_buses[0] = one_bus(1); p.nodes[1].out_buses[0] = one_bus(2);
     p.nodes[1].params[0] = 4;
     p.nodes[1].params[3] = 0b0101;                       // steps 0 and 2
     p.n_nodes = 2;
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 2};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(2)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -440,16 +440,16 @@ static void test_a_sequencer_resets_another_sequencer() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);            // tick -> gate 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 1;
     p.nodes[1] = node_config(ALGO_EUCLID_SEQ);           // gate 0 -> gate 1, every 6th
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].out_bus[0] = 1;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].out_buses[0] = one_bus(1);
     p.nodes[1].params[0] = 6; p.nodes[1].params[3] = 1;
     p.nodes[2] = node_config(ALGO_STEP_SEQ);             // gate 0 advance, gate 1 reset
-    p.nodes[2].in_bus[0] = 0; p.nodes[2].in_bus[1] = 1; p.nodes[2].out_bus[0] = 2;
+    p.nodes[2].in_buses[0] = one_bus(0); p.nodes[2].in_buses[1] = one_bus(1); p.nodes[2].out_buses[0] = one_bus(2);
     p.nodes[2].params[0] = 4; p.nodes[2].params[3] = 0b0001;
     p.n_nodes = 3;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 2};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(2)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 

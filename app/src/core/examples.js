@@ -38,13 +38,27 @@ export const EXAMPLE_CATEGORIES = [
 ];
 
 export const EXAMPLES = {
-  'Default patch': {
+  'Pedal and pulse': {
     category: 'starting points',
-    about: 'What a freshly flashed module runs: a metronome at a quarter note pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. It is already running: watch jack 1 under play.',
+    about: 'A metronome at a quarter note pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. A module boots empty, so this is the smallest patch worth opening: it is already running \u2014 watch jack 1 under play.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 8, dir: 'in', bus: 0 }],
       nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }, { algo: 'Metronome', out: [1], seq: { division: '1/4' } }],
       midi_out: [{ port: 1, targets: ['ALL'], channel: 0, bus: 0 }],
+    },
+  },
+  'Two sources, one output': {
+    category: 'routing & MIDI',
+    about: 'A merge. Two arpeggios run on their own note buses \u2014 one from the keyboard, one a chord built on the key \u2014 and MIDI out 1 reads both of them at once (`bus: [0, 1]`). Neither source has to give up its own bus to be summed, which is why a port names a set of buses rather than one: jack 1 still pulses from bus 1 alone.',
+    patch: {
+      midi_in: [{ port: 1, sources: ['ALL'], channel: 0, bus: 2 }],
+      gate_ports: [{ port: 1, dir: 'out', bus: 0 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/8' } },
+        { algo: 'Arpeggiator', in: [2, 0], out: [0], params: [2, 2, 60, 0] },
+        { algo: 'Chord', in: [2], out: [1] },
+      ],
+      midi_out: [{ port: 1, targets: ['ALL'], channel: 0, bus: [0, 1] }],
     },
   },
   'Metronome': {

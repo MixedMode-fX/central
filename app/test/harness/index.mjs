@@ -403,7 +403,7 @@ export function patched(device, patch, descriptor) {
   const written = new Set();
   const outletsOf = (n, dd) => {
     for (let i = 0; i < dd.nOut && i < P.MAX_OUT; i++) {
-      if (n.outBus[i] !== P.NO_BUS) written.add(`${dd.outDomain[i]}:${n.outBus[i]}`);
+      for (const bus of n.outBuses[i] ?? []) written.add(`${dd.outDomain[i]}:${bus}`);
     }
   };
   patch.nodes.forEach((other) => {
@@ -417,20 +417,18 @@ export function patched(device, patch, descriptor) {
     for (let n = patch.nodes.length - 1; n >= 0 && bus === 0; n--) {
       const od = device.byId.get(patch.nodes[n].algorithmId);
       for (let k = 0; od && k < od.nOut && k < P.MAX_OUT; k++) {
-        if (od.outDomain[k] === domain && patch.nodes[n].outBus[k] !== P.NO_BUS) {
-          bus = patch.nodes[n].outBus[k];
-          break;
-        }
+        const [first] = patch.nodes[n].outBuses[k] ?? [];
+        if (od.outDomain[k] === domain && first !== undefined) { bus = first; break; }
       }
     }
-    node.inBus[i] = bus;
+    node.inBuses[i] = [bus];
   }
   if (d.nOut > 0) {
     const domain = d.outDomain[0];
     const buses = busCountOf(device, domain);
     for (let b = 0; b < buses; b++) {
       if (written.has(`${domain}:${b}`)) continue;
-      node.outBus[0] = b;
+      node.outBuses[0] = [b];
       break;
     }
   }

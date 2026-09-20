@@ -43,8 +43,8 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 static int8_t as_signed(uint8_t stored){ return (int8_t)stored; }
 
 NoteDelay::NoteDelay(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     sync(clamp_enum(config.params[0], ND_SYNCS, ND_CLOCK)),
     div(clamp_enum(config.params[1], DIVISIONS, DIV_EIGHTH)),
     how(clamp_enum(config.params[2], FEELS, FEEL_STRAIGHT)),
@@ -57,7 +57,7 @@ NoteDelay::NoteDelay(const NodeConfig& config) :
     channel(config.params[9] > 16 ? (uint8_t)0 : config.params[9]),
     dry(clamp_enum(config.params[10], ND_DRYS, ND_PASS)),
     subtick(0), drops(0),
-    clear_in(config.in_bus[1]),
+    clear_in(config.in_buses[1]),
     rng(entropy::seed()),
     passed(),
     echoes()

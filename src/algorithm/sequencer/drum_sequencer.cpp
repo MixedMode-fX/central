@@ -93,8 +93,8 @@ DrumSequencer::DrumSequencer(const NodeConfig& config) :
     header_direction(config.params[P_DIRECTION]),
     gate_param(config.params[P_GATE]),
     lanes(), rng(entropy::seed()), chance(), lane_len(),
-    advance_in(config.in_bus[0]),
-    reset_in(config.in_bus[1])
+    advance_in(config.in_buses[0]),
+    reset_in(config.in_buses[1])
 {
     for (uint8_t l = 0; l < LANES; l++) chance[l] = 100;
     // Lane lengths are set by the subclass, which knows where they live.
@@ -163,7 +163,7 @@ DrumSeqGate::DrumSeqGate(const NodeConfig& config) :
 {
     for (uint8_t l = 0; l < LANES; l++){
         const uint8_t* lane = &config.params[LANE_BASE + l * LANE_STRIDE];
-        out[l] = config.out_bus[l];
+        out[l] = config.out_buses[l];
         bits[l] = (uint32_t)lane[0] | ((uint32_t)lane[1] << 8) | ((uint32_t)lane[2] << 16) | ((uint32_t)lane[3] << 24);
         lane_len[l] = lane[4];
         if (lane[4]) lanes[l].configure(lane[4], config.params[P_DIRECTION], DEFAULT_LENGTH);
@@ -222,7 +222,7 @@ void DrumSeqGate::fire(BusManager&, uint8_t lane, uint32_t now_us){
 
 void DrumSeqGate::run(BusManager& bus, uint32_t now_us){
     for (uint8_t l = 0; l < LANES; l++){
-        if (pulse[l].level(now_us)) bus.gate_write(out[l], true);   // NO_BUS is ignored by the bus
+        if (pulse[l].level(now_us)) bus.gate_write(out[l], true);   // an unpatched lane writes nowhere
     }
 }
 
@@ -230,7 +230,7 @@ void DrumSeqGate::run(BusManager& bus, uint32_t now_us){
 
 DrumSeqMidi::DrumSeqMidi(const NodeConfig& config) :
     DrumSequencer(config),
-    out(config.out_bus[0]),
+    out(config.out_buses[0]),
     gate_us((uint32_t)(config.params[P_GATE] ? config.params[P_GATE] : DEFAULT_GATE_MS) * 1000u),
     note(), channel(), velocity(), off_at_us(), playing(), sounding()
 {

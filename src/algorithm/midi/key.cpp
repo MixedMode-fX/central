@@ -30,7 +30,7 @@ const AlgorithmDescriptor Key::descriptor = {
     true };     // singleton
 
 Key::Key(const NodeConfig& config) :
-    root_in(config.in_bus[0]),
+    root_in(config.in_buses[0]),
     channel(config.params[P_CHANNEL] > 16 ? (uint8_t)0 : config.params[P_CHANNEL]),
     from(config.params[P_FROM] >= KEY_FROM_PITCH_CLASS && config.params[P_FROM] <= KEY_FROMS
          ? config.params[P_FROM] : (uint8_t)KEY_FROM_PITCH_CLASS),

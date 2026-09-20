@@ -435,25 +435,25 @@ function drumSource(descriptor, node) {
   if (descriptor.name === 'DrumSeqMidi') {
     // One note outlet for every lane: the note number says which drum, so
     // the lanes are told apart by what they play rather than by where.
-    return { kind: 'note', channel: null, bus: node.outBus[0] ?? P.NO_BUS, lanes: [] };
+    return { kind: 'note', channel: null, buses: node.outBuses[0] ?? [], lanes: [] };
   }
   if (descriptor.name === 'DrumSeqGate') {
     // One gate outlet per lane, and a gate carries no note number - so the
     // lane *is* the drum, by the firmware's own default note for it.
     const lanes = [];
     for (let lane = 0; lane < P.DRUM_SEQ_LANES && lane < descriptor.nOut; lane++) {
-      const laneBus = node.outBus[lane] ?? P.NO_BUS;
-      if (laneBus === P.NO_BUS) continue;
-      lanes.push({ lane, bus: laneBus, piece: pieceOf(LANE_NOTES[lane]) });
+      const buses = node.outBuses[lane] ?? [];
+      if (!buses.length) continue;
+      lanes.push({ lane, buses, piece: pieceOf(LANE_NOTES[lane]) });
     }
-    return { kind: 'gate', channel: null, bus: P.NO_BUS, lanes };
+    return { kind: 'gate', channel: null, buses: [], lanes };
   }
   if (channelOf(descriptor, node) !== DRUM_CHANNEL) return null;
   const out = descriptor.outDomain?.indexOf(Domain.Note) ?? -1;
   if (out < 0) return null;
-  const bus = node.outBus[out] ?? P.NO_BUS;
-  if (bus === P.NO_BUS) return null;
-  return { kind: 'note', channel: DRUM_CHANNEL, bus, lanes: [] };
+  const buses = node.outBuses[out] ?? [];
+  if (!buses.length) return null;
+  return { kind: 'note', channel: DRUM_CHANNEL, buses, lanes: [] };
 }
 
 // The channel a node emits on, or null if it does not name one. A `channel`

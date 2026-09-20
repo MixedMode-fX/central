@@ -80,8 +80,8 @@ class Metronome : public Node{
         // same as one loaded at zero.
         void advance_to(BusManager& bus, uint32_t position);
 
-        uint8_t reset_in;
-        uint8_t out;
+        BusSet reset_in;
+        BusSet out;
         uint8_t div;             // MusicalDivision
         uint8_t how;             // MusicalFeel
         uint8_t width_param;     // as stored, for get_param

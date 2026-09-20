@@ -86,7 +86,7 @@ class Transport : public Node{
     private:
         void fire(BusManager& bus, uint8_t which);
 
-        uint8_t out[OUTLETS];
+        BusSet out[OUTLETS];
         uint8_t width_param;     // as stored, for get_param
         uint32_t now;            // last timestamp process() saw
         uint32_t counts[OUTLETS];

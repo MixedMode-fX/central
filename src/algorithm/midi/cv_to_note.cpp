@@ -38,10 +38,10 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 CvToNote::CvToNote(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    trigger_in(config.in_bus[1]),
-    velocity_in(config.in_bus[2]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    trigger_in(config.in_buses[1]),
+    velocity_in(config.in_buses[2]),
+    out(config.out_buses[0]),
     map(clamp_enum(config.params[0], CVN_MAPS, CVN_DEGREE)),
     octave(config.params[1] <= KEY_MAX_OCTAVE ? config.params[1] : (uint8_t)0),
     range(config.params[2] ? (config.params[2] > MAX_RANGE ? MAX_RANGE : config.params[2]) : (uint8_t)2),
@@ -50,7 +50,7 @@ CvToNote::CvToNote(const NodeConfig& config) :
     gate_ms(config.params[5]),
     velocity(config.params[6] ? (uint8_t)(config.params[6] & 0x7F) : (uint8_t)100),
     channel(config.params[7] ? config.params[7] : (uint8_t)1),
-    trigger(config.in_bus[1]),
+    trigger(config.in_buses[1]),
     last_pitch(0xFF),
     due_us(0), timed(false),
     sounding()
@@ -117,7 +117,7 @@ void CvToNote::strike(BusManager& bus, uint32_t now_us, uint8_t pitch){
     }
 
     uint8_t vel = velocity;
-    if (velocity_in != NO_BUS){
+    if (velocity_in.any()){
         const int32_t level = cv_clamp_unipolar((int32_t)bus.cv_read(velocity_in));
         vel = (uint8_t)(1 + (level * 126) / CV_MAX);
     }
@@ -135,7 +135,7 @@ void CvToNote::strike(BusManager& bus, uint32_t now_us, uint8_t pitch){
 void CvToNote::process(BusManager& bus, uint32_t now_us){
     const bool edge = trigger.rising(bus);
     const bool triggered = (mode == CVN_TRIGGER)
-                        || (mode == CVN_AUTO && trigger_in != NO_BUS);
+                        || (mode == CVN_AUTO && trigger_in.any());
 
     if (triggered){
         // A trigger retriggers, whether or not the pitch moved: that is what

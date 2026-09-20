@@ -82,10 +82,10 @@ class Probability : public Node{
         bool decision() const { return condition.decision(); }
 
     private:
-        uint8_t in;
-        uint8_t out;
-        uint8_t dropped_out;
-        uint8_t decision_out;
+        BusSet in;
+        BusSet out;
+        BusSet dropped_out;
+        BusSet decision_out;
         uint8_t channel;          // 0 keeps the source's
         EdgeIn reset_in;
         TrigCondition condition;

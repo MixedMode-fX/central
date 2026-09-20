@@ -38,10 +38,10 @@ static const uint8_t CV_DEGREE = 0;
 static NodeConfig harmony_config(uint8_t phrase, uint8_t cadence,
                                  uint8_t gravity, uint8_t seed, uint8_t spread = 100){
     NodeConfig c = node_config(ALGO_HARMONY);
-    c.in_bus[0] = GATE_ADVANCE;
-    c.in_bus[1] = GATE_RESET;
-    c.out_bus[0] = NOTE_ROOT;
-    c.out_bus[1] = CV_DEGREE;
+    c.in_buses[0] = one_bus(GATE_ADVANCE);
+    c.in_buses[1] = one_bus(GATE_RESET);
+    c.out_buses[0] = one_bus(NOTE_ROOT);
+    c.out_buses[1] = one_bus(CV_DEGREE);
     c.params[Harmony::P_PHRASE] = phrase;
     c.params[Harmony::P_CADENCE] = cadence;
     c.params[Harmony::P_GRAVITY] = gravity;
@@ -400,8 +400,8 @@ static void test_a_triad_on_every_degree_comes_out_the_right_quality() {
     Harmony harmony(hc);
 
     NodeConfig cc = node_config(ALGO_CHORD);
-    cc.in_bus[0] = NOTE_ROOT;              // Harmony's root is what plays the chord
-    cc.out_bus[0] = NOTE_CHORD;
+    cc.in_buses[0] = one_bus(NOTE_ROOT);              // Harmony's root is what plays the chord
+    cc.out_buses[0] = one_bus(NOTE_CHORD);
     cc.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord chord(cc);
 

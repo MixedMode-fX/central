@@ -27,8 +27,8 @@ static void run_passes(MixedModeMaster& m, int n, uint32_t& now, uint32_t step_u
 
 static NodeConfig node(uint8_t id, uint8_t in0, uint8_t out0) {
     NodeConfig c = node_config(id);
-    c.in_bus[0] = in0;
-    c.out_bus[0] = out0;
+    c.in_buses[0] = one_bus(in0);
+    c.out_buses[0] = one_bus(out0);
     return c;
 }
 
@@ -69,11 +69,11 @@ static void test_gate_in_through_algorithms_to_midi_out() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};                    // jack 1 -> gate bus 0
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};                    // jack 1 -> gate bus 0
     p.nodes[0] = node(ALGO_LOGIC_NOT, 0, 1);                              // gate 0 -> gate 1
     p.nodes[1] = node(ALGO_GATE_TO_NOTE, 1, 0);                           // gate 1 -> note 0
     p.n_nodes = 2;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};                    // note 0 -> USB cable 0
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};                    // note 0 -> USB cable 0
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
     TEST_ASSERT_EQUAL(GPIO_MODE_INPUT_PULLUP, gpio.modes[0]);
@@ -101,15 +101,15 @@ static void test_worked_example_arpeggio_to_two_outputs_an_octave_apart() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};                   // DIN 1 -> note bus 0
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};                    // trigger -> gate bus 0
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};                   // DIN 1 -> note bus 0
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};                    // trigger -> gate bus 0
     p.nodes[0] = node_config(ALGO_ARPEGGIATOR);                           // note 0 (held), gate 0 (advance) -> note 1
-    p.nodes[0].in_bus[0] = 0; p.nodes[0].in_bus[1] = 0; p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0); p.nodes[0].in_buses[1] = one_bus(0); p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[1] = node(ALGO_TRANSPOSE, 1, 2);                              // note 1 -> note 2, +12
     p.nodes[1].params[0] = PARAM_CENTRE + 12;
     p.n_nodes = 2;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 1, 1};                    // note 1 -> USB 0, channel 1
-    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 2, 2};                 // note 2 -> DIN 2, channel 2
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 1, one_bus(1)};                    // note 1 -> USB 0, channel 1
+    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 2, one_bus(2)};                 // note 2 -> DIN 2, channel 2
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -142,14 +142,14 @@ static void test_fan_out_three_readers_one_pass() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, 3};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 3};
-    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_1, 0, 3};
-    p.midi_out[2] = MidiOutConfig{mmMIDI_HOST_1, 0, 3};
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 4};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 4};
-    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 4};
-    p.gate_ports[3] = GatePortConfig{GATE_PORT_OUT, 4};
+    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(3)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(3)};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_1, 0, one_bus(3)};
+    p.midi_out[2] = MidiOutConfig{mmMIDI_HOST_1, 0, one_bus(3)};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(4)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(4)};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(4)};
+    p.gate_ports[3] = GatePortConfig{GATE_PORT_OUT, one_bus(4)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -169,12 +169,12 @@ static void test_fan_in_rules() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, 0};
-    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 0};
-    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, 0};
-    p.midi_in[1] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
+    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(0)};
+    p.midi_in[1] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -210,13 +210,13 @@ static void test_fan_in_holds_whatever_order_the_patch_is_in() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 1};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, 2};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(1)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, one_bus(2)};
     p.nodes[0] = node(ALGO_LOGIC_NOT, 0, 3);          // the reader, listed first
     p.nodes[1] = node(ALGO_LOGIC_NOT, 1, 0);          // one writer of bus 0
     p.nodes[2] = node(ALGO_LOGIC_NOT, 2, 0);          // the other
     p.n_nodes = 3;
-    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 3};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(3)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -228,6 +228,112 @@ static void test_fan_in_holds_whatever_order_the_patch_is_in() {
         master.pass(0);
         TEST_ASSERT_EQUAL(combo == 3 ? GPIO_HIGH : GPIO_LOW, gpio.outputs[2]);
     }
+}
+
+// --- merging without moving anything --------------------------------------
+//
+// The reason a port names a *set* of buses. Two sources can be summed into
+// one inlet while each keeps its own bus and everything else listening to it,
+// so connecting one thing never disconnects another (bus/domain.h).
+
+static void test_two_sources_merge_into_one_inlet_and_keep_their_own_readers() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    // Two jacks, each on its own gate bus, each already driving a jack out.
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, one_bus(1)};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
+    p.gate_ports[3] = GatePortConfig{GATE_PORT_OUT, one_bus(1)};
+    // And an inverter listening to both of them at once.
+    BusSet both{}; both.add(0); both.add(1);
+    p.nodes[0] = node_config(ALGO_LOGIC_NOT);
+    p.nodes[0].in_buses[0] = both;
+    p.nodes[0].out_buses[0] = one_bus(2);
+    p.n_nodes = 1;
+    p.gate_ports[4] = GatePortConfig{GATE_PORT_OUT, one_bus(2)};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    for (uint8_t combo = 0; combo < 4; combo++) {
+        gpio.set_input(0, combo & 1);
+        gpio.set_input(1, (combo >> 1) & 1);
+        master.pass(0);
+        // The merge is the OR of the two, inverted.
+        TEST_ASSERT_EQUAL(combo == 0 ? GPIO_HIGH : GPIO_LOW, gpio.outputs[4]);
+        // And neither source lost the reader it already had.
+        TEST_ASSERT_EQUAL((combo & 1) ? GPIO_HIGH : GPIO_LOW, gpio.outputs[2]);
+        TEST_ASSERT_EQUAL((combo >> 1) ? GPIO_HIGH : GPIO_LOW, gpio.outputs[3]);
+    }
+}
+
+// The same for notes, which is the case the bus model could not express at
+// all before: two MIDI inputs on their own note buses, one output playing
+// both, and each input still reaching the output it already had.
+static void test_one_output_merges_two_note_buses() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(0)};
+    p.midi_in[1] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(1)};
+    BusSet both{}; both.add(0); both.add(1);
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, both};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 0, one_bus(0)};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    master.deliver_midi(mmMIDI_USB_0, MidiEvent{MIDI_NOTE_ON, 1, 60, 100});
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_ON, 1, 64, 100});
+    master.pass(0);
+
+    int merged = 0, only_first = 0;
+    for (const RecordingMidiOut::Message& m : midi.messages) {
+        if (m.target == mmMIDI_USB_1) merged++;
+        if (m.target == mmMIDI_SERIAL_2) { only_first++; TEST_ASSERT_EQUAL(60, m.d1); }
+    }
+    TEST_ASSERT_EQUAL(2, merged);        // both inputs reach the merging output
+    TEST_ASSERT_EQUAL(1, only_first);    // and the first keeps the one it had
+}
+
+// An outlet may be on several buses too, which is the same freedom from the
+// writing end: one inverter feeding two otherwise unrelated merges.
+static void test_an_outlet_on_two_buses_reaches_both() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    BusSet both{}; both.add(1); both.add(2);
+    p.nodes[0] = node_config(ALGO_LOGIC_NOT);
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = both;
+    p.n_nodes = 1;
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(1)};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(2)};
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    gpio.set_input(0, GPIO_HIGH);
+    master.pass(0);
+    TEST_ASSERT_EQUAL(GPIO_LOW, gpio.outputs[1]);
+    TEST_ASSERT_EQUAL(GPIO_LOW, gpio.outputs[2]);
+    gpio.set_input(0, GPIO_LOW);
+    master.pass(0);
+    TEST_ASSERT_EQUAL(GPIO_HIGH, gpio.outputs[1]);
+    TEST_ASSERT_EQUAL(GPIO_HIGH, gpio.outputs[2]);
+}
+
+// A CV port naming a bus the module has not got is refused - the one domain
+// narrow enough for a set to be able to say it (N_CV_BUS < 16).
+static void test_a_cv_port_out_of_range_is_refused() {
+    NodeConfig c = node_config(ALGO_SLEW);
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(1);
+    TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
+    c.in_buses[0] = BusSet{1u << N_CV_BUS};
+    TEST_ASSERT_EQUAL(CONFIG_INLET_OUT_OF_RANGE, registry::validate(c));
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = BusSet{1u << N_CV_BUS};
+    TEST_ASSERT_EQUAL(CONFIG_OUTLET_OUT_OF_RANGE, registry::validate(c));
 }
 
 // A patch assigning a note bus index to a CV inlet is rejected by the
@@ -252,7 +358,7 @@ static void test_validator_rejects_wrong_domain_index_and_keeps_running_patch() 
 
     Patch missing = empty_patch();
     missing.nodes[0] = node_config(ALGO_ARPEGGIATOR);
-    missing.nodes[0].in_bus[0] = 0; missing.nodes[0].out_bus[0] = 1;   // advance inlet left NO_BUS
+    missing.nodes[0].in_buses[0] = one_bus(0); missing.nodes[0].out_buses[0] = one_bus(1);   // advance inlet left unconnected
     missing.n_nodes = 1;
     TEST_ASSERT_EQUAL(LOAD_NODE_INVALID, master.load(missing));
     TEST_ASSERT_EQUAL(CONFIG_INLET_NOT_CONNECTED, master.last_node_error());
@@ -263,12 +369,16 @@ static void test_validator_rejects_wrong_domain_index_and_keeps_running_patch() 
     TEST_ASSERT_EQUAL(LOAD_NODE_INVALID, master.load(unknown));
     TEST_ASSERT_EQUAL(CONFIG_UNKNOWN_ALGORITHM, master.last_node_error());
 
-    Patch port = empty_patch();
-    port.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, N_GATE_BUS};
-    TEST_ASSERT_EQUAL(LOAD_GATE_PORT_BUS_OUT_OF_RANGE, master.load(port));
-    Patch midi_port = empty_patch();
-    midi_port.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, N_NOTE_BUS};
-    TEST_ASSERT_EQUAL(LOAD_MIDI_PORT_BUS_OUT_OF_RANGE, master.load(midi_port));
+    // A port names a set of buses, sixteen bits wide, so a gate or note port
+    // *cannot* name a bus this module has not got - both domains fill the
+    // word. The CV domain does not, and it is where the same check bites: a
+    // modulation route reading a CV bus above N_CV_BUS is refused.
+    Patch route = empty_patch();
+    route.mod_map[0].buses = BusSet{1u << N_CV_BUS};
+    route.mod_map[0].target_kind = CC_TARGET_CLOCK;
+    route.mod_map[0].param = CC_CLOCK_TEMPO;
+    route.mod_map[0].depth = 255;
+    TEST_ASSERT_EQUAL(LOAD_MOD_ROUTE_INVALID, master.load(route));
     Patch too_many = empty_patch();
     too_many.n_nodes = N_NODE + 1;
     TEST_ASSERT_EQUAL(LOAD_TOO_MANY_NODES, master.load(too_many));
@@ -282,7 +392,7 @@ static void test_self_feedback_oscillates() {
     Patch p = empty_patch();
     p.nodes[0] = node(ALGO_LOGIC_NOT, 0, 0);
     p.n_nodes = 1;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
     uint8_t previous = 0xFF;
@@ -302,7 +412,7 @@ static void test_a_chain_costs_one_pass_whatever_its_order() {
             FakeGpio gpio; RecordingMidiOut midi;
             MixedModeMaster master(gpio, midi);
             Patch p = empty_patch();
-            p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
+            p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
             for (uint8_t s = 0; s < stages; s++) {
                 // Reversed, the last stage of the signal is the first node in
                 // the patch, so patch order is exactly the wrong order.
@@ -310,7 +420,7 @@ static void test_a_chain_costs_one_pass_whatever_its_order() {
                 p.nodes[s] = node(ALGO_LOGIC_NOT, stage, stage + 1);
             }
             p.n_nodes = stages;
-            p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, stages};   // an even number of inverters: same polarity
+            p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(stages)};   // an even number of inverters: same polarity
             TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
             master.setup();
             for (int i = 0; i < 20; i++) master.pass(0);
@@ -331,7 +441,7 @@ static void test_eight_of_the_same_and_one_of_everything() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     for (uint8_t i = 0; i < 8; i++) {
-        p.gate_ports[i] = GatePortConfig{(uint8_t)(i < 4 ? GATE_PORT_IN : GATE_PORT_OUT), (uint8_t)(i < 4 ? i : i + 4)};
+        p.gate_ports[i] = GatePortConfig{(uint8_t)(i < 4 ? GATE_PORT_IN : GATE_PORT_OUT), one_bus((uint8_t)(i < 4 ? i : i + 4))};
         p.nodes[i] = node(ALGO_LOGIC_NOT, i, i + 8);
     }
     p.n_nodes = 8;
@@ -345,14 +455,14 @@ static void test_eight_of_the_same_and_one_of_everything() {
     TEST_ASSERT_EQUAL(GPIO_HIGH, gpio.outputs[7]);
 
     Patch all = empty_patch();
-    all.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
-    all.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, 0};
+    all.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    all.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(0)};
     uint8_t n = 0;
     for (uint8_t i = 0; i < registry::count(); i++) {
         const AlgorithmDescriptor* d = registry::at(i);
         NodeConfig c = node_config(d->id);
-        for (uint8_t k = 0; k < d->min_in; k++) c.in_bus[k] = 0;
-        for (uint8_t k = 0; k < d->n_out; k++) c.out_bus[k] = 1;
+        for (uint8_t k = 0; k < d->min_in; k++) c.in_buses[k] = one_bus(0);
+        for (uint8_t k = 0; k < d->n_out; k++) c.out_buses[k] = one_bus(1);
         all.nodes[n++] = c;
     }
     all.n_nodes = n;
@@ -373,10 +483,10 @@ static void test_zero_heap_allocation_after_setup() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
-    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(0)};
     p.nodes[0] = node_config(ALGO_ARPEGGIATOR);
-    p.nodes[0].in_bus[0] = 0; p.nodes[0].in_bus[1] = 0; p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0); p.nodes[0].in_buses[1] = one_bus(0); p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[1] = node(ALGO_TRANSPOSE, 1, 2);
     p.nodes[2] = node(ALGO_SUSTAIN, 0, 2);
     // The largest nodes in the system (#13, #14), advanced by the jack.
@@ -388,10 +498,10 @@ static void test_zero_heap_allocation_after_setup() {
     p.nodes[5].params[16] = 1;                                            // lane 0, step 0
     p.nodes[6] = node(ALGO_NOTE_SEQ, 0, 3);
     p.n_nodes = 7;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 2};
-    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_2, 0, 3};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 0};
-    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 4};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(2)};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_2, 0, one_bus(3)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(4)};
 
     const size_t before = g_allocations;
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
@@ -411,9 +521,9 @@ static void test_thousand_load_unload_cycles_leave_identical_state() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 1};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(1)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
     for (uint8_t i = 0; i < N_NODE; i++) p.nodes[i] = node((uint8_t)(ALGO_LOGIC_NOT + (i % 7)), 0, 1);
     p.n_nodes = N_NODE;
 
@@ -441,17 +551,17 @@ static void test_worked_example_with_a_real_clock_divider() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};        // DIN 1 -> note bus 0
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};        // DIN 1 -> note bus 0
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;                                  // /4
     p.nodes[1] = node_config(ALGO_ARPEGGIATOR);                // note 0 + gate 0 -> note 1
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = 0; p.nodes[1].out_bus[0] = 1;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].in_buses[1] = one_bus(0); p.nodes[1].out_buses[0] = one_bus(1);
     p.nodes[2] = node(ALGO_TRANSPOSE, 1, 2);                   // note 1 -> note 2, +12
     p.nodes[2].params[0] = PARAM_CENTRE + 12;
     p.n_nodes = 3;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 1, 1};
-    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 2, 2};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 1, one_bus(1)};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_SERIAL_2, 2, one_bus(2)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -502,17 +612,17 @@ static void test_stopping_the_transport_releases_what_the_clock_was_playing() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;                                  // /4
     p.nodes[1] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS;
-    p.nodes[1].out_bus[0] = 0; p.nodes[1].out_bus[1] = NO_BUS;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].in_buses[1] = BusSet{};
+    p.nodes[1].out_buses[0] = one_bus(0); p.nodes[1].out_buses[1] = BusSet{};
     p.nodes[2] = node_config(ALGO_TONNETZ);                    // gate 0 -> note 1
-    p.nodes[2].in_bus[0] = 0; p.nodes[2].in_bus[1] = NO_BUS;
-    p.nodes[2].out_bus[0] = 1;
+    p.nodes[2].in_buses[0] = one_bus(0); p.nodes[2].in_buses[1] = BusSet{};
+    p.nodes[2].out_buses[0] = one_bus(1);
     p.n_nodes = 3;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
-    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -555,12 +665,12 @@ static void test_a_jack_clocked_patch_plays_with_the_transport_stopped() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};         // jack 1 -> gate bus 0
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};         // jack 1 -> gate bus 0
     p.nodes[0] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
-    p.nodes[0].in_bus[0] = 0; p.nodes[0].in_bus[1] = NO_BUS;
-    p.nodes[0].out_bus[0] = 0; p.nodes[0].out_bus[1] = NO_BUS;
+    p.nodes[0].in_buses[0] = one_bus(0); p.nodes[0].in_buses[1] = BusSet{};
+    p.nodes[0].out_buses[0] = one_bus(0); p.nodes[0].out_buses[1] = BusSet{};
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -583,16 +693,16 @@ static void test_stopping_the_transport_releases_a_root_driven_chord() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;                                  // /4
     p.nodes[1] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS;
-    p.nodes[1].out_bus[0] = 0; p.nodes[1].out_bus[1] = NO_BUS;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].in_buses[1] = BusSet{};
+    p.nodes[1].out_buses[0] = one_bus(0); p.nodes[1].out_buses[1] = BusSet{};
     p.nodes[2] = node_config(ALGO_CHORD);                      // note 0 -> note 1
-    p.nodes[2].in_bus[0] = 0;
-    p.nodes[2].out_bus[0] = 1;
+    p.nodes[2].in_buses[0] = one_bus(0);
+    p.nodes[2].out_buses[0] = one_bus(1);
     p.n_nodes = 3;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -622,16 +732,16 @@ static void test_stopping_the_transport_releases_a_chord_through_a_voicer() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;                                  // /4
     p.nodes[1] = node_config(ALGO_TONNETZ);                    // gate 0 -> note 0
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS; p.nodes[1].in_bus[2] = NO_BUS;
-    p.nodes[1].out_bus[0] = 0;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].in_buses[1] = BusSet{}; p.nodes[1].in_buses[2] = BusSet{};
+    p.nodes[1].out_buses[0] = one_bus(0);
     p.nodes[2] = node_config(ALGO_VOICER);                     // note 0 -> note 1
-    p.nodes[2].in_bus[0] = 0;
-    p.nodes[2].out_bus[0] = 1;
+    p.nodes[2].in_buses[0] = one_bus(0);
+    p.nodes[2].out_buses[0] = one_bus(1);
     p.n_nodes = 3;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -657,16 +767,16 @@ static void test_stopping_the_transport_releases_a_synced_delay() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;
     p.nodes[1] = node_config(ALGO_TONNETZ);                    // gate 0 -> note 0
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS; p.nodes[1].in_bus[2] = NO_BUS;
-    p.nodes[1].out_bus[0] = 0;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].in_buses[1] = BusSet{}; p.nodes[1].in_buses[2] = BusSet{};
+    p.nodes[1].out_buses[0] = one_bus(0);
     p.nodes[2] = node_config(ALGO_NOTE_DELAY);                 // note 0 -> note 1
-    p.nodes[2].in_bus[0] = 0; p.nodes[2].in_bus[1] = NO_BUS;
-    p.nodes[2].out_bus[0] = 1;
+    p.nodes[2].in_buses[0] = one_bus(0); p.nodes[2].in_buses[1] = BusSet{};
+    p.nodes[2].out_buses[0] = one_bus(1);
     p.n_nodes = 3;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -692,11 +802,11 @@ static void test_stopping_the_transport_leaves_a_held_note_alone() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};        // DIN 1 -> note bus 0
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};        // DIN 1 -> note bus 0
     p.nodes[0] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, +12
     p.nodes[0].params[0] = PARAM_CENTRE + 12;
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 1};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -726,17 +836,17 @@ static void test_a_panic_releases_what_is_sounding_and_sweeps_every_channel() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);                  // tick -> gate bus 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;                                  // /4
     p.nodes[1] = node_config(ALGO_HARMONY);                    // gate 0 -> note 0
-    p.nodes[1].in_bus[0] = 0; p.nodes[1].in_bus[1] = NO_BUS;
-    p.nodes[1].out_bus[0] = 0; p.nodes[1].out_bus[1] = NO_BUS;
+    p.nodes[1].in_buses[0] = one_bus(0); p.nodes[1].in_buses[1] = BusSet{};
+    p.nodes[1].out_buses[0] = one_bus(0); p.nodes[1].out_buses[1] = BusSet{};
     p.nodes[2] = node_config(ALGO_TONNETZ);                    // gate 0 -> note 1
-    p.nodes[2].in_bus[0] = 0; p.nodes[2].in_bus[1] = NO_BUS;
-    p.nodes[2].out_bus[0] = 1;
+    p.nodes[2].in_buses[0] = one_bus(0); p.nodes[2].in_buses[1] = BusSet{};
+    p.nodes[2].out_buses[0] = one_bus(1);
     p.n_nodes = 3;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
-    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_1, 0, 1};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
+    p.midi_out[1] = MidiOutConfig{mmMIDI_USB_1, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -775,11 +885,11 @@ static void test_a_panic_cuts_a_held_note_that_a_stop_leaves_alone() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, 0};        // DIN 1 -> note bus 0
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};        // DIN 1 -> note bus 0
     p.nodes[0] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, +12
     p.nodes[0].params[0] = PARAM_CENTRE + 12;
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 1};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -804,17 +914,17 @@ static void test_transpose_arpeggiator_priority_chain() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(0)};
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 2;
     p.nodes[1] = node(ALGO_TRANSPOSE, 0, 1);                   // note 0 -> note 1, -12
     p.nodes[1].params[0] = PARAM_CENTRE - 12;
     p.nodes[2] = node_config(ALGO_ARPEGGIATOR);                // note 1 + gate 0 -> note 2
-    p.nodes[2].in_bus[0] = 1; p.nodes[2].in_bus[1] = 0; p.nodes[2].out_bus[0] = 2;
+    p.nodes[2].in_buses[0] = one_bus(1); p.nodes[2].in_buses[1] = one_bus(0); p.nodes[2].out_buses[0] = one_bus(2);
     p.nodes[3] = node(ALGO_NOTE_PRIORITY, 2, 3);               // note 2 -> note 3
     p.n_nodes = 4;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, 3};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_SERIAL_1, 0, one_bus(3)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -874,34 +984,34 @@ static void test_the_arpeggio_plays_the_chord_the_same_pulse_chose() {
     Patch p = empty_patch();
 
     NodeConfig arp = node_config(ALGO_ARPEGGIATOR);
-    arp.in_bus[0] = 1;                                  // chord in  <- note bus 1
-    arp.in_bus[1] = 1;                                  // advance   <- gate bus 1
-    arp.out_bus[0] = 2;
+    arp.in_buses[0] = one_bus(1);                                  // chord in  <- note bus 1
+    arp.in_buses[1] = one_bus(1);                                  // advance   <- gate bus 1
+    arp.out_buses[0] = one_bus(2);
     p.nodes[0] = arp;
 
     NodeConfig chord = node_config(ALGO_CHORD);
-    chord.in_bus[0] = 0;                                // note in   <- note bus 0
-    chord.out_bus[0] = 1;
+    chord.in_buses[0] = one_bus(0);                                // note in   <- note bus 0
+    chord.out_buses[0] = one_bus(1);
     chord.params[11] = 1;                               // quality: triad
     p.nodes[1] = chord;
 
     NodeConfig harmony = node_config(ALGO_HARMONY);
-    harmony.in_bus[0] = 0;                              // advance   <- gate bus 0
-    harmony.out_bus[0] = 0;                             // root      -> note bus 0
+    harmony.in_buses[0] = one_bus(0);                              // advance   <- gate bus 0
+    harmony.out_buses[0] = one_bus(0);                             // root      -> note bus 0
     p.nodes[2] = harmony;
 
     NodeConfig bar = node_config(ALGO_METRONOME);
-    bar.out_bus[0] = 0;
+    bar.out_buses[0] = one_bus(0);
     bar.params[0] = DIV_BAR;
     p.nodes[3] = bar;
 
     NodeConfig eighth = node_config(ALGO_METRONOME);
-    eighth.out_bus[0] = 1;
+    eighth.out_buses[0] = one_bus(1);
     eighth.params[0] = DIV_EIGHTH;
     p.nodes[4] = eighth;
 
     p.n_nodes = 5;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 2};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(2)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
     master.clock().set_bpm(120);
@@ -951,6 +1061,10 @@ int main() {
     RUN_TEST(test_fan_out_three_readers_one_pass);
     RUN_TEST(test_fan_in_rules);
     RUN_TEST(test_fan_in_holds_whatever_order_the_patch_is_in);
+    RUN_TEST(test_two_sources_merge_into_one_inlet_and_keep_their_own_readers);
+    RUN_TEST(test_one_output_merges_two_note_buses);
+    RUN_TEST(test_an_outlet_on_two_buses_reaches_both);
+    RUN_TEST(test_a_cv_port_out_of_range_is_refused);
     RUN_TEST(test_validator_rejects_wrong_domain_index_and_keeps_running_patch);
     RUN_TEST(test_self_feedback_oscillates);
     RUN_TEST(test_a_chain_costs_one_pass_whatever_its_order);

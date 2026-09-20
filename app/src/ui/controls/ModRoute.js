@@ -25,6 +25,7 @@ import { Switch } from '../components/Switch.js';
 import { Field, Fields } from '../components/Field.js';
 import { Domain } from '../../core/validate.js';
 import { busPeers, routesOf, targetParamName, paramDescriptorOf } from '../../core/patch.js';
+import { busWords } from '../../core/graph.js';
 import { paramText } from './ParamText.js';
 import './ModRoute.css';
 
@@ -55,7 +56,7 @@ function ModRoute(app, slot, route) {
   return el('div', { class: 'param mod-route' },
     el('div', { class: 'param-head' },
       el('span', { class: 'param-name' }, name),
-      el('span', { class: 'param-cc dom-CV' }, `CV ${route.bus}`),
+      el('span', { class: 'param-cc dom-CV' }, `CV ${route.buses.join(' + ')}`),
       IconButton({ icon: 'cut', label: `stop modulating ${name}`, class: 'ghost danger',
                    onclick: () => app.editor.clearModRoute(slot) })),
     ModMeter(app, slot, route),
@@ -64,7 +65,7 @@ function ModRoute(app, slot, route) {
       // "absolute" are the firmware's words and neither says which one leaves
       // the knob below still working.
       Field({ label: 'moves it' }, Select({
-        class: 'grow', 'aria-label': `how CV bus ${route.bus} reaches ${name}`,
+        class: 'grow', 'aria-label': `how CV ${busWords(route.buses)} reaches ${name}`,
         value: route.flags & P.ModFlags.MOD_MODE_MASK,
         options: [{ value: P.ModMode.MOD_OFFSET, label: 'around the setting' },
                   { value: P.ModMode.MOD_ABSOLUTE, label: 'instead of the setting' }],
@@ -130,8 +131,8 @@ export function ModMeter(app, slot, route) {
 // is a perfectly valid signal. Nothing *writing* the bus is a fact about the
 // patch, and the patch is here.
 function noSource(app, route) {
-  const { writers } = busPeers(app.device, app.state.patch, Domain.CV, route.bus);
-  return writers.length ? null : `nothing writes CV bus ${route.bus}`;
+  const { writers } = busPeers(app.device, app.state.patch, Domain.CV, route.buses);
+  return writers.length ? null : `nothing writes CV ${busWords(route.buses)}`;
 }
 
 export function paintMeter(app, meter, parts, slot, route, range) {

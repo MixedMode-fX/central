@@ -18,6 +18,14 @@
 
 static constexpr uint16_t HEADER_BYTES = 4;
 
+// A port's set of buses, as put_set() wrote it: three seven-bit data bytes,
+// low septet first (bus/domain.h).
+static BusSet read_set(const uint8_t* at){
+    return BusSet{(uint16_t)((at[0] & 0x7Fu)
+                           | ((uint16_t)(at[1] & 0x7Fu) << 7)
+                           | ((uint16_t)(at[2] & 0x7Fu) << 14))};
+}
+
 SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
                            PatchStore& patch_store, StatusLeds& status, IMidiOut& midi_out,
                            CcMapper& mapper, ModMatrix& matrix,
@@ -196,32 +204,33 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             return;
         }
 
-        // One inlet or outlet of one node. Under the bus model this is one
-        // byte in the config, with no re-sort, no graph rebuild and no cycle
-        // re-check - which is what makes dragging a cable in the editor a
-        // single message rather than a full dump.
+        // One inlet or outlet of one node: the whole set of buses that port
+        // is on (bus/domain.h), as three data bytes. Under the bus model this
+        // is two bytes in the config, with no re-sort, no graph rebuild and
+        // no cycle re-check - which is what makes dragging a cable in the
+        // editor a single message rather than a full dump. The set is sent
+        // whole rather than as "add this bus" so that the message says what
+        // the port *is*, and two editors cannot drift apart over it.
         case SYSEX_SET_CONNECTION: {
-            if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 6){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             const uint8_t node = args[0];
             const uint8_t is_out = args[1];
             const uint8_t index = args[2];
-            // 0x7F on the wire means NO_BUS: bus indices are small, and 0xFF
-            // is not a legal SysEx data byte.
-            const uint8_t bus = (args[3] == 0x7F) ? NO_BUS : args[3];
+            const BusSet set = read_set(&args[3]);
             if (node >= patches.active().n_nodes){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
             if ((is_out ? index >= MAX_OUT : index >= MAX_IN)){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
 
             patches.begin_edit();
             NodeConfig& c = patches.staging().nodes[node];
-            if (is_out) c.out_bus[index] = bus; else c.in_bus[index] = bus;
+            if (is_out) c.out_buses[index] = set; else c.in_buses[index] = set;
             if (patches.commit_node(node, now_us) != APPLY_OK){ nak(source, SYSEX_ERR_REJECTED); return; }
             ack(source);
             return;
         }
 
         case SYSEX_SET_GATE_PORT: {
-            if (n < 3){ nak(source, SYSEX_ERR_TRUNCATED); return; }
-            GatePortConfig c{args[1], (uint8_t)(args[2] == 0x7F ? NO_BUS : args[2])};
+            if (n < 5){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            GatePortConfig c{args[1], read_set(&args[2])};
             if (patches.commit_gate_port(args[0], c, now_us) != APPLY_OK){
                 nak(source, SYSEX_ERR_REJECTED);
                 return;
@@ -231,14 +240,15 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         }
 
         case SYSEX_SET_MIDI_PORT: {
-            if (n < 5){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 7){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             // The mask is seven bits on the wire plus one carried in the
             // direction byte's high bit, because a port mask reaches 0x80.
             const uint8_t mask = (uint8_t)(args[2] | ((args[1] & 0x02) ? 0x80u : 0u));
             const bool is_out = (args[1] & 0x01) != 0;
+            const BusSet set = read_set(&args[4]);
             const ApplyError e = is_out
-                ? patches.commit_midi_out(args[0], MidiOutConfig{mask, args[3], (uint8_t)(args[4] == 0x7F ? NO_BUS : args[4])}, now_us)
-                : patches.commit_midi_in(args[0], MidiInConfig{mask, args[3], (uint8_t)(args[4] == 0x7F ? NO_BUS : args[4])}, now_us);
+                ? patches.commit_midi_out(args[0], MidiOutConfig{mask, args[3], set}, now_us)
+                : patches.commit_midi_in(args[0], MidiInConfig{mask, args[3], set}, now_us);
             if (e != APPLY_OK){ nak(source, SYSEX_ERR_REJECTED); return; }
             ack(source);
             return;
@@ -305,22 +315,23 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         // same trick for the byte that does not fit seven bits - depth
         // reaches 255, so its top bit rides in the flags byte's spare bit.
         case SYSEX_SET_MOD_ROUTE: {
-            if (n < 12){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 14){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             if (args[0] >= N_MOD_ROUTE){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
             ModRoute route = unused_route();
-            // A bus index that is not a bus clears the slot. NO_BUS is 0xFF
-            // and does not fit a data byte, so "not a bus" is what says it on
-            // the wire rather than a separate enable flag that could disagree
-            // with the bus field.
-            if (args[1] < N_CV_BUS){
-                route.bus = args[1];
-                route.target_kind = args[2];
-                route.target_index = args[3];
-                route.param = (uint16_t)(args[4] | ((uint16_t)args[5] << 7));
-                route.min = (uint16_t)(args[6] | ((uint16_t)args[7] << 7));
-                route.max = (uint16_t)(args[8] | ((uint16_t)args[9] << 7));
-                route.depth = (uint8_t)(args[10] | ((args[11] & 0x40) ? 0x80u : 0u));
-                route.flags = (uint8_t)(args[11] & 0x3F);
+            // An empty set of source buses clears the slot: a route with
+            // nothing to read is not a route, which is what says it on the
+            // wire rather than a separate enable flag that could disagree
+            // with the source field.
+            const BusSet set = read_set(&args[1]);
+            if (set.any()){
+                route.buses = set;
+                route.target_kind = args[4];
+                route.target_index = args[5];
+                route.param = (uint16_t)(args[6] | ((uint16_t)args[7] << 7));
+                route.min = (uint16_t)(args[8] | ((uint16_t)args[9] << 7));
+                route.max = (uint16_t)(args[10] | ((uint16_t)args[11] << 7));
+                route.depth = (uint8_t)(args[12] | ((args[13] & 0x40) ? 0x80u : 0u));
+                route.flags = (uint8_t)(args[13] & 0x3F);
             }
             patches.begin_edit();
             patches.staging().mod_map[args[0]] = route;
@@ -878,10 +889,10 @@ void SysexHandler::reply_mod_route(uint8_t source, uint8_t slot){
     const ModRoute& r = patches.active().mod_map[slot];
     begin_reply(SYSEX_MOD_ROUTE);
     put(slot);
-    // An unused slot answers with a bus index that is not a bus, which is
-    // exactly what SYSEX_SET_MOD_ROUTE reads as "clear it": a host can echo a
-    // reply straight back and change nothing.
-    put(r.bus == NO_BUS ? (uint8_t)0x7F : r.bus);
+    // An unused slot answers with the empty set, which is exactly what
+    // SYSEX_SET_MOD_ROUTE reads as "clear it": a host can echo a reply
+    // straight back and change nothing.
+    put_set(r.buses);
     put(r.target_kind);
     put(r.target_index);
     put_u14(r.param);

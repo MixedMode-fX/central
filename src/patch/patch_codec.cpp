@@ -11,14 +11,16 @@
 //
 // Payload:
 //   globals            sizeof(GlobalSettings), as bytes
-//   gate ports         GPIO_N x {direction, bus}
-//   midi in            N_MIDI_IN_NODES x {source_mask, channel, bus}
-//   midi out           N_MIDI_OUT_NODES x {target_mask, channel, bus}
+//   gate ports         GPIO_N x {direction 1, buses 2}
+//   midi in            N_MIDI_IN_NODES x {source_mask 1, channel 1, buses 2}
+//   midi out           N_MIDI_OUT_NODES x {target_mask 1, channel 1, buses 2}
 //   n_nodes            1
 //   nodes              n_nodes x {
 //                          algorithm_id      1
-//                          in_bus            MAX_IN
-//                          out_bus           MAX_OUT
+//                          in length         1   (trailing empty sets trimmed)
+//                          in_buses          2 x that many (a bit per bus)
+//                          out length        1
+//                          out_buses         2 x that many
 //                          param length      2   (trailing zeros trimmed)
 //                          params            that many bytes
 //                      }
@@ -38,7 +40,7 @@
 //   n_routes           1   (modulation; unused slots are not stored)
 //   routes             n_routes x {
 //                          slot              1   which mod_map entry it is
-//                          bus               1
+//                          buses             2   CV buses, a bit per bus
 //                          target_kind       1
 //                          target_index      1
 //                          param             2
@@ -69,10 +71,10 @@
 static constexpr size_t HEADER_BYTES = 8;
 static constexpr size_t CRC_BYTES = 2;
 static constexpr size_t PORT_BYTES =
-    (size_t)GPIO_N * 2u + (size_t)N_MIDI_IN_NODES * 3u + (size_t)N_MIDI_OUT_NODES * 3u + 1u;
-static constexpr size_t NODE_FIXED_BYTES = 1u + MAX_IN + MAX_OUT + 2u;
+    (size_t)GPIO_N * 3u + (size_t)N_MIDI_IN_NODES * 4u + (size_t)N_MIDI_OUT_NODES * 4u + 1u;
+static constexpr size_t NODE_FIXED_BYTES = 1u + 1u + 2u * MAX_IN + 1u + 2u * MAX_OUT + 2u;
 static constexpr size_t MAPPING_BYTES = 13u;
-static constexpr size_t ROUTE_BYTES = 12u;
+static constexpr size_t ROUTE_BYTES = 13u;
 static constexpr size_t MACRO_BYTES = 1u + MACRO_NAME_BYTES;
 static constexpr size_t MACRO_DEST_BYTES = 11u;
 
@@ -111,6 +113,9 @@ namespace {
         void u16(uint16_t v){ u8((uint8_t)(v & 0xFFu)); u8((uint8_t)(v >> 8)); }
         void u32(uint32_t v){ u16((uint16_t)(v & 0xFFFFu)); u16((uint16_t)(v >> 16)); }
         void bytes(const uint8_t* src, size_t n){ for (size_t i = 0; i < n; i++) u8(src[i]); }
+        // A port's set of buses, a bit per bus.
+        void set(BusSet s){ u16(s.bits); }
+        void sets(const BusSet* src, size_t n){ for (size_t i = 0; i < n; i++) set(src[i]); }
     };
 
     struct Reader {
@@ -126,6 +131,8 @@ namespace {
         uint16_t u16(){ const uint16_t lo = u8(); return (uint16_t)(lo | ((uint16_t)u8() << 8)); }
         uint32_t u32(){ const uint32_t lo = u16(); return lo | ((uint32_t)u16() << 16); }
         void bytes(uint8_t* dst, size_t n){ for (size_t i = 0; i < n; i++) dst[i] = u8(); }
+        BusSet set(){ return BusSet{u16()}; }
+        void sets(BusSet* dst, size_t n){ for (size_t i = 0; i < n; i++) dst[i] = set(); }
     };
 
     // The last non-zero parameter, plus one. An all-zero block encodes as
@@ -133,6 +140,15 @@ namespace {
     uint16_t used_params(const NodeConfig& node){
         uint16_t n = N_PARAM;
         while (n > 0 && node.params[n - 1] == 0) n--;
+        return n;
+    }
+
+    // The last connected port, plus one - the same trimming the parameters
+    // get, and for the same reason: most algorithms use one or two inlets and
+    // one outlet, and a fixed MAX_IN + MAX_OUT of them is most of a node
+    // record spent saying "nothing".
+    uint8_t used_ports(const BusSet* ports, uint8_t n){
+        while (n > 0 && !ports[n - 1].any()) n--;
         return n;
     }
 }
@@ -153,25 +169,29 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
 
     for (uint8_t i = 0; i < GPIO_N; i++){
         w.u8(patch.gate_ports[i].direction);
-        w.u8(patch.gate_ports[i].bus);
+        w.set(patch.gate_ports[i].buses);
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         w.u8(patch.midi_in[i].source_mask);
         w.u8(patch.midi_in[i].channel);
-        w.u8(patch.midi_in[i].bus);
+        w.set(patch.midi_in[i].buses);
     }
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++){
         w.u8(patch.midi_out[i].target_mask);
         w.u8(patch.midi_out[i].channel);
-        w.u8(patch.midi_out[i].bus);
+        w.set(patch.midi_out[i].buses);
     }
 
     w.u8(patch.n_nodes);
     for (uint8_t n = 0; n < patch.n_nodes; n++){
         const NodeConfig& node = patch.nodes[n];
         w.u8(node.algorithm_id);
-        w.bytes(node.in_bus, MAX_IN);
-        w.bytes(node.out_bus, MAX_OUT);
+        const uint8_t n_in = used_ports(node.in_buses, MAX_IN);
+        w.u8(n_in);
+        w.sets(node.in_buses, n_in);
+        const uint8_t n_out = used_ports(node.out_buses, MAX_OUT);
+        w.u8(n_out);
+        w.sets(node.out_buses, n_out);
         const uint16_t n_params = used_params(node);
         w.u16(n_params);
         w.bytes(node.params, n_params);
@@ -201,13 +221,13 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
     // reason: only the slots in use are stored, so a patch with no modulation
     // costs one byte.
     uint8_t n_routes = 0;
-    for (uint8_t i = 0; i < N_MOD_ROUTE; i++) if (patch.mod_map[i].bus != NO_BUS) n_routes++;
+    for (uint8_t i = 0; i < N_MOD_ROUTE; i++) if (patch.mod_map[i].buses.any()) n_routes++;
     w.u8(n_routes);
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
         const ModRoute& r = patch.mod_map[i];
-        if (r.bus == NO_BUS) continue;
+        if (!r.buses.any()) continue;
         w.u8(i);
-        w.u8(r.bus);
+        w.set(r.buses);
         w.u8(r.target_kind);
         w.u8(r.target_index);
         w.u16(r.param);
@@ -288,17 +308,17 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
 
     for (uint8_t i = 0; i < GPIO_N; i++){
         patch.gate_ports[i].direction = r.u8();
-        patch.gate_ports[i].bus = r.u8();
+        patch.gate_ports[i].buses = r.set();
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         patch.midi_in[i].source_mask = r.u8();
         patch.midi_in[i].channel = r.u8();
-        patch.midi_in[i].bus = r.u8();
+        patch.midi_in[i].buses = r.set();
     }
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++){
         patch.midi_out[i].target_mask = r.u8();
         patch.midi_out[i].channel = r.u8();
-        patch.midi_out[i].bus = r.u8();
+        patch.midi_out[i].buses = r.set();
     }
 
     const uint8_t n_nodes = r.u8();
@@ -307,10 +327,14 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
 
     for (uint8_t n = 0; n < n_nodes; n++){
         NodeConfig& node = patch.nodes[n];
-        node = node_config(0);                  // NO_BUS everywhere, params zero
+        node = node_config(0);                  // every port on no bus, params zero
         node.algorithm_id = r.u8();
-        r.bytes(node.in_bus, MAX_IN);
-        r.bytes(node.out_bus, MAX_OUT);
+        const uint8_t n_in = r.u8();
+        if (n_in > MAX_IN) return CODEC_TRUNCATED;
+        r.sets(node.in_buses, n_in);
+        const uint8_t n_out = r.u8();
+        if (n_out > MAX_OUT) return CODEC_TRUNCATED;
+        r.sets(node.out_buses, n_out);
         const uint16_t n_params = r.u16();
         if (r.underflowed) return CODEC_TRUNCATED;
         if (n_params > N_PARAM) return CODEC_PARAM_TOO_LONG;
@@ -346,7 +370,7 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
     for (uint8_t i = 0; i < n_routes; i++){
         const uint8_t slot = r.u8();
         ModRoute route = unused_route();
-        route.bus = r.u8();
+        route.buses = r.set();
         route.target_kind = r.u8();
         route.target_index = r.u8();
         route.param = r.u16();

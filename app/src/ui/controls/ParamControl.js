@@ -85,7 +85,7 @@ export function ParamControl(app, index, at, pd) {
     el('div', { class: 'param-head' },
       el('span', { class: 'param-name' }, pd.name),
       binding ? el('span', { class: 'param-cc' }, `CC ${binding.cc}`) : null,
-      route ? el('span', { class: 'param-cc dom-CV' }, `CV ${route.bus}`) : null,
+      route ? el('span', { class: 'param-cc dom-CV' }, `CV ${route.buses.join(' + ')}`) : null,
       live,
       inline ? null : el('span', { class: 'param-value' }, paramText(pd, value))),
     el('div', { class: 'param-controls' }, controls,

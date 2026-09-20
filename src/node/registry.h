@@ -60,8 +60,8 @@ enum ConfigError : uint8_t {
     CONFIG_OK = 0,
     CONFIG_UNKNOWN_ALGORITHM,
     CONFIG_INLET_OUT_OF_RANGE,     // bus index not valid for that inlet's domain
-    CONFIG_INLET_NOT_CONNECTED,    // required inlet is NO_BUS
-    CONFIG_OUTLET_OUT_OF_RANGE,    // an outlet may be NO_BUS (unused), never out of range
+    CONFIG_INLET_NOT_CONNECTED,    // required inlet is on no bus
+    CONFIG_OUTLET_OUT_OF_RANGE,    // an outlet may be on no bus (unused), never out of range
     CONFIG_PARAM_OUT_OF_RANGE,     // a parameter byte outside its ParamDescriptor (#20)
 };
 

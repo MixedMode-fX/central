@@ -26,8 +26,8 @@ class Sustain : public Node{
     private:
         void send(BusManager& bus) const;
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t channel;
         uint8_t controller;
         bool invert;

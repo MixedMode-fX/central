@@ -62,8 +62,9 @@ function reading(app, index) {
   const node = app.state.patch.nodes[index];
   const descriptor = node && app.device?.byId.get(node.algorithmId);
   const inlet = descriptor ? rootInlet(descriptor) : -1;
-  if (inlet < 0 || node.inBus[inlet] === P.NO_BUS) return { ...shape, inlet: null, note: null };
-  const played = app.session?.usingModule ? app.module?.busNote(node.inBus[inlet]) : NO_NOTE;
+  const rooted = (node.inBuses?.[inlet] ?? [])[0];
+  if (inlet < 0 || rooted === undefined) return { ...shape, inlet: null, note: null };
+  const played = app.session?.usingModule ? app.module?.busNote(rooted) : NO_NOTE;
   return { ...shape, inlet: inletName(descriptor, inlet),
            note: played === undefined || played === NO_NOTE ? null : played };
 }

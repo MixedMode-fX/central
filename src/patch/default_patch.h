@@ -6,22 +6,13 @@
 
 // The patch a module boots into when the store is empty or unreadable (#7).
 //
-// It lives in flash, not in EEPROM, so a freshly flashed module with nothing
-// stored still does something observable. That matters more here than on most
-// modules: there is no display to explain a silence, and with no panel input
-// at all a user who saw nothing happen would have no way to tell a dead
-// module from an unconfigured one.
-//
-// What it does, deliberately visible and audible:
-//
-//   * **MIDI thru.** Every transport in, every transport out, omni. Plug a
-//     keyboard into either DIN port or USB and it plays whatever is
-//     downstream, immediately.
-//   * **A metronome on jack 1.** A `Metronome` at a quarter note, so a scope,
-//     an LED or an envelope generator on jack 1 shows the module is alive and
-//     running at CLOCK_DEFAULT_BPM.
-//   * **A sustain pedal on jack 8.** The one jack whose default direction
-//     cannot be guessed wrong: an unpatched input reads as no gate.
+// **It is empty: no jack in use, no MIDI port in use, no node, nothing
+// patched.** A module that boots playing something has made three decisions
+// on the user's behalf - which jacks face which way, which cables are thru'd,
+// what is on note bus 0 - and every one of them is a wire they have to find
+// and undo before their own patch means what it says. Silence is the only
+// honest starting point, and it is the same one every block starts from: a
+// node arrives on no bus and is connected by being dragged.
 //
 // It is also what "restore defaults" restores. That is a host-side command -
 // over SysEx (#11) or the console - because there is no button to hold at

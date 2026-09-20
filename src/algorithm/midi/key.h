@@ -72,7 +72,7 @@ class Key : public Node{
         uint32_t moves() const { return move_count; }
 
     private:
-        uint8_t root_in;
+        BusSet root_in;
         uint8_t channel;
         uint8_t from;
         uint32_t move_count;

@@ -89,8 +89,8 @@ class NoteFilter : public Node{
         uint32_t refused() const { return sounding.refused(); }
 
     private:
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t channel;
         uint8_t low;
         uint8_t high;

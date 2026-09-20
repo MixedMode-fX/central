@@ -273,6 +273,18 @@ void Console::cmd_key(uint8_t n, uint32_t now_us){
     put_kv("root note", global_key::tonic(0));
 }
 
+// A port's buses, as a list: "3" for one, "3,7" for a merge, "-" for none.
+void Console::put_buses(BusSet set){
+    if (!set.any()){ put("-"); return; }
+    bool first = true;
+    for (uint8_t b = 0; b < 16; b++){
+        if (!set.has(b)) continue;
+        if (!first) put(",");
+        put_uint(b);
+        first = false;
+    }
+}
+
 void Console::cmd_patch(){
     const Patch& p = patches.active();
 
@@ -281,7 +293,7 @@ void Console::cmd_patch(){
         if (p.gate_ports[i].direction == GATE_PORT_UNUSED) continue;
         put("  jack "); put_uint(i + 1u);
         put(p.gate_ports[i].direction == GATE_PORT_IN ? " in  -> gate " : " out <- gate ");
-        put_uint(p.gate_ports[i].bus);
+        put_buses(p.gate_ports[i].buses);
         put_line("");
     }
     put_line("midi in:");
@@ -290,7 +302,7 @@ void Console::cmd_patch(){
         put("  port "); put_uint(i);
         put(" mask 0x"); put_uint(p.midi_in[i].source_mask);
         put(" ch "); put_uint(p.midi_in[i].channel);
-        put(" -> note "); put_uint(p.midi_in[i].bus);
+        put(" -> note "); put_buses(p.midi_in[i].buses);
         put_line("");
     }
     put_line("midi out:");
@@ -299,7 +311,7 @@ void Console::cmd_patch(){
         put("  port "); put_uint(i);
         put(" mask 0x"); put_uint(p.midi_out[i].target_mask);
         put(" ch "); put_uint(p.midi_out[i].channel);
-        put(" <- note "); put_uint(p.midi_out[i].bus);
+        put(" <- note "); put_buses(p.midi_out[i].buses);
         put_line("");
     }
 
@@ -313,17 +325,17 @@ void Console::cmd_patch(){
         // connection advances this node or resets it, and the descriptor has
         // known since the registry gained port names.
         for (uint8_t i = 0; i < d->n_in && i < MAX_IN; i++){
-            if (p.nodes[n].in_bus[i] == NO_BUS) continue;
+            if (!p.nodes[n].in_buses[i].any()) continue;
             put("      in  "); put_uint(i); put(" ");
             put(d->in_name != nullptr ? d->in_name[i] : "");
-            put(" <- bus "); put_uint(p.nodes[n].in_bus[i]);
+            put(" <- bus "); put_buses(p.nodes[n].in_buses[i]);
             put_line("");
         }
         for (uint8_t o = 0; o < d->n_out && o < MAX_OUT; o++){
-            if (p.nodes[n].out_bus[o] == NO_BUS) continue;
+            if (!p.nodes[n].out_buses[o].any()) continue;
             put("      out "); put_uint(o); put(" ");
             put(d->out_name != nullptr ? d->out_name[o] : "");
-            put(" -> bus "); put_uint(p.nodes[n].out_bus[o]);
+            put(" -> bus "); put_buses(p.nodes[n].out_buses[o]);
             put_line("");
         }
     }
@@ -557,9 +569,9 @@ void Console::cmd_mods(){
     bool any = false;
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++){
         const ModRoute& r = p.mod_map[i];
-        if (r.bus == NO_BUS) continue;
+        if (!r.buses.any()) continue;
         any = true;
-        put_uint(i); put(": cv bus "); put_uint(r.bus);
+        put_uint(i); put(": cv bus "); put_buses(r.buses);
         put(" -> "); put(r.target_kind < CC_TARGET_KINDS ? CC_TARGET_NAMES[r.target_kind] : "?");
         put(" "); put_uint(r.target_index);
         put(" param "); put_uint(r.param);
@@ -594,7 +606,7 @@ void Console::cmd_mod(uint8_t n, uint32_t now_us){
     if (bus >= N_CV_BUS){ put_line("mod: no such cv bus"); return; }
 
     ModRoute route = unused_route();
-    route.bus = (uint8_t)bus;
+    route.buses = one_bus((uint8_t)bus);
     route.target_kind = CC_TARGET_NODE;
     route.target_index = (uint8_t)node;
     route.param = (uint16_t)param;

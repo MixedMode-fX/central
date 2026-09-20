@@ -53,8 +53,8 @@ uint8_t VelocityCurve::get_param(uint16_t index) const {
 }
 
 VelocityCurve::VelocityCurve(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     curve(config.params[P_CURVE]),
     scale(config.params[P_SCALE] ? config.params[P_SCALE] : 100),
     offset((int8_t)config.params[P_OFFSET]),

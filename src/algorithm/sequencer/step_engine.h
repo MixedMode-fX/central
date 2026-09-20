@@ -117,24 +117,25 @@ class StepEngine {
         bool descending;
 };
 
-// A rising-edge detector on one gate bus. NO_BUS never fires, so an optional
-// inlet costs nothing to leave unpatched.
+// A rising-edge detector on an inlet's gate buses: the edge is on their OR,
+// so two triggers merged into one inlet advance the same sequencer. An empty
+// set never fires, so an optional inlet costs nothing to leave unpatched.
 class EdgeIn {
     public:
-        explicit EdgeIn(uint8_t gate_bus = NO_BUS) : bus(gate_bus), last(false) {}
+        explicit EdgeIn(BusSet gate_buses = BusSet{}) : buses(gate_buses), last(false) {}
 
-        bool connected() const { return bus != NO_BUS; }
-        // Samples the bus; true on the pass where it went high.
+        bool connected() const { return buses.any(); }
+        // Samples the buses; true on the pass where they went high.
         bool rising(const BusManager& b){
-            if (bus == NO_BUS) return false;
-            const bool level = b.gate_read(bus);
+            if (!buses.any()) return false;
+            const bool level = b.gate_read(buses);
             const bool edge = level && !last;
             last = level;
             return edge;
         }
 
     private:
-        uint8_t bus;
+        BusSet buses;
         bool last;
 };
 

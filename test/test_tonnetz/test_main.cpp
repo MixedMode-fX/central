@@ -24,9 +24,9 @@ static MidiEvent on(uint8_t note, uint8_t velocity = 100, uint8_t channel = 1) {
 
 static NodeConfig tonnetz_config(uint8_t cycle, uint8_t deviation = 0, uint8_t seed = 9){
     NodeConfig c = node_config(ALGO_TONNETZ);
-    c.in_bus[0] = GATE_ADVANCE;
-    c.in_bus[1] = GATE_RESET;
-    c.out_bus[0] = NOTE_TRIAD;
+    c.in_buses[0] = one_bus(GATE_ADVANCE);
+    c.in_buses[1] = one_bus(GATE_RESET);
+    c.out_buses[0] = one_bus(NOTE_TRIAD);
     c.params[Tonnetz::P_CYCLE] = cycle;
     c.params[Tonnetz::P_DEVIATION] = deviation;
     c.params[Tonnetz::P_OCTAVE] = 5;                   // middle C
@@ -350,12 +350,12 @@ static void test_tonnetz_hangs_nothing() {
 static void test_into_a_voicer_two_of_three_voices_are_held() {
     BusManager bus;
     NodeConfig tc = tonnetz_config(Tonnetz::TONNETZ_LR);
-    tc.out_bus[0] = NOTE_TRIAD;
+    tc.out_buses[0] = one_bus(NOTE_TRIAD);
     Tonnetz walker(tc);
 
     NodeConfig vc = node_config(ALGO_VOICER);
-    vc.in_bus[0] = NOTE_TRIAD;
-    vc.out_bus[0] = NOTE_VOICED;
+    vc.in_buses[0] = one_bus(NOTE_TRIAD);
+    vc.out_buses[0] = one_bus(NOTE_VOICED);
     vc.params[Voicer::P_MODE] = Voicer::VOICE_CLOSEST;
     vc.params[Voicer::P_LOW] = 48;
     vc.params[Voicer::P_HIGH] = 84;
@@ -415,7 +415,7 @@ static void test_the_first_triad_is_the_one_the_key_holds() {
 static void test_the_root_inlet_plays_the_walk() {
     BusManager bus;
     NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_LR);
-    c.in_bus[2] = NOTE_ROOT;
+    c.in_buses[2] = one_bus(NOTE_ROOT);
     Tonnetz node(c);
 
     advance(node, bus);                                 // the parameter's root
@@ -447,7 +447,7 @@ static void test_the_root_inlet_plays_the_walk() {
 static void test_a_played_root_does_not_drag_the_key_with_it() {
     BusManager bus;
     NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_PL, 50);
-    c.in_bus[2] = NOTE_ROOT;
+    c.in_buses[2] = one_bus(NOTE_ROOT);
     c.params[Tonnetz::P_DIATONIC] = 1;
     Tonnetz node(c);
     global_key::set(SCALE_MAJOR, 0);
@@ -468,7 +468,7 @@ static void test_a_played_root_does_not_drag_the_key_with_it() {
 static void test_octave_places_a_played_root_and_moves_what_is_sounding() {
     BusManager bus;
     NodeConfig c = tonnetz_config(Tonnetz::TONNETZ_LR);
-    c.in_bus[2] = NOTE_ROOT;
+    c.in_buses[2] = one_bus(NOTE_ROOT);
     c.params[Tonnetz::P_OCTAVE] = 0;                   // the key's own register
     Tonnetz node(c);
     global_key::set(SCALE_MAJOR, 0);

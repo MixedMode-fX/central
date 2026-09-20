@@ -324,9 +324,12 @@ export class Device extends EventTarget {
   // Incremental ----------------------------------------------------------
   // Dragging a connection sends one message, not a full dump.
 
-  async setConnection(node, isOutlet, index, bus) {
+  // The whole set of buses that port is on, not one bus: the message says
+  // what the port *is*, so two editors cannot drift apart over it
+  // (src/bus/domain.h).
+  async setConnection(node, isOutlet, index, buses) {
     return this.command(P.SysexCommand.SYSEX_SET_CONNECTION,
-      [node, isOutlet ? 1 : 0, index, bus === P.NO_BUS ? 0x7f : bus]);
+      [node, isOutlet ? 1 : 0, index, ...codec.wireBuses(buses)]);
   }
   // A parameter byte reaches 255 and a SysEx data byte holds seven bits, so
   // the value travels as a u14 - low seven bits where they have always been,
@@ -344,14 +347,14 @@ export class Device extends EventTarget {
     this.throwOnNak(reply, 'no such parameter');
     return codec.readU14(reply, 8) & 0xff;
   }
-  async setGatePort(jack, direction, bus) {
+  async setGatePort(jack, direction, buses) {
     return this.command(P.SysexCommand.SYSEX_SET_GATE_PORT,
-      [jack, direction, bus === P.NO_BUS ? 0x7f : bus]);
+      [jack, direction, ...codec.wireBuses(buses)]);
   }
-  async setMidiPort(index, isOut, mask, channel, bus) {
+  async setMidiPort(index, isOut, mask, channel, buses) {
     const flags = (isOut ? 1 : 0) | ((mask & 0x80) ? 2 : 0);
     return this.command(P.SysexCommand.SYSEX_SET_MIDI_PORT,
-      [index, flags, mask & 0x7f, channel, bus === P.NO_BUS ? 0x7f : bus]);
+      [index, flags, mask & 0x7f, channel, ...codec.wireBuses(buses)]);
   }
   // The key and the register it sits in (src/midi/global_key.h) ride on the
   // same message: they are patch state rather than a node's, so they are set
@@ -401,18 +404,17 @@ export class Device extends EventTarget {
       ...codec.u14(m.max),
     ]);
   }
-  // One modulation route (src/control/mod_matrix.h). A bus index that is not
-  // a bus clears the slot, which is what the firmware reads too: NO_BUS is
-  // 0xFF and does not fit a data byte, so "not a bus" says it rather than a
-  // separate enable flag that could disagree with the bus field.
+  // One modulation route (src/control/mod_matrix.h).
   async setModRoute(slot, route) {
-    const r = route ?? { bus: P.NO_BUS };
-    if (r.bus === P.NO_BUS || r.bus === null || r.bus === undefined) {
+    // A route with no source buses is a cleared slot: the module reads the
+    // empty set that way rather than needing an enable flag beside it.
+    const r = route ?? {};
+    if (!(r.buses ?? []).length) {
       return this.command(P.SysexCommand.SYSEX_SET_MOD_ROUTE,
-        [slot, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        [slot, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
     return this.command(P.SysexCommand.SYSEX_SET_MOD_ROUTE, [
-      slot, r.bus, r.targetKind, r.targetIndex,
+      slot, ...codec.wireBuses(r.buses), r.targetKind, r.targetIndex,
       ...codec.u14(r.param), ...codec.u14(r.min), ...codec.u14(r.max),
       r.depth & 0x7f, (r.flags & 0x3f) | ((r.depth & 0x80) ? 0x40 : 0),
     ]);
@@ -422,17 +424,17 @@ export class Device extends EventTarget {
       this.msg(P.SysexCommand.SYSEX_GET_MOD_ROUTE, [slot]),
       (r) => this.isReply(r, P.SysexCommand.SYSEX_MOD_ROUTE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
     this.throwOnNak(reply, 'no such modulation route');
-    const bus = reply[6];
-    if (bus >= 0x7f) return null;
-    const flags = reply[16];
+    const buses = codec.readBuses(reply, 6);
+    if (!buses.length) return null;
+    const flags = reply[18];
     return {
-      bus,
-      targetKind: reply[7],
-      targetIndex: reply[8],
-      param: codec.readU14(reply, 9),
-      min: codec.readU14(reply, 11),
-      max: codec.readU14(reply, 13),
-      depth: (reply[15] & 0x7f) | ((flags & 0x40) ? 0x80 : 0),
+      buses,
+      targetKind: reply[9],
+      targetIndex: reply[10],
+      param: codec.readU14(reply, 11),
+      min: codec.readU14(reply, 13),
+      max: codec.readU14(reply, 15),
+      depth: (reply[17] & 0x7f) | ((flags & 0x40) ? 0x80 : 0),
       flags: flags & 0x3f,
     };
   }

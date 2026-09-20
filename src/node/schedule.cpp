@@ -5,18 +5,20 @@
 static const uint8_t NOTE_BASE = N_GATE_BUS;
 static const uint8_t CV_BASE = N_GATE_BUS + N_NOTE_BUS;
 
-static uint64_t bus_bit(Domain domain, uint8_t bus){
+// One port's set of buses, lifted into the combined space.
+static uint64_t bus_bits(Domain domain, BusSet set){
+    const uint64_t in_domain = (uint64_t)(set.bits & all_buses(domain).bits);
     switch (domain){
-        case Domain::Gate: return bus < N_GATE_BUS ? (uint64_t)1u << bus : 0u;
-        case Domain::Note: return bus < N_NOTE_BUS ? (uint64_t)1u << (NOTE_BASE + bus) : 0u;
-        case Domain::CV:   return bus < N_CV_BUS   ? (uint64_t)1u << (CV_BASE + bus) : 0u;
+        case Domain::Gate: return in_domain;
+        case Domain::Note: return in_domain << NOTE_BASE;
+        case Domain::CV:   return in_domain << CV_BASE;
     }
     return 0u;
 }
 
 // Puts one bus of the combined space back into the per-domain set the
 // BusManager publishes from.
-static void add_bus(BusSet& set, uint8_t bus){
+static void add_bus(PublishSet& set, uint8_t bus){
     if (bus < NOTE_BASE)    set.gate |= (uint32_t)1u << bus;
     else if (bus < CV_BASE) set.note = (uint16_t)(set.note | (1u << (bus - NOTE_BASE)));
     else                    set.cv   = (uint16_t)(set.cv   | (1u << (bus - CV_BASE)));
@@ -31,7 +33,7 @@ void Schedule::clear(){
     for (uint8_t i = 0; i < N_NODE; i++){
         ports[i] = Ports{0, 0, false, false};
         order[i] = i;
-        publish[i] = BusSet{0, 0, 0};
+        publish[i] = PublishSet{0, 0, 0};
     }
     build();
 }
@@ -40,13 +42,11 @@ void Schedule::set(uint8_t index, const NodeConfig& config, const AlgorithmDescr
     if (index >= N_NODE) return;
     Ports& p = ports[index];
     p = Ports{0, 0, descriptor.reads_key, descriptor.writes_key};
-    for (uint8_t i = 0; i < descriptor.n_in; i++){
-        if (config.in_bus[i] == NO_BUS) continue;
-        p.read |= bus_bit(descriptor.in_domain[i], config.in_bus[i]);
+    for (uint8_t i = 0; i < descriptor.n_in && i < MAX_IN; i++){
+        p.read |= bus_bits(descriptor.in_domain[i], config.in_buses[i]);
     }
-    for (uint8_t i = 0; i < descriptor.n_out; i++){
-        if (config.out_bus[i] == NO_BUS) continue;
-        p.write |= bus_bit(descriptor.out_domain[i], config.out_bus[i]);
+    for (uint8_t i = 0; i < descriptor.n_out && i < MAX_OUT; i++){
+        p.write |= bus_bits(descriptor.out_domain[i], config.out_buses[i]);
     }
     if (index >= n) n = (uint8_t)(index + 1u);
 }
@@ -55,8 +55,8 @@ uint8_t Schedule::node_at(uint8_t position) const {
     return position < n ? order[position] : 0;
 }
 
-const BusSet& Schedule::after(uint8_t position) const {
-    static const BusSet none = {0, 0, 0};
+const PublishSet& Schedule::after(uint8_t position) const {
+    static const PublishSet none = {0, 0, 0};
     return position < n ? publish[position] : none;
 }
 
@@ -111,8 +111,8 @@ void Schedule::build(){
     // and the MIDI delivered between passes arrive. Every bus is published
     // exactly once a pass either way, so one nothing writes any more empties
     // rather than holding what it last carried.
-    for (uint8_t pos = 0; pos < n; pos++) publish[pos] = BusSet{0, 0, 0};
-    early = BusSet{0, 0, 0};
+    for (uint8_t pos = 0; pos < n; pos++) publish[pos] = PublishSet{0, 0, 0};
+    early = PublishSet{0, 0, 0};
     for (uint8_t b = 0; b < N_BUS_TOTAL; b++){
         uint8_t last = 0xFF;
         for (uint8_t pos = 0; pos < n; pos++){

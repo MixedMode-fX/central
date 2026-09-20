@@ -39,12 +39,12 @@ class SoundingNotes {
 
         // Emits a note-on and records it. Returns false, having sent nothing,
         // when there is no room to record the release.
-        bool emit(BusManager& bus, uint8_t out_bus,
+        bool emit(BusManager& bus, BusSet out_buses,
                   uint8_t source, uint8_t note, uint8_t velocity, uint8_t channel);
         // Releases everything emitted for `source`. Returns how many.
-        uint8_t release(BusManager& bus, uint8_t out_bus, uint8_t source);
+        uint8_t release(BusManager& bus, BusSet out_buses, uint8_t source);
         // Releases everything. Emits note-offs and nothing else.
-        uint8_t release_all(BusManager& bus, uint8_t out_bus);
+        uint8_t release_all(BusManager& bus, BusSet out_buses);
 
         uint8_t count() const { return n; }
         const SoundingNote& at(uint8_t index) const;
@@ -53,7 +53,7 @@ class SoundingNotes {
         uint32_t refused() const { return refusals; }
 
     private:
-        void send_off(BusManager& bus, uint8_t out_bus, const SoundingNote& s) const;
+        void send_off(BusManager& bus, BusSet out_buses, const SoundingNote& s) const;
 
         SoundingNote notes[CAPACITY];
         SoundingNote none;

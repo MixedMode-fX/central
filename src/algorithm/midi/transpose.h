@@ -88,8 +88,8 @@ class Transpose : public Node{
         // The shift in scale steps: what `offset()` asks for, read in the key.
         int16_t degree_shift() const;
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         int8_t semitones;
         int8_t octaves;
         bool diatonic;

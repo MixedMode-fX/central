@@ -105,6 +105,80 @@ static void test_reset_clears_everything() {
     TEST_ASSERT_EQUAL(0, bus.cv_read(1));
 }
 
+// --- a port's set of buses ------------------------------------------------
+//
+// An inlet reading two buses is a merge under the domain's own fan-in rule,
+// and it costs the two writers nothing: each keeps its own bus.
+
+static BusSet both(uint8_t a, uint8_t b) { BusSet s{}; s.add(a); s.add(b); return s; }
+
+static void test_reading_a_set_of_gate_buses_is_their_or() {
+    BusManager bus;
+    bus.gate_write(1, true);
+    bus.swap();
+    TEST_ASSERT_TRUE(bus.gate_read(both(1, 5)));
+    TEST_ASSERT_FALSE(bus.gate_read(one_bus(5)));      // the other writer is untouched
+    bus.swap();
+    TEST_ASSERT_FALSE(bus.gate_read(both(1, 5)));
+}
+
+static void test_writing_a_set_of_gate_buses_writes_every_one() {
+    BusManager bus;
+    bus.gate_write(both(2, 7), true);
+    bus.swap();
+    TEST_ASSERT_TRUE(bus.gate_read(2));
+    TEST_ASSERT_TRUE(bus.gate_read(7));
+    TEST_ASSERT_FALSE(bus.gate_read(3));
+}
+
+static void test_reading_a_set_of_cv_buses_is_their_sum() {
+    BusManager bus;
+    bus.cv_write(0, 300);
+    bus.cv_write(1, 400);
+    bus.swap();
+    TEST_ASSERT_EQUAL(700, bus.cv_read(both(0, 1)));
+    TEST_ASSERT_EQUAL(300, bus.cv_read(one_bus(0)));
+}
+
+static void test_reading_a_set_of_note_buses_concatenates_in_bus_order() {
+    BusManager bus;
+    bus.note_write(4, note_on(64));
+    bus.note_write(1, note_on(60));
+    bus.note_write(1, note_on(62));
+    bus.swap();
+    const BusSet set = both(1, 4);
+    TEST_ASSERT_EQUAL(3, bus.note_count(set));
+    // The lower bus first, arrival order within it - so a merge is the same
+    // every pass and the tests can say what a node saw.
+    TEST_ASSERT_EQUAL(60, bus.note_read(set, 0).data1);
+    TEST_ASSERT_EQUAL(62, bus.note_read(set, 1).data1);
+    TEST_ASSERT_EQUAL(64, bus.note_read(set, 2).data1);
+    TEST_ASSERT_EQUAL(0, bus.note_read(set, 3).type);      // past the end
+}
+
+static void test_a_note_written_to_a_set_reaches_every_bus_and_room_is_the_tightest() {
+    BusManager bus;
+    for (uint8_t i = 0; i < NOTE_QUEUE_DEPTH - 1u; i++) bus.note_write(6, note_on(60));
+    const BusSet set = both(3, 6);
+    TEST_ASSERT_EQUAL(1, bus.note_room(set));              // bus 6 is nearly full
+    TEST_ASSERT_TRUE(bus.note_write(set, note_on(72)));
+    bus.swap();
+    TEST_ASSERT_EQUAL(1, bus.note_count(one_bus(3)));
+    TEST_ASSERT_EQUAL(NOTE_QUEUE_DEPTH, bus.note_count(one_bus(6)));
+}
+
+static void test_an_empty_set_reads_nothing_and_writes_nowhere() {
+    BusManager bus;
+    bus.gate_write(BusSet{}, true);
+    bus.cv_write(BusSet{}, 1000);
+    bus.note_write(BusSet{}, note_on(60));
+    bus.swap();
+    TEST_ASSERT_FALSE(bus.gate_read(BusSet{}));
+    TEST_ASSERT_EQUAL(0, bus.cv_read(BusSet{}));
+    TEST_ASSERT_EQUAL(0, bus.note_count(BusSet{}));
+    for (uint8_t b = 0; b < N_GATE_BUS; b++) TEST_ASSERT_FALSE(bus.gate_read(b));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_gate_is_double_buffered);
@@ -114,5 +188,11 @@ int main() {
     RUN_TEST(test_cv_sum_saturates);
     RUN_TEST(test_out_of_range_indices_are_ignored);
     RUN_TEST(test_reset_clears_everything);
+    RUN_TEST(test_reading_a_set_of_gate_buses_is_their_or);
+    RUN_TEST(test_writing_a_set_of_gate_buses_writes_every_one);
+    RUN_TEST(test_reading_a_set_of_cv_buses_is_their_sum);
+    RUN_TEST(test_reading_a_set_of_note_buses_concatenates_in_bus_order);
+    RUN_TEST(test_a_note_written_to_a_set_reaches_every_bus_and_room_is_the_tightest);
+    RUN_TEST(test_an_empty_set_reads_nothing_and_writes_nowhere);
     return UNITY_END();
 }

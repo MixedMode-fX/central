@@ -12,6 +12,7 @@ import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
 import { Panel, Hint, Row, Notice } from '../components/Panel.js';
 import { Table } from '../components/Table.js';
+import { busWords } from '../../core/graph.js';
 import { Field, Fields } from '../components/Field.js';
 import { Select } from '../components/Select.js';
 import { NumberField } from '../components/NumberField.js';
@@ -126,7 +127,7 @@ export function RouteTable(app) {
           head: ['slot', 'signal', 'moves', 'how', ''],
           rows: used.map(({ r, slot }) => [
             String(slot),
-            `CV bus ${r.bus}`,
+            `CV ${busWords(r.buses)}`,
             describeTarget(app, r),
             [
               (r.flags & P.ModFlags.MOD_MODE_MASK) === P.ModMode.MOD_OFFSET ? 'offset' : 'absolute',

@@ -140,12 +140,12 @@ class MidiToCv : public Node{
         // Where a note sits on the pitch bus, bend included, clamped.
         int16_t pitch_of(uint8_t note) const;
 
-        uint8_t in;
-        uint8_t pitch_out;
-        uint8_t gate_out;
-        uint8_t velocity_out;
-        uint8_t mod_out;
-        uint8_t trig_out;
+        BusSet in;
+        BusSet pitch_out;
+        BusSet gate_out;
+        BusSet velocity_out;
+        BusSet mod_out;
+        BusSet trig_out;
 
         uint8_t priority;
         uint8_t range;          // octaves across full scale

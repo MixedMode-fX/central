@@ -55,8 +55,8 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 Lfo::Lfo(const NodeConfig& config) :
-    reset_in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    reset_in(config.in_buses[0]),
+    out(config.out_buses[0]),
     shape(clamp_enum(config.params[0], LFO_SHAPES, LFO_SINE)),
     sync(clamp_enum(config.params[1], LFO_SYNCS, LFO_FREE)),
     rate_param(config.params[2] ? config.params[2] : 20),
@@ -109,7 +109,7 @@ void Lfo::restart(){
 }
 
 void Lfo::process(BusManager& bus, uint32_t now_us){
-    if (reset_in != NO_BUS){
+    if (reset_in.any()){
         const bool level = bus.gate_read(reset_in);
         if (level && !last_gate) restart();
         last_gate = level;

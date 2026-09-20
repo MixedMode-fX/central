@@ -32,9 +32,9 @@ static uint8_t clamp_mode(uint8_t stored){
 }
 
 GateHold::GateHold(const NodeConfig& config) :
-    set_in(config.in_bus[0]),
-    reset_in(config.in_bus[1]),
-    out(config.out_bus[0]),
+    set_in(config.in_buses[0]),
+    reset_in(config.in_buses[1]),
+    out(config.out_buses[0]),
     how(clamp_mode(config.params[0])),
     hold_param(config.params[1]),
     // A patch that stored the gate up loads with it up: the level is state a
@@ -79,12 +79,12 @@ uint8_t GateHold::get_param(uint16_t index) const {
 }
 
 void GateHold::process(BusManager& bus, uint32_t now_us){
-    const bool set_level = (set_in == NO_BUS) ? false : bus.gate_read(set_in);
+    const bool set_level = (!set_in.any()) ? false : bus.gate_read(set_in);
     const bool set_rise = set_level && !last_set;
     last_set = set_level;
 
     bool reset_rise = false;
-    if (reset_in != NO_BUS){
+    if (reset_in.any()){
         const bool r = bus.gate_read(reset_in);
         reset_rise = r && !last_reset;
         last_reset = r;

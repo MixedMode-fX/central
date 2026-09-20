@@ -22,8 +22,8 @@ const AlgorithmDescriptor Sustain::descriptor = {
     CATEGORY_MIDI };
 
 Sustain::Sustain(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     channel(config.params[0] ? config.params[0] : 1),
     controller(config.params[1] ? config.params[1] : 64),
     invert(config.params[2] != 0),

@@ -159,8 +159,8 @@ class Tonnetz : public Node{
 
         EdgeIn advance_in;
         EdgeIn reset_in;
-        uint8_t root_in;
-        uint8_t note_out;
+        BusSet root_in;
+        BusSet note_out;
         uint8_t cycle;
         uint8_t deviation;
         bool diatonic;

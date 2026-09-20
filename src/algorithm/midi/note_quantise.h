@@ -48,9 +48,9 @@ class NoteQuantise : public Node{
         uint8_t active_root() const;
 
     private:
-        uint8_t in;
-        uint8_t root_in;
-        uint8_t out;
+        BusSet in;
+        BusSet root_in;
+        BusSet out;
         // What the root inlet last wrote, or NO_ROOT until it has: a cable
         // that has not played anything yet has not said anything, so the key
         // is still what the node is in.

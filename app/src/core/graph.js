@@ -10,31 +10,27 @@ import * as P from '../protocol/generated.js';
 import { Domain, busCount, domainName } from './validate.js';
 import { MUSICAL_PORTS, ALL_MUSICAL } from '../protocol/names.js';
 import {
-  isRoute, isBinding, routesOf, routeTo, bindingTo, freeModSlot, freeCcSlot, writtenBuses,
+  isBinding, routesOf, routeTo, bindingTo, freeModSlot, freeCcSlot,
   inletName, outletName, paramDescriptorOf, targetParamName,
 } from './patch.js';
 
 const key = (domain, bus) => `${domain}:${bus}`;
 
-// **A block arrives unconnected.** Nothing here chooses a bus for a node, and
-// that is the point: a bus chosen for you is a wire you did not draw. The
-// editor used to patch a new node in on arrival - required inlets onto the bus
-// the last node wrote, the first outlet onto the first bus nothing wrote yet -
-// and every one of those choices was a guess about a patch that did not exist
-// yet. Add a MIDI output while a sequencer is being built and the sequencer's
-// next node lands on the output's bus; add two unrelated nodes and they come
-// out chained. On a canvas those guesses are arrows nobody drew, and undoing
-// one means finding which port to move off which bus.
+// **Every block arrives unconnected, and nothing here chooses a bus for one.**
+// A bus chosen for you is a wire you did not draw. The editor used to patch a
+// new node in on arrival - required inlets onto the bus the last node wrote,
+// the first outlet onto the first bus nothing wrote yet - and every one of
+// those choices was a guess about a patch that did not exist yet. Add a MIDI
+// output while a sequencer is being built and the sequencer's next node lands
+// on the output's bus; add two unrelated nodes and they come out chained. On
+// a canvas those guesses are arrows nobody drew.
 //
-// So a node is added with every port at NO_BUS, and the wires are the ones you
-// drag. Until a required inlet has one the patch is incomplete and the app
-// says so rather than sending it (`validate`, `Editor.sendWhole`) - which is
-// the same thing the canvas is already showing.
-//
-// An endpoint has no NO_BUS to sit at: a jack and a MIDI port carry a bus
-// index whatever they are doing, so "unconnected" for one of them is a bus
-// nothing else is on. `unusedBus` is that, and it is the only bus choice left
-// in this file that is not a drag.
+// So a node, a jack and a MIDI port all arrive on no bus at all, and the
+// wires are the ones you drag. Until a required inlet has one the patch is
+// incomplete and the app says so rather than sending it (`validate`,
+// `Editor.sendWhole`) - which is the same thing the canvas is already showing.
+// The only bus this file ever picks is the one a *source* claims on the drag
+// that first gives it something to say: `freeBus`.
 
 // --- the patch as blocks and arrows ---------------------------------------
 //
@@ -50,12 +46,17 @@ const key = (domain, bus) => `${domain}:${bus}`;
 // that a writer and a reader are on the same bus. That has three consequences
 // the editor has to be honest about, rather than hide behind a cable:
 //
-//   * one outlet on a bus two inlets read is *two* arrows, and they were made
-//     by one bus selection;
-//   * two outlets on one bus are two sources merged, which is a real thing to
-//     do and is drawn as two arrows arriving at the same socket;
-//   * removing one arrow of either shape cannot be done without moving a port
-//     off its bus, which changes the other arrows. `planDisconnect` says which.
+//   * one outlet on a bus two inlets read is *two* arrows;
+//   * two writers of one bus are two sources merged, and so are two buses in
+//     one inlet's set: both are drawn as two arrows arriving at one socket;
+//   * a port is on a *set* of buses, so an arrow can be removed on its own -
+//     the reader drops that one bus and keeps the rest.
+//
+// That last one is why a port carries a set rather than a bus. With one bus
+// per port, summing two sources meant putting them on the same bus, which
+// merged everything else they were driving too: connecting one thing
+// disconnected another. Now a source keeps its own bus and a destination
+// listens to as many as it likes.
 
 export const BlockKind = Object.freeze({
   Node: 'node', Jack: 'jack', MidiIn: 'midiIn', MidiOut: 'midiOut',
@@ -86,7 +87,7 @@ export const BlockKind = Object.freeze({
 // True for a port synthesised from a modulation route rather than read from a
 // descriptor. `at` still numbers the row it is drawn on - `layout.js` places a
 // socket from it, so it cannot be an arbitrary handle - but it is *not* an
-// index into inBus, and `modSlot` is what says which route the port is.
+// index into inBuses, and `modSlot` is what says which route the port is.
 export const isModPort = (port) => port?.modSlot !== undefined && port?.modSlot !== null;
 
 // Every route that reaches node `index`, as inlet-shaped ports, numbered from
@@ -97,7 +98,7 @@ function modInlets(device, patch, index, firstRow) {
   return routesOf(patch, index).map(({ slot, route }, row) => ({
     at: firstRow + row, modSlot: slot,
     name: targetParamName(device, patch, route),
-    domain: Domain.CV, bus: route.bus, required: false,
+    domain: Domain.CV, buses: route.buses, required: false,
   }));
 }
 
@@ -151,7 +152,7 @@ export function patchBlocks(device, patch) {
       id: blockId(BlockKind.MidiIn, i), kind: BlockKind.MidiIn, index: i,
       title: `MIDI in ${i + 1}`, subtitle: 'plays a note bus',
       inlets: [],
-      outlets: [{ at: 0, name: 'notes', domain: Domain.Note, bus: port.bus }],
+      outlets: [{ at: 0, name: 'notes', domain: Domain.Note, buses: port.buses }],
     });
   });
 
@@ -161,7 +162,7 @@ export function patchBlocks(device, patch) {
       id: blockId(BlockKind.Jack, i), kind: BlockKind.Jack, index: i,
       title: `jack ${i + 1}`, subtitle: 'in — drives a gate bus',
       inlets: [],
-      outlets: [{ at: 0, name: 'gate', domain: Domain.Gate, bus: port.bus }],
+      outlets: [{ at: 0, name: 'gate', domain: Domain.Gate, buses: port.buses }],
     });
   });
 
@@ -178,7 +179,7 @@ export function patchBlocks(device, patch) {
     const inlets = [];
     for (let k = 0; k < d.nIn && k < P.MAX_IN; k++) {
       inlets.push({ at: k, name: inletName(d, k), domain: d.inDomain[k],
-                    bus: node.inBus[k], required: k < d.minIn });
+                    buses: node.inBuses[k] ?? [], required: k < d.minIn });
     }
     // Parameters something is modulating, as inlets. See the note above
     // BlockKind: only the ones in use are drawn, which is what keeps a block
@@ -186,7 +187,8 @@ export function patchBlocks(device, patch) {
     for (const port of modInlets(device, patch, i, inlets.length)) inlets.push(port);
     const outlets = [];
     for (let k = 0; k < d.nOut && k < P.MAX_OUT; k++) {
-      outlets.push({ at: k, name: outletName(d, k), domain: d.outDomain[k], bus: node.outBus[k] });
+      outlets.push({ at: k, name: outletName(d, k), domain: d.outDomain[k],
+                     buses: node.outBuses[k] ?? [] });
     }
     blocks.push({
       id: blockId(BlockKind.Node, i), kind: BlockKind.Node, index: i,
@@ -200,7 +202,7 @@ export function patchBlocks(device, patch) {
     blocks.push({
       id: blockId(BlockKind.Jack, i), kind: BlockKind.Jack, index: i,
       title: `jack ${i + 1}`, subtitle: 'out — a gate bus drives it',
-      inlets: [{ at: 0, name: 'gate', domain: Domain.Gate, bus: port.bus, required: false }],
+      inlets: [{ at: 0, name: 'gate', domain: Domain.Gate, buses: port.buses, required: false }],
       outlets: [],
     });
   });
@@ -210,7 +212,7 @@ export function patchBlocks(device, patch) {
     blocks.push({
       id: blockId(BlockKind.MidiOut, i), kind: BlockKind.MidiOut, index: i,
       title: `MIDI out ${i + 1}`, subtitle: 'sends a note bus',
-      inlets: [{ at: 0, name: 'notes', domain: Domain.Note, bus: port.bus, required: false }],
+      inlets: [{ at: 0, name: 'notes', domain: Domain.Note, buses: port.buses, required: false }],
       outlets: [],
     });
   });
@@ -225,16 +227,18 @@ export function connectionsOf(blocks) {
   const readers = new Map();
   for (const block of blocks) {
     for (const port of block.outlets) {
-      if (port.bus === P.NO_BUS) continue;
-      const k = key(port.domain, port.bus);
-      if (!writers.has(k)) writers.set(k, []);
-      writers.get(k).push({ block, port });
+      for (const bus of port.buses) {
+        const k = key(port.domain, bus);
+        if (!writers.has(k)) writers.set(k, []);
+        writers.get(k).push({ block, port });
+      }
     }
     for (const port of block.inlets) {
-      if (port.bus === P.NO_BUS) continue;
-      const k = key(port.domain, port.bus);
-      if (!readers.has(k)) readers.set(k, []);
-      readers.get(k).push({ block, port });
+      for (const bus of port.buses) {
+        const k = key(port.domain, bus);
+        if (!readers.has(k)) readers.set(k, []);
+        readers.get(k).push({ block, port });
+      }
     }
   }
   const arrows = [];
@@ -245,7 +249,7 @@ export function connectionsOf(blocks) {
     for (const source of from) {
       for (const target of to) {
         arrows.push({
-          id: `${source.block.id}#${source.port.at}->${target.block.id}#${target.port.at}`,
+          id: `${source.block.id}#${source.port.at}->${target.block.id}#${target.port.at}@${domain}:${bus}`,
           domain, bus,
           from: { blockId: source.block.id, at: source.port.at },
           to: { blockId: target.block.id, at: target.port.at },
@@ -269,19 +273,18 @@ export function connectionsOf(blocks) {
 // every other rule about the shape of a patch they are here rather than in a
 // view, so a test can ask them without a browser.
 
-// Which way a jack faces. The bus travels with the turn - a jack in on gate
+// Which way a jack faces. The buses travel with the turn - a jack in on gate
 // bus 3 turned round is a jack out *of* gate bus 3, which is the monitoring
-// you were reaching for - and a jack in use has to be on a bus the module
-// actually has, so one coming back from unused lands on the bus it last had
-// or on the first.
+// you were reaching for - and a jack taken out of use lets go of them, so
+// putting it back does not silently reconnect it.
 export function planJackDirection(patch, caps, index, direction) {
   const port = patch.gatePorts?.[index];
   if (!port) return null;
-  const buses = caps?.gateBuses ?? P.N_GATE_BUS;
-  const bus = direction === P.GatePortDirection.GATE_PORT_UNUSED
-    ? P.NO_BUS
-    : (port.bus === P.NO_BUS || port.bus >= buses ? 0 : port.bus);
-  return { index, direction, bus };
+  const limit = caps?.gateBuses ?? P.N_GATE_BUS;
+  const buses = direction === P.GatePortDirection.GATE_PORT_UNUSED
+    ? []
+    : (port.buses ?? []).filter((b) => b < limit);
+  return { index, direction, buses };
 }
 
 // Which way a MIDI port faces, which is not a field to write: the module has
@@ -306,64 +309,53 @@ export function planPortFlip(patch, caps, index, isOut) {
     to: { index: free, isOut: wantOut },
     mask: isOut ? port.targetMask : port.sourceMask,
     channel: port.channel,
-    bus: port.bus,
+    buses: port.buses ?? [],
     said: `MIDI ${wantOut ? 'out' : 'in'} ${free + 1}`
-        + `${port.bus === P.NO_BUS ? '' : `, note bus ${port.bus}`}`,
+        + ((port.buses ?? []).length ? `, note ${busWords(port.buses)}` : ''),
   };
 }
 
-// **Fanning a port out: the same source, a second destination.** One cable's
-// worth of notes reaching two chains, or one note bus reaching two synths, is
-// a patch the module has always been able to run - a MIDI port is a source
-// mask, a channel and a bus, and nothing stops two of them naming the same bus
-// - but making one meant knowing that a spare port slot was where to go and
-// filling it in by hand until the numbers matched. This is that, as an action
-// on the port being copied.
+// **Fanning an output out: the same note buses, a second cable and a second
+// channel.** One output already sends to every cable in its mask, so this is
+// not about reaching more of them - it is about reaching one of them on a
+// *different channel*, which is a second port or nothing.
 //
-// Which half travels is which half is the *source*, and that is the one thing
-// the two directions do not share: an input's source is its cables, so the
-// copy keeps them and takes a note bus nothing else writes; an output's source
-// is its note bus, so the copy keeps that and takes a cable the original is
-// not already playing - never the same one, because two outputs on one bus and
-// one cable is every note sent down it twice.
-export function planPortFanOut(device, patch, caps, index, isOut) {
-  const ports = (isOut ? patch.midiOut : patch.midiIn) ?? [];
+// There is no such action on an input. An input reaching a second note bus is
+// that bus in its own set now (src/bus/domain.h), which is a drag on the
+// canvas rather than a second port to keep in step.
+export function planPortFanOut(patch, caps, index) {
+  const ports = patch.midiOut ?? [];
   const port = ports[index];
-  const mask = isOut ? port?.targetMask : port?.sourceMask;
-  if (!port || !mask) return { ok: false, why: 'that port is not in use' };
-  const limit = (isOut ? caps?.midiOut : caps?.midiIn) ?? ports.length;
-  const free = ports.findIndex((other, i) =>
-    i < limit && !(isOut ? other.targetMask : other.sourceMask));
-  if (free < 0) {
-    return { ok: false, why: `every MIDI ${isOut ? 'output' : 'input'} port is already in use` };
-  }
+  if (!port || !port.targetMask) return { ok: false, why: 'that port is not in use' };
+  const limit = caps?.midiOut ?? ports.length;
+  const free = ports.findIndex((other, i) => i < limit && !other.targetMask);
+  if (free < 0) return { ok: false, why: 'every MIDI output port is already in use' };
+  if (!(port.buses ?? []).length) return { ok: false, why: 'that port is on no note bus' };
 
-  if (isOut) {
-    if (port.bus === P.NO_BUS) return { ok: false, why: 'that port is on no note bus' };
-    // Every cable the bus already goes down, so the copy lands on one it does
-    // not: a second output doubling the first is not a fan-out, it is a flam.
-    let taken = 0;
-    ports.forEach((other, i) => {
-      if (i < limit && other.targetMask && other.bus === port.bus) taken |= other.targetMask;
-    });
-    const cable = MUSICAL_PORTS.find((p) => (taken & p.value) === 0);
-    if (!cable) return { ok: false, why: 'that note bus already plays every cable' };
-    return {
-      ok: true, index: free, isOut, mask: cable.value, channel: port.channel, bus: port.bus,
-      said: `MIDI out ${free + 1} plays note bus ${port.bus} on ${cable.label} too`,
-    };
-  }
-
-  const written = writtenBuses(device, patch);
-  let bus = -1;
-  for (let b = 0; b < busCount(caps, Domain.Note); b++) {
-    if (!written.has(key(Domain.Note, b))) { bus = b; break; }
-  }
-  if (bus < 0) return { ok: false, why: 'every note bus already has a source' };
+  // Every cable those buses already go down, so the copy lands on one they do
+  // not: a second output doubling the first is not a fan-out, it is a flam.
+  let taken = 0;
+  ports.forEach((other, i) => {
+    if (i < limit && other.targetMask && sameBuses(other.buses, port.buses)) taken |= other.targetMask;
+  });
+  const cable = MUSICAL_PORTS.find((p) => (taken & p.value) === 0);
+  if (!cable) return { ok: false, why: 'those note buses already play every cable' };
   return {
-    ok: true, index: free, isOut, mask, channel: port.channel, bus,
-    said: `MIDI in ${free + 1} feeds note bus ${bus} from the same cables`,
+    ok: true, index: free, isOut: true, mask: cable.value, channel: port.channel,
+    buses: port.buses,
+    said: `MIDI out ${free + 1} plays note ${busWords(port.buses)} on ${cable.label} too`,
   };
+}
+
+const sameBuses = (a, b) => (a ?? []).length === (b ?? []).length
+  && (a ?? []).every((bus) => b.includes(bus));
+
+// A port's buses in words: "bus 3", or "buses 0 and 3" for a merge.
+export function busWords(buses) {
+  const list = buses ?? [];
+  if (!list.length) return 'no bus';
+  if (list.length === 1) return `bus ${list[0]}`;
+  return `buses ${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
 // The flip, made to the patch. Two ports change: the one being left goes back
@@ -377,41 +369,26 @@ export function applyPortFlip(patch, plan) {
     [plan.from.isOut ? 'targetMask' : 'sourceMask']: 0,
   };
   to[plan.to.index] = {
-    ...to[plan.to.index], channel: plan.channel, bus: plan.bus,
+    ...to[plan.to.index], channel: plan.channel, buses: plan.buses,
     [plan.to.isOut ? 'targetMask' : 'sourceMask']: plan.mask,
   };
   return plan;
 }
 
-// A bus to put a new connection on. One nothing writes *and* nothing reads
-// first, so a fresh connection never joins two signals that had nothing to do
-// with each other; then one nothing writes, which is a merge nobody asked for
-// but is at least audible; then nothing, and the drag is refused.
+// A bus for a source that has none yet. One nothing writes *and* nothing
+// reads first, so a fresh connection never joins two signals that had nothing
+// to do with each other; then one nothing writes, which is a merge nobody
+// asked for but is at least audible; then nothing, and the drag is refused.
 export function freeBus(blocks, caps, domain) {
   const written = new Set();
   const read = new Set();
   for (const block of blocks) {
-    for (const port of block.outlets) if (port.domain === domain) written.add(port.bus);
-    for (const port of block.inlets) if (port.domain === domain) read.add(port.bus);
+    for (const port of block.outlets) if (port.domain === domain) for (const b of port.buses) written.add(b);
+    for (const port of block.inlets) if (port.domain === domain) for (const b of port.buses) read.add(b);
   }
   const n = busCount(caps, domain);
   for (let b = 0; b < n; b++) if (!written.has(b) && !read.has(b)) return b;
   for (let b = 0; b < n; b++) if (!written.has(b)) return b;
-  return null;
-}
-
-// A bus nothing is on at all, for a block that cannot be left unconnected.
-// Unlike `freeBus` there is no second choice: a jack or a MIDI port put on a
-// bus something already writes or reads is exactly the wire nobody asked for,
-// so when the domain is full the caller refuses instead.
-export function unusedBus(blocks, caps, domain) {
-  const taken = new Set();
-  for (const block of blocks) {
-    for (const port of block.outlets) if (port.domain === domain) taken.add(port.bus);
-    for (const port of block.inlets) if (port.domain === domain) taken.add(port.bus);
-  }
-  const n = busCount(caps, domain);
-  for (let b = 0; b < n; b++) if (!taken.has(b)) return b;
   return null;
 }
 
@@ -425,17 +402,17 @@ export function portOf(blocks, ref) {
   return port ? { block, port } : null;
 }
 
-// What a drag from one socket to another means, as a list of ports to move and
-// a sentence saying what happened. Nothing is applied here: `App.applyPlan`
-// writes the patch and sends the messages, so the rule and the effect are not
-// the same code.
+// What a drag from one socket to another means, as a list of ports to write
+// and a sentence saying what happened. Nothing is applied here:
+// `App.applyPlan` writes the patch and sends the messages, so the rule and the
+// effect are not the same code.
 //
-// The bus is the source's, if it has one - dragging *from* something already
-// on a bus adds a listener to it rather than moving it, which is what makes
-// "one sequencer, three things reading it" the easy shape to build. Otherwise
-// the target's, and otherwise a free one. Which end the drag started at does
-// not change the answer: dragging an inlet onto an outlet connects the same
-// two ports.
+// **A connection only ever adds.** The source keeps its bus - claiming a free
+// one if this is the first thing it has been asked to drive - and the target
+// adds that bus to the set it already listens to. So a source reaches as many
+// destinations as you drag it to, a destination sums as many sources as you
+// drag into it, and neither ever costs the other a connection it already had.
+// Which end the drag started at does not change the answer.
 export function planConnection(blocks, caps, a, b) {
   const first = portOf(blocks, a);
   const second = portOf(blocks, b);
@@ -452,33 +429,35 @@ export function planConnection(blocks, caps, a, b) {
     return { ok: false, why: `a ${domainName(source.port.domain)} outlet cannot drive a `
                            + `${domainName(target.port.domain)} inlet` };
   }
-
-  const domain = source.port.domain;
-  const writes = [];
-  let bus = source.port.bus;
   if (isModPort(source.port)) {
     return { ok: false, why: 'a modulated parameter is a destination, not a source' };
   }
-  if (bus === P.NO_BUS) {
-    bus = target.port.bus !== P.NO_BUS ? target.port.bus : freeBus(blocks, caps, domain);
+
+  const domain = source.port.domain;
+  const writes = [];
+  // The source's own bus. One already on several is asked to speak on the
+  // first of them: that is the bus that *is* this source in the patch.
+  let bus = source.port.buses[0];
+  if (bus === undefined) {
+    bus = freeBus(blocks, caps, domain);
     if (bus === null) {
       return { ok: false, why: `every ${domainName(domain)} bus is already written by something` };
     }
-    writes.push({ blockId: source.block.id, at: source.port.at, isOutlet: true, bus });
+    writes.push({ blockId: source.block.id, at: source.port.at, isOutlet: true, buses: [bus] });
   }
-  const was = target.port.bus;
-  if (was !== bus) {
-    writes.push({ blockId: target.block.id, at: target.port.at, isOutlet: false, bus,
-                  modSlot: target.port.modSlot });
+  if (target.port.buses.includes(bus)) {
+    return { ok: false, why: 'those two are already connected' };
   }
-  if (!writes.length) return { ok: false, why: 'those two are already connected' };
+  const buses = [...target.port.buses, bus].sort((x, y) => x - y);
+  writes.push({ blockId: target.block.id, at: target.port.at, isOutlet: false, buses,
+                modSlot: target.port.modSlot });
 
-  const moved = was !== P.NO_BUS && was !== bus
-    ? ` (it was reading ${domainName(domain)} bus ${was})` : '';
+  const also = target.port.buses.length
+    ? `, summed with ${busWords(target.port.buses)}` : '';
   return {
     ok: true, domain, bus, writes,
     said: `${source.block.title} ${source.port.name} → ${target.block.title} ${target.port.name}`
-        + ` on ${domainName(domain)} bus ${bus}${moved}`,
+        + ` on ${domainName(domain)} bus ${bus}${also}`,
   };
 }
 
@@ -487,78 +466,64 @@ export function planConnection(blocks, caps, a, b) {
 // which byte moves is a patch-shape question, and it is here so that the tests
 // can apply a plan to a patch without a browser and get exactly what the app
 // would have got.
-export function applyWrite(patch, { blockId, at, isOutlet, bus, modSlot }) {
+export function applyWrite(patch, { blockId, at, isOutlet, buses, modSlot }) {
   const [kind, where] = blockId.split(':');
   const index = Number(where);
-  // A modulated parameter has no inBus byte behind it: what moves is the
-  // route's own bus, and the message that carries it is a different one.
+  const set = [...(buses ?? [])].sort((x, y) => x - y);
+  // A modulated parameter has no inlet behind it: what moves is the route's
+  // own source buses, and the message that carries it is a different one.
   if (modSlot !== undefined && modSlot !== null) {
     const route = patch.modMap?.[modSlot];
     if (!route) return null;
-    if (bus === P.NO_BUS) patch.modMap[modSlot] = null;
-    else route.bus = bus;
+    if (!set.length) patch.modMap[modSlot] = null;
+    else route.buses = set;
     return { kind: 'mod', index: modSlot, port: patch.modMap[modSlot] };
   }
   if (kind === BlockKind.Node) {
     const node = patch.nodes[index];
     if (!node) return null;
-    if (isOutlet) node.outBus[at] = bus; else node.inBus[at] = bus;
+    if (isOutlet) node.outBuses[at] = set; else node.inBuses[at] = set;
     return { kind, index, port: node };
   }
   const port = kind === BlockKind.Jack ? patch.gatePorts[index]
     : kind === BlockKind.MidiOut ? patch.midiOut[index]
     : patch.midiIn[index];
   if (!port) return null;
-  port.bus = bus;
+  port.buses = set;
   return { kind, index, port };
 }
 
-// A jack and a MIDI port are only *in* a patch while they are on a bus: the
-// module validates the pair, so "in use, but not connected" is not a patch it
-// would take. There is therefore no disconnecting one - there is putting it on
-// another bus, and there is taking it out of use, which is removing the block.
-function endpointRefusal(block) {
-  if (block.kind === BlockKind.Node) return null;
-  return { ok: false, why: `${block.title} is only in the patch while it is on a bus` };
-}
-
-// Removing one arrow. The reader comes off the bus, because that is the end
-// the arrow points at and the only end whose other arrows a user is not also
-// looking at - but if the bus had more writers, this stops that reader hearing
-// all of them, and if it had more readers, they are untouched. Both are said,
-// because a patch that quietly loses a connection nobody asked about is worse
-// than one that explains itself.
+// Removing one arrow, and only that one. The reader drops the arrow's bus
+// from its set and keeps every other bus it was listening to; the writer and
+// its other readers are untouched. That is the whole of it - which is what a
+// set of buses per port buys, and why this no longer has to explain what else
+// it took away.
 export function planDisconnect(blocks, arrow) {
   const target = portOf(blocks, { ...arrow.to, isOutlet: false });
   if (!target) return { ok: false, why: 'that arrow is no longer in the patch' };
-  const refused = endpointRefusal(target.block);
-  if (refused) return refused;
-  const also = arrow.writers > 1
-    ? ` — ${arrow.writers - 1} other source${arrow.writers > 2 ? 's were' : ' was'} on `
-      + `${domainName(arrow.domain)} bus ${arrow.bus}`
-    : '';
+  const buses = target.port.buses.filter((b) => b !== arrow.bus);
+  const left = buses.length ? `, still reading ${busWords(buses)}` : '';
   return {
     ok: true, domain: arrow.domain, bus: arrow.bus,
-    writes: [{ blockId: target.block.id, at: target.port.at, isOutlet: false, bus: P.NO_BUS,
+    writes: [{ blockId: target.block.id, at: target.port.at, isOutlet: false, buses,
                modSlot: target.port.modSlot }],
-    said: isModPort(target.port)
+    said: isModPort(target.port) && !buses.length
       ? `${target.block.title} ${target.port.name} is not modulated any more`
-      : `${target.block.title} ${target.port.name} is not connected${also}`,
+      : `${target.block.title} ${target.port.name} is off `
+        + `${domainName(arrow.domain)} bus ${arrow.bus}${left}`,
   };
 }
 
-// Taking one port off its bus, from the socket itself: the same as removing
-// every arrow at it at once.
+// Taking one port off every bus it is on, from the socket itself: the same as
+// removing every arrow at it at once.
 export function planClear(blocks, ref) {
   const found = portOf(blocks, ref);
   if (!found) return { ok: false, why: 'that socket is no longer in the patch' };
-  if (found.port.bus === P.NO_BUS) return { ok: false, why: 'that socket is not connected' };
-  const refused = endpointRefusal(found.block);
-  if (refused) return refused;
+  if (!found.port.buses.length) return { ok: false, why: 'that socket is not connected' };
   return {
-    ok: true, domain: found.port.domain, bus: found.port.bus,
+    ok: true, domain: found.port.domain, buses: found.port.buses,
     writes: [{ blockId: found.block.id, at: found.port.at, isOutlet: Boolean(ref.isOutlet),
-               bus: P.NO_BUS, modSlot: found.port.modSlot }],
+               buses: [], modSlot: found.port.modSlot }],
     said: isModPort(found.port)
       ? `${found.block.title} ${found.port.name} is not modulated any more`
       : `${found.block.title} ${found.port.name} is not connected`,
@@ -567,9 +532,10 @@ export function planClear(blocks, ref) {
 
 
 // A control signal dropped on a block, once the user has said which parameter
-// they meant. The signal's bus is the route's bus - dragging *from* something
-// already on a bus adds a listener to it, exactly as `planConnection` does -
-// and a source not on a bus yet claims a free one on the way.
+// they meant. The signal's bus becomes the route's source, exactly as
+// `planConnection` does - and a source not on a bus yet claims a free one on
+// the way. A second signal is summed into the same route by dragging onto the
+// socket it drew, like any other inlet.
 //
 // Nothing is applied here: `App.applyPlan` writes the patch and sends the
 // messages, so the rule and the effect are not the same code.
@@ -596,15 +562,15 @@ export function planModulation(blocks, patch, caps, sourceRef, targetBlockId, pa
   }
 
   const writes = [];
-  let bus = source.port.bus;
-  if (bus === P.NO_BUS) {
+  let bus = source.port.buses[0];
+  if (bus === undefined) {
     bus = freeBus(blocks, caps, Domain.CV);
     if (bus === null) return { ok: false, why: 'every CV bus is already written by something' };
-    writes.push({ blockId: source.block.id, at: source.port.at, isOutlet: true, bus });
+    writes.push({ blockId: source.block.id, at: source.port.at, isOutlet: true, buses: [bus] });
   }
 
   const route = {
-    bus,
+    buses: [bus],
     targetKind: P.CcTargetKind.CC_TARGET_NODE,
     targetIndex: index,
     param,
@@ -682,7 +648,7 @@ export function planBusModulation(patch, caps, index, param, bus, options = {}) 
   if (!caps?.modRoutes) {
     return { ok: false, why: 'this firmware has no modulation routes' };
   }
-  if (bus === P.NO_BUS || bus < 0 || bus >= busCount(caps, Domain.CV)) {
+  if (!Number.isInteger(bus) || bus < 0 || bus >= busCount(caps, Domain.CV)) {
     return { ok: false, why: 'that is not a CV bus' };
   }
   const target = patch.nodes[index];
@@ -693,7 +659,8 @@ export function planBusModulation(patch, caps, index, param, bus, options = {}) 
   const existing = routeTo(patch, index, param);
   if (existing) {
     const { slot: at, ...route } = existing;
-    return { ok: true, domain: Domain.CV, bus, writes: [], routes: [{ slot: at, route: { ...route, bus } }],
+    return { ok: true, domain: Domain.CV, bus, writes: [],
+             routes: [{ slot: at, route: { ...route, buses: [bus] } }],
              said: `${name} now reads CV bus ${bus}` };
   }
   const slot = freeModSlot(patch, caps.modRoutes);
@@ -701,7 +668,7 @@ export function planBusModulation(patch, caps, index, param, bus, options = {}) 
     return { ok: false, why: `every one of the module's ${caps.modRoutes} modulation routes is in use` };
   }
   const route = {
-    bus, targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: index, param,
+    buses: [bus], targetKind: P.CcTargetKind.CC_TARGET_NODE, targetIndex: index, param,
     min: 0, max: 0,
     depth: options.depth ?? 255,
     flags: options.flags ?? P.ModFlags.MOD_BIPOLAR | P.ModMode.MOD_OFFSET,

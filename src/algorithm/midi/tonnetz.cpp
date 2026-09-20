@@ -58,10 +58,10 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 Tonnetz::Tonnetz(const NodeConfig& config) :
-    advance_in(config.in_bus[0]),
-    reset_in(config.in_bus[1]),
-    root_in(config.in_bus[2]),
-    note_out(config.out_bus[0]),
+    advance_in(config.in_buses[0]),
+    reset_in(config.in_buses[1]),
+    root_in(config.in_buses[2]),
+    note_out(config.out_buses[0]),
     cycle(clamp_enum(config.params[P_CYCLE], TONNETZ_CYCLES, TONNETZ_LR)),
     deviation(config.params[P_DEVIATION] > 100 ? (uint8_t)100 : config.params[P_DEVIATION]),
     diatonic(config.params[P_DIATONIC] != 0),
@@ -257,7 +257,7 @@ void Tonnetz::restart(){
 void Tonnetz::process(BusManager& bus, uint32_t){
     // The root first, so a root and an edge arriving in the same pass agree:
     // the advance then plays the triad the key puts on the note just sent.
-    if (root_in != NO_BUS){
+    if (root_in.any()){
         const uint8_t n = bus.note_count(root_in);
         for (uint8_t i = 0; i < n; i++){
             const MidiEvent e = bus.note_read(root_in, i);

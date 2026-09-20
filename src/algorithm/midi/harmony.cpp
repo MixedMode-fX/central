@@ -58,10 +58,10 @@ const AlgorithmDescriptor Harmony::descriptor = {
 
 
 Harmony::Harmony(const NodeConfig& config) :
-    advance_in(config.in_bus[0]),
-    reset_in(config.in_bus[1]),
-    note_out(config.out_bus[0]),
-    cv_out(config.out_bus[1]),
+    advance_in(config.in_buses[0]),
+    reset_in(config.in_buses[1]),
+    note_out(config.out_buses[0]),
+    cv_out(config.out_buses[1]),
     phrase(config.params[P_PHRASE] ? (config.params[P_PHRASE] > MAX_PHRASE ? MAX_PHRASE
                                                                           : config.params[P_PHRASE])
                                    : (uint8_t)4),
@@ -381,7 +381,7 @@ void Harmony::process(BusManager& bus, uint32_t){
         if (sounding.at(0).note != want) strike(bus, current);
     }
 
-    if (cv_out != NO_BUS){
+    if (cv_out.any()){
         const uint8_t n = usable_degrees();
         const int32_t span = n > 1 ? (int32_t)(n - 1u) : 1;
         bus.cv_write(cv_out, (int16_t)(((int32_t)current * CV_MAX) / span));

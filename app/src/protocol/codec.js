@@ -97,6 +97,22 @@ export function emptyGlobals() {
   };
 }
 
+// --- a port's buses ---------------------------------------------------------
+//
+// Every port names the *set* of buses it is on (src/bus/domain.h), and the
+// app holds that set as a sorted list of bus numbers: `[]` is a port
+// connected to nothing, `[3]` one connection, `[0, 3]` a merge. The image and
+// the wire carry it as a bit per bus, so these two are where the list becomes
+// a number and back.
+
+export const busMask = (buses) => (buses ?? []).reduce((mask, b) => mask | (1 << b), 0) & 0xffff;
+
+export function busList(mask) {
+  const buses = [];
+  for (let b = 0; b < 16; b++) if (mask & (1 << b)) buses.push(b);
+  return buses;
+}
+
 // The unused marker in a MacroDest's `macro` field (src/node/patch.h).
 export const MACRO_NONE = 0xff;
 
@@ -125,9 +141,9 @@ export function nameFrom(bytes, at) {
 
 export function emptyPatch() {
   return {
-    gatePorts: Array.from({ length: P.GPIO_N }, () => ({ direction: 0, bus: P.NO_BUS })),
-    midiIn: Array.from({ length: P.N_MIDI_IN_NODES }, () => ({ sourceMask: 0, channel: 0, bus: P.NO_BUS })),
-    midiOut: Array.from({ length: P.N_MIDI_OUT_NODES }, () => ({ targetMask: 0, channel: 0, bus: P.NO_BUS })),
+    gatePorts: Array.from({ length: P.GPIO_N }, () => ({ direction: 0, buses: [] })),
+    midiIn: Array.from({ length: P.N_MIDI_IN_NODES }, () => ({ sourceMask: 0, channel: 0, buses: [] })),
+    midiOut: Array.from({ length: P.N_MIDI_OUT_NODES }, () => ({ targetMask: 0, channel: 0, buses: [] })),
     nodes: [],
     ccMap: Array.from({ length: P.N_CC_MAP }, () => null),
     // Modulation routes: a CV bus reaching a parameter
@@ -147,8 +163,8 @@ export function emptyPatch() {
 export function emptyNode(algorithmId) {
   return {
     algorithmId,
-    inBus: Array.from({ length: P.MAX_IN }, () => P.NO_BUS),
-    outBus: Array.from({ length: P.MAX_OUT }, () => P.NO_BUS),
+    inBuses: Array.from({ length: P.MAX_IN }, () => []),
+    outBuses: Array.from({ length: P.MAX_OUT }, () => []),
     params: new Uint8Array(P.N_PARAM),
   };
 }
@@ -159,6 +175,9 @@ class Writer {
   u16(v) { this.u8(v & 0xff); this.u8((v >> 8) & 0xff); }
   u32(v) { this.u16(v & 0xffff); this.u16((v >>> 16) & 0xffff); }
   many(values) { for (const v of values) this.u8(v); }
+  // A port's set of buses, a bit per bus.
+  set(buses) { this.u16(busMask(buses)); }
+  sets(lists) { for (const buses of lists) this.set(buses); }
 }
 
 class Reader {
@@ -170,6 +189,8 @@ class Reader {
   u16() { const lo = this.u8(); return lo | (this.u8() << 8); }
   u32() { const lo = this.u16(); return (lo | (this.u16() << 16)) >>> 0; }
   many(n) { const out = []; for (let i = 0; i < n; i++) out.push(this.u8()); return out; }
+  set() { return busList(this.u16()); }
+  sets(n) { const out = []; for (let i = 0; i < n; i++) out.push(this.set()); return out; }
 }
 
 function writeGlobals(w, g) {
@@ -222,6 +243,12 @@ function readGlobals(r) {
 // The last non-zero parameter plus one: an algorithm uses the first few bytes
 // and leaves the rest zero, and the image does not carry the tail. This is
 // what makes a patch fit a 1 KB preset slot when sizeof(Patch) is 11 KB.
+function usedPorts(sets) {
+  let n = sets.length;
+  while (n > 0 && !(sets[n - 1] ?? []).length) n--;
+  return sets.slice(0, n);
+}
+
 function usedParams(params) {
   let n = params.length;
   while (n > 0 && params[n - 1] === 0) n--;
@@ -237,15 +264,21 @@ export function encodePatch(patch, globals = emptyGlobals()) {
   const payloadStart = w.bytes.length;
 
   writeGlobals(w, globals);
-  for (const port of patch.gatePorts) { w.u8(port.direction); w.u8(port.bus); }
-  for (const port of patch.midiIn) { w.u8(port.sourceMask); w.u8(port.channel); w.u8(port.bus); }
-  for (const port of patch.midiOut) { w.u8(port.targetMask); w.u8(port.channel); w.u8(port.bus); }
+  for (const port of patch.gatePorts) { w.u8(port.direction); w.set(port.buses); }
+  for (const port of patch.midiIn) { w.u8(port.sourceMask); w.u8(port.channel); w.set(port.buses); }
+  for (const port of patch.midiOut) { w.u8(port.targetMask); w.u8(port.channel); w.set(port.buses); }
 
   w.u8(patch.nodes.length);
   for (const node of patch.nodes) {
     w.u8(node.algorithmId);
-    w.many(node.inBus);
-    w.many(node.outBus);
+    // Trailing unconnected ports are not carried, the same trimming the
+    // parameters get: most algorithms use one or two inlets and one outlet.
+    const ins = usedPorts(node.inBuses);
+    w.u8(ins.length);
+    w.sets(ins);
+    const outs = usedPorts(node.outBuses);
+    w.u8(outs.length);
+    w.sets(outs);
     const n = usedParams(node.params);
     w.u16(n);
     for (let i = 0; i < n; i++) w.u8(node.params[i]);
@@ -267,11 +300,11 @@ export function encodePatch(patch, globals = emptyGlobals()) {
   }
 
   const routes = (patch.modMap ?? []).map((m, slot) => ({ m, slot }))
-    .filter(({ m }) => m && m.bus !== P.NO_BUS && m.bus !== null && m.bus !== undefined);
+    .filter(({ m }) => m && (m.buses ?? []).length);
   w.u8(routes.length);
   for (const { m, slot } of routes) {
     w.u8(slot);
-    w.u8(m.bus);
+    w.set(m.buses);
     w.u8(m.targetKind);
     w.u8(m.targetIndex);
     w.u16(m.param);
@@ -335,20 +368,24 @@ export function decodePatch(image) {
 
   const patch = emptyPatch();
   const globals = readGlobals(r);
-  for (let i = 0; i < P.GPIO_N; i++) patch.gatePorts[i] = { direction: r.u8(), bus: r.u8() };
+  for (let i = 0; i < P.GPIO_N; i++) patch.gatePorts[i] = { direction: r.u8(), buses: r.set() };
   for (let i = 0; i < P.N_MIDI_IN_NODES; i++) {
-    patch.midiIn[i] = { sourceMask: r.u8(), channel: r.u8(), bus: r.u8() };
+    patch.midiIn[i] = { sourceMask: r.u8(), channel: r.u8(), buses: r.set() };
   }
   for (let i = 0; i < P.N_MIDI_OUT_NODES; i++) {
-    patch.midiOut[i] = { targetMask: r.u8(), channel: r.u8(), bus: r.u8() };
+    patch.midiOut[i] = { targetMask: r.u8(), channel: r.u8(), buses: r.set() };
   }
 
   const nNodes = r.u8();
   if (nNodes > P.N_NODE) throw new Error(`${nNodes} nodes; the module holds ${P.N_NODE}`);
   for (let i = 0; i < nNodes; i++) {
     const node = emptyNode(r.u8());
-    node.inBus = r.many(P.MAX_IN);
-    node.outBus = r.many(P.MAX_OUT);
+    const nIn = r.u8();
+    if (nIn > P.MAX_IN) throw new Error('a node carries more inlets than the module has');
+    r.sets(nIn).forEach((set, k) => { node.inBuses[k] = set; });
+    const nOut = r.u8();
+    if (nOut > P.MAX_OUT) throw new Error('a node carries more outlets than the module has');
+    r.sets(nOut).forEach((set, k) => { node.outBuses[k] = set; });
     const nParams = r.u16();
     if (nParams > P.N_PARAM) throw new Error('a node carries more parameters than the module has');
     for (let k = 0; k < nParams; k++) node.params[k] = r.u8();
@@ -378,7 +415,7 @@ export function decodePatch(image) {
   for (let i = 0; i < nRoutes; i++) {
     const slot = r.u8();
     const route = {
-      bus: r.u8(),
+      buses: r.set(),
       targetKind: r.u8(),
       targetIndex: r.u8(),
       param: r.u16(),
@@ -488,6 +525,11 @@ export function splitSysex(bytes) {
 
 // A 14-bit value, as the protocol carries one: low seven bits first.
 export const u14 = (value) => [value & 0x7f, (value >> 7) & 0x7f];
+// A port's set of buses on the wire: sixteen bits, so three data bytes.
+export const u21 = (value) => [value & 0x7f, (value >> 7) & 0x7f, (value >> 14) & 0x7f];
+export const wireBuses = (buses) => u21(busMask(buses));
+export const readBuses = (bytes, at) =>
+  busList(bytes[at] | (bytes[at + 1] << 7) | ((bytes[at + 2] & 0x03) << 14));
 export const readU14 = (bytes, at) => bytes[at] | (bytes[at + 1] << 7);
 
 // A signed value on the wire: magnitude as a u14, then the sign on its own.

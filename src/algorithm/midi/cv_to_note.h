@@ -127,10 +127,10 @@ class CvToNote : public Node{
         // Plays `pitch`, releasing whatever was sounding first.
         void strike(BusManager& bus, uint32_t now_us, uint8_t pitch);
 
-        uint8_t in;
-        uint8_t trigger_in;
-        uint8_t velocity_in;
-        uint8_t out;
+        BusSet in;
+        BusSet trigger_in;
+        BusSet velocity_in;
+        BusSet out;
         uint8_t map;
         uint8_t octave;
         uint8_t range;

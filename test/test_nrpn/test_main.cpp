@@ -102,8 +102,8 @@ struct Rig {
 static Patch euclid_patch() {
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_EUCLID_SEQ);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[0].params[0] = 8;
     p.nodes[0].params[3] = 3;
     p.n_nodes = 1;
@@ -123,20 +123,20 @@ static GlobalSettings c_major(){
 
 static Patch record_patch() {
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};      // jack 1: advance
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, 2};      // jack 2: record enable
-    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, 3};            // the keyboard -> note bus 3
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};      // jack 1: advance
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_IN, one_bus(2)};      // jack 2: record enable
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, one_bus(3)};            // the keyboard -> note bus 3
     p.nodes[0] = node_config(ALGO_NOTE_SEQ);
-    p.nodes[0].in_bus[0] = 0;                               // advance
-    p.nodes[0].in_bus[1] = NO_BUS;                          // reset
-    p.nodes[0].in_bus[2] = NO_BUS;                          // root
-    p.nodes[0].in_bus[3] = 3;                               // record
-    p.nodes[0].in_bus[4] = 2;                               // record enable
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].in_buses[0] = one_bus(0);                               // advance
+    p.nodes[0].in_buses[1] = BusSet{};                          // reset
+    p.nodes[0].in_buses[2] = BusSet{};                          // root
+    p.nodes[0].in_buses[3] = one_bus(3);                               // record
+    p.nodes[0].in_buses[4] = one_bus(2);                               // record enable
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[NoteSequencerBase::P_LENGTH] = 4;
     p.nodes[0].params[NoteSequencerBase::P_OCTAVE] = 5;      // C5 is 60
     p.n_nodes = 1;
-    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, 0};
+    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, one_bus(0)};
     return p;
 }
 
@@ -309,8 +309,8 @@ static void test_nrpn_and_cc_agree_on_the_same_parameter() {
 static void test_nrpn_traffic_passes_through_where_it_is_not_enabled() {
     Rig rig;
     Patch p = euclid_patch();
-    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, 0};
-    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, 0};
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, one_bus(0)};
+    p.midi_out[0] = MidiOutConfig{KEYBOARD, 0, one_bus(0)};
     GlobalSettings g = default_globals();
     rig.patches.apply(p, g, 0);
     TEST_ASSERT_EQUAL(0, rig.patches.globals().nrpn_enabled);
@@ -398,8 +398,8 @@ static void test_pattern_data_round_trips_over_sysex() {
     Rig rig;
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_POLY_SEQ);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[NoteSequencerBase::P_LENGTH] = 32;
     p.n_nodes = 1;
     GlobalSettings g = default_globals();
@@ -450,8 +450,8 @@ static void test_a_full_note_sequence_survives_the_store() {
     Rig rig;
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_POLY_SEQ);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(0);
     for (uint8_t step = 0; step < MAX_SEQUENCE_LEN; step++) {
         uint8_t* b = &p.nodes[0].params[NoteSequencerBase::STEP_BASE
                                        + step * NoteSequencerBase::stride(NOTE_SEQ_VOICES)];
@@ -643,8 +643,8 @@ static void test_the_reserved_keys_write_a_rest_and_a_tie() {
 static void test_reset_returns_the_record_cursor_to_the_first_step() {
     Rig rig;
     Patch p = record_patch();
-    p.gate_ports[2] = GatePortConfig{GATE_PORT_IN, 4};
-    p.nodes[0].in_bus[1] = 4;                       // reset from jack 3
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_IN, one_bus(4)};
+    p.nodes[0].in_buses[1] = one_bus(4);                       // reset from jack 3
     GlobalSettings g = c_major();
     rig.patches.apply(p, g, 0);
     NoteSequencer* seq = static_cast<NoteSequencer*>(rig.master.node(0));
@@ -722,8 +722,8 @@ static void test_the_nrpn_path_never_allocates() {
 // ---------------------------------------------------------------------------
 static Patch thru_patch() {
     Patch p = empty_patch();
-    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, 0};
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 0};
+    p.midi_in[0] = MidiInConfig{KEYBOARD, 0, one_bus(0)};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(0)};
     return p;
 }
 
@@ -772,7 +772,7 @@ static void test_the_dispatcher_runs_the_control_plane_before_the_graph() {
     GlobalSettings g = default_globals();
     Patch p = thru_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.n_nodes = 1;
     p.cc_map[0] = unused_mapping();
     p.cc_map[0].source_mask = KEYBOARD;

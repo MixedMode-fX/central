@@ -45,7 +45,14 @@
 // **It is computed once per edit, not per pass.** build() is O(n^2) over the
 // pool with everything in bitmasks, and runs on a patch load or on the one
 // node an incremental edit reconstructs (#11). A pass walks an array.
-struct BusSet {
+//
+// A port names a set of buses (bus/domain.h), so "the buses this node reads"
+// is the union of its inlets' sets and "the buses it writes" the union of its
+// outlets'. Nothing else here changes: a merge is still every writer before
+// every reader, whether they met on one bus or the reader listens to two.
+
+// Which buses to publish at one point in the pass, per domain.
+struct PublishSet {
     uint32_t gate;                  // one bit per gate bus
     uint16_t note;
     uint16_t cv;
@@ -70,9 +77,9 @@ class Schedule {
         uint8_t node_at(uint8_t position) const;
         // Published before the first node runs: the jacks, the MIDI input
         // delivered between passes, and every bus no node writes.
-        const BusSet& before() const { return early; }
+        const PublishSet& before() const { return early; }
         // Published once the node at `position` has run.
-        const BusSet& after(uint8_t position) const;
+        const PublishSet& after(uint8_t position) const;
 
     private:
         // What one node reads and writes: the three domains in one index
@@ -87,8 +94,8 @@ class Schedule {
 
         Ports ports[N_NODE];
         uint8_t order[N_NODE];
-        BusSet publish[N_NODE];
-        BusSet early;
+        PublishSet publish[N_NODE];
+        PublishSet early;
         uint8_t n;
 };
 

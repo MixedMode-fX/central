@@ -28,10 +28,10 @@ static const uint8_t CV_OUT = 0;
 // entropy pool, which is right on a module and useless in a test.
 static NodeConfig turing_config(uint8_t length, uint8_t chaos, uint8_t seed){
     NodeConfig c = node_config(ALGO_TURING);
-    c.in_bus[0] = GATE_ADVANCE;
-    c.in_bus[1] = GATE_RESET;
-    c.out_bus[0] = GATE_PULSE;
-    c.out_bus[1] = CV_OUT;
+    c.in_buses[0] = one_bus(GATE_ADVANCE);
+    c.in_buses[1] = one_bus(GATE_RESET);
+    c.out_buses[0] = one_bus(GATE_PULSE);
+    c.out_buses[1] = one_bus(CV_OUT);
     c.params[0] = length;
     c.params[1] = chaos;
     c.params[4] = seed;

@@ -60,26 +60,26 @@ struct Rig {
 
 static Patch three_node_patch() {
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 3};
-    p.midi_in[0] = MidiInConfig{0x11, 2, 1};
-    p.midi_out[2] = MidiOutConfig{0x30, 5, 1};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(3)};
+    p.midi_in[0] = MidiInConfig{0x11, 2, one_bus(1)};
+    p.midi_out[2] = MidiOutConfig{0x30, 5, one_bus(1)};
 
     p.nodes[0] = node_config(ALGO_LOGIC_NOT);
-    p.nodes[0].in_bus[0] = 0;
-    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0);
+    p.nodes[0].out_buses[0] = one_bus(1);
 
     p.nodes[1] = node_config(ALGO_EUCLID_SEQ);
-    p.nodes[1].in_bus[0] = 1;
-    p.nodes[1].out_bus[0] = 3;
+    p.nodes[1].in_buses[0] = one_bus(1);
+    p.nodes[1].out_buses[0] = one_bus(3);
     p.nodes[1].params[0] = 16;      // length
     p.nodes[1].params[3] = 5;       // pulses
     p.nodes[1].params[4] = 2;       // rotation
     p.nodes[1].params[8 + 7] = 40;  // step 7's probability
 
     p.nodes[2] = node_config(ALGO_TRANSPOSE);
-    p.nodes[2].in_bus[0] = 1;
-    p.nodes[2].out_bus[0] = 1;
+    p.nodes[2].in_buses[0] = one_bus(1);
+    p.nodes[2].out_buses[0] = one_bus(1);
     p.nodes[2].params[0] = PARAM_CENTRE - 5;
     p.n_nodes = 3;
     return p;
@@ -89,22 +89,22 @@ static bool patches_equal(const Patch& a, const Patch& b) {
     if (a.n_nodes != b.n_nodes) return false;
     for (uint8_t i = 0; i < GPIO_N; i++) {
         if (a.gate_ports[i].direction != b.gate_ports[i].direction) return false;
-        if (a.gate_ports[i].bus != b.gate_ports[i].bus) return false;
+        if (a.gate_ports[i].buses != b.gate_ports[i].buses) return false;
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) {
         if (a.midi_in[i].source_mask != b.midi_in[i].source_mask) return false;
         if (a.midi_in[i].channel != b.midi_in[i].channel) return false;
-        if (a.midi_in[i].bus != b.midi_in[i].bus) return false;
+        if (a.midi_in[i].buses != b.midi_in[i].buses) return false;
     }
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) {
         if (a.midi_out[i].target_mask != b.midi_out[i].target_mask) return false;
         if (a.midi_out[i].channel != b.midi_out[i].channel) return false;
-        if (a.midi_out[i].bus != b.midi_out[i].bus) return false;
+        if (a.midi_out[i].buses != b.midi_out[i].buses) return false;
     }
     for (uint8_t n = 0; n < a.n_nodes; n++) {
         if (a.nodes[n].algorithm_id != b.nodes[n].algorithm_id) return false;
-        for (uint8_t i = 0; i < MAX_IN; i++) if (a.nodes[n].in_bus[i] != b.nodes[n].in_bus[i]) return false;
-        for (uint8_t i = 0; i < MAX_OUT; i++) if (a.nodes[n].out_bus[i] != b.nodes[n].out_bus[i]) return false;
+        for (uint8_t i = 0; i < MAX_IN; i++) if (a.nodes[n].in_buses[i] != b.nodes[n].in_buses[i]) return false;
+        for (uint8_t i = 0; i < MAX_OUT; i++) if (a.nodes[n].out_buses[i] != b.nodes[n].out_buses[i]) return false;
         for (uint16_t i = 0; i < N_PARAM; i++) if (a.nodes[n].params[i] != b.nodes[n].params[i]) return false;
     }
     return true;
@@ -297,20 +297,21 @@ static void test_autosave_is_debounced() {
 // ---------------------------------------------------------------------------
 // Boot: the acceptance criteria from #7.
 // ---------------------------------------------------------------------------
-static void test_an_empty_module_boots_into_a_patch_that_does_something() {
+// An empty store boots into an empty patch: nothing is patched for the user,
+// because every wire the module drew itself would be one they had to find and
+// undo (patch/default_patch.h).
+static void test_an_empty_module_boots_into_an_empty_patch() {
     Rig rig;
     rig.patches.boot(0);
 
     TEST_ASSERT_TRUE(rig.patches.running_defaults());
-    TEST_ASSERT_TRUE(rig.master.node_count() > 0);
-    // MIDI thru, both ways, and the control cable is not in either mask: a
-    // patch cannot reroute the protocol's own port.
-    TEST_ASSERT_TRUE(rig.patches.active().midi_in[0].source_mask != 0);
-    TEST_ASSERT_TRUE(rig.patches.active().midi_out[0].target_mask != 0);
-    TEST_ASSERT_EQUAL(0, rig.patches.active().midi_out[0].target_mask & MIDI_CONTROL_PORT);
-    TEST_ASSERT_EQUAL(0, rig.patches.active().midi_in[0].source_mask & MIDI_CONTROL_PORT);
-    // And a pulse on jack 1, so the module is visibly alive.
-    TEST_ASSERT_EQUAL(GATE_PORT_OUT, rig.patches.active().gate_ports[0].direction);
+    TEST_ASSERT_EQUAL(0, rig.master.node_count());
+    for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++)
+        TEST_ASSERT_EQUAL(0, rig.patches.active().midi_in[i].source_mask);
+    for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++)
+        TEST_ASSERT_EQUAL(0, rig.patches.active().midi_out[i].target_mask);
+    for (uint8_t i = 0; i < GPIO_N; i++)
+        TEST_ASSERT_EQUAL(GATE_PORT_UNUSED, rig.patches.active().gate_ports[i].direction);
 }
 
 // An empty store is a new module, not a fault: red stays off.
@@ -413,8 +414,8 @@ static void test_a_patch_too_large_for_a_slot_is_refused() {
     Patch big = empty_patch();
     for (uint8_t n = 0; n < 8; n++) {
         big.nodes[n] = node_config(ALGO_POLY_SEQ);
-        big.nodes[n].in_bus[0] = 0;
-        big.nodes[n].out_bus[0] = 0;
+        big.nodes[n].in_buses[0] = one_bus(0);
+        big.nodes[n].out_buses[0] = one_bus(0);
         for (uint16_t p = 0; p < NoteSequencerBase::param_count(NOTE_SEQ_VOICES); p++) {
             big.nodes[n].params[p] = (uint8_t)(p | 1u);      // nothing to trim
         }
@@ -586,7 +587,7 @@ static void test_console_saves_recalls_and_restores_defaults() {
     rig.io.clear();
     rig.console.execute("defaults", 1000);
     TEST_ASSERT_TRUE(rig.io.said("built-in"));
-    TEST_ASSERT_EQUAL(ALGO_SUSTAIN, rig.patches.active().nodes[0].algorithm_id);
+    TEST_ASSERT_EQUAL(0, rig.patches.active().n_nodes);
 
     rig.io.clear();
     rig.console.execute("load 2", 2000);
@@ -803,7 +804,7 @@ int main() {
     RUN_TEST(test_erasing_a_slot_makes_it_empty_again);
     RUN_TEST(test_resaving_an_unchanged_patch_costs_no_writes);
     RUN_TEST(test_autosave_is_debounced);
-    RUN_TEST(test_an_empty_module_boots_into_a_patch_that_does_something);
+    RUN_TEST(test_an_empty_module_boots_into_an_empty_patch);
     RUN_TEST(test_an_empty_store_does_not_light_red);
     RUN_TEST(test_a_corrupt_store_boots_the_default_and_lights_red);
     RUN_TEST(test_a_saved_patch_survives_a_power_cycle);

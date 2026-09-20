@@ -21,13 +21,13 @@ void tearDown() {}
 // Test rig: one pass around a node, exactly as MixedModeMaster runs it.
 // ---------------------------------------------------------------------------
 
-static std::vector<MidiEvent> run_pass(BusManager& bus, Node& node, uint8_t out_bus) {
+static std::vector<MidiEvent> run_pass(BusManager& bus, Node& node, uint8_t out_buses) {
     bus.swap();
     node.process(bus, 0);
     bus.swap();
     std::vector<MidiEvent> out;
-    const uint8_t n = bus.note_count(out_bus);
-    for (uint8_t i = 0; i < n; i++) out.push_back(bus.note_read(out_bus, i));
+    const uint8_t n = bus.note_count(out_buses);
+    for (uint8_t i = 0; i < n; i++) out.push_back(bus.note_read(out_buses, i));
     return out;
 }
 
@@ -41,18 +41,18 @@ static MidiEvent cc(uint8_t controller, uint8_t value, uint8_t channel = 1) {
     return MidiEvent{MIDI_CONTROL_CHANGE, channel, controller, value};
 }
 
-static NodeConfig filter_config(uint8_t in_bus, uint8_t out_bus) {
+static NodeConfig filter_config(uint8_t in_buses, uint8_t out_buses) {
     NodeConfig c = node_config(ALGO_NOTE_FILTER);
-    c.in_bus[0] = in_bus;
-    c.out_bus[0] = out_bus;
+    c.in_buses[0] = one_bus(in_buses);
+    c.out_buses[0] = one_bus(out_buses);
     return c;
 }
 
-static NodeConfig channel_config(uint8_t in_bus, uint8_t out_bus,
+static NodeConfig channel_config(uint8_t in_buses, uint8_t out_buses,
                                  uint8_t first = 0, uint8_t count = 0) {
     NodeConfig c = node_config(ALGO_CHANNEL);
-    c.in_bus[0] = in_bus;
-    c.out_bus[0] = out_bus;
+    c.in_buses[0] = one_bus(in_buses);
+    c.out_buses[0] = one_bus(out_buses);
     c.params[Channel::P_CHANNEL] = first;
     c.params[Channel::P_COUNT] = count;
     return c;

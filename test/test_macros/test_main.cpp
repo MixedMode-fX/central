@@ -74,7 +74,7 @@ struct Rig {
 static Patch macro_patch(){
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[AMOUNT] = 100;
     p.nodes[0].params[PHASE] = 100;
     p.n_nodes = 1;

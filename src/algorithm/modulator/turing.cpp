@@ -33,10 +33,10 @@ static uint8_t clamp_enum(uint8_t stored, uint8_t max_value, uint8_t fallback){
 }
 
 Turing::Turing(const NodeConfig& config) :
-    advance_in(config.in_bus[0]),
-    reset_in(config.in_bus[1]),
-    gate_out(config.out_bus[0]),
-    cv_out(config.out_bus[1]),
+    advance_in(config.in_buses[0]),
+    reset_in(config.in_buses[1]),
+    gate_out(config.out_buses[0]),
+    cv_out(config.out_buses[1]),
     len(config.params[0] ? config.params[0] : (uint8_t)8),
     chaos(config.params[1] > 100 ? (uint8_t)100 : config.params[1]),
     bits(config.params[2] ? (config.params[2] > MAX_BITS ? MAX_BITS : config.params[2]) : MAX_BITS),

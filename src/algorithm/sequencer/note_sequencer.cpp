@@ -93,13 +93,13 @@ const AlgorithmDescriptor PolySequencer::descriptor = {
 static_assert(NoteSequencerBase::param_count(NOTE_SEQ_VOICES) <= N_PARAM, "PolySequencer's steps do not fit N_PARAM");
 
 NoteSequencerBase::NoteSequencerBase(const NodeConfig& config, uint8_t voices_per_step) :
-    advance_in(config.in_bus[0]),
-    reset_in(config.in_bus[1]),
-    root_in(config.in_bus[2]),
-    rec_in(config.in_bus[3]),
-    rec_enable_in(config.in_bus[4]),
-    rec_enable_bus(config.in_bus[4]),
-    out(config.out_bus[0]),
+    advance_in(config.in_buses[0]),
+    reset_in(config.in_buses[1]),
+    root_in(config.in_buses[2]),
+    rec_in(config.in_buses[3]),
+    rec_enable_in(config.in_buses[4]),
+    rec_enable_bus(config.in_buses[4]),
+    out(config.out_buses[0]),
     n_voices(voices_per_step == 0 ? 1 : (voices_per_step > MAX_VOICES ? MAX_VOICES : voices_per_step)),
     octave(config.params[P_OCTAVE] <= KEY_MAX_OCTAVE ? config.params[P_OCTAVE] : (uint8_t)0),
     root(NO_PITCH),
@@ -373,7 +373,7 @@ void NoteSequencerBase::play_step(BusManager& bus, uint8_t step, uint32_t now_us
 
 void NoteSequencerBase::process(BusManager& bus, uint32_t now_us){
     // The root first, so a root and an edge arriving in the same pass agree.
-    if (root_in != NO_BUS){
+    if (root_in.any()){
         const uint8_t n = bus.note_count(root_in);
         for (uint8_t i = 0; i < n; i++){
             const MidiEvent e = bus.note_read(root_in, i);
@@ -388,8 +388,8 @@ void NoteSequencerBase::process(BusManager& bus, uint32_t now_us){
     // Step-record (#22). Before the advance, so a note played in the same
     // pass as an edge is written to the step it was aimed at rather than the
     // one after it.
-    if (rec_in != NO_BUS){
-        const bool armed = (rec_enable_bus == NO_BUS) || bus.gate_read(rec_enable_bus);
+    if (rec_in.any()){
+        const bool armed = (!rec_enable_bus.any()) || bus.gate_read(rec_enable_bus);
         rec_enable_in.rising(bus);           // keep the edge detector in step
         if (armed){
             const uint8_t n = bus.note_count(rec_in);

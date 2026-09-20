@@ -32,13 +32,13 @@ void tearDown() { global_key::set(SCALE_CHROMATIC, 0); }
 // ---------------------------------------------------------------------------
 
 static std::vector<MidiEvent> run_pass(BusManager& bus, Node& node,
-                                       uint8_t out_bus, uint32_t now_us = 0) {
+                                       uint8_t out_buses, uint32_t now_us = 0) {
     bus.swap();
     node.process(bus, now_us);
     bus.swap();
     std::vector<MidiEvent> out;
-    const uint8_t n = bus.note_count(out_bus);
-    for (uint8_t i = 0; i < n; i++) out.push_back(bus.note_read(out_bus, i));
+    const uint8_t n = bus.note_count(out_buses);
+    for (uint8_t i = 0; i < n; i++) out.push_back(bus.note_read(out_buses, i));
     return out;
 }
 
@@ -192,12 +192,12 @@ static void test_held_notes_answers_the_priority_rules_and_finds_a_note() {
 static void test_release_all_emits_only_note_offs() {
     BusManager bus;
     SoundingNotes sounding;
-    sounding.emit(bus, 0, 60, 60, 100, 1);
-    sounding.emit(bus, 0, 64, 64, 100, 1);
+    sounding.emit(bus, one_bus(0), 60, 60, 100, 1);
+    sounding.emit(bus, one_bus(0), 64, 64, 100, 1);
     bus.swap();
     bus.swap();                                    // clear what emit() wrote
 
-    TEST_ASSERT_EQUAL(2, sounding.release_all(bus, 0));
+    TEST_ASSERT_EQUAL(2, sounding.release_all(bus, one_bus(0)));
     bus.swap();
     TEST_ASSERT_EQUAL(2, bus.note_count(0));
     for (uint8_t i = 0; i < 2; i++) TEST_ASSERT_EQUAL(MIDI_NOTE_OFF, bus.note_read(0, i).type);
@@ -210,9 +210,9 @@ static void test_sounding_notes_refuses_what_it_cannot_release() {
     BusManager bus;
     SoundingNotes sounding;
     for (uint8_t i = 0; i < SoundingNotes::CAPACITY; i++) {
-        TEST_ASSERT_TRUE(sounding.emit(bus, 0, i, i, 100, 1));
+        TEST_ASSERT_TRUE(sounding.emit(bus, one_bus(0), i, i, 100, 1));
     }
-    TEST_ASSERT_FALSE(sounding.emit(bus, 0, 99, 99, 100, 1));
+    TEST_ASSERT_FALSE(sounding.emit(bus, one_bus(0), 99, 99, 100, 1));
     TEST_ASSERT_EQUAL_UINT32(1, sounding.refused());
     TEST_ASSERT_EQUAL(SoundingNotes::CAPACITY, sounding.count());
 }
@@ -252,7 +252,7 @@ static void test_scale_masks_and_quantisation() {
 static void test_transpose_releases_what_it_sent_after_the_offset_moves() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = PARAM_CENTRE + 12;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[0] = PARAM_CENTRE + 12;
     Transpose node(c);
 
     bus.note_write(0, on(60));
@@ -274,7 +274,7 @@ static void test_transpose_releases_what_it_sent_after_the_offset_moves() {
 static void test_transpose_drops_out_of_range_notes_and_their_offs() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[1] = PARAM_CENTRE + 2;   // +2 octaves
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[1] = PARAM_CENTRE + 2;   // +2 octaves
     Transpose node(c);
 
     bus.note_write(0, on(120));                   // 144: gone
@@ -304,7 +304,7 @@ static void test_transpose_goes_down_and_adds_the_octaves_to_the_semitones() {
     for (uint8_t i = 0; i < 5; i++) {
         BusManager bus;
         NodeConfig c = node_config(ALGO_TRANSPOSE);
-        c.in_bus[0] = 0; c.out_bus[0] = 1;
+        c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
         c.params[0] = param_centred_byte(cases[i].semitones);
         c.params[1] = param_centred_byte(cases[i].octaves);
         Transpose node(c);
@@ -327,7 +327,7 @@ static void test_transpose_goes_down_and_adds_the_octaves_to_the_semitones() {
 static void test_transpose_left_alone_shifts_nothing() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     Transpose node(c);
     TEST_ASSERT_EQUAL(0, node.offset());
     TEST_ASSERT_EQUAL(PARAM_CENTRE, node.get_param(0));
@@ -344,7 +344,7 @@ static void test_transpose_left_alone_shifts_nothing() {
 static void test_transpose_releases_what_it_sent_after_the_octave_moves() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[1] = PARAM_CENTRE - 1;   // an octave down
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[1] = PARAM_CENTRE - 1;   // an octave down
     Transpose node(c);
 
     bus.note_write(0, on(60));
@@ -367,7 +367,7 @@ static void test_transpose_releases_what_it_sent_after_the_octave_moves() {
 static void test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_one() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     Transpose node(c);
     TEST_ASSERT_TRUE(node.set_param(0, param_centred_byte(Transpose::MAX_SEMITONES)));
     TEST_ASSERT_FALSE(node.set_param(0, param_centred_byte(Transpose::MAX_SEMITONES + 1)));
@@ -380,7 +380,7 @@ static void test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_o
     TEST_ASSERT_FALSE(node.set_param(3, PARAM_CENTRE));               // no such parameter
 
     NodeConfig wide = node_config(ALGO_TRANSPOSE);
-    wide.in_bus[0] = 0; wide.out_bus[0] = 1;
+    wide.in_buses[0] = one_bus(0); wide.out_buses[0] = one_bus(1);
     wide.params[0] = param_centred_byte(40);
     wide.params[1] = param_centred_byte(-9);
     Transpose stored(wide);
@@ -393,7 +393,7 @@ static void test_transpose_refuses_a_write_past_its_bounds_and_clamps_a_stored_o
 
 static Transpose diatonic_transpose(int8_t semitones, int8_t octaves) {
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[Transpose::P_SEMITONES] = param_centred_byte(semitones);
     c.params[Transpose::P_OCTAVES] = param_centred_byte(octaves);
     c.params[Transpose::P_DIATONIC] = 1;
@@ -422,7 +422,7 @@ static void test_transpose_diatonic_keeps_the_shape_of_the_line() {
     global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[Transpose::P_SEMITONES] = param_centred_byte(2);      // up a second
     c.params[Transpose::P_DIATONIC] = 1;
     Transpose node(c);
@@ -476,7 +476,7 @@ static void test_transpose_diatonic_releases_what_it_sent_after_the_key_moves() 
     global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[Transpose::P_SEMITONES] = param_centred_byte(4);
     c.params[Transpose::P_DIATONIC] = 1;
     Transpose node(c);
@@ -500,7 +500,7 @@ static void test_transpose_diatonic_drops_out_of_range_notes() {
     global_key::set(SCALE_MAJOR, 0);
     BusManager bus;
     NodeConfig c = node_config(ALGO_TRANSPOSE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[Transpose::P_OCTAVES] = param_centred_byte(4);
     c.params[Transpose::P_DIATONIC] = 1;
     Transpose node(c);
@@ -529,7 +529,7 @@ static void test_note_priority_modes() {
     for (uint8_t m = 0; m < 3; m++) {
         BusManager bus;
         NodeConfig c = node_config(ALGO_NOTE_PRIORITY);
-        c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = modes[m];
+        c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[0] = modes[m];
         NotePriority node(c);
 
         // The voice, followed across passes: one note at a time, whatever the
@@ -559,7 +559,7 @@ static void test_note_priority_modes() {
 static void test_note_priority_falls_back_on_release() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_PRIORITY);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = NotePriority::PRIORITY_HIGH;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[0] = NotePriority::PRIORITY_HIGH;
     NotePriority node(c);
 
     bus.note_write(0, on(60));
@@ -587,7 +587,7 @@ static void test_note_priority_falls_back_on_release() {
 static void test_velocity_curves_never_reach_zero() {
     for (uint8_t curve = 0; curve <= VelocityCurve::CURVE_HARD; curve++) {
         NodeConfig c = node_config(ALGO_VELOCITY);
-        c.in_bus[0] = 0; c.out_bus[0] = 1;
+        c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
         c.params[0] = curve;
         c.params[1] = 1;                          // 1 percent: the crushing case
         VelocityCurve node(c);
@@ -602,7 +602,7 @@ static void test_velocity_curves_never_reach_zero() {
 static void test_velocity_curve_shapes_and_passes_offs() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_VELOCITY);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = VelocityCurve::CURVE_SOFT;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[0] = VelocityCurve::CURVE_SOFT;
     VelocityCurve node(c);
     TEST_ASSERT_EQUAL(127, node.apply(127));
     TEST_ASSERT_TRUE(node.apply(64) > 64);        // soft lifts the middle
@@ -625,7 +625,7 @@ static void test_velocity_curve_shapes_and_passes_offs() {
 static void test_chord_emits_every_voice_and_releases_all_of_it() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;            // a triad, the default quality
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);            // a triad, the default quality
     Chord node(c);
 
     global_key::set(SCALE_CHROMATIC, 0);        // no key: the major triad
@@ -650,7 +650,7 @@ static void test_chord_emits_every_voice_and_releases_all_of_it() {
 static void test_note_quantise_snaps_and_releases_what_it_sent() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
-    c.in_bus[0] = 0; c.in_bus[1] = NO_BUS; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = BusSet{}; c.out_buses[0] = one_bus(1);
     global_key::set(SCALE_MAJOR, 0);              // C major
     NoteQuantise node(c);
 
@@ -671,7 +671,7 @@ static void test_note_quantise_snaps_and_releases_what_it_sent() {
 static void test_note_quantise_takes_its_root_from_a_bus() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
-    c.in_bus[0] = 0; c.in_bus[1] = 2; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(2); c.out_buses[0] = one_bus(1);
     global_key::set(SCALE_MAJOR, 0);
     NoteQuantise node(c);
 
@@ -690,7 +690,7 @@ static void test_note_quantise_takes_its_root_from_a_bus() {
 static void test_probability_pairs_every_note_it_passes() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_PROBABILITY);
-    c.in_bus[0] = 0; c.out_bus[0] = 1; c.params[0] = 50;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1); c.params[0] = 50;
     Probability node(c);
 
     NoteBalance balance;
@@ -713,7 +713,7 @@ static void test_probability_pairs_every_note_it_passes() {
 static void test_probability_defaults_to_passing_everything() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_PROBABILITY);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;            // params zeroed
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);            // params zeroed
     Probability node(c);
     for (uint8_t i = 0; i < 20; i++) {
         bus.note_write(0, on((uint8_t)(60 + i)));
@@ -774,7 +774,7 @@ static void test_the_key_names_a_register() {
 static void test_note_quantise_snaps_into_the_key() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     NoteQuantise node(c);
 
     global_key::set(SCALE_MAJOR, 2);                   // D major
@@ -802,7 +802,7 @@ static void test_note_quantise_snaps_into_the_key() {
 static void test_note_quantise_takes_its_root_from_a_cable() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_NOTE_QUANTISE);
-    c.in_bus[0] = 0; c.in_bus[1] = 2; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(2); c.out_buses[0] = one_bus(1);
     NoteQuantise node(c);
 
     global_key::set(SCALE_PENTATONIC_MAJOR, 2);        // D pentatonic
@@ -818,7 +818,7 @@ static void test_note_quantise_takes_its_root_from_a_cable() {
 static void test_chord_voices_its_quality_in_the_scale() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[Chord::P_QUALITY] = Chord::QUALITY_TRIAD;
     Chord node(c);
 
@@ -857,7 +857,7 @@ static void test_chord_voices_its_quality_in_the_scale() {
 static void test_chord_in_the_chromatic_scale_is_fixed_semitones() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(1);
     Chord node(c);
 
     global_key::set(SCALE_CHROMATIC, 3);
@@ -875,8 +875,8 @@ static void test_chord_in_the_chromatic_scale_is_fixed_semitones() {
 
 static NodeConfig free_chord(bool played) {
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = played ? (uint8_t)0 : NO_BUS;        // NO_BUS: nothing plays it
-    c.out_bus[0] = 1;                                  // a triad, the default quality
+    c.in_buses[0] = played ? one_bus(0) : BusSet{};              // unconnected: nothing plays it
+    c.out_buses[0] = one_bus(1);                                  // a triad, the default quality
     return c;
 }
 
@@ -1220,7 +1220,7 @@ static void test_stopping_the_transport_leaves_a_drone_alone() {
 static void test_stopping_the_transport_leaves_a_played_chord_alone() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CHORD);
-    c.in_bus[0] = 0; c.out_bus[0] = 2;
+    c.in_buses[0] = one_bus(0); c.out_buses[0] = one_bus(2);
     Chord node(c);
 
     global_key::set(SCALE_MAJOR, 0);
@@ -1282,9 +1282,9 @@ static void test_a_self_playing_chord_feeds_an_arpeggiator() {
     NodeConfig cc = free_chord(false);
     Chord chord(cc);
     NodeConfig ac = node_config(ALGO_ARPEGGIATOR);
-    ac.in_bus[0] = 1;                                  // the chord bus
-    ac.in_bus[1] = 0;                                  // advance
-    ac.out_bus[0] = 2;
+    ac.in_buses[0] = one_bus(1);                                  // the chord bus
+    ac.in_buses[1] = one_bus(0);                                  // advance
+    ac.out_buses[0] = one_bus(2);
     Arpeggiator arp(ac);
 
     global_key::set(SCALE_MAJOR, 0);
@@ -1330,7 +1330,7 @@ static void test_arpeggiator_one_note_per_edge_in_order() {
     for (uint8_t m = 0; m < 3; m++) {
         BusManager bus;
         NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-        c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
+        c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[2] = BusSet{}; c.out_buses[0] = one_bus(1);
         c.params[0] = modes[m];
         Arpeggiator node(c);
 
@@ -1356,7 +1356,7 @@ static void test_arpeggiator_one_note_per_edge_in_order() {
 static void test_arpeggiator_up_down_does_not_repeat_the_endpoints() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[2] = BusSet{}; c.out_buses[0] = one_bus(1);
     c.params[0] = Arpeggiator::ARP_UP_DOWN;
     Arpeggiator node(c);
 
@@ -1378,7 +1378,7 @@ static void test_arpeggiator_up_down_does_not_repeat_the_endpoints() {
 static void test_arpeggiator_octave_range_and_reset() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = 1; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[2] = one_bus(1); c.out_buses[0] = one_bus(1);
     c.params[1] = 2;                                   // two octaves
     Arpeggiator node(c);
 
@@ -1411,7 +1411,7 @@ static void test_arpeggiator_octave_range_and_reset() {
 static void test_arpeggiator_releases_when_the_chord_is_lifted() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[2] = BusSet{}; c.out_buses[0] = one_bus(1);
     Arpeggiator node(c);
 
     NoteBalance balance;
@@ -1453,7 +1453,7 @@ static void test_arpeggiator_restarts_the_figure_on_a_new_chord() {
         for (uint8_t m = 0; m < 2; m++) {
             BusManager bus;
             NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-            c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
+            c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[2] = BusSet{}; c.out_buses[0] = one_bus(1);
             c.params[0] = modes[m];
             c.params[5] = run_on;
             Arpeggiator node(c);
@@ -1490,7 +1490,7 @@ static void test_arpeggiator_restarts_the_figure_on_a_new_chord() {
 static void test_arpeggiator_run_on_survives_an_empty_keyboard() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = 1; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[2] = one_bus(1); c.out_buses[0] = one_bus(1);
     c.params[5] = 1;                                   // run on
     Arpeggiator node(c);
 
@@ -1527,7 +1527,7 @@ static void test_arpeggiator_run_on_survives_an_empty_keyboard() {
 static void test_arpeggiator_hold_keeps_the_figure_after_the_keys_are_lifted() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[4] = 1;                                   // hold
     Arpeggiator node(c);
 
@@ -1557,7 +1557,7 @@ static void test_arpeggiator_hold_keeps_the_figure_after_the_keys_are_lifted() {
 static void test_arpeggiator_hold_replaces_the_chord_rather_than_adding_to_it() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[4] = 1;
     Arpeggiator node(c);
 
@@ -1591,7 +1591,7 @@ static void test_arpeggiator_hold_replaces_the_chord_rather_than_adding_to_it() 
 static void test_arpeggiator_hold_off_drops_only_what_no_key_holds() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.out_buses[0] = one_bus(1);
     c.params[4] = 1;
     Arpeggiator node(c);
 
@@ -1616,7 +1616,7 @@ static void test_arpeggiator_hold_off_drops_only_what_no_key_holds() {
 static void test_arpeggiator_hold_inlet_latches_like_the_parameter() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[3] = 2; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[3] = one_bus(2); c.out_buses[0] = one_bus(1);
     Arpeggiator node(c);
 
     NoteBalance balance;
@@ -1647,7 +1647,7 @@ static void test_arpeggiator_hold_inlet_latches_like_the_parameter() {
 static void test_arpeggiator_gate_length_releases_early() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_ARPEGGIATOR);
-    c.in_bus[0] = 0; c.in_bus[1] = 0; c.in_bus[2] = NO_BUS; c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0); c.in_buses[1] = one_bus(0); c.in_buses[2] = BusSet{}; c.out_buses[0] = one_bus(1);
     c.params[2] = 10;                                  // 10 ms
     Arpeggiator node(c);
 
@@ -1686,12 +1686,12 @@ struct CvVoice {
 
 static NodeConfig cv_config() {
     NodeConfig c = node_config(ALGO_MIDI_TO_CV);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = CV_PITCH_BUS;
-    c.out_bus[1] = CV_GATE_BUS;
-    c.out_bus[2] = CV_VELOCITY_BUS;
-    c.out_bus[3] = CV_MOD_BUS;
-    c.out_bus[4] = CV_TRIGGER_BUS;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(CV_PITCH_BUS);
+    c.out_buses[1] = one_bus(CV_GATE_BUS);
+    c.out_buses[2] = one_bus(CV_VELOCITY_BUS);
+    c.out_buses[3] = one_bus(CV_MOD_BUS);
+    c.out_buses[4] = one_bus(CV_TRIGGER_BUS);
     return c;
 }
 
@@ -1963,10 +1963,10 @@ static void test_channel_pressure_can_drive_the_mod_outlet_instead() {
 static void test_an_outlet_with_nothing_patched_to_it_is_not_an_error() {
     BusManager bus;
     NodeConfig c = cv_config();
-    c.out_bus[0] = NO_BUS;                               // no pitch
-    c.out_bus[2] = NO_BUS;                               // no velocity
-    c.out_bus[3] = NO_BUS;                               // no mod
-    c.out_bus[4] = NO_BUS;                               // no trigger
+    c.out_buses[0] = BusSet{};                               // no pitch
+    c.out_buses[2] = BusSet{};                               // no velocity
+    c.out_buses[3] = BusSet{};                               // no mod
+    c.out_buses[4] = BusSet{};                               // no trigger
     TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
 
     MidiToCv node(c);
@@ -2008,7 +2008,7 @@ static void test_the_voice_survives_more_keys_than_the_node_can_hold() {
 // released - an arpeggiator on hold. The storm ends the same way a player
 // does: the latch comes off, and then nothing may be left sounding.
 template <class T>
-static void assert_no_hanging_notes(NodeConfig config, uint8_t in_bus, uint8_t out_bus,
+static void assert_no_hanging_notes(NodeConfig config, uint8_t in_buses, uint8_t out_buses,
                                     uint32_t seed, bool with_gate, uint16_t unlatch = 0xFFFF) {
     BusManager bus;
     T node(config);
@@ -2029,17 +2029,17 @@ static void assert_no_hanging_notes(NodeConfig config, uint8_t in_bus, uint8_t o
             bool already = false;
             for (uint8_t j = 0; j < n_held; j++) if (held[j] == note) already = true;
             if (!already) {
-                bus.note_write(in_bus, on(note, (uint8_t)(1 + (note % 126))));
+                bus.note_write(in_buses, on(note, (uint8_t)(1 + (note % 126))));
                 held[n_held++] = note;
             }
         } else {
             const uint8_t index = (uint8_t)(script.next() % n_held);
-            bus.note_write(in_bus, off(held[index]));
+            bus.note_write(in_buses, off(held[index]));
             for (uint8_t j = index; j + 1u < n_held; j++) held[j] = held[j + 1];
             n_held--;
         }
         if (with_gate) bus.gate_write(1, (i & 1) != 0);
-        balance.observe(run_pass(bus, node, out_bus, now));
+        balance.observe(run_pass(bus, node, out_buses, now));
         now += 5000;
         // A modifier must never release a note it did not emit.
         TEST_ASSERT_FALSE(balance.went_negative);
@@ -2049,28 +2049,28 @@ static void assert_no_hanging_notes(NodeConfig config, uint8_t in_bus, uint8_t o
     // note bus carries NOTE_QUEUE_DEPTH events per pass, and a test that
     // overflowed the bus would be proving nothing about the node.
     while (n_held > 0) {
-        for (uint8_t k = 0; k < 4 && n_held > 0; k++) bus.note_write(in_bus, off(held[--n_held]));
+        for (uint8_t k = 0; k < 4 && n_held > 0; k++) bus.note_write(in_buses, off(held[--n_held]));
         now += 5000;
-        balance.observe(run_pass(bus, node, out_bus, now));
+        balance.observe(run_pass(bus, node, out_buses, now));
     }
     // And a last pass with the gate low, for anything waiting on an edge.
     if (with_gate) bus.gate_write(1, false);
-    balance.observe(run_pass(bus, node, out_bus, now + 100000));
+    balance.observe(run_pass(bus, node, out_buses, now + 100000));
     if (unlatch != 0xFFFF) {
         TEST_ASSERT_TRUE(node.set_param(unlatch, 0));
-        balance.observe(run_pass(bus, node, out_bus, now + 200000));
+        balance.observe(run_pass(bus, node, out_buses, now + 200000));
     }
 
     TEST_ASSERT_FALSE(balance.went_negative);
-    TEST_ASSERT_EQUAL_MESSAGE(0, bus.note_overflows(in_bus), "the test overflowed the input bus");
-    TEST_ASSERT_EQUAL_MESSAGE(0, bus.note_overflows(out_bus), "the node overflowed the output bus");
+    TEST_ASSERT_EQUAL_MESSAGE(0, bus.note_overflows(in_buses), "the test overflowed the input bus");
+    TEST_ASSERT_EQUAL_MESSAGE(0, bus.note_overflows(out_buses), "the node overflowed the output bus");
     TEST_ASSERT_EQUAL(0, balance.total());
 }
 
 static NodeConfig modifier_config(uint8_t id) {
     NodeConfig c = node_config(id);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = 3;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(3);
     return c;
 }
 
@@ -2112,7 +2112,7 @@ static void test_probability_hangs_nothing() {
 static void test_arpeggiator_on_hold_hangs_nothing() {
     for (uint8_t mode = 0; mode <= Arpeggiator::ARP_AS_PLAYED; mode++) {
         NodeConfig c = modifier_config(ALGO_ARPEGGIATOR);
-        c.in_bus[1] = 1;
+        c.in_buses[1] = one_bus(1);
         c.params[0] = mode;
         c.params[1] = 2;
         c.params[4] = 1;                               // hold
@@ -2123,7 +2123,7 @@ static void test_arpeggiator_on_hold_hangs_nothing() {
 static void test_arpeggiator_hangs_nothing_in_any_mode() {
     for (uint8_t mode = 0; mode <= Arpeggiator::ARP_AS_PLAYED; mode++) {
         NodeConfig c = modifier_config(ALGO_ARPEGGIATOR);
-        c.in_bus[1] = 1;
+        c.in_buses[1] = one_bus(1);
         c.params[0] = mode;
         c.params[1] = 3;
         assert_no_hanging_notes<Arpeggiator>(c, 0, 3, 7u + mode, true);

@@ -351,9 +351,9 @@ static void test_cv_sync_pulses_carry_more_than_one_tick() {
 // ClockDiv, driven directly through a BusManager
 // ---------------------------------------------------------------------------
 
-static NodeConfig div_config(uint8_t mode, uint8_t amount, uint8_t out_bus) {
+static NodeConfig div_config(uint8_t mode, uint8_t amount, uint8_t out_buses) {
     NodeConfig c = node_config(ALGO_CLOCK_DIV);
-    c.out_bus[0] = out_bus;
+    c.out_buses[0] = one_bus(out_buses);
     c.params[0] = mode;
     c.params[1] = amount;
     return c;
@@ -369,7 +369,7 @@ struct DivRun {
     bool ever_high;
 };
 
-static DivRun run_ticks(ClockDiv& node, BusManager& bus, uint8_t out_bus,
+static DivRun run_ticks(ClockDiv& node, BusManager& bus, uint8_t out_buses,
                         uint32_t subticks, uint32_t start_count = 0,
                         uint32_t step_us = 1000) {
     DivRun r = {0, 0, false};
@@ -379,7 +379,7 @@ static DivRun run_ticks(ClockDiv& node, BusManager& bus, uint8_t out_bus,
         node.process(bus, now);
         node.tick(bus, start_count + t);
         bus.swap();
-        const bool high = bus.gate_read(out_bus);
+        const bool high = bus.gate_read(out_buses);
         if (high && !was_high) {
             r.pulses++;
             if (!r.ever_high) { r.first_high = start_count + t; r.ever_high = true; }
@@ -556,10 +556,10 @@ static void test_clock_div_drives_a_jack_through_the_master() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);              // tick source -> gate 0
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;                              // /4
     p.n_nodes = 1;
-    p.gate_ports[3] = GatePortConfig{GATE_PORT_OUT, 0};
+    p.gate_ports[3] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -574,15 +574,15 @@ static void test_divider_chained_from_another_divider() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);              // tick -> gate 0, /4
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 4;
     p.nodes[1] = node_config(ALGO_CLOCK_DIV);              // gate 0 -> gate 1, /3
-    p.nodes[1].in_bus[0] = 0;
-    p.nodes[1].out_bus[0] = 1;
+    p.nodes[1].in_buses[0] = one_bus(0);
+    p.nodes[1].out_buses[0] = one_bus(1);
     p.nodes[1].params[1] = 3;
     p.n_nodes = 2;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 0};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 1};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -616,8 +616,8 @@ static void test_divider_chained_from_another_divider() {
 static void test_multiply_from_a_gate_source_is_refused() {
     BusManager bus;
     NodeConfig c = node_config(ALGO_CLOCK_DIV);
-    c.in_bus[0] = 0;
-    c.out_bus[0] = 1;
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(1);
     c.params[0] = 1;                                       // multiply
     c.params[1] = 4;
     ClockDiv node(c);
@@ -646,10 +646,10 @@ static void test_midi_clock_through_deliver_midi_drives_a_divider() {
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 1;                              // one pulse per tick
     p.n_nodes = 1;
-    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 0};
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
     master.clock().set_source(MasterClock::CLOCK_MIDI);
@@ -692,9 +692,9 @@ static void test_sync_edge_only_counts_for_the_cv_source() {
 // Metronome: the same clock, said in note values
 // ---------------------------------------------------------------------------
 
-static NodeConfig metro_config(uint8_t division, uint8_t feel, uint8_t out_bus) {
+static NodeConfig metro_config(uint8_t division, uint8_t feel, uint8_t out_buses) {
     NodeConfig c = node_config(ALGO_METRONOME);
-    c.out_bus[0] = out_bus;
+    c.out_buses[0] = one_bus(out_buses);
     c.params[0] = division;
     c.params[1] = feel;
     return c;
@@ -712,7 +712,7 @@ struct MetroRun {
     bool even_gaps;
 };
 
-static MetroRun run_metronome(Metronome& node, BusManager& bus, uint8_t out_bus,
+static MetroRun run_metronome(Metronome& node, BusManager& bus, uint8_t out_buses,
                               uint32_t subticks, uint32_t start_count = 0,
                               uint32_t step_us = 1000) {
     MetroRun r = {0, 0, 0, false, true};
@@ -722,7 +722,7 @@ static MetroRun run_metronome(Metronome& node, BusManager& bus, uint8_t out_bus,
         node.process(bus, now);
         node.tick(bus, start_count + t);
         bus.swap();
-        const bool high = bus.gate_read(out_bus);
+        const bool high = bus.gate_read(out_buses);
         if (high && !was_high) {
             const uint32_t at = start_count + t;
             r.pulses++;
@@ -897,13 +897,13 @@ static void test_reset_re_anchors_the_grid() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[7] = GatePortConfig{GATE_PORT_IN, 0};     // jack 8 -> gate bus 0
+    p.gate_ports[7] = GatePortConfig{GATE_PORT_IN, one_bus(0)};     // jack 8 -> gate bus 0
     p.nodes[0] = node_config(ALGO_METRONOME);
-    p.nodes[0].in_bus[0] = 0;                              // reset
-    p.nodes[0].out_bus[0] = 1;
+    p.nodes[0].in_buses[0] = one_bus(0);                              // reset
+    p.nodes[0].out_buses[0] = one_bus(1);
     p.nodes[0].params[0] = DIV_QUARTER;
     p.n_nodes = 1;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 1};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 

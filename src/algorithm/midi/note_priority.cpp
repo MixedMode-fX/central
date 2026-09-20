@@ -47,8 +47,8 @@ uint8_t NotePriority::get_param(uint16_t index) const {
 }
 
 NotePriority::NotePriority(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     mode(config.params[P_MODE]),
     channel(config.params[P_CHANNEL] > 16 ? CHANNEL_FROM_SOURCE : config.params[P_CHANNEL]),
     playing(HeldNotes::NONE),

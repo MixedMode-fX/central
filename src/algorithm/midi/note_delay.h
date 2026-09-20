@@ -167,8 +167,8 @@ class NoteDelay : public Node{
         // or only over the ones counting subticks.
         void drop_echoes(BusManager& bus, bool clock_only);
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t sync;
         uint8_t div;
         uint8_t how;

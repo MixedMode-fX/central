@@ -10,11 +10,11 @@
 void setUp() {}
 void tearDown() {}
 
-static NodeConfig transport_config(uint8_t start_bus, uint8_t stop_bus, uint8_t continue_bus) {
+static NodeConfig transport_config(BusSet start_bus, BusSet stop_bus, BusSet continue_bus) {
     NodeConfig c = node_config(ALGO_TRANSPORT);
-    c.out_bus[Transport::OUT_START] = start_bus;
-    c.out_bus[Transport::OUT_STOP] = stop_bus;
-    c.out_bus[Transport::OUT_CONTINUE] = continue_bus;
+    c.out_buses[Transport::OUT_START] = start_bus;
+    c.out_buses[Transport::OUT_STOP] = stop_bus;
+    c.out_buses[Transport::OUT_CONTINUE] = continue_bus;
     return c;
 }
 
@@ -22,11 +22,11 @@ static NodeConfig transport_config(uint8_t start_bus, uint8_t stop_bus, uint8_t 
 // the node did is read off the pins rather than out of the node.
 static Patch three_jacks_patch() {
     Patch p = empty_patch();
-    p.nodes[0] = transport_config(0, 1, 2);
+    p.nodes[0] = transport_config(one_bus(0), one_bus(1), one_bus(2));
     p.n_nodes = 1;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 0};      // jack 1: start
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 1};      // jack 2: stop
-    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, 2};      // jack 3: continue
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};      // jack 1: start
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(1)};      // jack 2: stop
+    p.gate_ports[2] = GatePortConfig{GATE_PORT_OUT, one_bus(2)};      // jack 3: continue
     return p;
 }
 
@@ -230,9 +230,9 @@ static void test_two_outlets_on_one_bus_are_or() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.nodes[0] = transport_config(0, NO_BUS, 0);     // start and continue, one bus
+    p.nodes[0] = transport_config(one_bus(0), BusSet{}, one_bus(0));     // start and continue, one bus
     p.n_nodes = 1;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 0};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 
@@ -299,12 +299,12 @@ static void test_a_start_resets_a_running_sequencer() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, 0};       // jack 1 advances it
-    p.nodes[0] = transport_config(1, NO_BUS, NO_BUS);        // start -> gate 1
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};       // jack 1 advances it
+    p.nodes[0] = transport_config(one_bus(1), BusSet{}, BusSet{});        // start -> gate 1
     p.nodes[1] = node_config(ALGO_STEP_SEQ);
-    p.nodes[1].in_bus[0] = 0;                                // advance
-    p.nodes[1].in_bus[1] = 1;                                // reset, from the start outlet
-    p.nodes[1].out_bus[0] = 2;
+    p.nodes[1].in_buses[0] = one_bus(0);                                // advance
+    p.nodes[1].in_buses[1] = one_bus(1);                                // reset, from the start outlet
+    p.nodes[1].out_buses[0] = one_bus(2);
     p.nodes[1].params[0] = 8;                                // eight steps
     p.n_nodes = 2;
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
@@ -368,11 +368,11 @@ static void test_two_transports_both_hear_it() {
     FakeGpio gpio; RecordingMidiOut midi;
     MixedModeMaster master(gpio, midi);
     Patch p = empty_patch();
-    p.nodes[0] = transport_config(0, NO_BUS, NO_BUS);
-    p.nodes[1] = transport_config(1, NO_BUS, NO_BUS);
+    p.nodes[0] = transport_config(one_bus(0), BusSet{}, BusSet{});
+    p.nodes[1] = transport_config(one_bus(1), BusSet{}, BusSet{});
     p.n_nodes = 2;
-    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 0};
-    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, 1};
+    p.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
+    p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(1)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
     master.setup();
 

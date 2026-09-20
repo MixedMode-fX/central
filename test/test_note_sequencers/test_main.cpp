@@ -83,8 +83,8 @@ static void expect(const char* expected, const std::vector<MidiEvent>& events) {
 // placed plays in.
 static NodeConfig seq_config(uint8_t id, uint8_t length, uint8_t octave = 0) {
     NodeConfig c = node_config(id);
-    c.in_bus[0] = ADVANCE;
-    c.out_bus[0] = OUT;
+    c.in_buses[0] = one_bus(ADVANCE);
+    c.out_buses[0] = one_bus(OUT);
     c.params[NS::P_LENGTH] = length;
     c.params[NS::P_OCTAVE] = octave;
     return c;
@@ -197,7 +197,7 @@ static void test_a_pattern_plays_in_the_keys_register() {
 // outranks the key's register as it outranks everything else.
 static void test_the_root_inlet_outranks_the_key_register() {
     NodeConfig c = scale_run(4);
-    c.in_bus[2] = ROOT_BUS;
+    c.in_buses[2] = one_bus(ROOT_BUS);
     NoteSequencer node(c);
     Rig rig;
 
@@ -213,7 +213,7 @@ static void test_the_root_inlet_outranks_the_key_register() {
 
 static void test_root_inlet_last_note_on_wins() {
     NodeConfig c = scale_run(4);
-    c.in_bus[2] = ROOT_BUS;
+    c.in_buses[2] = one_bus(ROOT_BUS);
     NoteSequencer node(c);
     Rig rig;
     expect("+60/100 ", rig.edge(node));
@@ -464,7 +464,7 @@ static void test_poly_step_emits_four_voices_and_releases_all_of_them() {
 static void test_engine_is_shared_with_the_gate_sequencers() {
     for (uint8_t dir = 0; dir < StepEngine::SEQ_RANDOM; dir++) {
         NodeConfig g = node_config(ALGO_STEP_SEQ);
-        g.in_bus[0] = ADVANCE; g.out_bus[0] = 5;
+        g.in_buses[0] = one_bus(ADVANCE); g.out_buses[0] = one_bus(5);
         g.params[0] = 5; g.params[1] = dir;
         StepSequencer gate(g);
         NodeConfig n = scale_run(5);
@@ -487,7 +487,7 @@ static void test_engine_is_shared_with_the_gate_sequencers() {
 // sounding is released on that edge like any other.
 static void test_reset_inlet() {
     NodeConfig c = scale_run(4);
-    c.in_bus[1] = RESET;
+    c.in_buses[1] = one_bus(RESET);
     NoteSequencer node(c);
     Rig rig;
     expect("+60/100 ", rig.edge(node));
@@ -523,8 +523,8 @@ struct NoteBalance {
 template <class T>
 static void assert_no_hanging_notes(uint8_t voices, uint32_t seed) {
     NodeConfig c = seq_config(voices == 1 ? ALGO_NOTE_SEQ : ALGO_POLY_SEQ, 16);
-    c.in_bus[1] = RESET;
-    c.in_bus[2] = ROOT_BUS;
+    c.in_buses[1] = one_bus(RESET);
+    c.in_buses[2] = one_bus(ROOT_BUS);
     c.params[NS::P_GATE] = 60;
     Xorshift32 script(seed);
     for (uint8_t s = 0; s < MAX_SEQUENCE_LEN; s++) {
@@ -579,13 +579,13 @@ static void test_poly_hangs_nothing_under_every_change() {
 static Patch sequencer_patch() {
     Patch p = empty_patch();
     p.nodes[0] = node_config(ALGO_CLOCK_DIV);                    // tick -> gate 0, /6
-    p.nodes[0].out_bus[0] = 0;
+    p.nodes[0].out_buses[0] = one_bus(0);
     p.nodes[0].params[1] = 6;
     p.nodes[1] = scale_run(4);                                   // gate 0 -> note 3
     p.nodes[1].params[NS::P_STALL] = NS::STALL_NEVER;
     set_step(p.nodes[1], 1, 0, 0, 0, 100, 4);                    // a long note
     p.n_nodes = 2;
-    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, 3};
+    p.midi_out[0] = MidiOutConfig{mmMIDI_USB_0, 0, one_bus(3)};
     return p;
 }
 
@@ -604,7 +604,7 @@ static void test_patch_swap_mid_note_releases_it() {
     // Swap to an unrelated patch: the note-off goes out through the old
     // patch's MIDI port before anything is destroyed.
     Patch other = empty_patch();
-    other.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, 0};
+    other.gate_ports[0] = GatePortConfig{GATE_PORT_OUT, one_bus(0)};
     TEST_ASSERT_EQUAL(LOAD_OK, master.load(other));
     master.setup();
     TEST_ASSERT_EQUAL(2, midi.messages.size());
@@ -636,8 +636,12 @@ static void test_descriptors_and_sizes() {
     TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
     c.algorithm_id = ALGO_POLY_SEQ;
     TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
-    c.in_bus[2] = N_NOTE_BUS;
-    TEST_ASSERT_EQUAL(CONFIG_INLET_OUT_OF_RANGE, registry::validate(c));
+    // The root inlet is optional; the advance inlet is not, and a sequencer
+    // with nothing advancing it is a patch the module refuses.
+    c.in_buses[2] = BusSet{};
+    TEST_ASSERT_EQUAL(CONFIG_OK, registry::validate(c));
+    c.in_buses[0] = BusSet{};
+    TEST_ASSERT_EQUAL(CONFIG_INLET_NOT_CONNECTED, registry::validate(c));
 }
 
 int main() {

@@ -108,8 +108,8 @@ class Retrigger : public Node{
         void strike(BusManager& bus);
         void release_all(BusManager& bus);
 
-        uint8_t in;
-        uint8_t out;
+        BusSet in;
+        BusSet out;
         uint8_t length;          // MusicalDivision
         uint8_t how;             // MusicalFeel
         uint8_t release;         // Release

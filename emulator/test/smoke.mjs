@@ -22,7 +22,10 @@ if (E.__wasm_call_ctors) E.__wasm_call_ctors();
 const NOTE_ON = 0x90, NOTE_OFF = 0x80, CC = 0xB0;
 const USB_0 = 0x01, USB_1 = 0x02, SERIAL_1 = 0x10, SERIAL_2 = 0x20, HOST_1 = 0x80;
 const GATE_IN = 1, GATE_OUT = 2;
-const NO_BUS = E.emu_const_no_bus();
+// A port names the set of buses it is on (src/bus/domain.h), and the emulator
+// takes that set as a bit per bus. The scenarios below name buses, so this is
+// where a bus number - or two of them, for a merge - becomes a set.
+const B = (...buses) => buses.reduce((mask, bus) => mask | (1 << bus), 0);
 // A centred parameter's zero, as the firmware writes it (src/node/param.h).
 const CENTRE = 128;
 
@@ -38,7 +41,7 @@ const algo = name => {
 
 let now = 0;
 const passes = (n, step = 1000) => { for (let i = 0; i < n; i++) { E.emu_pass(now); now += step; } };
-const node = (i, name, in0, out0) => { E.emu_patch_node(i, algo(name)); if (in0 !== undefined) E.emu_patch_node_in(i, 0, in0); if (out0 !== undefined) E.emu_patch_node_out(i, 0, out0); };
+const node = (i, name, in0, out0) => { E.emu_patch_node(i, algo(name)); if (in0 !== undefined) E.emu_patch_node_in(i, 0, B(in0)); if (out0 !== undefined) E.emu_patch_node_out(i, 0, B(out0)); };
 let tests = 0;
 // Jack levels persist across loads as a patched cable would, so every
 // scenario starts from silence like the native tests' fresh FakeGpio.
@@ -59,10 +62,10 @@ test('registry is reachable and names the algorithms', () => {
 });
 
 test('gate in -> NOT -> GateToNote -> MIDI out: one message per edge', () => {
-  E.emu_patch_gate_port(0, GATE_IN, 0);
+  E.emu_patch_gate_port(0, GATE_IN, B(0));
   node(0, 'NOT', 0, 1);
   node(1, 'GateToNote', 1, 0);
-  E.emu_patch_midi_out(0, USB_0, 0, 0);
+  E.emu_patch_midi_out(0, USB_0, 0, B(0));
   assert.equal(E.emu_load(), 0);
   assert.equal(E.emu_jack_mode(0), 1, 'input pullup');
   E.emu_jack_set_input(0, 0);
@@ -74,13 +77,13 @@ test('gate in -> NOT -> GateToNote -> MIDI out: one message per edge', () => {
 });
 
 test('worked example: arpeggio to two outputs an octave apart', () => {
-  E.emu_patch_midi_in(0, SERIAL_1, 0, 0);
-  E.emu_patch_gate_port(0, GATE_IN, 0);
+  E.emu_patch_midi_in(0, SERIAL_1, 0, B(0));
+  E.emu_patch_gate_port(0, GATE_IN, B(0));
   E.emu_patch_node(0, algo('Arpeggiator'));
-  E.emu_patch_node_in(0, 0, 0); E.emu_patch_node_in(0, 1, 0); E.emu_patch_node_out(0, 0, 1);
+  E.emu_patch_node_in(0, 0, B(0)); E.emu_patch_node_in(0, 1, B(0)); E.emu_patch_node_out(0, 0, B(1));
   node(1, 'Transpose', 1, 2); E.emu_patch_node_param(1, 0, CENTRE + 12);
-  E.emu_patch_midi_out(0, USB_0, 1, 1);
-  E.emu_patch_midi_out(1, SERIAL_2, 2, 2);
+  E.emu_patch_midi_out(0, USB_0, 1, B(1));
+  E.emu_patch_midi_out(1, SERIAL_2, 2, B(2));
   assert.equal(E.emu_load(), 0);
   assert.equal(E.emu_deliver_midi(SERIAL_1, NOTE_ON, 1, 60, 100), 1);
   assert.equal(E.emu_deliver_midi(SERIAL_1, NOTE_ON, 1, 64, 100), 1);
@@ -97,12 +100,12 @@ test('worked example: arpeggio to two outputs an octave apart', () => {
 });
 
 test('fan-out: one bus, three readers, one pass', () => {
-  E.emu_patch_midi_in(0, USB_0, 0, 3);
-  E.emu_patch_midi_out(0, USB_1, 0, 3);
-  E.emu_patch_midi_out(1, SERIAL_1, 0, 3);
-  E.emu_patch_midi_out(2, HOST_1, 0, 3);
-  E.emu_patch_gate_port(0, GATE_IN, 4);
-  for (let p = 1; p <= 3; p++) E.emu_patch_gate_port(p, GATE_OUT, 4);
+  E.emu_patch_midi_in(0, USB_0, 0, B(3));
+  E.emu_patch_midi_out(0, USB_1, 0, B(3));
+  E.emu_patch_midi_out(1, SERIAL_1, 0, B(3));
+  E.emu_patch_midi_out(2, HOST_1, 0, B(3));
+  E.emu_patch_gate_port(0, GATE_IN, B(4));
+  for (let p = 1; p <= 3; p++) E.emu_patch_gate_port(p, GATE_OUT, B(4));
   assert.equal(E.emu_load(), 0);
   E.emu_deliver_midi(USB_0, NOTE_ON, 1, 60, 100);
   E.emu_jack_set_input(0, 1);
@@ -112,24 +115,47 @@ test('fan-out: one bus, three readers, one pass', () => {
   assert.equal(E.emu_gate_buses() & (1 << 4), 1 << 4);
 });
 
+// Two sources summed by one reader, each keeping its own bus and its own other
+// destination - the shape one bus per port could not hold.
+test('merge: one reader on two buses, and neither source loses anything', () => {
+  E.emu_patch_midi_in(0, USB_0, 0, B(0));
+  E.emu_patch_midi_in(1, SERIAL_1, 0, B(1));
+  E.emu_patch_midi_out(0, USB_1, 0, B(0, 1));        // both
+  E.emu_patch_midi_out(1, SERIAL_2, 0, B(0));        // only the first
+  assert.equal(E.emu_load(), 0);
+
+  assert.equal(E.emu_deliver_midi(USB_0, NOTE_ON, 1, 60, 100), 1);
+  assert.equal(E.emu_deliver_midi(SERIAL_1, NOTE_ON, 1, 64, 100), 1);
+  passes(1);
+  const merged = sent.filter(m => m.target === USB_1).map(m => m.d1).sort();
+  assert.deepEqual(merged, [60, 64], 'the merging output hears both inputs');
+  assert.deepEqual(sent.filter(m => m.target === SERIAL_2).map(m => m.d1), [60],
+                   'and the first input still reaches the output it already had');
+});
+
 test('validator rejects a bad patch and keeps the running one', () => {
-  E.emu_patch_gate_port(0, GATE_OUT, 0);
+  E.emu_patch_gate_port(0, GATE_OUT, B(0));
   node(0, 'NOT', 0, 0);
   assert.equal(E.emu_load(), 0);
   const before = E.emu_node_count();
   E.emu_patch_reset();
-  E.emu_patch_node(0, algo('NOT')); E.emu_patch_node_in(0, 0, 99); E.emu_patch_node_out(0, 0, 0);
+  // A required inlet on no bus at all.
+  E.emu_patch_node(0, algo('NOT')); E.emu_patch_node_in(0, 0, 0); E.emu_patch_node_out(0, 0, B(0));
   assert.equal(E.emu_load(), 4, 'LOAD_NODE_INVALID');
-  assert.equal(E.emu_last_node_error(), 2, 'CONFIG_INLET_OUT_OF_RANGE');
+  assert.equal(E.emu_last_node_error(), 3, 'CONFIG_INLET_NOT_CONNECTED');
   assert.equal(E.emu_last_node_index(), 0);
   assert.equal(E.emu_node_count(), before);
+  // A bus the module has not got. Gate and note fill the sixteen bits a set
+  // has, so the CV domain is the one that can say it.
   E.emu_patch_reset();
-  E.emu_patch_gate_port(0, GATE_IN, 99);
-  assert.equal(E.emu_load(), 2, 'LOAD_GATE_PORT_BUS_OUT_OF_RANGE');
+  E.emu_patch_node(0, algo('Slew'));
+  E.emu_patch_node_in(0, 0, 1 << E.emu_const_n_cv_bus()); E.emu_patch_node_out(0, 0, B(0));
+  assert.equal(E.emu_load(), 4, 'LOAD_NODE_INVALID');
+  assert.equal(E.emu_last_node_error(), 2, 'CONFIG_INLET_OUT_OF_RANGE');
 });
 
 test('self feedback: a NOT on its own bus oscillates every pass', () => {
-  E.emu_patch_gate_port(0, GATE_OUT, 0);
+  E.emu_patch_gate_port(0, GATE_OUT, B(0));
   node(0, 'NOT', 0, 0);
   assert.equal(E.emu_load(), 0);
   const seen = [];
@@ -138,9 +164,9 @@ test('self feedback: a NOT on its own bus oscillates every pass', () => {
 });
 
 test('sustain: a debounced pedal yields exactly one CC, the default patch from main.cpp', () => {
-  E.emu_patch_gate_port(7, GATE_IN, 0);
+  E.emu_patch_gate_port(7, GATE_IN, B(0));
   node(0, 'Sustain', 0, 0);
-  E.emu_patch_midi_out(0, 0xFF, 0, 0);
+  E.emu_patch_midi_out(0, 0xFF, 0, B(0));
   assert.equal(E.emu_load(), 0);
   passes(20);          // settle: first stable level (up) is transmitted once
   sent.length = 0;
@@ -151,8 +177,8 @@ test('sustain: a debounced pedal yields exactly one CC, the default patch from m
 });
 
 test('master clock: the page as interval timer, ClockDiv /24 pulses jack 1 once per beat at 120 BPM', () => {
-  E.emu_patch_gate_port(0, GATE_OUT, 0);
-  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 24);
+  E.emu_patch_gate_port(0, GATE_OUT, B(0));
+  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, B(0)); E.emu_patch_node_param(0, 1, 24);
   assert.equal(E.emu_load(), 0);
   E.emu_clock_set_bpm(120);
   // teensy_clock.cpp: reprogram on request, else free-run.
@@ -176,13 +202,13 @@ test('master clock: the page as interval timer, ClockDiv /24 pulses jack 1 once 
 // released with the pitch that was sent.
 test('note sequencer: degrees in C major, re-rooted from a key mid-note', () => {
   const NOTE_SEQ = algo('NoteSequencer');
-  E.emu_patch_midi_in(0, SERIAL_1, 0, 0);                 // DIN 1 -> note bus 0: the root
-  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 6);
-  E.emu_patch_node(1, NOTE_SEQ); E.emu_patch_node_in(1, 0, 0); E.emu_patch_node_in(1, 2, 0); E.emu_patch_node_out(1, 0, 1);
+  E.emu_patch_midi_in(0, SERIAL_1, 0, B(0));                 // DIN 1 -> note bus 0: the root
+  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, B(0)); E.emu_patch_node_param(0, 1, 6);
+  E.emu_patch_node(1, NOTE_SEQ); E.emu_patch_node_in(1, 0, B(0)); E.emu_patch_node_in(1, 2, B(0)); E.emu_patch_node_out(1, 0, B(1));
   E.emu_patch_key(1, 0, 5);                               // C major, middle C
   E.emu_patch_node_param(1, 0, 4);                        // length; the octave follows the key
   for (let st = 0; st < 4; st++) { E.emu_patch_node_param(1, 16 + st * 4, st); E.emu_patch_node_param(1, 16 + st * 4 + 1, 100); E.emu_patch_node_param(1, 16 + st * 4 + 2, 1); }
-  E.emu_patch_midi_out(0, USB_0, 0, 1);
+  E.emu_patch_midi_out(0, USB_0, 0, B(1));
   assert.equal(E.emu_load(), 0);
   assert.equal(E.emu_seq_kind(1), 2, 'a note sequencer');
   assert.equal(E.emu_seq_pitch(1, 0, 2), 64, 'degree 2 of C major');
@@ -203,9 +229,9 @@ test('note sequencer: degrees in C major, re-rooted from a key mid-note', () => 
 // swap that flushes the note-offs of the MIDI variant.
 test('drum sequencers: 16 against 12 on the jacks, and note-offs on a patch swap', () => {
   const GATE = algo('DrumSeqGate');
-  E.emu_patch_gate_port(0, GATE_OUT, 1); E.emu_patch_gate_port(1, GATE_OUT, 2);
-  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 1);
-  E.emu_patch_node(1, GATE); E.emu_patch_node_in(1, 0, 0); E.emu_patch_node_out(1, 0, 1); E.emu_patch_node_out(1, 1, 2);
+  E.emu_patch_gate_port(0, GATE_OUT, B(1)); E.emu_patch_gate_port(1, GATE_OUT, B(2));
+  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, B(0)); E.emu_patch_node_param(0, 1, 1);
+  E.emu_patch_node(1, GATE); E.emu_patch_node_in(1, 0, B(0)); E.emu_patch_node_out(1, 0, B(1)); E.emu_patch_node_out(1, 1, B(2));
   E.emu_patch_node_param(1, 0, 16);
   E.emu_patch_node_param(1, 16, 1);                                    // lane 0: step 0, 16 steps
   E.emu_patch_node_param(1, 16 + 8, 1); E.emu_patch_node_param(1, 16 + 8 + 4, 12);   // lane 1: step 0, 12 steps
@@ -222,11 +248,11 @@ test('drum sequencers: 16 against 12 on the jacks, and note-offs on a patch swap
   assert.deepEqual(both, [true, false, false, true, false, false, true], 'lane 1 coincides with lane 0 every 48 steps');
 
   E.emu_patch_reset();
-  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 6);
-  E.emu_patch_node(1, algo('DrumSeqMidi')); E.emu_patch_node_in(1, 0, 0); E.emu_patch_node_out(1, 0, 1);
+  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, B(0)); E.emu_patch_node_param(0, 1, 6);
+  E.emu_patch_node(1, algo('DrumSeqMidi')); E.emu_patch_node_in(1, 0, B(0)); E.emu_patch_node_out(1, 0, B(1));
   E.emu_patch_node_param(1, 0, 4); E.emu_patch_node_param(1, 2, 250);   // 250 ms notes
   E.emu_patch_node_param(1, 80, 100); E.emu_patch_node_param(1, 80 + 32, 90);   // lanes 0 and 1, step 0
-  E.emu_patch_midi_out(0, USB_1, 0, 1);
+  E.emu_patch_midi_out(0, USB_1, 0, B(1));
   assert.equal(E.emu_load(), 0);
   sent.length = 0;
   for (let t = 0; t < 8 * 24; t++) { E.emu_clock_advance(); E.emu_pass(now); now += 300; }
@@ -247,15 +273,15 @@ test('an LFO on a control bus moves a parameter, and the divider follows', () =>
 
   // A 1 Hz ramp on CV bus 0, unipolar, driving the divider's amount over its
   // whole range. The divider is on the master clock, its trigger on jack 0.
-  E.emu_patch_node(0, algo('LFO')); E.emu_patch_node_out(0, 0, 0);
+  E.emu_patch_node(0, algo('LFO')); E.emu_patch_node_out(0, 0, B(0));
   E.emu_patch_node_param(0, 0, 3);            // ramp up
   E.emu_patch_node_param(0, 1, 1);            // free-running
   E.emu_patch_node_param(0, 2, 10);           // 1 Hz
   E.emu_patch_node_param(0, 8, 2);            // unipolar
-  E.emu_patch_node(1, algo('ClockDiv')); E.emu_patch_node_out(1, 0, 0);
+  E.emu_patch_node(1, algo('ClockDiv')); E.emu_patch_node_out(1, 0, B(0));
   E.emu_patch_node_param(1, 1, 24);
-  E.emu_patch_gate_port(0, GATE_OUT, 0);
-  E.emu_patch_mod_route(0, 0, CC_TARGET_NODE, 1, 1, 255, MOD_ABSOLUTE);
+  E.emu_patch_gate_port(0, GATE_OUT, B(0));
+  E.emu_patch_mod_route(0, B(0), CC_TARGET_NODE, 1, 1, 255, MOD_ABSOLUTE);
   assert.equal(E.emu_load(), 0);
 
   const seen = new Set();
@@ -282,11 +308,11 @@ test('an LFO on a control bus moves a parameter, and the divider follows', () =>
 // ever - on the cable and on the note bus the piano roll reads, which is where
 // this was seen. Both go quiet, and starting plays again.
 test('stopping the transport releases what the clock was playing', () => {
-  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, 0); E.emu_patch_node_param(0, 1, 4);
+  E.emu_patch_node(0, algo('ClockDiv')); E.emu_patch_node_out(0, 0, B(0)); E.emu_patch_node_param(0, 1, 4);
   E.emu_patch_node(1, algo('Harmony'));
-  E.emu_patch_node_in(1, 0, 0); E.emu_patch_node_in(1, 1, NO_BUS);
-  E.emu_patch_node_out(1, 0, 1); E.emu_patch_node_out(1, 1, NO_BUS);
-  E.emu_patch_midi_out(0, USB_0, 0, 1);
+  E.emu_patch_node_in(1, 0, B(0)); E.emu_patch_node_in(1, 1, 0);
+  E.emu_patch_node_out(1, 0, B(1)); E.emu_patch_node_out(1, 1, 0);
+  E.emu_patch_midi_out(0, USB_0, 0, B(1));
   assert.equal(E.emu_load(), 0);
 
   // What the note bus carried, the way the app's piano roll drains it: once
@@ -369,7 +395,7 @@ test('the clock is routed out of the cables the protocol names', () => {
 });
 
 test('unload returns every jack to an input', () => {
-  E.emu_patch_gate_port(2, GATE_OUT, 1);
+  E.emu_patch_gate_port(2, GATE_OUT, B(1));
   assert.equal(E.emu_load(), 0);
   assert.equal(E.emu_jack_mode(2), 2);
   E.emu_unload();

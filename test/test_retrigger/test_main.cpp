@@ -39,9 +39,9 @@ static uint16_t logged = 0;
 
 static NodeConfig retrigger_config(uint8_t length, uint8_t feel, uint8_t release, uint8_t velocity){
     NodeConfig c = node_config(ALGO_RETRIGGER);
-    c.in_bus[0] = NOTE_IN;
-    c.in_bus[1] = GATE_TRIG;
-    c.out_bus[0] = NOTE_OUT;
+    c.in_buses[0] = one_bus(NOTE_IN);
+    c.in_buses[1] = one_bus(GATE_TRIG);
+    c.out_buses[0] = one_bus(NOTE_OUT);
     c.params[0] = length;
     c.params[1] = feel;
     c.params[2] = release;

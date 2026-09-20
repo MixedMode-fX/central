@@ -22,8 +22,8 @@ const AlgorithmDescriptor Channel::descriptor = {
     CATEGORY_MIDI };
 
 Channel::Channel(const NodeConfig& config) :
-    in(config.in_bus[0]),
-    out(config.out_bus[0]),
+    in(config.in_buses[0]),
+    out(config.out_buses[0]),
     first(config.params[P_CHANNEL] ? config.params[P_CHANNEL] : (uint8_t)1),
     count(config.params[P_COUNT] ? config.params[P_COUNT] : (uint8_t)1),
     next(0),

@@ -105,8 +105,8 @@ class Lfo : public Node{
         // Back to the top of the cycle, in whichever mode is running.
         void restart();
 
-        uint8_t reset_in;
-        uint8_t out;
+        BusSet reset_in;
+        BusSet out;
         uint8_t shape;
         uint8_t sync;
         uint8_t rate_param;      // tenths of a hertz

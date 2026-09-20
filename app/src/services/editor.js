@@ -11,7 +11,7 @@ import * as P from '../protocol/generated.js';
 import * as codec from '../protocol/codec.js';
 import { validate } from '../core/validate.js';
 import {
-  BlockKind, applyWrite,
+  BlockKind, applyWrite, copyNode, nodeFromCopy,
   planJackDirection, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation, planCcBinding,
 } from '../core/graph.js';
 import {
@@ -349,6 +349,68 @@ export class Editor {
     }
     this.setMidiPort(block.index, block.kind === BlockKind.MidiOut,
                      { [maskKey(block.kind === BlockKind.MidiOut)]: 0 });
+  }
+
+  // --- the clipboard ---------------------------------------------------------
+  //
+  // What a copy carries is `core/graph.js`'s to say. This is where one is
+  // kept: in the page, beside the canvas, rather than in the system clipboard
+  // - a node is a byte array and a set of buses, not text somebody would paste
+  // into a message, and a browser's clipboard is a permission prompt for
+  // something nobody asked to share.
+  //
+  // **Only a node is copied.** A jack and a MIDI port are fixed resources of
+  // the module rather than things a patch has more of, so the way to get
+  // another one is the add bar, which takes the next free one into use.
+
+  copyBlock(block) {
+    if (block.kind !== BlockKind.Node) {
+      this.say('only a node is copied — a jack or a MIDI port is taken into use from the add bar');
+      return;
+    }
+    const copy = copyNode(this.patch, block.index);
+    if (!copy) { this.fail('that block is no longer in the patch'); return; }
+    this.state.ui.canvas.clipboard = copy;
+    this.say(`copied ${block.title}`);
+  }
+
+  // The copy, as a node of this patch. `at` is where it goes on the canvas;
+  // without one the layout places it from the shape of the patch.
+  paste({ at = null } = {}) {
+    const copy = this.state.ui.canvas.clipboard;
+    if (!copy) { this.say('nothing has been copied yet'); return null; }
+    return this.pasteCopy(copy, at, 'pasted');
+  }
+
+  // One more of this block, under it. The clipboard is not touched: copying
+  // one thing and duplicating another should not lose the first.
+  duplicateBlock(block, at = null) {
+    if (block.kind !== BlockKind.Node) {
+      this.say('only a node is duplicated — a jack or a MIDI port is taken into use from the add bar');
+      return null;
+    }
+    const copy = copyNode(this.patch, block.index);
+    if (!copy) { this.fail('that block is no longer in the patch'); return null; }
+    return this.pasteCopy(copy, at, 'duplicated');
+  }
+
+  // The one place a copy becomes a node in the patch. Adding a node changes
+  // the graph's shape, so it goes to the module as a whole patch, exactly as
+  // `addNode` does.
+  pasteCopy(copy, at, what) {
+    if (this.caps && this.patch.nodes.length >= this.caps.nodes) {
+      this.fail(`this module holds ${this.caps.nodes} nodes`);
+      return null;
+    }
+    const node = nodeFromCopy(this.device, copy);
+    if (!node) { this.fail('this module has not got that algorithm'); return null; }
+    const index = this.patch.nodes.length;
+    this.patch.nodes.push(node);
+    if (at) this.arrangement.place(`node:${index}`, at);
+    this.state.ui.canvas.selected = selectBlock(`node:${index}`);
+    const name = this.device?.byId.get(node.algorithmId)?.name ?? node.algorithmId;
+    this.sendWhole(`${what} ${name} — it writes nothing until you drag its outlets`);
+    return index;
   }
 
   // --- plans -----------------------------------------------------------------

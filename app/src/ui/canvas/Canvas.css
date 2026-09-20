@@ -24,15 +24,65 @@
 .canvas-legend .merge { color: var(--dim); }
 
 /* The details panel: one bar, then the card. The bar stays when the body is
-   folded, so a folded panel is a line saying what is selected. */
-.details-bar { display: flex; gap: .4rem; align-items: center; margin-bottom: .8rem; flex-wrap: wrap; }
+   folded, so a folded panel is a line saying what is selected.
+
+   One row, never two: the bar is a fold, a name and the four things that can
+   be done to the block, and a close button wrapped onto a line of its own
+   reads as a second bar with nothing in it. The name is what gives way. */
+.details-bar { display: flex; gap: .4rem; align-items: center; margin-bottom: .8rem; flex-wrap: nowrap; }
 .details.folded .details-bar { margin-bottom: 0; }
 .details-title {
-  margin: 0; flex: 1 1 6rem; color: var(--ink); font-size: .95rem;
+  margin: 0; flex: 1 1 3rem; min-width: 0; color: var(--ink); font-size: .95rem;
   text-transform: none; letter-spacing: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
 .details-close { margin-left: auto; }
+
+/* --- the whole window ---
+
+   The canvas and the panel of whatever is selected, and nothing else: two
+   rows, the picture taking what the details leave. `position: fixed` rather
+   than a tall panel in the page, because the point of it is a picture with no
+   header, no tab bar and no scroll - and the details are given a ceiling and
+   their own scroll, so opening a sequencer's grid cannot push the canvas off
+   the screen. */
+.canvas-full {
+  position: fixed; inset: 0; z-index: 20;
+  display: grid; grid-template-rows: minmax(0, 1fr) auto;
+  gap: .5rem; padding: .5rem;
+  padding-bottom: max(.5rem, env(safe-area-inset-bottom));
+  background: var(--bg); overflow: hidden;
+}
+.canvas-full .canvas-panel {
+  margin: 0; min-height: 0;
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.canvas-full .canvas-view { height: auto; min-height: 0; }
+.canvas-full .details { margin: 0; max-height: 45vh; overflow-y: auto; }
+.canvas-full .details.folded { overflow-y: visible; }
+/* The foot is one line here rather than two: in a window whose whole point is
+   the picture, a legend that wraps is a legend charging the picture for it. */
+.canvas-full .canvas-foot {
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-top: .4rem;
+}
+.canvas-full .canvas-foot::-webkit-scrollbar { display: none; }
+.canvas-full .canvas-foot > * { flex: none; }
+.canvas-full .canvas-foot .hint { white-space: nowrap; }
+.canvas-full .canvas-legend { flex-wrap: nowrap; }
+.canvas-full .canvas-legend .chip { flex: none; white-space: nowrap; }
+
+/* On a phone the bar is one row too, and what goes is the zoom pair: a touch
+   screen pinches, and the button that matters - fit the whole patch - stays. */
+@media (max-width: 34rem) {
+  .canvas-full .canvas-bar { flex-wrap: nowrap; margin-bottom: .4rem; }
+  .canvas-full .add-row { flex: 1 1 4rem; min-width: 0; }
+  .canvas-full .picker-face-text { flex-wrap: nowrap; min-width: 0; }
+  .canvas-full .picker-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* What the algorithm's ports are is on the block once it is added; here it
+     is the half of the face that costs the name its letters. */
+  .canvas-full .picker-note { display: none; }
+  .canvas-full .canvas-zoom-step { display: none; }
+}
 
 /* A fixed window onto a world as big as the patch needs. touch-action: none
    is what makes a one-finger drag pan the canvas instead of scrolling the

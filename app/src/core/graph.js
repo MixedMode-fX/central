@@ -8,6 +8,7 @@
 
 import * as P from '../protocol/generated.js';
 import { Domain, busCount, domainName } from './validate.js';
+import { emptyNode } from '../protocol/codec.js';
 import { MUSICAL_PORTS, ALL_MUSICAL } from '../protocol/names.js';
 import {
   isBinding, routesOf, routeTo, bindingTo, freeModSlot, freeCcSlot,
@@ -512,6 +513,48 @@ export function planDisconnect(blocks, arrow) {
       : `${target.block.title} ${target.port.name} is off `
         + `${domainName(arrow.domain)} bus ${arrow.bus}${left}`,
   };
+}
+
+// --- copying a node ---------------------------------------------------------
+//
+// A copy is a node's *settings*: the algorithm it runs, every parameter byte
+// it holds, and the buses its inlets read. **Its outlets arrive empty**, for
+// the reason at the top of this file - a bus chosen for you is a wire you did
+// not draw. Reading a bus a second time is fan-out, which is the ordinary case
+// and changes nothing that was already playing; writing one a second time is a
+// merge, and a merge nobody drew is a sound nobody asked for. So a duplicated
+// sequencer is still advanced by whatever advanced the one it came from, and
+// says nothing at all until it is given a bus of its own.
+//
+// What is *not* copied is everything addressed by node index from outside the
+// node: the routes modulating it and the controller bindings pointing at it
+// stay with the original. A parameter reachable from two knobs because a
+// block was duplicated is a patch nobody can read.
+export function copyNode(patch, index) {
+  const node = patch.nodes[index];
+  if (!node) return null;
+  return {
+    algorithmId: node.algorithmId,
+    inBuses: (node.inBuses ?? []).map((buses) => [...(buses ?? [])]),
+    params: Uint8Array.from(node.params),
+  };
+}
+
+// A copy, as a node this module could hold: null when it does not run that
+// algorithm at all. A bus the copy read that this module has not got is
+// dropped rather than carried - the clipboard outlives the patch it was taken
+// from, and a module with four gate buses cannot read the eighth.
+export function nodeFromCopy(device, copy) {
+  const d = device?.byId?.get(copy?.algorithmId);
+  if (!d) return null;
+  const caps = device.capabilities;
+  const node = emptyNode(copy.algorithmId);
+  node.params.set(copy.params.subarray(0, node.params.length));
+  for (let k = 0; k < d.nIn && k < P.MAX_IN; k++) {
+    const buses = copy.inBuses[k] ?? [];
+    node.inBuses[k] = buses.filter((bus) => bus < busCount(caps, d.inDomain[k]));
+  }
+  return node;
 }
 
 // Taking one port off every bus it is on, from the socket itself: the same as

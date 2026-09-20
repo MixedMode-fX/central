@@ -3,11 +3,13 @@
 // read and wrote; a jack and a MIDI port get theirs; an arrow gets the two
 // ends it joins.
 //
-// The panel folds. Its bar carries the block's name, its remove button, a
-// chevron that folds the body away and a cross that puts the panel away by
-// deselecting - so on a phone, where the panel is below a canvas that fills
-// the screen, the card can be folded to a bar without losing the selection
-// it belongs to.
+// The panel folds. Its bar carries the block's name, what can be done to the
+// block whole - copy it, make another one, remove it - a chevron that folds
+// the body away and a cross that puts the panel away by deselecting. So on a
+// phone, where the panel is below a canvas that fills the screen, the card can
+// be folded to a bar without losing the selection it belongs to, and the
+// commands the keyboard shortcuts reach are buttons for a screen that has no
+// keyboard.
 
 import { el, classes } from '../dom.js';
 import { IconButton } from '../components/IconButton.js';
@@ -17,7 +19,8 @@ import { RouteCard } from '../panels/RouteCard.js';
 import { NodeRollPanel } from '../scope/ScopePanels.js';
 import { BlockKind, planDisconnect } from '../../core/graph.js';
 import { domainName } from '../../core/validate.js';
-import { geometry } from './Canvas.js';
+import { underBlock } from '../../core/layout.js';
+import { geometry, shortcut } from './Canvas.js';
 
 const portLabel = (block, at, isOutlet) =>
   (isOutlet ? block.outlets : block.inlets).find((p) => p.at === at)?.name ?? '';
@@ -65,13 +68,19 @@ export function Inspector(app, geom) {
 
   const block = geom.blocks.find((b) => b.id === selected.id);
   if (!block) return el('p', { class: 'hint' }, 'gone');
-  const remove = IconButton({ icon: 'trash', label: `remove ${block.title}`, class: 'ghost danger',
+  const remove = IconButton({ icon: 'trash', label: `remove ${block.title} (Delete)`, class: 'ghost danger',
                               onclick: () => app.editor.removeBlock(block) });
   if (block.kind === BlockKind.Node) {
     const d = app.device.byId.get(app.state.patch.nodes[block.index]?.algorithmId);
+    const copy = IconButton({ icon: 'copy', label: `copy ${block.title} (${shortcut('c')})`, class: 'ghost',
+                              onclick: () => app.editor.copyBlock(block) });
+    const duplicate = IconButton({
+      icon: 'duplicate', label: `another ${block.title} with the same settings (${shortcut('d')})`, class: 'ghost',
+      onclick: () => app.editor.duplicateBlock(block, underBlock(geom.positions, block)),
+    });
     return panel(block.title,
       { before: [el('span', { class: 'index' }, block.index)],
-        after: [d?.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null, remove] },
+        after: [d?.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null, copy, duplicate, remove] },
       NodeCard(app, block.index, { header: false }),
       NodeRollPanel(app, block.index));
   }

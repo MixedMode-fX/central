@@ -63,6 +63,10 @@ export function openMenu({ at, kind = '', head, items }) {
   return menu;
 }
 
+// Whether a menu is up. The canvas asks before it answers Escape itself: a
+// menu is the innermost thing on screen, so Escape is the menu's first.
+export const menuOpen = () => Boolean(document.getElementById(ID));
+
 export function closeMenu() {
   const menu = document.getElementById(ID);
   if (!menu) return;

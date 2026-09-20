@@ -9,19 +9,23 @@
 // Dragging from one socket to another therefore does not create anything: it
 // puts two ports on one bus (`planConnection`), which is the same edit the
 // selector makes and goes to the module as the same one-byte message.
+//
+// The keys are the accelerators for what the buttons already do - copy,
+// paste, duplicate, delete - and never the only way to do any of it: most of
+// this app is used on a phone, where there is no keyboard to press.
 
 import * as P from '../../protocol/generated.js';
 import { el, svg, classes } from '../dom.js';
 import { IconButton } from '../components/IconButton.js';
 import { Picker } from '../components/Picker.js';
-import { openMenu, MenuItem } from '../components/Menu.js';
+import { openMenu, MenuItem, menuOpen } from '../components/Menu.js';
 import { Domain, domainName, busCount } from '../../core/validate.js';
 import {
   BlockKind, patchBlocks, connectionsOf, planConnection, planDisconnect, planClear, portOf,
   planModulation, modulationChoices, isModPort, busWords,
 } from '../../core/graph.js';
 import {
-  BLOCK_W, HEAD_H, ROW_H, PAD_Y, blockHeight, socketPoint, layoutOf, worldSize, fitView,
+  BLOCK_W, HEAD_H, ROW_H, PAD_Y, blockHeight, socketPoint, layoutOf, worldSize, fitView, underBlock,
 } from '../../core/layout.js';
 import { catalogue, optionFor, optionsOf, ENDPOINTS } from '../../core/catalogue.js';
 import { curve, arrowMarkers, drag } from './wires.js';
@@ -51,6 +55,117 @@ const disconnect = (app, arrow) => {
   const same = fresh.arrows.find((a) => a.id === arrow.id);
   app.editor.applyPlan(same ? planDisconnect(fresh.blocks, same) : { ok: false, why: 'already gone' });
 };
+
+// --- what a command acts on -------------------------------------------------
+//
+// Every command below re-reads the patch rather than closing over the
+// geometry the page was drawn from: a key can be pressed between a render and
+// the next one, and a block index from the drawing before last is a different
+// node.
+function selectedNow(app) {
+  const selected = app.state.ui.canvas.selected;
+  if (!selected) return null;
+  const geom = geometry(app);
+  if (selected.kind === 'arrow') {
+    const arrow = geom.arrows.find((a) => a.id === selected.id);
+    return arrow ? { geom, arrow } : null;
+  }
+  const block = geom.blocks.find((b) => b.id === selected.id);
+  return block ? { geom, block } : null;
+}
+
+export const copySelected = (app) => {
+  const found = selectedNow(app);
+  if (found?.block) app.editor.copyBlock(found.block);
+  else app.say(found ? 'an arrow is not something to copy — copy the block that draws it' : 'select a block first');
+};
+
+export const duplicateSelected = (app) => {
+  const found = selectedNow(app);
+  if (found?.block) app.editor.duplicateBlock(found.block, underBlock(found.geom.positions, found.block));
+  else app.say(found ? 'an arrow is not something to duplicate' : 'select a block first');
+};
+
+// Delete is "take away what is selected", whichever kind of thing that is: a
+// block leaves the patch, an arrow is the one bus the reader stops reading.
+export const deleteSelected = (app) => {
+  const found = selectedNow(app);
+  if (found?.block) app.editor.removeBlock(found.block);
+  else if (found?.arrow) app.editor.applyPlan(planDisconnect(found.geom.blocks, found.arrow));
+  else app.say('select a block or an arrow first');
+};
+
+// The canvas with the whole window. The view is refitted on the way in and on
+// the way out: the window has changed size under the patch, which is the
+// other half of the rule in `mounted()` - a view left alone across that is a
+// patch somewhere off the edge of a screen that is now a different shape.
+export const toggleFull = (app) => {
+  const canvas = app.state.ui.canvas;
+  canvas.full = !canvas.full;
+  canvas.fit = true;
+  app.render();
+};
+
+// --- the keys ---------------------------------------------------------------
+
+// Bound to the page once, not to the canvas: the tree is rebuilt on every
+// edit, so a listener registered while the canvas is built would be added
+// again on every render and would answer one press as many times as the page
+// has been drawn. One listener for the life of the page, reading the state
+// each time - and `canvasKey` is where the decision is, so it can be pressed
+// in a test with no window in the room.
+let bound = null;
+
+export function bindCanvasKeys(app) {
+  if (bound) { bound.app = app; return; }
+  bound = { app };
+  globalThis.addEventListener?.('keydown', (event) => canvasKey(bound.app, event));
+}
+
+// Somewhere a key is a character rather than a command.
+const typingIn = (target) => {
+  const tag = String(target?.tagName ?? '').toLowerCase();
+  return target?.isContentEditable === true || tag === 'input' || tag === 'textarea' || tag === 'select';
+};
+
+// The shortcut, if this press is one. Returns what it did, for the tests and
+// for nothing else.
+export function canvasKey(app, event) {
+  // The canvas is the patch tab's, and only what is on screen answers a key.
+  if (app.state.ui.tab !== 'patch' || event.repeat || typingIn(event.target)) return null;
+  const mod = event.metaKey || event.ctrlKey;
+  const key = String(event.key ?? '').toLowerCase();
+
+  if (key === 'escape') {
+    // A menu is the innermost thing on screen, so Escape is the menu's first.
+    if (menuOpen()) return null;
+    if (app.state.ui.canvas.full) { event.preventDefault?.(); toggleFull(app); return 'full'; }
+    if (!app.state.ui.canvas.selected) return null;
+    event.preventDefault?.();
+    app.state.ui.canvas.selected = null;
+    app.render();
+    return 'deselect';
+  }
+  if (!mod && (key === 'delete' || key === 'backspace')) {
+    // Backspace is "go back" in a browser that has nothing else to do with it.
+    event.preventDefault?.();
+    deleteSelected(app);
+    return 'delete';
+  }
+  if (!mod && key === 'f') { event.preventDefault?.(); toggleFull(app); return 'full'; }
+  if (!mod || event.altKey) return null;
+  if (key === 'c') { event.preventDefault?.(); copySelected(app); return 'copy'; }
+  if (key === 'v') { event.preventDefault?.(); app.editor.paste(); return 'paste'; }
+  // The browser's own ⌘D is a bookmark, which is never what was meant here.
+  if (key === 'd') { event.preventDefault?.(); duplicateSelected(app); return 'duplicate'; }
+  return null;
+}
+
+// ⌘ on a Mac and Ctrl everywhere else: a button whose tooltip names the wrong
+// key is worse than one that names none.
+const APPLE = /mac|iphone|ipad|ipod/i.test(
+  globalThis.navigator?.userAgentData?.platform ?? globalThis.navigator?.platform ?? '');
+export const shortcut = (key) => (APPLE ? `\u2318${key.toUpperCase()}` : `Ctrl+${key.toUpperCase()}`);
 
 // --- the canvas -----------------------------------------------------------------
 
@@ -415,24 +530,34 @@ function askForParameter(app, ref, blockId, at) {
 
 export function CanvasPanel(app, geom) {
   const canvas = new CanvasView(app, geom);
+  const { full, clipboard } = app.state.ui.canvas;
+  bindCanvasKeys(app);
   app.live.onMount(() => { if (canvas.viewport.isConnected) canvas.mounted(); });
   app.live.paint(({ activity }) => canvas.paintLive(activity));
 
   return el('section', {
-    class: 'canvas-panel',
+    class: classes('canvas-panel', full && 'full'),
     // The stylesheet is given the same numbers the arrows are drawn from, so
     // a block's rows and its sockets cannot end up in different places.
     style: `--blk-w:${BLOCK_W}px; --blk-head:${HEAD_H}px; --blk-row:${ROW_H}px; --blk-pad:${PAD_Y}px`,
   },
     // The bar above the picture is where a patch grows: what to add, and the
-    // button that adds it, beside the zoom.
+    // button that adds it, beside the paste, the zoom and the window.
     el('div', { class: 'canvas-bar' },
       AddBar(app),
       el('div', { class: 'canvas-zoom' },
-        IconButton({ icon: 'zoomOut', label: 'zoom out', class: 'ghost', onclick: () => canvas.zoomFromButton(1 / 1.25) }),
-        IconButton({ icon: 'zoomIn', label: 'zoom in', class: 'ghost', onclick: () => canvas.zoomFromButton(1.25) }),
+        IconButton({ icon: 'paste', label: `paste the copied block (${shortcut('v')})`, class: 'ghost',
+                     disabled: !clipboard, onclick: () => app.editor.paste() }),
+        IconButton({ icon: 'zoomOut', label: 'zoom out', class: 'ghost canvas-zoom-step',
+                     onclick: () => canvas.zoomFromButton(1 / 1.25) }),
+        IconButton({ icon: 'zoomIn', label: 'zoom in', class: 'ghost canvas-zoom-step',
+                     onclick: () => canvas.zoomFromButton(1.25) }),
         IconButton({ icon: 'fit', label: 'fit the whole patch in the window', class: 'ghost',
-                     onclick: () => { app.state.ui.canvas.fit = true; app.render(); } }))),
+                     onclick: () => { app.state.ui.canvas.fit = true; app.render(); } }),
+        IconButton({ icon: full ? 'shrink' : 'expand', class: classes('ghost', full && 'active'),
+                     label: full ? 'leave full screen (Esc)' : 'the canvas on the whole screen (F)',
+                     'aria-pressed': full ? 'true' : 'false',
+                     onclick: () => toggleFull(app) }))),
     canvas.viewport,
     el('div', { class: 'canvas-foot' },
       geom.blocks.length ? BusLegend(geom) : el('span', { class: 'hint' }, 'an empty patch'),

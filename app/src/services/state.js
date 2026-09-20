@@ -62,9 +62,13 @@ export function createState() {
       // *document* - that is the performer's and lives in localStorage
       // (services/surface.js).
       surface: { edit: false, editing: null, armed: null, keyboard: false },
-      // The canvas: where it is looked at from, what is selected on it, and
-      // whether the view should be fitted to the patch on the next render.
-      canvas: { view: { x: 0, y: 0, k: 1 }, selected: null, fit: true, positions: {} },
+      // The canvas: where it is looked at from, what is selected on it,
+      // whether the view should be fitted to the patch on the next render,
+      // whether it has the whole window, and the node last copied on it. The
+      // clipboard outlives the patch it was taken from - copying a sequencer
+      // out of one patch and pasting it into the next is the point of it.
+      canvas: { view: { x: 0, y: 0, k: 1 }, selected: null, fit: true, positions: {},
+                full: false, clipboard: null },
     },
   };
 }

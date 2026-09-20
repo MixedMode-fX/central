@@ -70,8 +70,11 @@ algorithm at gate rate and at clock rate, and routing.
 
 It does not model:
 
-- **time** — a pass takes as long as the page says and passes are evenly
-  spaced. Jitter, ISR latency and the real loop period are Teensy measurements;
+- **time** — simulated time is the page's wall clock: `module.js` runs a
+  pass per millisecond of it, catching up after a stall and skipping a gap
+  too long to catch up, and schedules what the module plays on the audio and
+  MIDI clocks by that time rather than by when the pass ran. Jitter, ISR
+  latency and the real loop period are Teensy measurements;
 - **the transports** — DIN framing, USB MIDI cables, the USB host stack and
   MIDI parsing live in `teensy_midi.cpp`. The page delivers already-parsed
   events;

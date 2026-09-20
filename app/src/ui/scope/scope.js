@@ -424,8 +424,28 @@ export function drawRoll(canvas, module, sources, height) {
 // blurred on a phone: the CSS box the page lays out, and the pixel buffer it
 // is drawn into. The buffer follows the box times the device pixel ratio, and
 // the context is scaled so everything above can be written in CSS pixels.
+//
+// The box is measured once and then watched, not read every frame. Reading
+// `clientWidth` makes the browser lay the page out there and then if anything
+// has touched it since it last did - and the painters touch it every frame, a
+// readout here and a lamp there - so a scope that asked every frame was
+// costing a whole layout per canvas per frame, most of the frame's budget on
+// the module tab. A ResizeObserver is told after layout, and forces none.
+const boxes = new WeakMap();      // canvas -> { width }, its CSS box as last laid out
+function cssWidth(canvas) {
+  let box = boxes.get(canvas);
+  if (!box) {
+    box = { width: canvas.clientWidth };
+    boxes.set(canvas, box);
+    if (globalThis.ResizeObserver) {
+      new ResizeObserver((entries) => { box.width = entries[0].contentRect.width; }).observe(canvas);
+    }
+  }
+  return box.width;
+}
+
 function fit(canvas, cssHeight) {
-  const width = canvas.clientWidth;
+  const width = cssWidth(canvas);
   if (!width) return null;                          // laid out but not visible yet
   const ratio = globalThis.devicePixelRatio || 1;
   const w = Math.round(width * ratio);

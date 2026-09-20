@@ -63,6 +63,7 @@ import {
   autoLayout, layoutOf, socketPoint, blockHeight, forgetNode, BLOCK_W, ROW_H,
 } from '../src/core/layout.js';
 import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js';
+import { OUTPUT_LATENCY_MS } from '../src/runtime/module.js';
 import { OutputPanel } from '../src/ui/tabs/MidiTab.js';
 import {
   instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, listening,
@@ -274,6 +275,59 @@ test('the transport draws four buttons and lights while the clock runs', () => {
     // On the instrument panel it is glyphs only: the case has no room for prose.
     assert.ok(!words(TransportView(app, { compact: true })).includes('panic'));
   });
+});
+
+// Simulated time is the wall clock. The bug this closes: the module was run
+// one animation frame of simulated time per animation frame of real time,
+// floored to whole passes - and a frame is 16.667 ms, so two thirds of a
+// millisecond went missing every frame. Four percent slow at 60 Hz, thirteen
+// at 144 Hz, and a different figure whenever a frame came late: a clock that
+// was neither right nor steady, and drifted further the busier the page was.
+test('simulated time follows the wall clock, odd fractions included', async () => {
+  const { module } = await instantiate();
+  module.syncTo(0);
+  for (let frame = 1; frame <= 60; frame++) module.advanceTo(frame * 1000 / 60);
+  assert.ok(Math.abs(module.now - 1_000_000) < 1000, `a second of frames ran ${module.now} us`);
+  // And the same second of frames at a display that does not divide a
+  // millisecond nicely at all.
+  const before = module.now;
+  for (let frame = 1; frame <= 144; frame++) module.advanceTo(1000 + frame * 1000 / 144);
+  assert.ok(Math.abs(module.now - before - 1_000_000) < 1000, `at 144 Hz a second ran ${module.now - before} us`);
+  assert.equal(module.wallAt(module.now), module.now / 1000, 'wall time and simulated time are one clock');
+});
+
+test('a late frame is caught up in full, a lost tab is skipped', async () => {
+  const { module } = await instantiate();
+  module.syncTo(0);
+  module.advanceTo(100);
+  assert.equal(module.now, 100_000);
+  // A rebuild of the page held the thread for two hundred milliseconds: the
+  // passes it owed run now, and the module is on time again.
+  module.advanceTo(300);
+  assert.equal(module.now, 300_000, 'the late frame lost time');
+  // A tab that was in the background for five seconds does not play five
+  // seconds of music in one go: the module skips to the present, keeping
+  // only the last stretch it can catch up.
+  module.advanceTo(5300);
+  assert.ok(module.now < 1_000_000, `the module ran ${module.now} us for a five-second gap`);
+  assert.equal(module.wallAt(module.now), 5300, 'and simulated now is wall now again');
+});
+
+test('running ahead of a rebuild costs nothing afterwards', async () => {
+  const { module } = await instantiate();
+  module.syncTo(0);
+  module.advanceTo(10);
+  // The page is about to rebuild itself: the module runs sixty milliseconds
+  // ahead, and everything those passes played is stamped at its own time.
+  module.advanceTo(70);
+  assert.equal(module.now, 70_000);
+  assert.equal(module.wallAt(70_000), 70, 'a note played in the run-ahead is timed by the wall, not by when it ran');
+  // The rebuild took thirty milliseconds; the wall clock is at forty, the
+  // module is at seventy, and it waits.
+  module.advanceTo(40);
+  assert.equal(module.now, 70_000, 'the module went backwards, or ran passes it was not owed');
+  module.advanceTo(75);
+  assert.equal(module.now, 75_000);
 });
 
 test('a jack tap is an edge, not a level', async () => {
@@ -614,18 +668,24 @@ test('what the module plays reaches whoever is listening', async () => {
 // Ports that record what was sent, and an access holding them.
 function fakeMidiOut(...names) {
   const sent = new Map(names.map((name) => [name, []]));
-  const ports = names.map((name) => ({ id: `id:${name}`, name, send: (bytes) => sent.get(name).push([...bytes]) }));
-  return { access: { outputs: new Map(ports.map((port) => [port.id, port])) }, sent };
+  const stamps = new Map(names.map((name) => [name, []]));
+  const ports = names.map((name) => ({
+    id: `id:${name}`, name,
+    send: (bytes, at) => { sent.get(name).push([...bytes]); stamps.get(name).push(at); },
+  }));
+  return { access: { outputs: new Map(ports.map((port) => [port.id, port])) }, sent, stamps };
 }
 
 // The routing, over the real module or - where the module is not what is
-// being checked - one that only has to hand events over.
+// being checked - one that only has to hand events over and say where
+// simulated time falls on the wall clock.
 function routed(names, { library = null, module = null } = {}) {
   let emit = () => {};
-  const { access, sent } = fakeMidiOut(...names);
-  const outputs = new MidiOutputs(module ?? { onMidi: (fn) => { emit = fn; } }, library);
+  const { access, sent, stamps } = fakeMidiOut(...names);
+  const standIn = { now: 0, wallAt: (simUs) => simUs / 1000, onMidi: (fn) => { emit = fn; } };
+  const outputs = new MidiOutputs(module ?? standIn, library);
   outputs.access = access;
-  return { outputs, sent, play: (event) => emit(event) };
+  return { outputs, sent, stamps, standIn, play: (event) => emit(event) };
 }
 
 test('what the module plays leaves by the port its cable is routed to', async () => {
@@ -665,6 +725,28 @@ test('a message leaves as many bytes as its status says', () => {
   assert.deepEqual(messageBytes(0xc0, 1, 7, 0), [0xc0, 7], 'a Program Change is two bytes');
   assert.deepEqual(messageBytes(0xd0, 2, 40, 0), [0xd1, 40], 'channel pressure is two bytes');
   assert.deepEqual(messageBytes(0xf8, 0, 0, 0), [0xf8], 'a clock byte has no channel and no data');
+});
+
+// A message leaves for when it happened. The passes of a frame run in a
+// burst at the frame, and a rebuild of the page runs them early or late; the
+// synth on the cable must hear neither. Web MIDI takes a time with the bytes,
+// and the time is the event's own, on this computer's clock, plus the headroom
+// the audio listener keeps - so the cable and the page's own audio agree.
+test('what leaves a port is stamped with its own time, not the page\'s', () => {
+  const { outputs, stamps, standIn, play } = routed(['a synth']);
+  outputs.route(P.MidiPort.mmMIDI_USB_0, 'a synth');
+  play({ t: 2_000_000, target: P.MidiPort.mmMIDI_USB_0, type: 0x90, d1: 60, d2: 100, channel: 1 });
+  play({ t: 2_250_000, target: P.MidiPort.mmMIDI_USB_0, type: 0x80, d1: 60, d2: 0, channel: 1 });
+  const [on, off] = stamps.get('a synth');
+  assert.equal(on, 2000 + OUTPUT_LATENCY_MS, 'the note-on is not stamped for where its time falls on the wall');
+  assert.equal(off - on, 250, 'the note is not as long on the cable as it was in the module');
+  // A release for a re-route or a panic goes out for the module's own time -
+  // never before a note-on already stamped later than the moment of asking.
+  standIn.now = 2_100_000;
+  play({ t: 2_100_000, target: P.MidiPort.mmMIDI_USB_0, type: 0x90, d1: 64, d2: 100, channel: 1 });
+  outputs.panic();
+  const release = stamps.get('a synth').at(-1);
+  assert.ok(release >= 2100 + OUTPUT_LATENCY_MS, `the note-off at ${release} overtakes the note-on it ends`);
 });
 
 test('a note held when its cable is re-pointed is taken back', () => {
@@ -2804,6 +2886,38 @@ test('the gate listener hears what it was pointed at, and each edge once', async
     gateHits([{ kind: 'jacks' }, { kind: 'jack', index: 0 }, { kind: 'bus', index: 2 }],
              { jacksOut: 0b1, jacks: 0b1, buses: 1 << 2 }),
     [{ kind: 'jack', index: 0 }, { kind: 'bus', index: 2 }]);
+});
+
+// A note sounds where its own time falls on the audio clock. The pairing of
+// the clocks is between the wall clock and the audio clock, not between the
+// module's time and the audio clock: a rebuild of the page runs the module
+// ahead of the wall, and a note it computed early must still sound on time.
+test('a note sounds at its own time, wherever the module had got to', async () => {
+  const { listener, module, ctx } = await listening();
+  // The fake module's wall clock is `performance.now()`, so a note a second
+  // from now is a second from now.
+  const soon = Math.round(performance.now()) * 1000 + 1_000_000;
+  listener.anchor();
+  const first = listener.when(soon);
+  // The module is now half a second ahead of the wall clock, and the frame
+  // pairs the clocks again: a note a tenth of a second after the first one
+  // is scheduled a tenth of a second after it.
+  module.now = soon + 500_000;
+  listener.anchor();
+  const second = listener.when(soon + 100_000);
+  assert.ok(Math.abs(second - first - 0.1) < 0.005, `the notes are ${second - first} s apart`);
+  // What a stall made late sounds now rather than never.
+  ctx.currentTime = 1e9;
+  assert.ok(listener.when(0) >= 1e9 + 0.002, 'a note in the past was scheduled there');
+  // And a panic ends what is sounding at the module's time - after every
+  // note it has scheduled so far, never before one.
+  ctx.currentTime = 0;
+  const player = listener.players[0];
+  listener.midi({ t: soon + 500_000, type: 0x90, d1: 60, d2: 100, channel: 1 });
+  const voice = [...player.voices.values()][0];
+  assert.ok(voice, 'the note was not played');
+  listener.panic();
+  assert.ok(voice.osc.stoppedAt > voice.osc.startedAt, 'the panic stopped the note before it started');
 });
 
 test('what is being listened to survives a reload', async () => {

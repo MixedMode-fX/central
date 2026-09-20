@@ -268,6 +268,17 @@ or two passes and an animation frame is sixteen milliseconds, so reading at
 paint time shows a pattern nobody is playing. A bus is only read when something
 is listening to it.
 
+**The module keeps wall-clock time, and what it plays is heard at that time.**
+Simulated time is `performance.now()` from a fixed origin (`runtime/module.js`):
+a timer and the animation frame run whatever passes the clock owes, so a late
+frame is caught up rather than lost and no fraction of a frame is dropped. A
+note is scheduled on the audio clock and on a Web MIDI port by its own
+simulated time plus `OUTPUT_LATENCY_MS`, never by when the pass that made it
+happened to run. Rebuilding the page is the one stall the page can see coming,
+so the renderer runs the module ahead by what the last rebuilds cost before it
+starts one (`services/render.js`): an edit changes the patch and nothing about
+the beat.
+
 **A phone is the first target.** Every control is finger-sized, a button that
 acts on something is an icon with its word in the tooltip and the accessible
 name (`src/icons.js`), every numeric parameter has a number field beside its

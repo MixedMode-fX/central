@@ -276,6 +276,8 @@ export function fakeModule() {
   const hooks = { midi: [], bus: [], frame: [], pass: [] };
   return {
     now: 0,
+    // Simulated time is wall time, from an origin of zero.
+    wallAt(simUs) { return simUs / 1000; },
     levels: { jackIn: 0, jackOut: 0, gate: 0, green: 0, red: 0 },
     jackSources: Array.from({ length: P.GPIO_N }, () => ({ level: 0, hz: 0, pulseUntil: 0 })),
     modes: new Array(P.GPIO_N).fill(0),

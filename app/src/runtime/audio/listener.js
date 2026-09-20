@@ -43,10 +43,13 @@
 // the page and usually wants to be under the notes.
 //
 // Events are scheduled on the audio clock at the *simulated* time they
-// happened, anchored once per animation frame, so an arpeggio at 10 Hz sounds
-// like one even though the passes that produced it ran in a burst.
+// happened. Simulated time is the wall clock (`EmbeddedModule.wallAt`), and
+// the wall clock and the audio clock are paired once a frame, so an arpeggio
+// at 10 Hz sounds like one however the passes that produced it were bunched -
+// by a frame, or by a rebuild of the page that ran them early or late.
 
 import * as P from '../../protocol/generated.js';
+import { OUTPUT_LATENCY_MS } from '../module.js';
 import { DEFAULT_KIT, DRUM_CHANNEL, KITS, hit as drumHit, kitLabel, pieceOf } from './drums.js';
 import { renumberNodeKeys } from '../../core/patch.js';
 
@@ -55,7 +58,13 @@ const SUSTAIN = 64, ALL_SOUND_OFF = 120, ALL_NOTES_OFF = 123;
 const MAX_VOICES = 24;                 // per player
 const MAX_PLAYERS = 6;
 const MAX_GATE_SOURCES = 8;
-const LATENCY = 0.03;
+const LATENCY = OUTPUT_LATENCY_MS / 1000;
+// How fast the pairing of the two clocks follows a fresh sample of it. The
+// audio clock moves in render quanta of a few milliseconds, so one sample is
+// off by up to a quantum; smoothed over frames the pairing is steady to well
+// under a millisecond, and the clocks drift against each other far more
+// slowly than this follows.
+const OFFSET_FOLLOW = 0.1;
 
 // The drum voice for anything on channel 10 that no node in the patch accounts
 // for: the on-screen keyboard, a controller, MIDI arriving from outside. It is
@@ -297,14 +306,15 @@ export class Listener {
     this.gateRoute = new Map();     // gate bus -> { key, piece }
     this.drumOutMask = 0;           // MIDI targets already heard on a bus
     this.watched = new Set();       // note buses this listener is reading itself
-    this.frameSim = 0;
-    this.frameAudio = 0;
+    // The audio clock minus the wall clock, in seconds: what puts an event's
+    // wall time on the audio clock. Null until the two have been paired.
+    this.offset = null;
     this.lastJackOut = 0;
     this.lastJackAny = 0;
     this.lastGate = 0;
     module.onMidi((event) => this.midi(event));
     module.onNoteBus((event) => this.midi(event));
-    module.onFrame((now) => this.anchor(now));
+    module.onFrame(() => this.anchor());
     module.onPass(() => this.edges());
     // What it opens with is what it has always played: the MIDI leaving the
     // module. A note bus is something a user goes and asks for.
@@ -500,6 +510,9 @@ export class Listener {
     } else {
       await this.ctx.resume();
     }
+    // The audio clock stands still while the context is suspended, so
+    // whatever pairing there was is stale on either side of this.
+    this.offset = null;
     return this.enabled;
   }
 
@@ -513,14 +526,25 @@ export class Listener {
     if (this.clickGain) this.clickGain.gain.value = value;
   }
 
-  anchor(now) {
+  // Pair the audio clock with the wall clock: one reading of each, taken
+  // together, once a frame. Not with simulated time - the module may be
+  // ahead of the wall clock after a render ran it ahead, and an event is
+  // heard where its simulated time falls on the wall, not where the module
+  // had got to when it was computed.
+  anchor() {
     if (!this.enabled) return;
-    this.frameSim = now;
-    this.frameAudio = this.ctx.currentTime + LATENCY;
+    const offset = this.ctx.currentTime - performance.now() / 1000;
+    this.offset = this.offset === null ? offset : this.offset + (offset - this.offset) * OFFSET_FOLLOW;
   }
 
+  // The audio time an event at simulated `simTime` sounds: its wall time on
+  // the audio clock, plus the headroom. Never in the past - an event a stall
+  // made late sounds now rather than being dropped, which is the one place
+  // the page's timing shows.
   when(simTime) {
-    return Math.max(this.ctx.currentTime + 0.002, this.frameAudio + (simTime - this.frameSim) / 1e6);
+    if (this.offset === null) this.anchor();
+    const at = this.module.wallAt(simTime) / 1000 + this.offset + LATENCY;
+    return Math.max(this.ctx.currentTime + 0.002, at);
   }
 
   // One event. A drum note goes to the drum voice that owns it and stops
@@ -561,8 +585,12 @@ export class Listener {
   // reading the buses. Rather than leave a bus player droning for ever on a
   // note whose owner no longer exists, the app says when it has replaced the
   // patch and everything sounding is let go.
+  //
+  // Let go at the module's own time rather than the audio clock's now: the
+  // module is ahead of what is sounding by the headroom at least, and a note
+  // it has already scheduled is one this must end after, not before.
   panic() {
-    if (this.enabled) this.allOff(this.ctx.currentTime);
+    if (this.enabled) this.allOff(this.when(this.module.now));
   }
 
   // --- saving what was set up ----------------------------------------------

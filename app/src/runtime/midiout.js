@@ -24,12 +24,19 @@
 //     session, so the synth on the desk is still routed tomorrow. Two
 //     interfaces reporting the same name are one as far as this can tell,
 //     and the first wins.
+//   * **a message is sent for when it happened**, not for when the page got
+//     round to it. The passes that made it may have run in a burst at the end
+//     of a frame, or late after a rebuild of the page; its simulated time is
+//     where it belongs on this computer's clock (`EmbeddedModule.wallAt`),
+//     and Web MIDI takes that time with the bytes, plus the same headroom the
+//     audio listener keeps.
 //
 // Web MIDI is a browser limit, not an app limit: without it the module still
 // runs, and the audio listener on the play tab is what it is heard through.
 
 import * as P from '../protocol/generated.js';
 import { MUSICAL_PORTS } from '../protocol/names.js';
+import { OUTPUT_LATENCY_MS } from './module.js';
 import { access } from './webmidi.js';
 
 const NOTE_OFF = 0x80, NOTE_ON = 0x90;
@@ -60,6 +67,7 @@ export function cablesOut(patch, caps = null) {
 
 export class MidiOutputs {
   constructor(module, library = null) {
+    this.module = module;
     this.library = library;
     this.access = null;
     // cable (a MidiPort bit) -> the name of the output it is played out of.
@@ -110,8 +118,9 @@ export class MidiOutputs {
   // An output named twice - two cables, one synth - is sent to once: the
   // module puts one copy on each of its own cables, and two copies into one
   // port is a flam nobody programmed.
-  forward({ target, type, d1, d2, channel }) {
+  forward({ t, target, type, d1, d2, channel }) {
     const bytes = messageBytes(type, channel, d1, d2);
+    const at = this.stamp(t);
     const sent = new Set();
     for (const cable of MUSICAL_PORTS) {
       if ((target & cable.value) === 0) continue;
@@ -120,9 +129,15 @@ export class MidiOutputs {
       this.track(cable.value, type, d1, d2, channel);
       if (sent.has(output.name)) continue;
       sent.add(output.name);
-      this.send(output, bytes);
+      this.send(output, bytes, at);
     }
   }
+
+  // When a message at simulated `simUs` leaves the port, on the clock Web
+  // MIDI takes (`performance.now()`): where it fell on the wall, plus the
+  // headroom. A time already past sends at once, which is what Web MIDI does
+  // with it and the most a late event can be.
+  stamp(simUs) { return this.module.wallAt(simUs) + OUTPUT_LATENCY_MS; }
 
   // --- what is sounding ----------------------------------------------------
 
@@ -136,21 +151,24 @@ export class MidiOutputs {
 
   // The note-offs a cable owes, sent where its notes went. A note is released
   // with the channel and pitch it was played with, which is the same rule
-  // `SoundingNotes` keeps in the firmware.
+  // `SoundingNotes` keeps in the firmware. Released at the module's own time:
+  // everything it has sent so far is stamped no later than that, so a
+  // note-off sent for then cannot overtake the note-on it ends.
   release(cable) {
     const held = this.sounding.get(cable);
     this.sounding.delete(cable);
     const output = this.output(cable);
     if (!held || !output) return;
+    const at = this.stamp(this.module.now);
     for (const key of held) {
       const [channel, pitch] = key.split(':').map(Number);
-      this.send(output, messageBytes(NOTE_OFF, channel, pitch, 0));
+      this.send(output, messageBytes(NOTE_OFF, channel, pitch, 0), at);
     }
   }
 
-  send(output, bytes) {
+  send(output, bytes, at) {
     try {
-      output.send(bytes);
+      output.send(bytes, at);
     } catch {
       // A port that went away between the event and the send, or one that
       // refused the message. The panel redraws off `onChange` and says what

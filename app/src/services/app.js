@@ -37,6 +37,9 @@ export function createApp({ root, view, wasmUrl }) {
   const render = () => renderer.render();
   const renderer = new Renderer({
     root, live, view: () => view(app),
+    // The rebuild is the one stall the page can see coming: the module runs
+    // ahead of it, so the passes it would have held up are already done.
+    before: (ms) => app.module?.runAhead(ms),
     onPainted: () => { patches.autosave(); app.refreshLive(); },
   });
   const arrangement = new Arrangement({ state, library });

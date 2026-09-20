@@ -443,6 +443,30 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             return;
         }
 
+        // Where the clock comes from and where it goes. Both masks in one
+        // message, because they are one question: a user pointing the module
+        // at a host is usually also deciding what it clocks in turn.
+        case SYSEX_SET_CLOCK_ROUTE: {
+            if (n < 3){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            const uint8_t high = args[2];
+            const uint8_t in_mask  = (uint8_t)(args[0] | ((high & 0x01) ? 0x80u : 0u));
+            const uint8_t out_mask = (uint8_t)(args[1] | ((high & 0x02) ? 0x80u : 0u));
+            // The control cable carries the protocol, and a clock routed onto
+            // it would be the patch taking the module away from its editor.
+            // Refused rather than quietly masked off, so a host that asked
+            // for it is told (hal/midi_types.h).
+            if (((in_mask | out_mask) & MIDI_CONTROL_PORT) != 0){
+                nak(source, SYSEX_ERR_BAD_ARGUMENT);
+                return;
+            }
+            GlobalSettings g = patches.globals();
+            g.clock_in_mask = in_mask;
+            g.clock_out_mask = out_mask;
+            patches.set_globals(g, now_us);
+            ack(source);
+            return;
+        }
+
         // Pattern data (#22). A note sequencer's step grid is far too wide
         // for NRPN - 320 bytes for a poly sequencer - so an editor writes it
         // in runs. Every byte still goes through set_param, so the same

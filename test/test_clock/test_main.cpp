@@ -83,7 +83,7 @@ static void test_midi_clock_advances_and_measures() {
     uint32_t now = 1000;
     const uint32_t period = 20833;                    // 120 BPM at 24 PPQN
     for (int i = 0; i < 4; i++) {
-        clock.midi_message(MIDI_CLOCK, now);
+        clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, now);
         now += period;
     }
     TEST_ASSERT_EQUAL_UINT32(4 * CLOCK_SUBTICK, clock.count());
@@ -97,15 +97,15 @@ static void test_external_edges_rephase_without_rewinding() {
     MasterClock clock;
     clock.set_source(MasterClock::CLOCK_MIDI);
     clock.start();
-    clock.midi_message(MIDI_CLOCK, 1000);             // edge 1 -> subtick 24
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, 1000);             // edge 1 -> subtick 24
     TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICK, clock.count());
     advance(clock, 5);                                // timer ran slow
-    clock.midi_message(MIDI_CLOCK, 21000);            // edge 2 -> subtick 48
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, 21000);            // edge 2 -> subtick 48
     TEST_ASSERT_EQUAL_UINT32(2 * CLOCK_SUBTICK, clock.count());
 
     advance(clock, CLOCK_SUBTICK + 4);                // timer ran fast
     const uint32_t ahead = clock.count();
-    clock.midi_message(MIDI_CLOCK, 41000);
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, 41000);
     TEST_ASSERT_EQUAL_UINT32(ahead, clock.count());   // never rewinds
 }
 
@@ -113,9 +113,9 @@ static void test_implausible_edge_periods_are_counted_not_used() {
     MasterClock clock;
     clock.set_source(MasterClock::CLOCK_MIDI);
     clock.start();
-    clock.midi_message(MIDI_CLOCK, 1000);
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, 1000);
     const uint32_t before = clock.subtick_interval_us();
-    clock.midi_message(MIDI_CLOCK, 1010);             // 10 us apart: noise
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, 1010);             // 10 us apart: noise
     TEST_ASSERT_EQUAL_UINT32(before, clock.subtick_interval_us());
     TEST_ASSERT_EQUAL_UINT32(1, clock.rejected_edges());
 }
@@ -124,15 +124,214 @@ static void test_midi_transport_messages() {
     MasterClock clock;
     clock.set_source(MasterClock::CLOCK_MIDI);
     advance(clock, 7);
-    clock.midi_message(MIDI_STOP, 0);
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_STOP, 0);
     TEST_ASSERT_FALSE(clock.running());
     advance(clock, 7);
     TEST_ASSERT_EQUAL_UINT32(7, clock.count());
-    clock.midi_message(MIDI_CONTINUE, 0);             // resumes where it was
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CONTINUE, 0);             // resumes where it was
     TEST_ASSERT_TRUE(clock.running());
     TEST_ASSERT_EQUAL_UINT32(7, clock.count());
-    clock.midi_message(MIDI_START, 0);                // start is from zero
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_START, 0);                // start is from zero
     TEST_ASSERT_EQUAL_UINT32(0, clock.count());
+}
+
+// ---------------------------------------------------------------------------
+// Where the clock is routed from (MasterClock::set_in_mask)
+// ---------------------------------------------------------------------------
+
+// Two hosts on two cables, and only one of them is the clock. Without a mask
+// both drive the counter and the loser is invisible.
+static void test_clock_in_mask_selects_the_cable() {
+    MasterClock clock;
+    clock.set_source(MasterClock::CLOCK_MIDI);
+    clock.set_in_mask(mmMIDI_SERIAL_1);
+    clock.start();
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, 1000);
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_CLOCK, 21000);
+    const uint32_t followed = clock.count();
+    TEST_ASSERT_EQUAL_UINT32(2 * CLOCK_SUBTICK, followed);
+    // The other cable says the same thing and is not listened to.
+    clock.midi_message(mmMIDI_USB_0, MIDI_CLOCK, 41000);
+    TEST_ASSERT_EQUAL_UINT32(followed, clock.count());
+}
+
+// The transport goes with the clock: a DAW this module does not follow has no
+// business starting it either.
+static void test_clock_in_mask_gates_the_transport() {
+    MasterClock clock;
+    clock.set_in_mask(mmMIDI_SERIAL_1);
+    clock.midi_message(mmMIDI_USB_0, MIDI_STOP, 0);
+    TEST_ASSERT_TRUE(clock.running());
+    clock.midi_message(mmMIDI_SERIAL_1, MIDI_STOP, 0);
+    TEST_ASSERT_FALSE(clock.running());
+}
+
+// An empty mask is every musical cable, the module's rule for a source mask.
+static void test_clock_in_mask_of_zero_is_any_cable() {
+    MasterClock clock;
+    TEST_ASSERT_EQUAL_UINT8(0, clock.in_mask());
+    clock.midi_message(mmMIDI_HOST_1, MIDI_STOP, 0);
+    TEST_ASSERT_FALSE(clock.running());
+}
+
+// The control cable carries the protocol and nothing else, whatever is asked.
+static void test_clock_in_mask_never_takes_the_control_cable() {
+    MasterClock clock;
+    clock.set_in_mask((uint8_t)(MIDI_CONTROL_PORT | mmMIDI_SERIAL_2));
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_SERIAL_2, clock.in_mask());
+    clock.midi_message(MIDI_CONTROL_PORT, MIDI_STOP, 0);
+    TEST_ASSERT_TRUE(clock.running());
+}
+
+// ---------------------------------------------------------------------------
+// Where the clock is routed to (MidiClockOut)
+// ---------------------------------------------------------------------------
+
+// Every message of one type the fake recorded, and where it went.
+static size_t count_of(const RecordingMidiOut& midi, uint8_t type) {
+    size_t n = 0;
+    for (const auto& m : midi.messages) if (m.type == type) n++;
+    return n;
+}
+
+// Nothing leaves until a cable is named: a module that clocked every wire it
+// had would put two masters in every chain it was plugged into.
+static void test_clock_out_is_silent_until_a_cable_is_named() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock().start();
+    for (uint32_t i = 0; i < 4 * CLOCK_SUBTICK; i++) { master.clock().advance(); master.pass(i * 1000); }
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(midi, MIDI_CLOCK));
+}
+
+// MASTER_PPQN bytes a quarter note, on the cables the mask names and no
+// others - the figure every MIDI clock in the world is counted in.
+static void test_clock_out_sends_ppqn_bytes_a_quarter() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock_out().set_target((uint8_t)(mmMIDI_SERIAL_1 | mmMIDI_USB_0));
+    master.clock().start();
+    master.pass(0);                       // the downbeat
+    for (uint32_t i = 1; i <= CLOCK_SUBTICKS_PER_QUARTER; i++) {
+        master.clock().advance();
+        master.pass(i * 1000);
+    }
+    // One for subtick zero and one per CLOCK_SUBTICK after it.
+    TEST_ASSERT_EQUAL_UINT32(MASTER_PPQN + 1, count_of(midi, MIDI_CLOCK));
+    for (const auto& m : midi.messages) {
+        if (m.type == MIDI_CLOCK) TEST_ASSERT_EQUAL_UINT8(mmMIDI_SERIAL_1 | mmMIDI_USB_0, m.target);
+    }
+}
+
+// The transport itself, out of the same cables: a start announces the
+// downbeat the first clock byte then falls on.
+static void test_clock_out_sends_the_transport() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock_out().set_target(mmMIDI_SERIAL_1);
+    master.clock().stop();
+    master.pass(0);
+    midi.clear();
+
+    master.clock().start();
+    master.pass(1000);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(midi, MIDI_START));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(midi, MIDI_CLOCK));
+    // Start, then the clock byte for the subtick it put the count on.
+    TEST_ASSERT_EQUAL_UINT8(MIDI_START, midi.messages[0].type);
+    TEST_ASSERT_EQUAL_UINT8(MIDI_CLOCK, midi.messages[1].type);
+
+    midi.clear();
+    master.clock().stop();
+    master.pass(2000);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(midi, MIDI_STOP));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(midi, MIDI_CLOCK));
+
+    midi.clear();
+    master.clock().resume();
+    master.pass(3000);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(midi, MIDI_CONTINUE));
+}
+
+// A stopped transport sends no clock: the counter does not move while stopped
+// and neither does what is generated from it.
+static void test_clock_out_is_silent_while_stopped() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock_out().set_target(mmMIDI_SERIAL_1);
+    master.clock().stop();
+    midi.clear();
+    for (uint32_t i = 0; i < 4 * CLOCK_SUBTICK; i++) { master.clock().advance(); master.pass(i * 1000); }
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(midi, MIDI_CLOCK));
+}
+
+// A module slaved to a host re-clocks the chain behind it, because the bytes
+// are generated from the count rather than forwarded: CV sync into MIDI clock
+// out is the same patch and needs nothing else.
+static void test_clock_out_follows_an_external_source() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock_out().set_target(mmMIDI_SERIAL_2);
+    master.clock().set_source(MasterClock::CLOCK_CV);
+    master.clock().set_cv_ppqn(1);                 // one pulse per quarter
+    master.clock().start();
+    master.pass(0);
+    midi.clear();
+    // Two quarters of sync, with passes between them for the timer to fill in.
+    for (uint32_t beat = 1; beat <= 2; beat++) {
+        master.sync_edge(beat * 500000);
+        master.pass(beat * 500000);
+    }
+    // Each edge re-phases the count a whole quarter forward, so a quarter's
+    // worth of clock bytes is owed for it - capped at MAX_BURST, which is
+    // exactly MASTER_PPQN.
+    TEST_ASSERT_EQUAL_UINT32(2 * MASTER_PPQN, count_of(midi, MIDI_CLOCK));
+}
+
+// Taking a cable into use under a running clock phases onto the count rather
+// than paying off every subtick since zero.
+static void test_clock_out_does_not_open_with_a_burst() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock().start();
+    for (uint32_t i = 0; i < 10 * CLOCK_SUBTICKS_PER_QUARTER; i++) master.clock().advance();
+    master.pass(0);
+    master.clock_out().set_target(mmMIDI_SERIAL_1);
+    master.pass(1000);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(midi, MIDI_CLOCK));
+}
+
+// The control cable is refused whatever a host or a stored patch asks for.
+static void test_clock_out_never_takes_the_control_cable() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock_out().set_target((uint8_t)(MIDI_CONTROL_PORT | mmMIDI_SERIAL_1));
+    TEST_ASSERT_EQUAL_UINT8(mmMIDI_SERIAL_1, master.clock_out().target_mask());
+}
+
+// Realtime arrives on a musical cable and reaches the clock; the mask decides
+// which cable, and a module clocking a host it is not following is the pair
+// of settings doing two different things.
+static void test_clock_routes_in_and_out_independently() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    master.clock().set_source(MasterClock::CLOCK_MIDI);
+    master.clock().set_in_mask(mmMIDI_USB_0);
+    master.clock_out().set_target(mmMIDI_SERIAL_1);
+    master.clock().start();
+    master.pass(0);
+    midi.clear();
+
+    uint32_t now = 10000;
+    for (uint32_t i = 0; i < MASTER_PPQN; i++) {
+        // The cable it does not follow says nothing it acts on.
+        master.deliver_midi(mmMIDI_SERIAL_2, MidiEvent{MIDI_CLOCK, 0, 0, 0}, now);
+        master.deliver_midi(mmMIDI_USB_0, MidiEvent{MIDI_CLOCK, 0, 0, 0}, now);
+        now += 20000;
+        master.pass(now);
+    }
+    TEST_ASSERT_EQUAL_UINT32(MASTER_PPQN, count_of(midi, MIDI_CLOCK));
+    for (const auto& m : midi.messages) TEST_ASSERT_EQUAL_UINT8(mmMIDI_SERIAL_1, m.target);
 }
 
 // A sync pulse stands for a quarter divided by cv_ppqn, so the same edge
@@ -769,5 +968,17 @@ int main() {
     RUN_TEST(test_a_metronome_loaded_late_lands_on_the_beat);
     RUN_TEST(test_changing_the_division_keeps_the_rate_exact);
     RUN_TEST(test_reset_re_anchors_the_grid);
+    RUN_TEST(test_clock_in_mask_selects_the_cable);
+    RUN_TEST(test_clock_in_mask_gates_the_transport);
+    RUN_TEST(test_clock_in_mask_of_zero_is_any_cable);
+    RUN_TEST(test_clock_in_mask_never_takes_the_control_cable);
+    RUN_TEST(test_clock_out_is_silent_until_a_cable_is_named);
+    RUN_TEST(test_clock_out_sends_ppqn_bytes_a_quarter);
+    RUN_TEST(test_clock_out_sends_the_transport);
+    RUN_TEST(test_clock_out_is_silent_while_stopped);
+    RUN_TEST(test_clock_out_follows_an_external_source);
+    RUN_TEST(test_clock_out_does_not_open_with_a_burst);
+    RUN_TEST(test_clock_out_never_takes_the_control_cable);
+    RUN_TEST(test_clock_routes_in_and_out_independently);
     return UNITY_END();
 }

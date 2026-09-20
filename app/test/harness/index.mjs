@@ -63,6 +63,7 @@ export function fakeApp({ patch, globals, device = null, module = null, controll
     learn(index, param) { calls.push(['learn', index, param]); this.learnTarget = { nodeIndex: index, param }; },
     cancelLearn() { calls.push(['cancel']); this.learnTarget = null; },
     setGlobals(changes, what = 'settings') { Object.assign(state.globals, changes); calls.push(['globals', changes, what]); },
+    setClockRoute(changes) { Object.assign(state.globals, changes); calls.push(['clockRoute', changes]); },
   };
   for (const name of ['bindParam', 'clearMapping', 'routeParam', 'clearModRoute', 'setParam', 'setParams',
                       'setConnection', 'setJack', 'setMidiPort', 'setModRoute', 'setCcMap', 'learnInto',

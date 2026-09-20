@@ -133,6 +133,10 @@ export const CLOCK_SOURCES = [
   { value: 2, label: 'MIDI clock', hint: 'F8 from a host or a drum machine' },
 ];
 
+// MasterClock::CLOCK_MIDI: the one source that also *arrives* on a cable, and
+// so the one a clock output mask can double back on.
+export const CLOCK_MIDI_SOURCE = 2;
+
 // SysexHandler::SwapTiming: where a Program Change recall lands.
 export const SWAP_TIMINGS = [
   { value: 0, label: 'immediately' },

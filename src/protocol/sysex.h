@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 12
+#define SYSEX_PROTOCOL_VERSION 13
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -105,6 +105,15 @@ enum SysexCommand : uint8_t {
     // (control/macros.h), so an editor drawing a pot has no other way to
     // find out where the module has it.
     SYSEX_GET_MACRO_STATE  = 0x28,
+    // Where the clock is taken from and where it is sent, as two MidiPort
+    // masks: <in 6..0> <out 6..0> <high bits>. Its own message rather than
+    // two more arguments on SET_GLOBALS for the reason SET_NRPN is its own:
+    // routing the clock is one question a user asks in one place, and
+    // SET_GLOBALS already carries eleven arguments that have nothing to do
+    // with it. A port mask reaches 0x80 and a data byte holds seven bits, so
+    // the top bit of each rides in the third byte - bit 0 for the input
+    // mask, bit 1 for the output.
+    SYSEX_SET_CLOCK_ROUTE  = 0x29,
     SYSEX_RESTORE_DEFAULTS = 0x30,
 
     // <CcTransportTarget>: start, stop, continue, tap. The transport is

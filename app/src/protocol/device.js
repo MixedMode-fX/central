@@ -363,6 +363,15 @@ export class Device extends EventTarget {
       g.scale ?? P.ScaleId.SCALE_CHROMATIC, g.root ?? 0, g.rootOctave ?? 0,
     ]);
   }
+  // Where the clock arrives and where it leaves. A port mask reaches 0x80 and
+  // a data byte holds seven bits, so the top bit of each rides in a third
+  // byte (src/protocol/sysex.h).
+  async setClockRoute(inMask, outMask) {
+    const high = ((inMask & 0x80) ? 0x01 : 0) | ((outMask & 0x80) ? 0x02 : 0);
+    return this.command(P.SysexCommand.SYSEX_SET_CLOCK_ROUTE,
+                        [inMask & 0x7f, outMask & 0x7f, high]);
+  }
+
   async setNrpn(enabled, channel, mask) {
     return this.command(P.SysexCommand.SYSEX_SET_NRPN, [enabled ? 1 : 0, channel, mask]);
   }

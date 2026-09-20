@@ -61,6 +61,15 @@ class MasterClock {
         // Pulses per quarter note expected at the sync jack (1, 2, 4, 24, ...).
         void set_cv_ppqn(uint8_t ppqn);
         uint8_t cv_ppqn() const { return cv_pulses; }
+        // **Which cables the clock listens to**, as a MidiPort mask; 0 is any
+        // of them. Realtime is transport-level and reaches no bus, so a
+        // MidiInPort's source mask cannot say this: without a mask of its own
+        // the clock takes start, stop and every 0xF8 from all eight cables at
+        // once, and two hosts on two cables fight over the counter with the
+        // loser invisible. The control cable is never in it (midi_types.h) -
+        // nothing musical is routed there.
+        void set_in_mask(uint8_t mask);
+        uint8_t in_mask() const { return in_ports; }
 
         // Transport --------------------------------------------------------
         // Resets the count to zero and runs: the downbeat is subtick 0.
@@ -99,7 +108,12 @@ class MasterClock {
         // Clock bytes only advance the counter while the MIDI source is
         // selected; start / stop / continue always apply, so a patch can be
         // armed from a DAW before the source is switched.
-        void midi_message(uint8_t type, uint32_t now_us);
+        //
+        // `source` is the MidiPort bit the message arrived on. A message from
+        // a cable outside in_mask() is dropped whole - the transport included,
+        // because a DAW that is not this module's clock has no business
+        // starting it either.
+        void midi_message(uint8_t source, uint8_t type, uint32_t now_us);
 
         // Main loop ----------------------------------------------------------
         // True when the count changed since the last call, with the newest
@@ -141,6 +155,7 @@ class MasterClock {
         uint16_t tempo;
         uint8_t src;
         uint8_t cv_pulses;
+        uint8_t in_ports;
 };
 
 #endif

@@ -64,7 +64,8 @@ import {
 } from '../src/core/layout.js';
 import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js';
 import { OUTPUT_LATENCY_MS } from '../src/runtime/module.js';
-import { OutputPanel } from '../src/ui/tabs/MidiTab.js';
+import { OutputPanel, ClockPanel } from '../src/ui/tabs/MidiTab.js';
+import { CLOCK_MIDI_SOURCE } from '../src/protocol/names.js';
 import {
   instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, listening,
   patched, words, find, findAll, withDom, repoRoot,
@@ -776,6 +777,47 @@ test('a route is remembered by the name on the desk', () => {
   const { outputs } = routed(['a synth'], { library: new Library(storage) });
   assert.equal(outputs.routeOf(P.MidiPort.mmMIDI_SERIAL_2), 'a synth', 'the routing was forgotten on reload');
   assert.ok(outputs.output(P.MidiPort.mmMIDI_SERIAL_2), 'the remembered name found no port');
+});
+
+// Where the clock is routed to and from: two cable masks, sent as the one
+// message that carries them. Realtime reaches no bus, so neither of them is a
+// MIDI routing row and both belong to the clock.
+test('the clock panel routes the clock in and out', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const globals = { ...codec.emptyGlobals() };
+  const app = fakeApp({ device, module, globals });
+
+  withDom(() => {
+    const panel = ClockPanel(app);
+    const said = words(panel);
+    assert.match(said, /follows these ports/);
+    assert.match(said, /sends clock to/);
+
+    const group = find(panel, (n) => n.attrs?.['aria-label'] === 'clock output ports');
+    find(group, (n) => words(n).trim() === 'DIN 1').fire('click');
+  });
+  assert.equal(app.state.globals.clockOutMask, P.MidiPort.mmMIDI_SERIAL_1);
+  assert.deepEqual(app.calls.at(-1), ['clockRoute', { clockOutMask: P.MidiPort.mmMIDI_SERIAL_1 }]);
+
+  // Following a cable and clocking it back is the module clocking itself. On
+  // two DIN sockets it is an ordinary chain, so it is said rather than
+  // refused - and only said when MIDI is what the clock is following.
+  assert.doesNotMatch(withDom(() => words(ClockPanel(app))), /clocking itself/);
+  app.state.globals.clockInMask = P.MidiPort.mmMIDI_SERIAL_1;
+  app.state.globals.clockSource = CLOCK_MIDI_SOURCE;
+  const warned = withDom(() => words(ClockPanel(app)));
+  assert.match(warned, /DIN 1 both follows and sends/);
+});
+
+// A cable carrying nothing but clock is still a cable something is on:
+// clocking a drum machine and playing it no notes is an ordinary patch.
+test('a cable the clock alone goes out of is offered a route', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const globals = { ...codec.emptyGlobals(), clockOutMask: P.MidiPort.mmMIDI_SERIAL_2 };
+  assert.deepEqual(cablesOut(patch, device.capabilities, globals).map((c) => c.label), ['DIN 2']);
 });
 
 test('the output panel asks once per cable the patch plays to', async () => {

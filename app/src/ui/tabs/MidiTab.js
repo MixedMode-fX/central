@@ -21,7 +21,7 @@ import { ChannelSelect } from '../controls/ChannelSelect.js';
 import { PortToggles } from '../controls/PortToggles.js';
 import { ClockFields } from '../controls/ClockFields.js';
 import { RouteCard } from '../panels/RouteCard.js';
-import { MUSICAL_PORTS, SWAP_TIMINGS } from '../../protocol/names.js';
+import { MUSICAL_PORTS, SWAP_TIMINGS, CLOCK_MIDI_SOURCE, portNames } from '../../protocol/names.js';
 import { describeSupport } from '../../runtime/webmidi.js';
 import { cablesOut } from '../../runtime/midiout.js';
 import '../panels/cards.css';
@@ -62,19 +62,42 @@ export function RoutingPanel(app) {
 
 // --- the clock -------------------------------------------------------------
 
-// What the module counts time by. The source and the tempo are the same two
-// fields the module tab draws (controls/ClockFields.js), so the two cannot
-// disagree about what a tempo is; the CV pulse rate is here because it is
-// what the clock *is* out of a jack.
+// What the module counts time by, and the cables the clock is routed over.
+// The source and the tempo are the same two fields the module tab draws
+// (controls/ClockFields.js), so the two cannot disagree about what a tempo
+// is; the CV pulse rate is here because it is what the clock *is* out of a
+// jack.
+//
+// **The two masks are not MIDI routing rows**, and they are here rather than
+// in that panel because of it: clock, start, stop and continue are
+// transport-level and reach no note bus (src/patch/patch_codec.h), so there
+// is no cable to draw them on. What is left is the pair of questions a user
+// actually asks - which host this module follows, and what it clocks in turn.
 export function ClockPanel(app) {
   const g = app.state.globals;
+  const route = (changes) => app.editor.setClockRoute(changes);
+  // The same cable in both masks with MIDI as the source is the module
+  // clocking itself: what arrives on that wire goes straight back out of it.
+  // Said rather than refused - on two DIN sockets it is a chain, and only the
+  // user can see which end of the cable is which.
+  const loop = g.clockSource === CLOCK_MIDI_SOURCE && (g.clockInMask & g.clockOutMask);
   return Panel('clock',
     Fields(
       ...ClockFields(app),
       Field({ label: 'CV pulses per quarter' }, NumberField({
         value: g.cvPpqn, min: 1, max: 96, fallback: 4, wide: true, 'aria-label': 'CV pulses per quarter note',
         onChange: (cvPpqn) => app.editor.setGlobals({ cvPpqn }),
-      }))));
+      }))),
+    Fields(
+      Field({ label: 'follows these ports', hint: 'none = any' }, PortToggles({
+        mask: g.clockInMask, label: 'clock input ports',
+        onChange: (clockInMask) => route({ clockInMask }),
+      })),
+      Field({ label: 'sends clock to', hint: 'none = nowhere' }, PortToggles({
+        mask: g.clockOutMask, label: 'clock output ports',
+        onChange: (clockOutMask) => route({ clockOutMask }),
+      }))),
+    loop ? Hint(`${portNames(g.clockInMask & g.clockOutMask).join(', ')} both follows and sends: on one cable that is the module clocking itself`) : null);
 }
 
 // --- Program Change recall --------------------------------------------------
@@ -163,7 +186,7 @@ export function OutputPanel(app) {
   const gate = deviceGate(app, outputs?.access, 'the module plays out of its own sockets');
   if (gate) return Panel(title, gate);
 
-  const cables = cablesOut(app.state.patch, app.device.capabilities);
+  const cables = cablesOut(app.state.patch, app.device.capabilities, app.state.globals);
   if (!cables.length) return Panel(title, Hint('this patch plays nothing out'));
 
   const ports = outputs.outputs;

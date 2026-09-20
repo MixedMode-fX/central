@@ -2,12 +2,14 @@
 #include "hal/midi_types.h"
 
 MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
-    gpio(gpio_if), midi(midi_if), clk(), bus(), pool(), sched(),
+    gpio(gpio_if), midi(midi_if), clk(), clk_out(), bus(), pool(), sched(),
     gate_in(), gate_out(), midi_in(), midi_out(),
     tick_pending(false), was_running(clk.running()), stop_settle(0), tick_count(0),
     error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0),
     route_error_index(0), dest_error_index(0)
-{}
+{
+    clk_out.attach(midi);
+}
 
 LoadError MixedModeMaster::validate(const Patch& patch){
     if (patch.n_nodes > N_NODE) return LOAD_TOO_MANY_NODES;
@@ -263,6 +265,12 @@ void MixedModeMaster::pass(uint32_t now_us){
     // the same edges, and cleared whether the patch holds a node that cares
     // or not - an edge no node listened to is spent, not queued.
     const uint8_t edges = clk.take_transport_edges();
+    // The clock, out of the cables the globals name (clock/clock_out.h).
+    // Here rather than with the output port nodes at step 4, because realtime
+    // is transport-level and owes nothing to a bus: a host downstream is told
+    // the transport moved in the same pass the pool is, and the F8 for this
+    // pass's subticks leads the notes the pool is about to play on them.
+    clk_out.pass(clk.count(), running, edges);
     const uint8_t n = sched.count();
     for (uint8_t pos = 0; pos < n; pos++){
         const uint8_t i = sched.node_at(pos);
@@ -390,7 +398,7 @@ uint8_t MixedModeMaster::deliver_midi(uint8_t source, const MidiEvent& event, ui
     // SysEx, song position, active sensing - are dropped here until something
     // asks for them (#11 for SysEx).
     if (event.type >= 0xF0){
-        clk.midi_message(event.type, now_us);
+        clk.midi_message(source, event.type, now_us);
         return 0;
     }
     uint8_t accepted = 0;

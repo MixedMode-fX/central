@@ -118,6 +118,7 @@ void Console::dispatch(uint32_t now_us){
     if (str_eq(cmd, "help"))       { cmd_help(); return; }
     if (str_eq(cmd, "info"))       { cmd_info(); return; }
     if (str_eq(cmd, "clock"))      { cmd_clock(argc, now_us); return; }
+    if (str_eq(cmd, "clockroute")) { cmd_clock_route(argc, now_us); return; }
     if (str_eq(cmd, "key"))        { cmd_key(argc, now_us); return; }
     if (str_eq(cmd, "patch"))      { cmd_patch(); return; }
     if (str_eq(cmd, "buses"))      { cmd_buses(); return; }
@@ -147,6 +148,7 @@ void Console::dispatch(uint32_t now_us){
 void Console::cmd_help(){
     put_line("info                    firmware, patch and store summary");
     put_line("clock [bpm] [source]    show, or set tempo and source (0 int, 1 cv, 2 midi)");
+    put_line("clockroute [in] [out]   show, or set the cables clock arrives and leaves on");
     put_line("key [scale] [root] [oct] show, or set the key every algorithm follows");
     put_line("patch                   the running patch: ports, nodes, connections");
     put_line("buses                   live bus state");
@@ -203,9 +205,34 @@ void Console::cmd_clock(uint8_t n, uint32_t now_us){
     put_kv("bpm      ", mm.clock().bpm());
     put_kv("source   ", mm.clock().source());
     put_kv("cv ppqn  ", mm.clock().cv_ppqn());
+    put_kv("in ports ", mm.clock().in_mask());
+    put_kv("out ports", mm.clock_out().target_mask());
     put("running   ");
     put_line(mm.clock().running() ? "yes" : "no");
     put_kv("subticks ", mm.clock().count());
+}
+
+// The two cable masks the clock is routed by, as decimal MidiPort bit sums:
+// 1 USB 1, 2 USB 2, 4 USB 3, 8 the control cable, 16 DIN 1, 32 DIN 2, 64 DIN
+// 3, 128 the USB host. An empty input mask is every musical cable; an empty
+// output mask is nowhere (patch/patch_codec.h). The control cable is never
+// either, and is masked off rather than refused - the module keeps its editor.
+void Console::cmd_clock_route(uint8_t n, uint32_t now_us){
+    if (n >= 2){
+        GlobalSettings g = patches.globals();
+        bool ok = false;
+        const uint32_t in_mask = arg_uint(1, ok);
+        if (!ok || in_mask > 255){ put_line("clockroute: a mask is 0..255"); return; }
+        g.clock_in_mask = (uint8_t)(in_mask & MIDI_MUSICAL_PORTS);
+        if (n >= 3){
+            const uint32_t out_mask = arg_uint(2, ok);
+            if (!ok || out_mask > 255){ put_line("clockroute: a mask is 0..255"); return; }
+            g.clock_out_mask = (uint8_t)(out_mask & MIDI_MUSICAL_PORTS);
+        }
+        patches.set_globals(g, now_us);
+    }
+    put_kv("in ports ", mm.clock().in_mask());
+    put_kv("out ports", mm.clock_out().target_mask());
 }
 
 // The key, for the same reason and by the same route as the clock above: it

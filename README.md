@@ -128,6 +128,24 @@ period and each edge re-phases the count **forward only**, so a node never sees
 time reverse. Multiplication from a gate source is refused: it would have to
 extrapolate. Trigger width is wall-clock (`TRIGGER_WIDTH_US`), never ticks.
 
+**The clock is routed by two cable masks, not by a port node.** Realtime is
+transport-level and reaches no bus, so neither end of it is a `MidiInPort` or a
+`MidiOutPort`: `clock_in_mask` is the cables clock and transport are *taken*
+from and `clock_out_mask` the cables the module's own clock leaves by, both in
+the patch's `GlobalSettings`. An empty input mask is every musical cable, as
+every source mask here is; an empty output mask is nowhere, because clock
+nobody asked for is how a chain ends up with two masters. The control cable is
+never in either. A message from a cable outside the input mask is dropped
+whole, the transport included — a host this module does not follow does not get
+to start it — and two hosts on two cables therefore stop fighting over one
+counter.
+
+**What goes out is generated from the count, not forwarded.** The module is a
+clock whatever moves it, so a patch slaved to a DAW re-clocks the chain behind
+it and CV sync into MIDI clock out is a patch nobody has to build. A pass that
+fell far behind re-phases rather than paying off its arrears
+(`src/clock/clock_out.h`): a burst of `F8` reads as a tempo spike downstream.
+
 **Starting, stopping and continuing are events, and the patch hears them.**
 The count going back to zero is what a start leaves behind; it says nothing to
 a node that counts edges rather than subticks. Every node is told what the
@@ -359,7 +377,8 @@ is only what a parameter list cannot say.
 All four transports feed the same graph. Every parser drains into one queue
 tagged with its transport; the pass dispatches. A full queue drops the newest
 message and counts it. Realtime messages are transport-level and reach the
-master clock, not a bus.
+master clock, not a bus — and leave by it, on the cables the clock's own masks
+name rather than on a `MidiOutPort` (see "Master clock").
 
 **Thru is a patch, not a default.** Library soft-thru is off; a `MidiInPort`
 and a `MidiOutPort` on a shared note bus is thru.
@@ -469,6 +488,7 @@ USB serial and `SERIAL_UART` both carry the same text console.
 |---|---|
 | `info` | build, node count, store state |
 | `clock [bpm] [source]` | show or set tempo and clock source |
+| `clockroute [in] [out]` | show or set the cables the clock arrives and leaves on |
 | `key [scale] [root] [oct]` | show or set the key |
 | `patch` | the running patch: jacks, ports, nodes, connections |
 | `buses` | live bus state and overflow counters |
@@ -502,6 +522,10 @@ than mid-transfer. Binary payloads are 7-in-8 packed.
   a checksum per chunk and accumulates into a staging buffer; the live graph is
   untouched until the whole image passes magic, version, CRC and validation. An
   incremental edit is one message changing one field.
+- **Routing the clock** is `SYSEX_SET_CLOCK_ROUTE`, one message for both
+  masks: a user pointing the module at a host is usually also deciding what it
+  clocks in turn. A mask naming the control cable is refused rather than
+  quietly trimmed.
 - **The transport and the panic button** have messages of their own. MIDI
   realtime only arrives on a musical port, and an editor holds the control
   cable, so `SYSEX_TRANSPORT` carries the same start / stop / continue / tap a

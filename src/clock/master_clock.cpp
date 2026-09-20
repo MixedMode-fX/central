@@ -6,7 +6,7 @@ MasterClock::MasterClock() :
     interval_dirty(true), is_running(true), transport_edges(0), have_edge(false),
     last_consumed(0), last_tap_us(0), tap_intervals(), tap_count(0),
     tempo(CLOCK_DEFAULT_BPM),
-    src(CLOCK_INTERNAL), cv_pulses(4)
+    src(CLOCK_INTERNAL), cv_pulses(4), in_ports(0)
 {
     recompute_internal_interval();
 }
@@ -124,7 +124,18 @@ void MasterClock::external_edge(uint32_t now_us){
     else                   edge_index = subticks / n;
 }
 
-void MasterClock::midi_message(uint8_t type, uint32_t now_us){
+// The control cable carries the protocol and nothing musical, so it is never
+// a clock source however a host asks (hal/midi_types.h).
+void MasterClock::set_in_mask(uint8_t mask){
+    in_ports = (uint8_t)(mask & MIDI_MUSICAL_PORTS);
+}
+
+void MasterClock::midi_message(uint8_t source, uint8_t type, uint32_t now_us){
+    // An empty mask is every musical cable: a module nobody has pointed at a
+    // host still follows the first one that speaks, which is what it did
+    // before there was a mask at all.
+    const uint8_t listening = in_ports ? in_ports : (uint8_t)MIDI_MUSICAL_PORTS;
+    if ((source & listening) == 0) return;
     switch (type){
         case MIDI_CLOCK:
             if (src == CLOCK_MIDI) external_edge(now_us);

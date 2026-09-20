@@ -812,6 +812,34 @@ static void test_port_edits_reconstruct_nothing() {
     TEST_ASSERT_TRUE(rig.naked_with(SYSEX_ERR_REJECTED));
 }
 
+// A port taken out of use is stored on no bus, whatever the message that
+// took it out of use still carried. The node has released its own either way
+// (node/ports.h); a stored patch holding the buses would save a wire nothing
+// reads and hand it back on the next recall, with nothing on the panel or in
+// the editor to say it was there.
+static void test_a_port_out_of_use_is_stored_on_no_bus() {
+    Rig rig;
+    GlobalSettings g = default_globals();
+    rig.patches.apply(two_node_patch(), g, 0);
+
+    rig.send(SYSEX_SET_MIDI_PORT, args_with({0, 0x01, 0x01, 0}, one_bus(2)));   // out 0, USB 1, bus 2
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(one_bus(2).bits, rig.patches.active().midi_out[0].buses.bits);
+
+    rig.send(SYSEX_SET_MIDI_PORT, args_with({0, 0x01, 0x00, 0}, one_bus(2)));   // out 0, no cable
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(0, rig.patches.active().midi_out[0].target_mask);
+    TEST_ASSERT_EQUAL(0, rig.patches.active().midi_out[0].buses.bits);
+
+    rig.send(SYSEX_SET_MIDI_PORT, args_with({1, 0x00, 0x00, 0}, one_bus(4)));   // in 1, no cable
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(0, rig.patches.active().midi_in[1].buses.bits);
+
+    rig.send(SYSEX_SET_GATE_PORT, args_with({2, GATE_PORT_UNUSED}, one_bus(5)));
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(0, rig.patches.active().gate_ports[2].buses.bits);
+}
+
 // ---------------------------------------------------------------------------
 // A patch swap under a held chord releases every note it started.
 // ---------------------------------------------------------------------------
@@ -1515,6 +1543,7 @@ int main() {
     RUN_TEST(test_a_parameter_above_127_survives_the_wire);
     RUN_TEST(test_a_parameter_beyond_its_range_is_refused);
     RUN_TEST(test_port_edits_reconstruct_nothing);
+    RUN_TEST(test_a_port_out_of_use_is_stored_on_no_bus);
     RUN_TEST(test_a_swap_under_a_held_chord_hangs_nothing);
     RUN_TEST(test_replacing_one_node_releases_the_notes_it_owned);
     RUN_TEST(test_slots_can_be_saved_listed_erased_and_recalled);

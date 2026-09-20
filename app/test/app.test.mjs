@@ -27,7 +27,7 @@ import { Arrangement } from '../src/services/arrangement.js';
 import { Editor } from '../src/services/editor.js';
 import { Patches } from '../src/services/patches.js';
 import { fromPatchJson, toPatchJson, SEQ_FAMILY } from '../src/core/patchjson.js';
-import { validate } from '../src/core/validate.js';
+import { validate, advise } from '../src/core/validate.js';
 import {
   SCALES, scaleMaskOf, scaleIdOf, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS, ALL_MUSICAL,
 } from '../src/protocol/names.js';
@@ -2656,6 +2656,90 @@ test('a jack and a MIDI port are disconnected like any other port', async () => 
   assert.ok(cleared.ok, cleared.why);
   for (const write of cleared.writes) applyWrite(patch, write);
   assert.deepEqual(patch.midiIn[0].buses, []);
+  assert.deepEqual(validate(device, patch), []);
+});
+
+// --- what a removal takes with it ---------------------------------------------
+//
+// A bus is the connection, so a block leaving the patch has to let go of both
+// ends of every wire it was on. A port still speaking on the bus its old
+// destination left behind is a wire nobody can see: it draws no arrow, and it
+// is why "delete it and patch it somewhere else" used to land the new wire
+// back on the old bus.
+
+test('a MIDI port taken out of use leaves no bus behind, at either end', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const { editor } = editorOn(device, patch);
+  editor.addMidiPort(false);
+  editor.addMidiPort(true);
+  dragged(device, patch, { blockId: 'midiIn:0', at: 0, isOutlet: true },
+                         { blockId: 'midiOut:0', at: 0, isOutlet: false });
+  assert.deepEqual(patch.midiOut[0].buses, [0]);
+  assert.deepEqual(patch.midiIn[0].buses, [0]);
+
+  editor.removeBlock({ kind: 'midiOut', index: 0 });
+  assert.equal(patch.midiOut[0].targetMask, 0);
+  assert.deepEqual(patch.midiOut[0].buses, [], 'a port out of use is on no bus');
+  assert.deepEqual(patch.midiIn[0].buses, [], 'and nothing is left playing to nobody');
+
+  // So the port comes back unconnected, and what it is patched to next
+  // decides the bus - rather than the one the last patch left on it.
+  editor.addMidiPort(true);
+  assert.deepEqual(patch.midiOut[0].buses, []);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0);
+  const plan = dragged(device, patch, { blockId: 'midiIn:0', at: 0, isOutlet: true },
+                                      { blockId: 'midiOut:0', at: 0, isOutlet: false });
+  assert.ok(plan.ok, plan.why);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 1, 'one wire, not two');
+  assert.deepEqual(validate(device, patch), []);
+});
+
+test('a node removed takes its wires with it, and leaves the shared ones alone', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const { editor } = editorOn(device, patch);
+  editor.addMidiPort(false);
+  editor.addMidiPort(true);
+  editor.addNode(idOf('Transpose', device));
+  dragged(device, patch, { blockId: 'midiIn:0', at: 0, isOutlet: true },
+                         { blockId: 'node:0', at: 0, isOutlet: false });
+  dragged(device, patch, { blockId: 'node:0', at: 0, isOutlet: true },
+                         { blockId: 'midiOut:0', at: 0, isOutlet: false });
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 2);
+  const [inBus] = patch.nodes[0].inBuses[0];
+  const [outBus] = patch.nodes[0].outBuses[0];
+
+  // A second output on the transposer's bus: one of two readers going is a
+  // fan-out losing an arrow, not the source going quiet.
+  editor.addMidiPort(true);
+  dragged(device, patch, { blockId: 'node:0', at: 0, isOutlet: true },
+                         { blockId: 'midiOut:1', at: 0, isOutlet: false });
+  editor.removeBlock({ kind: 'midiOut', index: 1 });
+  assert.deepEqual(patch.nodes[0].outBuses[0], [outBus], 'the other output still reads it');
+  assert.deepEqual(patch.midiOut[0].buses, [outBus]);
+
+  editor.removeNode(0);
+  assert.equal(patch.nodes.length, 0);
+  assert.deepEqual(patch.midiIn[0].buses, [], `nothing writes note bus ${inBus} any more`);
+  assert.deepEqual(patch.midiOut[0].buses, [], `nothing reads note bus ${outBus} any more`);
+  assert.equal(connectionsOf(patchBlocks(device, patch)).length, 0);
+  assert.deepEqual(validate(device, patch), []);
+  assert.deepEqual(advise(device, patch), [], 'and no inlet is left listening to silence');
+});
+
+test('a MIDI port turned round leaves the port it came from on no bus', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 3, buses: [2] };
+  const plan = planPortFlip(patch, device.capabilities, 0, false);
+  assert.ok(plan.ok, plan.why);
+  applyPortFlip(patch, plan);
+  assert.deepEqual(patch.midiOut[plan.to.index].buses, [2], 'what it carried moved with it');
+  assert.deepEqual(patch.midiIn[0].buses, [], 'and the port it left is on no bus');
   assert.deepEqual(validate(device, patch), []);
 });
 

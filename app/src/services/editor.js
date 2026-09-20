@@ -11,7 +11,7 @@ import * as P from '../protocol/generated.js';
 import * as codec from '../protocol/codec.js';
 import { validate } from '../core/validate.js';
 import {
-  BlockKind, applyWrite, copyNode, nodeFromCopy,
+  BlockKind, applyWrite, busesOf, copyNode, nodeFromCopy, patchBlocks, planDanglingWires,
   planJackDirection, planPortFlip, applyPortFlip, planPortFanOut, planBusModulation, planCcBinding,
 } from '../core/graph.js';
 import {
@@ -261,6 +261,7 @@ export class Editor {
   }
 
   removeNode(index) {
+    const was = busesOf(patchBlocks(this.device, this.patch), `${BlockKind.Node}:${index}`);
     this.patch.nodes.splice(index, 1);
     // Everything addressed by node index moves with the renumbering: the
     // positions, the drum voices, the selection, the bindings and the routes.
@@ -274,7 +275,19 @@ export class Editor {
     this.patch.ccMap = renumberTargets(this.patch.ccMap, index);
     this.patch.modMap = renumberTargets(this.patch.modMap ?? [], index);
     this.patch.macroDest = renumberTargets(this.patch.macroDest ?? [], index);
+    // Its wires go with it. The whole patch is on its way out, so nothing is
+    // sent for them on their own.
+    this.cutDanglingWires(was, { send: false });
     this.sendWhole();
+  }
+
+  // The other end of every wire the block leaving was holding, let go of:
+  // `core/graph.js` says which buses have nobody at the far side now, and
+  // those ports come off them.
+  cutDanglingWires(was, { send = true } = {}) {
+    for (const write of planDanglingWires(patchBlocks(this.device, this.patch), was)) {
+      if (send) this.writePort(write); else applyWrite(this.patch, write);
+    }
   }
 
   // A jack or a MIDI port is not added so much as *taken into use*: the
@@ -331,7 +344,7 @@ export class Editor {
     applyPortFlip(this.patch, plan);
     this.state.ui.canvas.selected = selectBlock(`${portKind(plan.wantOut)}:${plan.to.index}`);
     this.edit(async () => {
-      await this.device.setMidiPort(index, isOut, 0, left.channel, left.buses);
+      await this.device.setMidiPort(index, isOut, 0, left.channel, []);
       await this.device.setMidiPort(plan.to.index, plan.wantOut, plan.mask, plan.channel, plan.buses);
     }, 'MIDI port direction');
     this.say(plan.said);
@@ -342,13 +355,18 @@ export class Editor {
   removeBlock(block) {
     if (block.kind === BlockKind.Node) { this.removeNode(block.index); return; }
     this.state.ui.canvas.selected = null;
+    const was = busesOf(patchBlocks(this.device, this.patch), `${block.kind}:${block.index}`);
     if (block.kind === BlockKind.Jack) {
       this.setJack(block.index, P.GatePortDirection.GATE_PORT_UNUSED);
       this.say(`jack ${block.index + 1} is unused`);
-      return;
+    } else {
+      // Out of use is off every bus, as it is for a jack: a port still
+      // holding the bus it used to play comes back silently connected to it,
+      // and nothing it is patched to afterwards can move it anywhere else.
+      const isOut = block.kind === BlockKind.MidiOut;
+      this.setMidiPort(block.index, isOut, { [maskKey(isOut)]: 0, buses: [] });
     }
-    this.setMidiPort(block.index, block.kind === BlockKind.MidiOut,
-                     { [maskKey(block.kind === BlockKind.MidiOut)]: 0 });
+    this.cutDanglingWires(was);
   }
 
   // --- the clipboard ---------------------------------------------------------

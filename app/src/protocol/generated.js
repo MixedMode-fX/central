@@ -18,7 +18,7 @@ export const KEY_DEFAULT_OCTAVE = 5;
 export const KEY_MAX_OCTAVE = 10;
 export const MACRO_NAME_BYTES = 8;
 export const MASTER_PPQN = 24;
-export const MAX_IN = 5;
+export const MAX_IN = 8;
 export const MAX_OUT = 8;
 export const MAX_SEQUENCE_LEN = 32;
 export const MIDI_CONTROL_PORT = 8;
@@ -40,7 +40,7 @@ export const NRPN_KEY_BASE = 15488;
 export const NRPN_RESERVED_BASE = 15504;
 export const NRPN_TRANSPORT_BASE = 15472;
 export const PARAM_CENTRE = 128;
-export const PATCH_FORMAT_VERSION = 10;
+export const PATCH_FORMAT_VERSION = 11;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
 export const PATCH_SLOTS = 4;
@@ -55,7 +55,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 15;
+export const SYSEX_PROTOCOL_VERSION = 16;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 320;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -296,6 +296,17 @@ export const AlgorithmId = Object.freeze({
   ALGO_TRANSPORT: 44,
   ALGO_STEP_MOD: 45,
   ALGO_GATE_PROBABILITY: 46,
+  ALGO_GATE_SWITCH: 47,
+  ALGO_GATE_ROUTER: 48,
+  ALGO_NOTE_SWITCH: 49,
+  ALGO_NOTE_ROUTER: 50,
+  ALGO_FLIP_FLOP: 51,
+  ALGO_COUNTER: 52,
+  ALGO_SHIFT_REGISTER: 53,
+  ALGO_EDGE: 54,
+  ALGO_GATE_TO_CV: 55,
+  ALGO_CV_SWITCH: 56,
+  ALGO_CV_ROUTER: 57,
 });
 
 export const AlgorithmCategory = Object.freeze({

@@ -172,7 +172,8 @@ touched.
 
 | Domain | Algorithms |
 |---|---|
-| Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR` |
+| Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR`, `FlipFlop`, `Counter`, `ShiftRegister`, `Edge` |
+| Switches | `GateSwitch`, `GateRouter`, `NoteSwitch`, `NoteRouter`, `CvSwitch`, `CvRouter` |
 | Clock | `ClockDiv`, `Metronome`, `Transport` |
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
@@ -182,7 +183,7 @@ touched.
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
 | Utility | `GateHold`, `GateProbability` |
-| Modulators | `LFO`, `StepMod`, `SampleHold`, `Slew`, `Turing` |
+| Modulators | `LFO`, `StepMod`, `SampleHold`, `Slew`, `Turing`, `GateToCV` |
 | Rhythm | `Automaton` |
 
 Every algorithm reports its own name, summary, category, port names, parameter
@@ -388,6 +389,38 @@ is only what a parameter list cannot say.
   normalised in the HAL (`GATE_INPUT_ACTIVE_LOW`), so an unpatched input reads
   0 and cannot force an OR high. `NOT` and `Sustain` take exactly one port and
   are invalid otherwise. Logic is not clocked by the master clock.
+- **A switch is how a patch has parts.** `GateSwitch`, `NoteSwitch` and
+  `CvSwitch` carry one of up to `MAX_IN - 3` inlets to one outlet;
+  `GateRouter`, `NoteRouter` and `CvRouter` carry one inlet to one of
+  `MAX_OUT` outlets. All six are one mechanism (`src/algorithm/switch/selector.h`): a `select` parameter that
+  reads back as the position the switch is on, a `step` edge that moves to
+  the next position and wraps at `steps` - by default the last patched port,
+  so two parts alternate - a `reset` edge that returns to the first, and a
+  `select` **level** inlet that, when patched, *is* the position and outranks
+  the rest. Every part runs whether or not it is heard, so switching back
+  lands in the bar; a router on the clock instead of the output holds the
+  unselected parts where they were. **The note switches own the note-offs of
+  what they pass**: moving one releases everything it let through from the
+  part it is leaving, before the first event of the next part, and a note
+  already held on the part it moves to is not heard until struck again. A
+  `CvRouter`'s unselected outlets are written by nobody, so a route from one
+  falls back to the parameter's own setting, as an unpatched route does.
+- **`FlipFlop` is one clocked bit in five shapes** - D, transparent D latch, T,
+  JK and SR - with `Q`, `not Q` and an asynchronous `clear` that wins. A T
+  with nothing on `data` toggles on every edge, which is a divide-by-two with
+  a square output rather than a trigger. `Counter` is that chain in one
+  node, and a sequencer with no pattern: `StepEngine`'s directions, a `carry`
+  trigger on the edge that wraps the count (not on the first step after a
+  reset, so a counter and a switch reset together do not lose a part to the
+  bar that started them), the count as a level across the full scale, and
+  its bits as levels. `ShiftRegister` is eight bits in a row, tap *k* being
+  `data` *k* clocks ago; `loop` feeds the bit at `length` back OR'd with
+  `data`, so a burst of gates played into it goes round for ever and `clear`
+  erases it. `Edge` names the two edges of a gate as fixed-width triggers.
+- **`GateToCV` is the door from the gate domain into the control bus**, the
+  inverse of `CvToGate`: `high` while the gate is up, `low` while it is down,
+  both in percent of full scale. A gate pattern through it into a switch's
+  `select` inlet is which part plays on which bar.
 
 ## MIDI
 

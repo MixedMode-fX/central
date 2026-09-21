@@ -2,14 +2,16 @@
 #include "node/registry.h"
 
 static const Domain GATE_INLETS[MAX_IN] = {
-    Domain::Gate, Domain::Gate, Domain::Gate, Domain::Gate, Domain::Gate };
-static_assert(MAX_IN == 5, "GATE_INLETS lists one domain per inlet");
+    Domain::Gate, Domain::Gate, Domain::Gate, Domain::Gate,
+    Domain::Gate, Domain::Gate, Domain::Gate, Domain::Gate };
+static_assert(MAX_IN == 8, "GATE_INLETS lists one domain per inlet");
 static const Domain GATE_OUTLET[1] = {Domain::Gate};
 
 // The first inlet is the one that must be connected (min_in is 1); the rest
 // are folded in if they are patched, which is what "unconnected inputs are
 // skipped" means where a user can see it.
-static const char* const GATE_IN_NAMES[MAX_IN] = {"in 1", "in 2", "in 3", "in 4", "in 5"};
+static const char* const GATE_IN_NAMES[MAX_IN] = {
+    "in 1", "in 2", "in 3", "in 4", "in 5", "in 6", "in 7", "in 8"};
 static const char* const NOT_IN_NAMES[1] = {"in"};
 static const char* const GATE_OUT_NAMES[1] = {"out"};
 

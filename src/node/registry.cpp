@@ -35,6 +35,14 @@
 #include "algorithm/midi/key.h"
 #include "algorithm/midi/retrigger.h"
 #include "algorithm/clock/transport.h"
+#include "algorithm/switch/gate_switch.h"
+#include "algorithm/switch/note_switch.h"
+#include "algorithm/switch/cv_switch.h"
+#include "algorithm/logic/flip_flop.h"
+#include "algorithm/logic/counter.h"
+#include "algorithm/logic/shift_register.h"
+#include "algorithm/logic/edge.h"
+#include "algorithm/modulator/gate_to_cv.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -85,6 +93,17 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &Retrigger::descriptor,
     &Transport::descriptor,
     &StepMod::descriptor,
+    &GateSwitch::descriptor,
+    &GateRouter::descriptor,
+    &NoteSwitch::descriptor,
+    &NoteRouter::descriptor,
+    &FlipFlop::descriptor,
+    &Counter::descriptor,
+    &ShiftRegister::descriptor,
+    &Edge::descriptor,
+    &GateToCv::descriptor,
+    &CvSwitch::descriptor,
+    &CvRouter::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

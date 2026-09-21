@@ -58,6 +58,8 @@ static const Driven DRIVEN[] = {
     {ALGO_PROBABILITY,    false},
     {ALGO_ARPEGGIATOR,    true},
     {ALGO_RETRIGGER,      true},
+    {ALGO_NOTE_SWITCH,    false},
+    {ALGO_NOTE_ROUTER,    false},
 };
 static const uint8_t N_DRIVEN = (uint8_t)(sizeof(DRIVEN) / sizeof(DRIVEN[0]));
 

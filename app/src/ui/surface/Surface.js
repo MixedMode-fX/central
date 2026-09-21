@@ -49,6 +49,7 @@ import { MachineBadge, PortSelect } from '../components/Machine.js';
 import { Transport } from '../components/Transport.js';
 import { KeyboardOverlay } from '../components/Keyboard.js';
 import { Select, range } from '../components/Select.js';
+import { NumberField } from '../components/NumberField.js';
 import { portNames } from '../../protocol/names.js';
 import { closeMenu } from '../components/Menu.js';
 import { PadKind, PadMode, POTS, PADS } from '../../services/surface.js';
@@ -181,6 +182,16 @@ function Cable(app) {
       options: range(17, (c) => `ch ${c}`, 1), value: play.channel,
       onChange: (channel) => { play.channel = channel; app.render(); },
     }),
+    // How hard the bottom of a key is. It rode on the module tab beside the
+    // keyboard that used to be there; this is the only keyboard now, and a
+    // loud end set on another tab is one nobody finds.
+    el('label', { class: 'machine-port' },
+      el('span', { class: 'field-name' }, 'vel'),
+      NumberField({
+        value: play.velocity, min: 1, max: 127,
+        'aria-label': 'how loud the bottom of a key is',
+        onChange: (velocity) => { play.velocity = velocity; },
+      })),
   ];
 }
 

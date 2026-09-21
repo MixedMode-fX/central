@@ -114,14 +114,15 @@ sends, what it is called and what colour it is are **yours, not the patch's** �
 live in this browser beside the canvas arrangement, keyed globally rather than
 per patch, because a pad that changed meaning with every patch load is one
 nobody could learn. A **keyboard** is summoned over it: one scrolling row of
-real keys, six octaves, a drag across it playing a glissando, and **a cable and
-channel of its own** — playing a part into one input of the patch while the
-pads drive another is the ordinary case.
+real keys, six octaves, a drag across it playing a glissando, and **a cable, a
+channel and a loud end of its own** — playing a part into one input of the
+patch while the pads drive another is the ordinary case. It is the app's only
+keyboard: one place to aim it, and no second copy to be the stale one.
 
 **module** — the module running: the LEDs and gate buses, the jacks — the sync
-jack among them, since no cable reaches it in a browser — an on-screen keyboard
-and CC sender, and two views that answer questions no
-lamp can. The **scope** draws every jack, gate bus and CV bus the patch uses
+jack among them, since no cable reaches it in a browser — a CC sender on a
+chosen cable, and two views that answer questions no lamp can. Notes are
+played on the surface, not here. The **scope** draws every jack, gate bus and CV bus the patch uses
 against the last few seconds, which is the only way to read a divider, a
 Euclidean pattern or an LFO. The **piano roll** draws notes with a shade per
 place they were seen — played in, sent out, and each note bus the patch writes

@@ -7,7 +7,9 @@
 // wrapped onto three rows, because a wrapping flex row is what a keyboard
 // becomes when it is put in a one-column panel and told to fit.
 //
-// So: one component, and the three faults fixed where they were.
+// So: one component, and the three faults fixed where they were. It is played
+// in one place too - the overlay on the performance surface, which carries
+// the cable, the channel and the loud end with it.
 //
 //   * **It scrolls; it never wraps.** The track is one row however narrow the
 //     viewport is, and the register is reached by scrolling it or by the
@@ -192,11 +194,12 @@ export function Keyboard({
 // The overlay: the keyboard summoned over whatever is on screen, owning the
 // full width because that is the width a keyboard needs and a one-column
 // panel cannot give it. `controls` goes in its bar - where the notes are
-// going is part of playing them, and the surface has no other room for it.
+// going and how hard is part of playing them, and the surface has no other
+// room for it. The bar is not captioned "keyboard": the thing under it is
+// one, and on a phone that word is a control's worth of width.
 export function KeyboardOverlay({ onClose, controls = null, ...options }) {
   return el('div', { class: 'pk-overlay', role: 'dialog', 'aria-label': 'keyboard' },
     el('div', { class: 'pk-overlay-bar' },
-      el('span', { class: 'field-name' }, 'keyboard'),
       controls ? el('div', { class: 'pk-overlay-controls' }, controls) : null,
       el('button', { class: 'ghost', onclick: () => onClose() }, 'close')),
     Keyboard(options));

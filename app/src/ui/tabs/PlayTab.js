@@ -1,6 +1,13 @@
 // The play surface: the module, running, with the few controls a module has
-// - two LEDs, its jacks and its MIDI - plus the three things a rack cannot
-// give you: ears, an on-screen keyboard, and a time axis.
+// - two LEDs, its jacks and its MIDI - plus the two things a rack cannot give
+// you: ears and a time axis.
+//
+// **There is no keyboard here.** One belongs to the performance surface,
+// summoned over it with its own cable, channel and octave strip
+// (ui/components/Keyboard.js), and two of them meant two places to set the
+// same three things and one of them always being the stale one. What is left
+// of this panel is the cable the page sends on and a CC to send down it,
+// which is the half a keyboard cannot do.
 //
 // **What the clock is set to is not here.** The source, the tempo and the
 // cables it is routed over are globals (tabs/GlobalsTab.js), and a second
@@ -25,7 +32,6 @@ import { Domain } from '../../core/validate.js';
 import { noteName } from '../../core/music.js';
 import { portNames, CLOCK_CV_SOURCE } from '../../protocol/names.js';
 import { MachineBadge, PortSelect } from '../components/Machine.js';
-import { Keyboard } from '../components/Keyboard.js';
 import { WAVES } from '../../runtime/audio/listener.js';
 import { KITS, PIECE_LABELS } from '../../runtime/audio/drums.js';
 import './Play.css';
@@ -52,11 +58,11 @@ export function PlayTab(app) {
         Hint('its jacks, LEDs and sound are its own: the meters, the scope and the '
              + 'audio below need the module in the page'),
         Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))),
-      KeyboardPanel(app));
+      SendPanel(app));
   }
   return el('div', {},
     Meters(app), ScopePanel(app), RollPanel(app),
-    JacksPanel(app), KeyboardPanel(app), ListenPanel(app), MonitorPanel(app));
+    JacksPanel(app), SendPanel(app), ListenPanel(app), MonitorPanel(app));
 }
 
 // --- jacks ------------------------------------------------------------------
@@ -124,9 +130,15 @@ function SyncCard(app) {
         el('span', { class: 'hint' }, 'Hz')));
 }
 
-// --- playing ----------------------------------------------------------------
+// --- sending by hand ---------------------------------------------------------
 
-function KeyboardPanel(app) {
+// A CC sent from the page, on a chosen cable and channel: the one musical
+// message the surface's pads and pots cannot send on demand, because each of
+// those carries whatever it was assigned. Notes are played on the surface
+// (the **play** button, then the keyboard) - this is what is left when they
+// move there, and the cable is here because it is what decides whether a CC
+// sent from this page is heard at all (services/play.js).
+function SendPanel(app) {
   const play = app.state.ui.play;
   const accepted = el('span', { class: 'hint' }, '');
   if (app.session.usingModule) {
@@ -138,25 +150,13 @@ function KeyboardPanel(app) {
     value: play[key], min, max, 'aria-label': label, onChange: (v) => { play[key] = v; },
   });
 
-  return Panel('play',
-    // Which machine, and which of its cables - both of which decide whether a
-    // key played here is heard at all, and neither of which a view should be
-    // guessing at (services/play.js).
+  return Panel('send',
+    // Which machine, and which of its cables - neither of which a view should
+    // be guessing at (services/play.js).
     Row(MachineBadge(app, { compact: true })),
     Row(PortSelect(app),
         ...Labelled('channel', number('channel', 1, 16, 'channel')),
-        ...Labelled('velocity', number('velocity', 1, 127, 'velocity')),
         accepted),
-    // The one keyboard component (ui/components/Keyboard.js). It takes
-    // callbacks and knows nothing about where a note goes.
-    Keyboard({
-      octave: play.octave, velocity: play.velocity,
-      mounted: (fn) => app.live.onMount(fn),
-      onOctave: (octave) => { play.octave = octave; },
-      onNoteOn: (pitch, velocity) => app.play.noteOn(pitch, velocity),
-      onNoteOff: (pitch) => app.play.noteOff(pitch),
-    }),
-    Hint('a key is louder towards its bottom edge; the velocity above is its loud end'),
     // No all-notes-off here: it was this panel's own cable and channel only,
     // and the panic in the bar above is every port and every channel of
     // whatever is playing (services/transport.js).

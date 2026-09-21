@@ -8,4 +8,5 @@ canvas.scope, canvas.roll {
   border-radius: var(--radius); background: var(--bg);
 }
 .legend-row .legend { margin-top: 0; flex: 1 1 auto; }
-.node-roll canvas.roll { margin-bottom: .2rem; }
+.block-signals canvas.scope, .block-signals canvas.roll { margin-bottom: .2rem; }
+.block-signals .scope-wrap { margin-bottom: .4rem; }

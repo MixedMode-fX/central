@@ -1,6 +1,6 @@
 // What was clicked on the canvas, in full. A node gets its card - every
-// parameter, its grid, its bus selectors - and under it the roll of what it
-// read and wrote; a jack and a MIDI port get theirs; an arrow gets the two
+// parameter, its grid, its bus selectors, and the signals it read and wrote;
+// a jack and a MIDI port get theirs, signals included; an arrow gets the two
 // ends it joins.
 //
 // The panel folds. Its bar carries the block's name, what can be done to the
@@ -16,7 +16,6 @@ import { IconButton } from '../components/IconButton.js';
 import { NodeCard } from '../panels/NodeCard.js';
 import { JackCard } from '../panels/JackCard.js';
 import { RouteCard } from '../panels/RouteCard.js';
-import { NodeRollPanel } from '../scope/ScopePanels.js';
 import { BlockKind, planDisconnect } from '../../core/graph.js';
 import { domainName } from '../../core/validate.js';
 import { underBlock } from '../../core/layout.js';
@@ -81,8 +80,7 @@ export function Inspector(app, geom) {
     return panel(block.title,
       { before: [el('span', { class: 'index' }, block.index)],
         after: [d?.wantsTick ? el('span', { class: 'tag' }, 'clocked') : null, copy, duplicate, remove] },
-      NodeCard(app, block.index, { header: false }),
-      NodeRollPanel(app, block.index));
+      NodeCard(app, block.index, { header: false }));
   }
   if (block.kind === BlockKind.Jack) return panel(block.title, { after: [remove] }, JackCard(app, block.index));
   // The port's own head is left out: the panel's bar already carries its

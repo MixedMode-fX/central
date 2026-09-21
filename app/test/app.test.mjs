@@ -55,7 +55,9 @@ import { Transport as TransportView } from '../src/ui/components/Transport.js';
 import { Device } from '../src/protocol/device.js';
 import { KeyTab } from '../src/ui/tabs/KeyTab.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
-import { shade, nodeRollSources, scopeRows } from '../src/ui/scope/scope.js';
+import { shade, nodeRollSources, scopeRows, blockSignals } from '../src/ui/scope/scope.js';
+import { BlockSignalsPanel } from '../src/ui/scope/ScopePanels.js';
+import { BlockKind } from '../src/core/graph.js';
 import { ICON_NAMES } from '../src/ui/components/icons.js';
 import { gateHits } from '../src/runtime/audio/listener.js';
 import { KITS, LANE_NOTES, PIECES, drumSources, hit, pieceOf, voiceSpec } from '../src/runtime/audio/drums.js';
@@ -1604,6 +1606,109 @@ test('a node\'s roll lists what it reads and writes, in the domain\'s colour', a
   }
   assert.equal(shade('not a colour', 1), 'not a colour', 'a colour it cannot read is left alone');
   assert.ok(ICON_NAMES.includes('cv') && ICON_NAMES.includes('cut'), 'the icons the buttons ask for exist');
+});
+
+// Every block has its signals, whatever it is: a node's gate and control
+// ports are rows of a scope and its note ports sources of a roll, a jack is
+// its own level and the bus behind it, and a MIDI port is its cables on one
+// side and its buses on the other. Each keeps the key it has on the module
+// tab, so a chip pressed under a block puts away the same trace it would
+// there.
+test('every kind of block lists the signals it carries', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_OUT, buses: [1] };
+  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_IN, buses: [4] };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0 | P.MidiPort.mmMIDI_SERIAL_1, channel: 0, buses: [2] };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_1, channel: 0, buses: [3] };
+  const ctx = { patch, device };
+
+  // A gate node: what it is clocked by and what it writes, both on the scope.
+  const div = device.algorithms.find((d) => d?.name === 'ClockDiv');
+  patched(device, patch, div);
+  const divAt = patch.nodes.length - 1;
+  patch.nodes[divAt].inBuses[0] = [4];
+  patch.nodes[divAt].outBuses[0] = [1];
+  const gate = blockSignals(ctx, { kind: BlockKind.Node, index: divAt });
+  assert.equal(gate.sources.length, 0, 'a divider has no notes');
+  assert.deepEqual(gate.rows.map((r) => [r.key, r.role, r.source]),
+                   [['gate4', 'in', 'gate'], ['gate1', 'out', 'gate']], 'the bus it reads, then the bus it writes');
+  assert.match(gate.rows[0].label, /^reads .* · gate 4$/);
+  assert.match(gate.rows[1].label, /^writes .* · gate 1$/);
+
+  // A modulator: a control signal is a curve, in the CV colour.
+  const lfo = device.algorithms.find((d) => d?.name === 'LFO');
+  patched(device, patch, lfo);
+  const lfoAt = patch.nodes.length - 1;
+  const cv = blockSignals(ctx, { kind: BlockKind.Node, index: lfoAt });
+  assert.equal(cv.rows.length, 1);
+  assert.equal(cv.rows[0].kind, 'cv');
+  assert.match(cv.rows[0].key, /^cv\d+$/, 'the same key the module tab\'s scope gives that bus');
+
+  // A note sequencer: its notes on a roll, and the gate that advances it on
+  // the scope above.
+  const seq = device.algorithms.find((d) => d?.name === 'NoteSequencer');
+  patched(device, patch, seq);
+  const seqAt = patch.nodes.length - 1;
+  patch.nodes[seqAt].inBuses[0] = [1];
+  patch.nodes[seqAt].outBuses[0] = [3];
+  const notes = blockSignals(ctx, { kind: BlockKind.Node, index: seqAt });
+  assert.deepEqual(notes.rows.map((r) => r.key), ['gate1'], 'the advance edge');
+  assert.deepEqual(notes.sources.map((s) => [s.key, s.role]), [['bus3', 'out']], 'and what it plays');
+  assert.deepEqual(nodeRollSources(ctx, seqAt), notes.sources, 'the roll under a node is its note ports');
+
+  // A jack: an input is its level then the bus it writes; an output is the
+  // bus it reads then its level. Inputs first, whichever way it faces.
+  const out = blockSignals(ctx, { kind: BlockKind.Jack, index: 0 });
+  assert.deepEqual(out.rows.map((r) => [r.key, r.source, r.role]), [['gate1', 'gate', 'in'], ['jack0', 'jackOut', 'out']],
+                   'the bus it reads, then the level it puts out');
+  const inn = blockSignals(ctx, { kind: BlockKind.Jack, index: 1 });
+  assert.deepEqual(inn.rows.map((r) => [r.key, r.source, r.role]), [['jack1', 'jackIn', 'in'], ['gate4', 'gate', 'out']]);
+  assert.deepEqual(blockSignals(ctx, { kind: BlockKind.Jack, index: 2 }), { rows: [], sources: [] },
+                   'an unused jack carries nothing');
+
+  // A MIDI port: the cables are one side and the buses the other, and the
+  // cable side is masked to *its* cables.
+  const midiIn = blockSignals(ctx, { kind: BlockKind.MidiIn, index: 0 });
+  assert.deepEqual(midiIn.sources.map((s) => [s.key, s.role]), [['in', 'in'], ['bus2', 'out']]);
+  assert.equal(midiIn.sources[0].mask, P.MidiPort.mmMIDI_USB_0 | P.MidiPort.mmMIDI_SERIAL_1);
+  assert.match(midiIn.sources[0].label, /played in · USB 1, DIN 1/);
+  const midiOut = blockSignals(ctx, { kind: BlockKind.MidiOut, index: 0 });
+  assert.deepEqual(midiOut.sources.map((s) => [s.key, s.role]), [['bus3', 'in'], ['out', 'out']]);
+  assert.equal(midiOut.sources[1].mask, P.MidiPort.mmMIDI_USB_1);
+  assert.match(midiOut.sources[1].label, /sent out · USB 2/);
+
+  // The panel: a scope for the rows, a roll for the sources, one legend for
+  // both, and a chip pressed puts that trace away for this block only.
+  const app = fakeApp({ patch, device, module });
+  let panel = withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Node, index: seqAt }));
+  assert.equal(findAll(panel, (n) => n.tag === 'canvas').length, 2, 'a scope and a roll');
+  const chips = findAll(panel, (n) => n.classList?.contains('legend-chip'));
+  assert.equal(chips.length, 2);
+  chips[1].fire('click');
+  assert.ok(app.state.ui.traceHidden.has(`node:${seqAt}:bus3`), 'hidden under this block');
+  panel = withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Node, index: seqAt }));
+  assert.equal(findAll(panel, (n) => n.tag === 'canvas').length, 1, 'the roll is put away, the scope stays');
+  const other = withDom(() => BlockSignalsPanel(app, { kind: BlockKind.MidiOut, index: 0 }));
+  assert.equal(findAll(other, (n) => n.tag === 'canvas').length, 2,
+               'the same bus under another block is still shown: a roll of what it read, one of what it sent');
+  assert.ok(findAll(other, (n) => n.classList?.contains('legend-chip')).every((c) => !c.classList.contains('off')),
+            'and nothing under that block is hidden');
+  // Inputs before outputs across both pictures: a converter reading notes
+  // and writing a control signal draws its roll above its scope.
+  const toCv = device.algorithms.find((d) => d?.name === 'MidiToCV');
+  patched(device, patch, toCv);
+  const toCvAt = patch.nodes.length - 1;
+  patch.nodes[toCvAt].inBuses[0] = [3];
+  const order = findAll(withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Node, index: toCvAt })),
+                        (n) => n.tag === 'canvas').map((n) => n.className);
+  assert.equal(order[0], 'roll', 'what it read, first');
+  assert.ok(order.slice(1).every((c) => c === 'scope'), 'then what it wrote');
+  assert.match(words(withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Jack, index: 2 }))), /on no bus/,
+               'a block on no bus says so');
+  assert.equal(BlockSignalsPanel(fakeApp({ patch, device }), { kind: BlockKind.Node, index: seqAt }), null,
+               'no module in the page, no signals to draw');
 });
 
 // --- the circle of fifths ----------------------------------------------------

@@ -1,5 +1,6 @@
-// One node: what it reads, what it writes, and the buses they are on; its
-// parameters; its grid, if its algorithm has one. Everything here is driven
+// One node: what it reads, what it writes, and the buses they are on; the
+// signals on those buses, live; its parameters; its grid, if its algorithm
+// has one. Everything here is driven
 // by what the device reported - port names and domains, parameter ranges and
 // kinds, enum options - so an algorithm added to the firmware gets a working
 // card for free.
@@ -13,6 +14,8 @@ import { ModRoutes } from '../controls/ModRoute.js';
 import { inletName, outletName } from '../../core/patch.js';
 import { domainName } from '../../core/validate.js';
 import { algorithmGrid } from './algorithms.js';
+import { BlockSignalsPanel } from '../scope/ScopePanels.js';
+import { BlockKind } from '../../core/graph.js';
 import './cards.css';
 
 // One port of one node: what it is called, and what it is wired to.
@@ -65,6 +68,9 @@ export function NodeCard(app, index, { header = true } = {}) {
     el('div', { class: 'ports' },
       ports(false, d.nIn, 'reads', 'reads nothing'),
       ports(true, d.nOut, 'writes', 'writes nothing')),
+    // Right under the ports, because it is the same list drawn over time:
+    // what the node read on each, and what it wrote.
+    BlockSignalsPanel(app, { kind: BlockKind.Node, index }),
     ParamSections(app, index),
     ModRoutes(app, index),
     grid ? grid(app, index) : null);

@@ -58,7 +58,9 @@ scope row per gate and control bus it reads or writes, a piano roll of its
 note buses, a jack's own level, and a MIDI port's cables beside its buses — so
 a sequencer's notes, a divider's pulses and a transformation's two sides are
 each read off the block itself, in the same shades and with the same hiding
-chips as the module tab's scope and roll. The picture takes the **whole window** from the button in the bar
+chips as the module tab's scope. **The notes are read here and nowhere else**:
+a whole-patch roll answers the one question nobody asks, where what is wanted
+is what *this* sequencer played or what *that* MIDI out sent. The picture takes the **whole window** from the button in the bar
 or **F** — the canvas and the details of what is selected, and nothing else —
 and **Esc** gives it back. Parameters are sorted onto the same sections on every
 node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in
@@ -120,14 +122,12 @@ pads drive another is the ordinary case.
 
 **module** — the module running: the LEDs and gate buses, the jacks — the sync
 jack among them, since no cable reaches it in a browser — an on-screen keyboard
-and CC sender, and two views that answer questions no
-lamp can. The **scope** draws every jack, gate bus and CV bus the patch uses
-against the last few seconds, which is the only way to read a divider, a
-Euclidean pattern or an LFO. The **piano roll** draws notes with a shade per
-place they were seen — played in, sent out, and each note bus the patch writes
-— so the same phrase is visible at every point in the chain and a disagreement
-between two of them is the bug. Both have a legend of chips, and pressing a
-chip hides its trace.
+and CC sender, and the **scope**, which draws every jack, gate bus and CV bus
+the patch uses against the last few seconds. That is the only way to read a
+divider, a Euclidean pattern or an LFO, and its question really is a
+whole-patch one: a divider against its clock against a jack, in one picture.
+It has a legend of chips, and pressing a chip hides its trace. Notes are not
+here — they are read off a block, under the block, on the patch tab.
 
 **Colour is the domain.** A gate is green, a note is orange and a control
 signal is purple — in an arrow, a socket, a bus chip, a lamp and a trace. Where
@@ -413,7 +413,7 @@ app/
       canvas/         the patch as blocks and arrows
       surface/        the performance surface: the pads, the pots, and the
                       sheet that says what a control does
-      scope/          the scope and the piano rolls
+      scope/          the scope and the piano roll
       tabs/           one file per tab
       App.js          the shell
   test/

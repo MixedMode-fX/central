@@ -25,7 +25,6 @@ const ROW_H = 18;            // one gate trace
 const CV_ROW_H = 46;         // a control signal needs room to be a curve
 const TRACE_FONT = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
 const ROLL_GUTTER = 30;      // room for a pitch name
-export const ROLL_H = 220;
 export const NODE_ROLL_H = 150;
 const ROLL_SLOTS = 4;        // most sub-lanes one pitch lane is split into
 const MIN_SEMITONES = 13;    // an octave, so a one-note patch is not a full-height bar
@@ -278,23 +277,11 @@ function drawCvRow(ctx, { trace, x0, span, left, count, first, columnsAt, colour
   ctx.textAlign = 'left';
 }
 
-// --- the piano roll's sources ------------------------------------------------
+// --- the note colours ---------------------------------------------------------
 
-// What can appear in the roll, in the order it is stacked and listed: what
-// was played in, what the module sent out, and each note bus the patch
-// writes. Every one is a shade of the note colour, and a bus keeps its shade
-// in every roll on the page.
+// A note bus keeps its shade of the note colour in every roll on the page, so
+// the same bus read under two blocks is the same colour in both.
 export const noteBusColour = (bus) => shade(palette().note, bus + 1);
-
-export function rollSources(watchedBuses) {
-  const colours = palette();
-  return [
-    { key: 'in', label: 'played in', colour: shade(colours.note, 9) },
-    { key: 'out', label: 'sent out', colour: colours.note },
-    ...[...watchedBuses].sort((a, b) => a - b).map((bus) =>
-      ({ key: `bus${bus}`, bus, label: `note bus ${bus}`, colour: noteBusColour(bus) })),
-  ];
-}
 
 // --- what one block carries -----------------------------------------------
 //

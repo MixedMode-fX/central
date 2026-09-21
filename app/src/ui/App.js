@@ -12,9 +12,9 @@
 // Play does not open a tab. It opens the performance surface, which is its
 // own shell and takes the whole viewport (ui/surface/Surface.js): an
 // instrument rather than an instrument panel. The panels that used to be
-// behind the play button - the meters, the scope, the roll, the jacks, the
-// listener, the monitor - are the **module** tab, which is where an
-// instrument panel belongs.
+// behind the play button - the meters, the scope, the jacks, the listener,
+// the monitor - are the **module** tab, which is where an instrument panel
+// belongs.
 
 import { el, classes } from './dom.js';
 import { icon } from './components/icons.js';
@@ -108,11 +108,12 @@ function Tabs(app) {
     }, icon(t.icon), el('span', { class: 'tab-label' }, t.label))));
 }
 
-// Keep the roll's note-bus watches in step with the patch, on every render,
-// which is every edit: a connection dragged onto a new bus is a new bus to
-// show, and one dragged off is one to stop reading. A bus is only read when
-// something asks for it, and what the roll asks for is "every bus this
-// patch writes".
+// Keep the note-bus watches in step with the patch, on every render, which
+// is every edit: a connection dragged onto a new bus is a new bus to show,
+// and one dragged off is one to stop reading. A bus is only read when
+// something asks for it, and what a block's own roll asks for is "every bus
+// this patch writes" - the block is chosen after the notes were played, so
+// the bus has to have been watched all along.
 function syncNoteBuses(app) {
   const wanted = new Set();
   app.watchedBuses ??= new Set();

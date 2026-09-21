@@ -45,7 +45,6 @@ export function createState() {
       // Traces put away for a moment, by pressing their chip in a legend.
       scopeAll: false,
       scopeHidden: new Set(),
-      rollHidden: new Set(),
       // The same, under a block's own signals, keyed by the block.
       traceHidden: new Set(),
       // Per harmony node: which chord the arrows come from, and which of the

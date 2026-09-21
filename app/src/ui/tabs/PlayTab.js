@@ -2,6 +2,14 @@
 // - two LEDs, its jacks and its MIDI - plus the three things a rack cannot
 // give you: ears, an on-screen keyboard, and a time axis.
 //
+// **The notes are read off a block, not off the module.** A whole-patch piano
+// roll drew every note bus at once, which is the one question nobody asks:
+// what is wanted is what *this* sequencer played, or what *that* MIDI out
+// sent, and a block's own signals answer it beside the block that raised it
+// (scope/ScopePanels.js, on the patch tab). The scope stays because its
+// question really is a whole-patch one - a divider against a clock against a
+// jack, in one picture.
+//
 // **What the clock is set to is not here.** The source, the tempo and the
 // cables it is routed over are globals (tabs/GlobalsTab.js), and a second
 // copy of them on this tab was one more place for the same two numbers to be
@@ -18,7 +26,7 @@ import { Switch } from '../components/Switch.js';
 import { LevelSlider } from '../components/Slider.js';
 import { IconButton } from '../components/IconButton.js';
 import { Meters } from '../panels/Meters.js';
-import { ScopePanel, RollPanel } from '../scope/ScopePanels.js';
+import { ScopePanel } from '../scope/ScopePanels.js';
 import { busPeers } from '../../core/patch.js';
 import { busWords } from '../../core/graph.js';
 import { Domain } from '../../core/validate.js';
@@ -55,7 +63,7 @@ export function PlayTab(app) {
       KeyboardPanel(app));
   }
   return el('div', {},
-    Meters(app), ScopePanel(app), RollPanel(app),
+    Meters(app), ScopePanel(app),
     JacksPanel(app), KeyboardPanel(app), ListenPanel(app), MonitorPanel(app));
 }
 

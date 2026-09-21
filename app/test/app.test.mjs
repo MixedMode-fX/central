@@ -55,6 +55,7 @@ import { Transport as TransportView } from '../src/ui/components/Transport.js';
 import { Device } from '../src/protocol/device.js';
 import { GlobalsTab, KeyPanel, ClockPanel } from '../src/ui/tabs/GlobalsTab.js';
 import { KeyNow } from '../src/ui/panels/grids/KeyNow.js';
+import { NoteLane } from '../src/ui/panels/grids/Sequencers.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
 import { shade, nodeRollSources, scopeRows, blockSignals } from '../src/ui/scope/scope.js';
 import { BlockSignalsPanel } from '../src/ui/scope/ScopePanels.js';
@@ -1922,6 +1923,83 @@ test('every kind of block lists the signals it carries', async () => {
                'a block on no bus says so');
   assert.equal(BlockSignalsPanel(fakeApp({ patch, device }), { kind: BlockKind.Node, index: seqAt }), null,
                'no module in the page, no signals to draw');
+});
+
+// --- the note lane -----------------------------------------------------------
+//
+// A sequencer stores degrees and the lane shows the pitch each one is, which
+// is only true if it is worked out where the firmware works it out: from the
+// key the module is in, in the register the sequencer names, unless a cable
+// on its root inlet has said otherwise (note_sequencer.h).
+test('the note lane resolves degrees against the key, and Enter enters the root', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const seq = device.algorithms.find((d) => d?.name === 'NoteSequencer');
+  const sequencer = codec.emptyNode(seq.id);
+  sequencer.outBuses[0] = [1];
+  const STEP_BASE = 16, STRIDE = 4;
+  const degreeAt = (step) => STEP_BASE + step * STRIDE;
+  sequencer.params[degreeAt(0)] = 0; sequencer.params[degreeAt(0) + 1] = 100;      // the root
+  sequencer.params[degreeAt(1)] = 2; sequencer.params[degreeAt(1) + 1] = 100;      // the third
+  sequencer.params[degreeAt(2)] = 256 - 1; sequencer.params[degreeAt(2) + 1] = 100; // the seventh, below
+  patch.nodes.push(sequencer);
+  const globals = { ...codec.emptyGlobals(), root: 2, scale: scaleIdOf('minor') };
+  const app = fakeApp({ patch, device, globals });
+
+  const pitches = (lane) => findAll(lane, (n) => n.classList?.contains('pitch')).map((n) => words(n).trim());
+  // D minor in the key's own register: D4, then F4 a minor third up, then C4
+  // a tone below - the degrees are the key's, not C major's.
+  let lane = withDom(() => NoteLane(app, 0, false));
+  assert.match(words(lane), /root D4/);
+  assert.deepEqual(pitches(lane).slice(0, 4), ['D4', 'F4', 'C4', '·']);
+
+  // The sequencer's own register moves the whole pattern; the key's register
+  // moves every sequencer that names none.
+  sequencer.params[3] = 3;
+  lane = withDom(() => NoteLane(app, 0, false));
+  assert.deepEqual(pitches(lane).slice(0, 3), ['D2', 'F2', 'C2']);
+  sequencer.params[3] = 0;
+  app.state.globals.rootOctave = 4;
+  lane = withDom(() => NoteLane(app, 0, false));
+  assert.deepEqual(pitches(lane).slice(0, 3), ['D3', 'F3', 'C3']);
+
+  // A cable on the root inlet outranks the key and the register both, and the
+  // lane says so.
+  sequencer.inBuses[rootInlet(seq)] = [3];
+  const rooted = fakeApp({ patch, device, globals: app.state.globals, module: { busNote: () => 67 } });
+  lane = withDom(() => NoteLane(rooted, 0, false));
+  assert.match(words(lane), /root G4 \(on the root inlet\)/);
+  assert.deepEqual(pitches(lane).slice(0, 3), ['G4', 'A#4', 'F4']);
+
+  // Entering the root: a silent step reads "0" already, so typing 0 into it
+  // raises no change event. Enter writes it, once, and turns the step on.
+  const inputs = findAll(lane, (n) => n.tag === 'input');
+  const silent = inputs[3];
+  assert.equal(silent.value, '0');
+  silent.fire('keydown', { key: 'Enter', target: silent });
+  assert.deepEqual(rooted.calls.filter((c) => c[0] === 'setParams'),
+                   [['setParams', 0, [[degreeAt(3), 0], [degreeAt(3) + 1, 100]]]]);
+  silent.fire('change', { target: silent });
+  silent.fire('blur', { target: silent });
+  assert.equal(rooted.calls.filter((c) => c[0] === 'setParams').length, 1, 'said once');
+  // Typed and left, on a phone with no Enter: written on the way out.
+  const next = inputs[4];
+  next.value = '4';
+  next.fire('input', { target: next });
+  next.fire('blur', { target: next });
+  assert.deepEqual(rooted.calls.filter((c) => c[0] === 'setParams').at(-1),
+                   ['setParams', 0, [[degreeAt(4), 4], [degreeAt(4) + 1, 100]]]);
+
+  // The pitch is the step's switch: a sounding step is silenced by tapping
+  // it, a silent one sounded, and the degree is left alone either way.
+  const switches = findAll(lane, (n) => n.classList?.contains('pitch'));
+  assert.equal(switches[0].getAttribute('aria-pressed'), 'true');
+  switches[0].fire('click');
+  assert.deepEqual(rooted.calls.at(-1), ['setParam', 0, degreeAt(0) + 1, 0]);
+  assert.equal(switches[5].getAttribute('aria-pressed'), 'false');
+  switches[5].fire('click');
+  assert.deepEqual(rooted.calls.at(-1), ['setParam', 0, degreeAt(5) + 1, 100]);
 });
 
 // --- the circle of fifths ----------------------------------------------------

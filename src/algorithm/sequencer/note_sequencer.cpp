@@ -23,9 +23,9 @@ const ParamDescriptor NoteSequencerBase::HEADER[16] = {
     {"channel",    1, 16,                             1,  PARAM_CHANNEL, nullptr},
     {"accent",     0, 127,                            30, PARAM_NUMBER,  nullptr},
     {"stall",      0, 255,                            4,  PARAM_NUMBER,  nullptr},
-    {"rest key",   0, 127,                            0,  PARAM_PITCH,   nullptr},
-    {"tie key",    0, 127,                            1,  PARAM_PITCH,   nullptr},
     {"rec velocity", 0, 127,                          0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
+    {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
     // The header is sixteen bytes whatever it uses, so the steps keep their
     // parameter numbers - which an NRPN address and a pattern message name.
     {"reserved",   0, 0,                              0,  PARAM_NUMBER,  nullptr},
@@ -109,8 +109,6 @@ NoteSequencerBase::NoteSequencerBase(const NodeConfig& config, uint8_t voices_pe
     channel(config.params[P_CHANNEL] ? (uint8_t)(((config.params[P_CHANNEL] - 1u) % 16u) + 1u) : 1),
     accent(config.params[P_ACCENT] ? config.params[P_ACCENT] : DEFAULT_ACCENT),
     stall_periods(config.params[P_STALL] ? config.params[P_STALL] : DEFAULT_STALL),
-    rest_key(config.params[P_REST_KEY]),
-    tie_key(config.params[P_TIE_KEY] ? config.params[P_TIE_KEY] : DEFAULT_TIE_KEY),
     rec_velocity(config.params[P_REC_VELOCITY]),
     rec_cursor(0), snap_count(0),
     last_edge_us(0), period(0), have_edge(false), have_period(false),
@@ -179,14 +177,6 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
         case P_STALL:
             stall_periods = value ? value : DEFAULT_STALL;
             return true;
-        case P_REST_KEY:
-            if (value > 127) return false;
-            rest_key = value;
-            return true;
-        case P_TIE_KEY:
-            if (value > 127) return false;
-            tie_key = value ? value : DEFAULT_TIE_KEY;
-            return true;
         case P_REC_VELOCITY:
             if (value > 127) return false;
             rec_velocity = value;
@@ -198,7 +188,7 @@ bool NoteSequencerBase::set_param(uint16_t index, uint8_t value){
         steps[index - STEP_BASE] = value;
         return true;
     }
-    return false;                     // params[12..15] are reserved
+    return false;                     // params[10..15] are reserved
 }
 
 uint8_t NoteSequencerBase::get_param(uint16_t index) const {
@@ -212,8 +202,6 @@ uint8_t NoteSequencerBase::get_param(uint16_t index) const {
         case P_CHANNEL:    return channel;
         case P_ACCENT:     return accent;
         case P_STALL:      return stall_periods;
-        case P_REST_KEY:   return rest_key;
-        case P_TIE_KEY:    return tie_key;
         case P_REC_VELOCITY: return rec_velocity;
         default:           break;
     }
@@ -396,8 +384,8 @@ void NoteSequencerBase::process(BusManager& bus, uint32_t now_us){
             for (uint8_t i = 0; i < n; i++){
                 const MidiEvent e = bus.note_read(rec_in, i);
                 if (!is_note_on(e)) continue;
-                if (e.data1 == rest_key){ write_rest(); continue; }
-                if (e.data1 == tie_key){ write_tie(); continue; }
+                if (e.data1 == REST_KEY){ write_rest(); continue; }
+                if (e.data1 == TIE_KEY){ write_tie(); continue; }
                 record_note(e.data1, e.data2);
             }
         }

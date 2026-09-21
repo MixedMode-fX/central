@@ -46,10 +46,10 @@
 // notes are counted (`snapped()`) so a user can tell it happened.
 //
 // **Rest and tie** have to be enterable or step-record is only good for
-// continuous runs. Two note numbers are reserved for them: `rest key`
-// (params[11], default MIDI note 0) and `tie key` (params[12], default note
-// 1). Both are below anything a keyboard plays, and both are configurable if
-// a controller does reach them.
+// continuous runs. Two note numbers are reserved for them, MIDI notes 0
+// (`REST_KEY`) and 1 (`TIE_KEY`): both are below anything a keyboard plays,
+// and they are not parameters, because two settings called "key" beside the
+// one key the module is in read as a second key and are not.
 //
 // **Real-time record** - capturing against the running clock, quantised to
 // the step grid - is a second stage and is deliberately not built. It needs
@@ -73,10 +73,8 @@
 //   [8] stall       advance periods of silence after which sounding notes
 //                   are released (0 -> 4, 255 -> never), so a clock that
 //                   stops cannot leave a note held for ever
-//   [9] rest key    the note that writes a rest when recording (0 -> note 0)
-//  [10] tie key     the note that writes a tie when recording (0 -> note 1)
-//  [11] rec velocity 0 keeps the velocity played, 1..127 forces one
-//  [12..15]         reserved, zero. The header is sixteen bytes whatever it
+//   [9] rec velocity 0 keeps the velocity played, 1..127 forces one
+//  [10..15]         reserved, zero. The header is sixteen bytes whatever it
 //                   uses, so the steps keep their parameter numbers - which
 //                   an NRPN address and a pattern message both name.
 //
@@ -119,11 +117,12 @@ class NoteSequencerBase : public Node{
         static constexpr uint16_t STEP_BASE = 16;
         static constexpr uint8_t P_LENGTH = 0, P_DIRECTION = 1, P_GATE = 2, P_OCTAVE = 3,
                                  P_VEL_SCALE = 4, P_VEL_OFFSET = 5, P_CHANNEL = 6, P_ACCENT = 7,
-                                 P_STALL = 8, P_REST_KEY = 9, P_TIE_KEY = 10, P_REC_VELOCITY = 11;
+                                 P_STALL = 8, P_REC_VELOCITY = 9;
         static constexpr uint8_t LENGTH_MASK = 0x1F, FLAG_REST = 0x20, FLAG_TIE = 0x40, FLAG_ACCENT = 0x80;
         static constexpr uint8_t NO_PITCH = 0xFF;
         static constexpr uint8_t DEFAULT_LENGTH = 8, DEFAULT_ACCENT = 30, DEFAULT_STALL = 4;
-        static constexpr uint8_t DEFAULT_REST_KEY = 0, DEFAULT_TIE_KEY = 1;
+        // The notes that write a rest and a tie when recording (above).
+        static constexpr uint8_t REST_KEY = 0, TIE_KEY = 1;
         static constexpr uint8_t STALL_NEVER = 255;
         // With no measured period, the stall timeout counts this per period.
         static constexpr uint32_t STALL_UNKNOWN_PERIOD_US = 1000000;
@@ -236,8 +235,6 @@ class NoteSequencerBase : public Node{
         uint8_t channel;
         uint8_t accent;
         uint8_t stall_periods;
-        uint8_t rest_key;
-        uint8_t tie_key;
         uint8_t rec_velocity;
         uint8_t rec_cursor;
         uint32_t snap_count;

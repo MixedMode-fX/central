@@ -629,8 +629,8 @@ static void test_the_reserved_keys_write_a_rest_and_a_tie() {
     rig.master.pass(now); now += 1000;
 
     play(rig, 60, now);                            // step 0: a note
-    play(rig, NoteSequencerBase::DEFAULT_REST_KEY, now);   // step 1: a rest
-    play(rig, NoteSequencerBase::DEFAULT_TIE_KEY, now);    // step 2: a tie
+    play(rig, NoteSequencerBase::REST_KEY, now);   // step 1: a rest
+    play(rig, NoteSequencerBase::TIE_KEY, now);    // step 2: a tie
     play(rig, 64, now);                            // step 3: a note
 
     TEST_ASSERT_EQUAL(0, seq->flags(0) & (NoteSequencerBase::FLAG_REST | NoteSequencerBase::FLAG_TIE));

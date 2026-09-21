@@ -11,14 +11,18 @@ import * as P from '../../../protocol/generated.js';
 import { el, classes } from '../../dom.js';
 import { Scroller } from '../../controls/Scroller.js';
 import { outletName } from '../../../core/patch.js';
-import { noteName, degreeToSemitone } from '../../../core/music.js';
+import { noteName, degreeToSemitone, tonicOf, DEFAULT_KEY_OCTAVE } from '../../../core/music.js';
+import { scaleMaskById } from '../../../protocol/names.js';
+import { keyNow, globalNow } from '../../../core/globals.js';
+import { rootedNote } from '../../components/KeyBadge.js';
 import { paintPlayhead } from './playhead.js';
 import '../Grid.css';
 
 // The box a grid lives in: a title, and the lanes in a remembered scroller.
+// The title is words, or an element a grid repaints.
 function Grid(app, index, title, lanes) {
   return el('div', { class: 'grid' },
-    el('div', { class: 'grid-title' }, title),
+    typeof title === 'string' ? el('div', { class: 'grid-title' }, title) : title,
     Scroller(app, `grid-${index}`, el('div', { class: 'lanes' }, lanes)));
 }
 
@@ -90,47 +94,110 @@ export function DrumGrid(app, index, isMidi) {
 }
 
 // A lane over **scale degrees**, because that is what the sequencer stores.
-// The pitch each degree resolves to against the current root and scale is
-// shown alongside, and changing the root moves the pitches without touching
-// the stored pattern.
+// The pitch each degree resolves to is shown alongside, worked out the way
+// the firmware works it out (note_sequencer.h): from the key the module is
+// playing in - the live one, not the stored one (core/globals.js) - in the
+// register the sequencer's `octave` names, unless a cable on its root inlet
+// has said otherwise. Changing the key moves the pitches without touching
+// the stored pattern. The key moves while the module runs, so the pitch
+// labels are repainted per frame into cells that already exist.
+//
+// A degree is committed on Enter, and on leaving a field that was typed in,
+// as well as on change: a silent step reads "0" already, so typing 0 into it
+// changes nothing, no change event ever comes, and the root would be the one
+// degree that could not be entered. A value is written once, whichever of
+// those says it first.
+//
+// The pitch under the degree is the step's switch: a step is silent when its
+// velocity is zero (note_sequencer.h), so tapping the pitch mutes the step
+// and tapping the dot sounds it again, and the degree stays where it was.
 export function NoteLane(app, index, isPoly) {
   const node = app.state.patch.nodes[index];
   const STEP_BASE = 16;
   const voices = isPoly ? P.NOTE_SEQ_VOICES : 1;
   const stride = voices * 2 + 2;
   const length = node.params[0] || 8;
-  const root = node.params[5] || 60;
-  const mask = node.params[3] | ((node.params[4] & 0x0f) << 8);
+  const octave = node.params[3];
 
+  const anchor = () => {
+    const key = keyNow(app);
+    const rooted = rootedNote(app, index);
+    const root = rooted.note ?? tonicOf(octave, globalNow(app, 'rootOctave').value || DEFAULT_KEY_OCTAVE, key.root);
+    return { root, mask: scaleMaskById(key.scale), inlet: rooted.inlet };
+  };
+  const pitchOf = (at, { root, mask }) => {
+    const degree = node.params[at] > 127 ? node.params[at] - 256 : node.params[at];
+    if (!node.params[at + 1]) return { degree, pitch: null };
+    const pitch = root + degreeToSemitone(degree, mask);
+    return { degree, pitch: pitch < 0 || pitch > 127 ? null : pitch };
+  };
+  const cellTitle = (step, { degree, pitch }) =>
+    (pitch === null ? `step ${step + 1}: silent` : `step ${step + 1}: degree ${degree} → ${noteName(pitch)}`);
+  const switchTitle = (step, on) => `step ${step + 1}: ${on ? 'sounding, tap to silence it' : 'silent, tap to sound it'}`;
+  const anchorTitle = ({ root, inlet }) =>
+    `degrees · root ${noteName(root)}${inlet === null ? '' : ` (on the ${inlet} inlet)`}`;
+
+  const first = anchor();
+  const title = el('div', { class: 'grid-title' }, anchorTitle(first));
   const rows = [];
   const lanes = [];
+  const painted = [];
   for (let voice = 0; voice < voices; voice++) {
     const cells = [];
     for (let step = 0; step < P.MAX_SEQUENCE_LEN; step++) {
       const at = STEP_BASE + step * stride + voice * 2;
-      const degree = node.params[at] > 127 ? node.params[at] - 256 : node.params[at];
+      const { degree, pitch } = pitchOf(at, first);
       const velocity = node.params[at + 1];
       const flags = node.params[STEP_BASE + step * stride + voices * 2];
-      const pitch = velocity ? root + degreeToSemitone(degree, mask) : null;
-      cells.push(el('div', {
+      // A step given a degree sounds: a velocity of zero is a silent step.
+      let committed = null;
+      let typed = false;
+      const commit = (value) => {
+        typed = false;
+        if (value === committed) return;
+        committed = value;
+        app.editor.setParams(index, [[at, Number(value) & 0xff], [at + 1, node.params[at + 1] || 100]]);
+      };
+      const label = el('button', {
+        type: 'button', class: 'pitch', 'aria-pressed': velocity ? 'true' : 'false',
+        'aria-label': switchTitle(step, velocity),
+        onclick: () => app.editor.setParam(index, at + 1, velocity ? 0 : 100),
+      }, pitch === null ? '·' : noteName(pitch));
+      const cell = el('div', {
         class: classes('note-cell', velocity && 'on', step >= length && 'beyond',
                        (flags & 0x20) && 'rest', (flags & 0x40) && 'tie'),
-        title: pitch === null ? `step ${step + 1}: silent` : `step ${step + 1}: degree ${degree} → ${noteName(pitch)}`,
+        title: cellTitle(step, { degree, pitch }),
       },
         el('input', {
           type: 'number', value: String(degree), min: '-64', max: '63', inputmode: 'numeric',
           'aria-label': `step ${step + 1} degree`,
-          // A step given a degree sounds: a velocity of zero is a silent step.
-          onchange: (e) => app.editor.setParams(index, [
-            [at, Number(e.target.value) & 0xff], [at + 1, node.params[at + 1] || 100],
-          ]),
+          onchange: (e) => commit(e.target.value),
+          onkeydown: (e) => { if (e.key === 'Enter') commit(e.target.value); },
+          oninput: () => { typed = true; },
+          onblur: (e) => { if (typed) commit(e.target.value); },
         }),
-        el('span', { class: 'pitch' }, pitch === null ? '·' : noteName(pitch))));
+        label);
+      cells.push(cell);
+      painted.push({ at, step, cell, label });
     }
     // The voices step together, so every row carries the one playhead.
     lanes.push(cells);
     rows.push(Lane(isPoly ? `voice ${voice + 1}` : 'notes', cells, 'notes'));
   }
   playhead(app, index, lanes);
-  return Grid(app, index, `degrees · root ${noteName(root)}`, rows);
+
+  let drawn = `${first.root}:${first.mask}:${first.inlet}`;
+  app.live?.paint(() => {
+    const now = anchor();
+    const key = `${now.root}:${now.mask}:${now.inlet}`;
+    if (key === drawn) return;
+    drawn = key;
+    title.textContent = anchorTitle(now);
+    for (const { at, step, cell, label } of painted) {
+      const resolved = pitchOf(at, now);
+      label.textContent = resolved.pitch === null ? '·' : noteName(resolved.pitch);
+      cell.setAttribute('title', cellTitle(step, resolved));
+    }
+  });
+  return Grid(app, index, title, rows);
 }

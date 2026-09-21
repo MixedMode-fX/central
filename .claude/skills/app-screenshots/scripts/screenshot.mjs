@@ -70,6 +70,7 @@ for (let i = 0; i < args.length; i++) {
     case '--base': opt.base = args[++i]; break;
     case '--theme': opt.theme = args[++i]; break;
     case '--full-page': opt.fullPage = true; break;
+    case '--element': opt.element = args[++i]; break;
     case '--wait': opt.wait = Number(args[++i]); break;
     case '--help': usage(); process.exit(0); break;
     default: console.error(`unknown option: ${args[i]}`); usage(); process.exit(2);
@@ -90,6 +91,7 @@ screenshot.mjs [options]
   --select <selector>=<value>         choose in a <select>; ordered with --click
   --theme light|dark                  force a colour scheme
   --full-page                         capture the whole scroll height
+  --element <selector>                capture one element, not the page
   --wait <ms>                         settle time before the shot
   --name <slug>                       filename prefix
   --base <url>                        override .dev/base_url
@@ -189,7 +191,10 @@ for (const w of opt.widths) {
 
   const label = WIDTHS[w] ? w : `${width}px`;
   const file = `.dev/screenshots/${opt.name}-${label}${opt.theme ? `-${opt.theme}` : ''}.png`;
-  await page.screenshot({ path: file, fullPage: opt.fullPage });
+  // One element on its own, for a control that would otherwise be a strip
+  // at the bottom of a page-long shot: the first match, scrolled into view.
+  if (opt.element) await page.locator(opt.element).first().screenshot({ path: file });
+  else await page.screenshot({ path: file, fullPage: opt.fullPage });
   written.push(file);
   await context.close();
 }

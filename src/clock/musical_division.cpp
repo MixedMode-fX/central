@@ -5,6 +5,11 @@ const char* const DIVISION_NAMES[DIVISIONS] = {
     "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
 };
 
+const char* const DIVISION_OFF_NAMES[DIVISIONS_OFF] = {
+    "8 bars", "4 bars", "2 bars", "1 bar",
+    "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "off",
+};
+
 const char* const FEEL_NAMES[FEELS] = {
     "straight", "dotted", "triplet",
 };
@@ -33,6 +38,7 @@ static_assert(CLOCK_SUBTICKS_PER_QUARTER % 96u == 0,
               "a note value would not be a whole number of subticks; see config.h");
 
 uint32_t division_subticks(uint8_t division, uint8_t feel){
+    if (division == DIV_OFF) return 0;
     if (division < DIV_8_BARS || division > DIVISIONS) division = DIV_QUARTER;
     if (feel < FEEL_STRAIGHT || feel > FEELS) feel = FEEL_STRAIGHT;
     const uint32_t base = DIVISION_SUBTICKS[division - DIV_8_BARS];

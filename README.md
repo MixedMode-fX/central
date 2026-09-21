@@ -183,7 +183,7 @@ touched.
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
 | Utility | `GateHold`, `GateProbability` |
-| Modulators | `LFO`, `StepMod`, `SampleHold`, `Slew`, `Turing`, `GateToCV` |
+| Modulators | `LFO`, `AD`, `ADSR`, `StepMod`, `SampleHold`, `Slew`, `Turing`, `GateToCV` |
 | Rhythm | `Automaton` |
 
 Every algorithm reports its own name, summary, category, port names, parameter
@@ -256,6 +256,22 @@ is only what a parameter list cannot say.
   on subtick zero rather than on construction, and changing its rate re-derives
   the period without moving the phase. `Slew` rates are **per full scale**, so
   two different step sizes glide at the same speed.
+- **`AD` and `ADSR` are one walk through one set of stages**, and what differs
+  is who ends it: an `AD` is fired by an edge and runs to the end by itself, so
+  the trigger's length means nothing; an `ADSR` waits at its sustain level for
+  as long as the gate is up, so the contour is as long as the note. Everything
+  else with a name - AR, AHD, DADSR, an inverted pluck - is one of those two
+  with a stage turned off or turned up, so it is a setting and not an
+  algorithm id. Every stage carries **both** a wall-clock length and a note
+  value, and `sync` says which is live, the arrangement `Lfo` has between
+  `rate` and `division`; synced, an envelope advances on subticks, so it
+  stretches with the tempo and a stopped clock freezes it rather than finishing
+  it behind the music's back. A stage that should not be there is `off` on the
+  note list and the bottom of the time control when free. `loop` turns either
+  node into a shape generator - always, or only while the gate is held, which
+  on an `ADSR` is the loop that skips the sustain - and the second outlet is a
+  trigger at the **end of every contour**, which is what chains one envelope
+  into the next.
 - **`StepMod` is a shape with no rate**: each trigger moves one step and a
   period is `steps` of them, so what clocks it decides how fast it runs and the
   modulation is locked to the rhythm by construction. A step reads the

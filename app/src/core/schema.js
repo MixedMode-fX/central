@@ -64,6 +64,8 @@ const KIND_NOTE = {
   [P.ParamKind.PARAM_SIGNED]: 'an int8 kept in the byte: 128..255 read as -128..-1',
   [P.ParamKind.PARAM_CENTRED]: `a byte biased by ${P.PARAM_CENTRE}: the value is the byte less ${P.PARAM_CENTRE}`,
   [P.ParamKind.PARAM_MILLIS]: 'milliseconds',
+  [P.ParamKind.PARAM_ENV_TIME]:
+    `an envelope stage: the byte squared, times ${P.ENV_TIME_UNIT_US} microseconds`,
   [P.ParamKind.PARAM_PERCENT]: 'percent',
   [P.ParamKind.PARAM_CHANNEL]: 'a MIDI channel 1..16, or 0 for omni',
   [P.ParamKind.PARAM_CHANNEL_OUT]:
@@ -82,6 +84,7 @@ const KIND_SLUG = {
   [P.ParamKind.PARAM_PITCH_CLASS]: 'pitch_class',
   [P.ParamKind.PARAM_SIGNED]: 'signed',
   [P.ParamKind.PARAM_MILLIS]: 'millis',
+  [P.ParamKind.PARAM_ENV_TIME]: 'env_time',
   [P.ParamKind.PARAM_PERCENT]: 'percent',
   [P.ParamKind.PARAM_CHANNEL]: 'channel',
   [P.ParamKind.PARAM_CENTRED]: 'centred',

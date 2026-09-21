@@ -21,6 +21,7 @@
 #include "algorithm/modulator/sample_hold.h"
 #include "algorithm/modulator/slew.h"
 #include "algorithm/modulator/step_mod.h"
+#include "algorithm/modulator/envelope.h"
 #include "algorithm/clock/clock_div.h"
 
 static size_t g_allocations = 0;
@@ -1258,6 +1259,558 @@ static void test_the_modulation_path_never_allocates() {
     TEST_ASSERT_EQUAL(before, g_allocations);
 }
 
+// ---------------------------------------------------------------------------
+// Envelopes
+//
+// A contour with a beginning. The two nodes are one walk through one set of
+// stages and differ only in who ends it - an AD runs to the end by itself, an
+// ADSR waits at the sustain level for as long as the gate is up - so most of
+// what is checked here is checked once, on whichever of the two shows it.
+// ---------------------------------------------------------------------------
+
+// Gate bus 0 is the trigger or the gate, bus 1 the second inlet; CV bus 0 is
+// the contour and gate bus 1 the end trigger.
+static NodeConfig envelope_config(uint8_t algorithm, bool with_aux){
+    NodeConfig c = node_config(algorithm);
+    c.in_buses[0] = one_bus(0);
+    if (with_aux) c.in_buses[1] = one_bus(1);
+    c.out_buses[0] = one_bus(0);
+    c.out_buses[1] = one_bus(1);
+    return c;
+}
+
+// One pass with the inlets held where the caller wants them. Gates are
+// republished every pass (the back buffer is cleared on every swap), so the
+// write comes first and the node's own writes are published by the second.
+static void env_pass(Node& node, BusManager& bus, uint32_t now_us, bool gate, bool aux = false){
+    if (gate) bus.gate_write(0, true);
+    if (aux) bus.gate_write(1, true);
+    bus.swap();
+    node.process(bus, now_us);
+    bus.swap();
+}
+
+// Passes at a millisecond each up to `until`, holding the gate where it is.
+static void env_run(Node& node, BusManager& bus, uint32_t& now_us, uint32_t until, bool gate){
+    while (now_us < until){
+        env_pass(node, bus, now_us, gate);
+        now_us += 1000u;
+    }
+}
+
+static void test_an_ad_rises_to_the_peak_and_falls_back_to_nothing() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_ATTACK] = 20;      // 200 ms
+    c.params[EnvelopeNode::P_DECAY] = 20;       // 200 ms
+    AdEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, node.stage());
+    TEST_ASSERT_EQUAL_INT16(0, node.value());
+
+    env_pass(node, bus, t, true);               // the trigger
+    t += 1000u;
+    // No delay and no hold by default, so the contour is in the attack on the
+    // pass that fired it rather than a stage later.
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+
+    env_run(node, bus, t, 40000u, false);
+    TEST_ASSERT_INT16_WITHIN(150, CV_MAX / 5, node.value());
+    env_run(node, bus, t, 199000u, false);
+    TEST_ASSERT_GREATER_THAN_INT16(CV_MAX - 100, node.value());
+
+    // Over the top and down the other side. A fifth of a second of decay from
+    // full scale is half way down.
+    env_run(node, bus, t, 300000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DECAY, node.stage());
+    TEST_ASSERT_INT16_WITHIN(200, CV_HALF, node.value());
+
+    env_run(node, bus, t, 420000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, node.stage());
+    TEST_ASSERT_EQUAL_INT16(0, node.value());
+}
+
+static void test_the_length_of_the_trigger_means_nothing_to_an_ad() {
+    BusManager short_bus;
+    BusManager long_bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_ATTACK] = 14;
+    c.params[EnvelopeNode::P_DECAY] = 14;
+    AdEnvelope stabbed(c);
+    AdEnvelope leaned_on(c);
+
+    // One pass of trigger against a gate held the whole way through.
+    for (uint32_t t = 0; t < 400000u; t += 1000u){
+        const bool first = (t == 1000u);
+        env_pass(stabbed, short_bus, t, first);
+        env_pass(leaned_on, long_bus, t, t >= 1000u);
+        TEST_ASSERT_EQUAL_INT16(stabbed.value(), leaned_on.value());
+    }
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, stabbed.stage());
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, leaned_on.stage());
+}
+
+static void test_a_pre_delay_keeps_the_contour_at_nothing_first() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_DELAY] = 20;       // 200 ms
+    c.params[EnvelopeNode::P_ATTACK] = 10;      // 50 ms
+    AdEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    env_pass(node, bus, t, true);
+    t += 1000u;
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DELAY, node.stage());
+
+    // Nothing at all comes out for the whole of the delay - a pre-delay that
+    // leaked a level would be an attack with a bend in it.
+    while (t < 195000u){
+        env_pass(node, bus, t, false);
+        t += 1000u;
+        TEST_ASSERT_EQUAL_INT16(0, node.value());
+    }
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DELAY, node.stage());
+
+    env_run(node, bus, t, 230000u, false);
+    TEST_ASSERT_GREATER_THAN_INT16(0, node.value());
+}
+
+static void test_a_hold_keeps_the_peak_before_the_decay_starts() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_ATTACK] = 10;      // 50 ms
+    c.params[EnvelopeNode::P_HOLD] = 20;        // 200 ms
+    c.params[EnvelopeNode::P_DECAY] = 10;
+    AdEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    env_pass(node, bus, t, true);
+    t += 1000u;
+
+    env_run(node, bus, t, 55000u, false);
+    while (t < 245000u){
+        env_pass(node, bus, t, false);
+        t += 1000u;
+        TEST_ASSERT_EQUAL(EnvelopeNode::ENV_HOLD, node.stage());
+        TEST_ASSERT_EQUAL_INT16(CV_MAX, node.value());
+    }
+    env_run(node, bus, t, 260000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DECAY, node.stage());
+}
+
+static void test_an_adsr_waits_at_the_sustain_level_while_the_gate_is_up() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_ADSR, false);
+    c.params[EnvelopeNode::P_ATTACK] = 10;          // 50 ms
+    c.params[EnvelopeNode::P_DECAY] = 10;           // 50 ms
+    c.params[AdsrEnvelope::P_SUSTAIN] = 50;         // half scale
+    c.params[AdsrEnvelope::P_RELEASE] = 10;         // 50 ms
+    AdsrEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    env_run(node, bus, t, 150000u, true);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_SUSTAIN, node.stage());
+    TEST_ASSERT_INT16_WITHIN(40, CV_MAX / 2, node.value());
+
+    // Held for ten seconds: still exactly where it was. The contour is as
+    // long as the note, which is the whole of what a sustain is.
+    const int16_t held = node.value();
+    env_run(node, bus, t, 10000000u, true);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_SUSTAIN, node.stage());
+    TEST_ASSERT_EQUAL_INT16(held, node.value());
+
+    env_pass(node, bus, t, false);              // let go
+    t += 1000u;
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_RELEASE, node.stage());
+    env_run(node, bus, t, 10060000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, node.stage());
+    TEST_ASSERT_EQUAL_INT16(0, node.value());
+}
+
+static void test_the_release_leaves_from_wherever_the_contour_had_got_to() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_ADSR, false);
+    c.params[EnvelopeNode::P_ATTACK] = 32;          // 512 ms: long enough to cut into
+    c.params[AdsrEnvelope::P_RELEASE] = 20;         // 200 ms
+    AdsrEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    env_run(node, bus, t, 150000u, true);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+    const int16_t caught = node.value();
+    TEST_ASSERT_GREATER_THAN_INT16(200, caught);
+    TEST_ASSERT_LESS_THAN_INT16(CV_MAX - 200, caught);
+
+    // Let go part way up the attack: the release starts here and not at the
+    // peak the contour never reached.
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_RELEASE, node.stage());
+    TEST_ASSERT_INT16_WITHIN(60, caught, node.value());
+
+    env_run(node, bus, t, 400000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, node.stage());
+}
+
+static void test_a_looping_adsr_never_reaches_the_sustain() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_ADSR, false);
+    c.params[EnvelopeNode::P_ATTACK] = 10;          // 50 ms
+    c.params[EnvelopeNode::P_DECAY] = 10;           // 50 ms
+    c.params[AdsrEnvelope::P_SUSTAIN] = 50;
+    c.params[AdsrEnvelope::P_RELEASE] = 10;
+    c.params[AdsrEnvelope::P_LOOP] = EnvelopeNode::ENV_LOOP_HELD;
+    AdsrEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+
+    // Under a held gate the contour keeps starting over, so the level keeps
+    // coming back to the top and back down rather than settling.
+    uint8_t peaks = 0;
+    bool climbing = true;
+    int16_t previous = 0;
+    while (t < 600000u){
+        env_pass(node, bus, t, true);
+        t += 1000u;
+        TEST_ASSERT_NOT_EQUAL(EnvelopeNode::ENV_SUSTAIN, node.stage());
+        if (climbing && node.value() < previous){ peaks++; climbing = false; }
+        if (!climbing && node.value() > previous) climbing = true;
+        previous = node.value();
+    }
+    // Five and a half cycles in half a second of 100 ms contours; the count
+    // is loose because where the window lands is not the claim.
+    TEST_ASSERT_GREATER_THAN_UINT8(3, peaks);
+
+    // Letting go still releases it, from wherever round the loop it was.
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_RELEASE, node.stage());
+    env_run(node, bus, t, t + 100000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, node.stage());
+}
+
+static void test_an_envelope_looping_always_runs_with_nothing_patched() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_ATTACK] = 10;          // 50 ms
+    c.params[EnvelopeNode::P_DECAY] = 10;           // 50 ms
+    c.params[AdEnvelope::P_LOOP] = EnvelopeNode::ENV_LOOP_FREE;
+    AdEnvelope node(c);
+
+    // It is a shape generator now: never idle, never triggered, and it visits
+    // both ends of its travel.
+    int16_t lowest = CV_MAX;
+    int16_t highest = 0;
+    uint32_t t = 0;
+    while (t < 400000u){
+        env_pass(node, bus, t, false);
+        t += 1000u;
+        TEST_ASSERT_NOT_EQUAL(EnvelopeNode::ENV_IDLE, node.stage());
+        if (node.value() < lowest) lowest = node.value();
+        if (node.value() > highest) highest = node.value();
+    }
+    TEST_ASSERT_LESS_THAN_INT16(200, lowest);
+    TEST_ASSERT_GREATER_THAN_INT16(CV_MAX - 200, highest);
+}
+
+static void test_a_synced_envelope_advances_on_the_clock_and_not_on_time() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_SYNC] = EnvelopeNode::ENV_CLOCK;
+    c.params[EnvelopeNode::P_ATTACK_DIV] = DIV_16TH;
+    c.params[EnvelopeNode::P_DECAY_DIV] = DIV_16TH;
+    AdEnvelope node(c);
+
+    const uint32_t sixteenth = division_subticks(DIV_16TH, FEEL_STRAIGHT);
+    uint32_t count = 0;
+    node.tick(bus, count);
+    env_pass(node, bus, 0, false);
+    env_pass(node, bus, 1000u, true);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+    // The stage is a note value, counted in subticks, and the delay and the
+    // hold are off, so the contour is in the attack already.
+    TEST_ASSERT_EQUAL_UINT32(sixteenth, node.stage_length());
+
+    // A minute of wall clock with the clock stopped moves it nowhere: a
+    // synced envelope is measured in the clock's own time.
+    for (uint32_t t = 2000u; t < 60000000u; t += 1000000u) env_pass(node, bus, t, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+    TEST_ASSERT_EQUAL_INT16(0, node.value());
+
+    count += sixteenth / 2u;
+    node.tick(bus, count);
+    env_pass(node, bus, 60000000u, false);
+    TEST_ASSERT_INT16_WITHIN(60, CV_HALF, node.value());
+
+    count += sixteenth;                              // through the top and into the decay
+    node.tick(bus, count);
+    env_pass(node, bus, 60001000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DECAY, node.stage());
+}
+
+static void test_a_triplet_stage_is_a_whole_number_of_subticks() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_SYNC] = EnvelopeNode::ENV_CLOCK;
+    c.params[EnvelopeNode::P_FEEL] = FEEL_TRIPLET;
+    c.params[EnvelopeNode::P_ATTACK_DIV] = DIV_EIGHTH;
+    AdEnvelope node(c);
+    node.tick(bus, 0);
+    env_pass(node, bus, 0, false);
+    env_pass(node, bus, 1000u, true);
+    TEST_ASSERT_EQUAL_UINT32(CLOCK_SUBTICKS_PER_QUARTER / 3u, node.stage_length());
+}
+
+static void test_a_stage_turned_off_takes_no_time_in_either_unit() {
+    // Synced, "off" is a value on the note list and is worth nothing at all.
+    TEST_ASSERT_EQUAL_UINT32(0, division_subticks(DIV_OFF, FEEL_STRAIGHT));
+    TEST_ASSERT_EQUAL_UINT32(0, division_subticks(DIV_OFF, FEEL_TRIPLET));
+    // Free-running, the same job is done by the bottom of the time control:
+    // one pass of the graph, which is the shortest thing a wall clock can say.
+    TEST_ASSERT_EQUAL_UINT32(500, param_env_time_us(EnvelopeNode::OFF_TIME));
+    TEST_ASSERT_EQUAL_UINT32(32512500, param_env_time_us(255));
+}
+
+static void test_the_end_outlet_fires_a_trigger_when_the_contour_finishes() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_ATTACK] = 10;          // 50 ms
+    c.params[EnvelopeNode::P_DECAY] = 10;           // 50 ms
+    AdEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    env_pass(node, bus, t, true);
+    t += 1000u;
+
+    // Nothing while the contour is running ...
+    while (t < 95000u){
+        env_pass(node, bus, t, false);
+        t += 1000u;
+        TEST_ASSERT_FALSE(bus.gate_read(1));
+    }
+    // ... and a trigger once it has finished.
+    bool fired = false;
+    while (t < 120000u){
+        env_pass(node, bus, t, false);
+        t += 1000u;
+        if (bus.gate_read(1)) fired = true;
+    }
+    TEST_ASSERT_TRUE(fired);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, node.stage());
+}
+
+static void test_retriggering_starts_from_zero_or_from_the_level_or_not_at_all() {
+    for (uint8_t rule = EnvelopeNode::ENV_RETRIG_ZERO; rule <= EnvelopeNode::ENV_RETRIGGERS; rule++){
+        BusManager bus;
+        NodeConfig c = envelope_config(ALGO_AD, false);
+        c.params[EnvelopeNode::P_ATTACK] = 10;      // 50 ms
+        c.params[EnvelopeNode::P_DECAY] = 40;       // 800 ms, to catch half way down
+        c.params[AdEnvelope::P_RETRIG] = rule;
+        AdEnvelope node(c);
+
+        uint32_t t = 0;
+        env_pass(node, bus, t, false);
+        t += 1000u;
+        env_pass(node, bus, t, true);
+        t += 1000u;
+        env_run(node, bus, t, 450000u, false);
+        TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DECAY, node.stage());
+        const int16_t before = node.value();
+
+        env_pass(node, bus, t, true);               // a second trigger, part way down
+        t += 1000u;
+        switch (rule){
+            case EnvelopeNode::ENV_RETRIG_ZERO:
+                // A hard retrigger: back to nothing and up again from there.
+                TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+                TEST_ASSERT_LESS_THAN_INT16(200, node.value());
+                break;
+            case EnvelopeNode::ENV_RETRIG_LEVEL:
+                // Up again from where it was, with no step in the middle.
+                TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+                TEST_ASSERT_INT16_WITHIN(80, before, node.value());
+                break;
+            default:
+                // Ignored: the contour it is already drawing finishes first.
+                TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DECAY, node.stage());
+                TEST_ASSERT_LESS_THAN_INT16(before, node.value());
+                break;
+        }
+    }
+}
+
+static void test_level_scales_the_contour_and_invert_turns_it_over() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_ATTACK] = 10;
+    c.params[EnvelopeNode::P_HOLD] = 40;            // sit at the peak to read it
+    c.params[AdEnvelope::P_LEVEL] = 50;
+    AdEnvelope quiet(c);
+    c.params[AdEnvelope::P_INVERT] = 1;
+    AdEnvelope upside_down(c);
+
+    BusManager other;
+    uint32_t t = 0;
+    env_pass(quiet, bus, t, false);
+    env_pass(upside_down, other, t, false);
+    t += 1000u;
+    env_pass(quiet, bus, t, true);
+    env_pass(upside_down, other, t, true);
+    t += 1000u;
+    while (t < 200000u){
+        env_pass(quiet, bus, t, false);
+        env_pass(upside_down, other, t, false);
+        t += 1000u;
+    }
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_HOLD, quiet.stage());
+    // Half level, and the same contour the other side of zero.
+    TEST_ASSERT_INT16_WITHIN(2, CV_MAX / 2, quiet.value());
+    TEST_ASSERT_EQUAL_INT16(-quiet.value(), upside_down.value());
+}
+
+static void test_a_curve_bends_the_travel_without_moving_its_ends() {
+    // The ends are the ends whatever the curve: a stage that started
+    // somewhere else or stopped short would be a curve that changed the
+    // contour's shape rather than how it is walked.
+    for (uint8_t amount = PARAM_CENTRE - 100; amount <= PARAM_CENTRE + 100; amount++){
+        TEST_ASSERT_EQUAL_UINT32(0, env_curve(amount, 0));
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)CV_FULL, env_curve(amount, CV_FULL));
+    }
+    // Straight through the middle is the middle.
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)CV_HALF, env_curve(PARAM_CENTRE, CV_HALF));
+    // Fully positive creeps then runs: a quarter of the way along at half
+    // time. Fully negative is the mirror of it.
+    TEST_ASSERT_UINT32_WITHIN(16, (uint32_t)CV_FULL / 4u, env_curve(PARAM_CENTRE + 100, CV_HALF));
+    TEST_ASSERT_UINT32_WITHIN(16, (uint32_t)(3 * CV_FULL) / 4u, env_curve(PARAM_CENTRE - 100, CV_HALF));
+    // And every curve is still a walk in one direction.
+    for (uint32_t frac = 1; frac <= (uint32_t)CV_FULL; frac++){
+        TEST_ASSERT_TRUE(env_curve(PARAM_CENTRE + 100, frac) >= env_curve(PARAM_CENTRE + 100, frac - 1));
+        TEST_ASSERT_TRUE(env_curve(PARAM_CENTRE - 100, frac) >= env_curve(PARAM_CENTRE - 100, frac - 1));
+    }
+}
+
+static void test_a_stage_lengthened_under_a_finger_does_not_jump() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, false);
+    c.params[EnvelopeNode::P_ATTACK] = 20;          // 200 ms
+    AdEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    env_pass(node, bus, t, true);
+    t += 1000u;
+    env_run(node, bus, t, 100000u, false);
+    const int16_t half_way = node.value();
+    TEST_ASSERT_INT16_WITHIN(150, CV_HALF, half_way);
+
+    // Four times as long, set under a finger. The contour keeps the fraction
+    // of the stage it had covered rather than snapping back to the bottom.
+    TEST_ASSERT_TRUE(node.set_param(EnvelopeNode::P_ATTACK, 40));
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    TEST_ASSERT_INT16_WITHIN(60, half_way, node.value());
+    // And it is still climbing, at the new rate.
+    env_run(node, bus, t, 150000u, false);
+    TEST_ASSERT_GREATER_THAN_INT16(half_way, node.value());
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+}
+
+static void test_an_ad_reset_edge_cuts_the_contour() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_AD, true);
+    c.params[EnvelopeNode::P_ATTACK] = 10;
+    c.params[EnvelopeNode::P_DECAY] = 40;           // 800 ms
+    c.params[AdEnvelope::P_LOOP] = EnvelopeNode::ENV_LOOP_FREE;
+    AdEnvelope node(c);
+
+    uint32_t t = 0;
+    env_run(node, bus, t, 300000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DECAY, node.stage());
+    TEST_ASSERT_GREATER_THAN_INT16(CV_HALF, node.value());
+
+    // A reset cuts it to nothing, which is the only handle there is on a
+    // loop that never asked for a gate. An envelope told to loop always then
+    // starts the next contour at once - it was told to run, and a reset says
+    // where from, not whether.
+    env_pass(node, bus, t, false, true);
+    t += 1000u;
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+    TEST_ASSERT_LESS_THAN_INT16(200, node.value());
+
+    // One that is not looping stops there and stays stopped.
+    BusManager once_bus;
+    c.params[AdEnvelope::P_LOOP] = EnvelopeNode::ENV_LOOP_OFF;
+    AdEnvelope one_shot(c);
+    uint32_t u = 0;
+    env_pass(one_shot, once_bus, u, false);
+    u += 1000u;
+    env_pass(one_shot, once_bus, u, true);
+    u += 1000u;
+    env_run(one_shot, once_bus, u, 300000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_DECAY, one_shot.stage());
+    env_pass(one_shot, once_bus, u, false, true);
+    u += 1000u;
+    env_run(one_shot, once_bus, u, 400000u, false);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_IDLE, one_shot.stage());
+    TEST_ASSERT_EQUAL_INT16(0, one_shot.value());
+}
+
+static void test_an_adsr_retrig_inlet_fires_under_a_held_gate() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_ADSR, true);
+    c.params[EnvelopeNode::P_ATTACK] = 10;
+    c.params[EnvelopeNode::P_DECAY] = 10;
+    c.params[AdsrEnvelope::P_SUSTAIN] = 40;
+    AdsrEnvelope node(c);
+
+    uint32_t t = 0;
+    env_pass(node, bus, t, false);
+    t += 1000u;
+    env_run(node, bus, t, 150000u, true);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_SUSTAIN, node.stage());
+
+    // A second note under the first: the contour starts again without the
+    // gate ever having fallen.
+    env_pass(node, bus, t, true, true);
+    t += 1000u;
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_ATTACK, node.stage());
+    env_run(node, bus, t, 250000u, true);
+    TEST_ASSERT_EQUAL(EnvelopeNode::ENV_SUSTAIN, node.stage());
+}
+
+static void test_an_envelope_never_allocates() {
+    BusManager bus;
+    NodeConfig c = envelope_config(ALGO_ADSR, true);
+    AdsrEnvelope node(c);
+    const size_t before = g_allocations;
+    uint32_t t = 0;
+    while (t < 2000000u){
+        env_pass(node, bus, t, (t / 100000u) % 2u == 0u);
+        node.tick(bus, t / 1000u);
+        t += 1000u;
+    }
+    TEST_ASSERT_TRUE(node.set_param(EnvelopeNode::P_ATTACK, 60));
+    TEST_ASSERT_TRUE(node.set_param(AdsrEnvelope::P_RELEASE_DIV, DIV_BAR));
+    TEST_ASSERT_EQUAL(before, g_allocations);
+}
+
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_latch_holds_a_trigger_up_for_ever);
@@ -1294,6 +1847,26 @@ int main() {
     RUN_TEST(test_depth_and_offset_move_the_level_already_held);
     RUN_TEST(test_random_step_draws_a_level_on_every_trigger);
     RUN_TEST(test_random_glide_steps_between_two_levels_over_one_period);
+
+    RUN_TEST(test_an_ad_rises_to_the_peak_and_falls_back_to_nothing);
+    RUN_TEST(test_the_length_of_the_trigger_means_nothing_to_an_ad);
+    RUN_TEST(test_a_pre_delay_keeps_the_contour_at_nothing_first);
+    RUN_TEST(test_a_hold_keeps_the_peak_before_the_decay_starts);
+    RUN_TEST(test_an_adsr_waits_at_the_sustain_level_while_the_gate_is_up);
+    RUN_TEST(test_the_release_leaves_from_wherever_the_contour_had_got_to);
+    RUN_TEST(test_a_looping_adsr_never_reaches_the_sustain);
+    RUN_TEST(test_an_envelope_looping_always_runs_with_nothing_patched);
+    RUN_TEST(test_a_synced_envelope_advances_on_the_clock_and_not_on_time);
+    RUN_TEST(test_a_triplet_stage_is_a_whole_number_of_subticks);
+    RUN_TEST(test_a_stage_turned_off_takes_no_time_in_either_unit);
+    RUN_TEST(test_the_end_outlet_fires_a_trigger_when_the_contour_finishes);
+    RUN_TEST(test_retriggering_starts_from_zero_or_from_the_level_or_not_at_all);
+    RUN_TEST(test_level_scales_the_contour_and_invert_turns_it_over);
+    RUN_TEST(test_a_curve_bends_the_travel_without_moving_its_ends);
+    RUN_TEST(test_a_stage_lengthened_under_a_finger_does_not_jump);
+    RUN_TEST(test_an_ad_reset_edge_cuts_the_contour);
+    RUN_TEST(test_an_adsr_retrig_inlet_fires_under_a_held_gate);
+    RUN_TEST(test_an_envelope_never_allocates);
 
     RUN_TEST(test_slew_takes_the_first_reading_whole);
     RUN_TEST(test_slew_takes_its_time_and_arrives);

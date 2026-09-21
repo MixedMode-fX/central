@@ -13,6 +13,7 @@ export const CV_BITS = 12;
 export const CV_FULL = 4096;
 export const DRUM_SEQ_LANES = 8;
 export const EEPROM_BYTES = 4284;
+export const ENV_TIME_UNIT_US = 500;
 export const GPIO_N = 8;
 export const KEY_DEFAULT_OCTAVE = 5;
 export const KEY_MAX_OCTAVE = 10;
@@ -237,6 +238,7 @@ export const ParamKind = Object.freeze({
   PARAM_CHANNEL: 9,
   PARAM_CENTRED: 10,
   PARAM_CHANNEL_OUT: 11,
+  PARAM_ENV_TIME: 12,
 });
 
 export const ConfigError = Object.freeze({
@@ -307,6 +309,8 @@ export const AlgorithmId = Object.freeze({
   ALGO_GATE_TO_CV: 55,
   ALGO_CV_SWITCH: 56,
   ALGO_CV_ROUTER: 57,
+  ALGO_AD: 58,
+  ALGO_ADSR: 59,
 });
 
 export const AlgorithmCategory = Object.freeze({

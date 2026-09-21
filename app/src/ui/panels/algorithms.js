@@ -25,17 +25,50 @@ import { StepGrid, DrumGrid, NoteLane } from './grids/Sequencers.js';
 import { HarmonyCircle } from './grids/HarmonyCircle.js';
 import { EuclidCircle } from './grids/EuclidCircle.js';
 
-// Tonnetz's fourth cycle, and the LFO's clock-locked sync. The descriptors
-// number their options from their own minimum and the page reads the names
-// from the firmware, so this is the one place a value of either enum is
-// written down.
+// Tonnetz's fourth cycle, the LFO's clock-locked sync, and the handful of
+// envelope values a rule below has to compare against. The descriptors number
+// their options from their own minimum and the page reads the names from the
+// firmware, so this is the one place a value of any of these enums is written
+// down.
 const TONNETZ_FREE = 4;
 const LFO_CLOCK = 2;
+const ENV_CLOCK = 2;            // EnvelopeNode::ENV_CLOCK
+const ENV_DIV_OFF = 11;         // MusicalDivision's DIV_OFF
+const ENV_NO_TIME = 1;          // EnvelopeNode::OFF_TIME
+const ENV_LOOP_OFF = 1;         // EnvelopeNode::ENV_LOOP_OFF
+const ENV_LOOP_ALWAYS = 3;      // EnvelopeNode::ENV_LOOP_FREE
 
 // An inert rule: `when(values, key)` is given a node's effective parameter
 // values by name and the key's scale mask, and says why the control does
 // nothing, or nothing at all.
 const inert = (param, when) => ({ param, when });
+
+// The envelopes carry two controls for every stage - a length in its own
+// right and a note value - and `sync` decides which of the two is live, the
+// same arrangement the LFO has between `rate` and `division`. Six stages of
+// that is twelve controls of which half are asleep at any moment, which is
+// exactly the wall this table exists to take down.
+const envSynced = (v) => v.sync === ENV_CLOCK;
+// A stage nobody asked for: "off" on the note list, or the bottom of the time
+// control, depending on which of them is being read.
+const envStageOff = (v, stage) =>
+  (envSynced(v) ? v[`${stage} div`] === ENV_DIV_OFF : v[stage] <= ENV_NO_TIME);
+
+const envStage = (stage, curved) => [
+  inert(stage, (v) => (envSynced(v) ? 'locked to the clock: the note value is the length' : null)),
+  inert(`${stage} div`, (v) => (envSynced(v) ? null : 'free-running: the time is the length')),
+  ...(curved
+    ? [inert(`${stage} curve`, (v) => (envStageOff(v, stage) ? `there is no ${stage} to bend` : null))]
+    : []),
+];
+
+// [name, has a curve]. A stage that only waits travels nowhere to bend.
+const ENV_STAGES = [['delay', false], ['attack', true], ['hold', false], ['decay', true]];
+
+const envRules = (stages) => [
+  inert('feel', (v) => (envSynced(v) ? null : 'free-running: the times are the lengths')),
+  ...stages.flatMap(([stage, curved]) => envStage(stage, curved)),
+];
 
 const ALGORITHMS = {
   StepSequencer: { grid: StepGrid },
@@ -65,6 +98,17 @@ const ALGORITHMS = {
     ],
   },
   Slew: { inert: [inert('fall', (v) => (v.link ? 'linked: fall follows rise' : null))] },
+  AD: { inert: envRules(ENV_STAGES) },
+  ADSR: {
+    inert: [
+      ...envRules([...ENV_STAGES, ['release', true]]),
+      // A looping envelope never stops to wait, and one looping for ever is
+      // not listening to the gate at all, so it has no release either.
+      inert('sustain', (v) => (v.loop === ENV_LOOP_OFF ? null : 'the loop starts over instead of waiting')),
+      ...['release', 'release div', 'release curve'].map((param) =>
+        inert(param, (v) => (v.loop === ENV_LOOP_ALWAYS ? 'cycling: the gate never releases it' : null))),
+    ],
+  },
   Tonnetz: {
     inert: [
       // `free` draws all three transforms uniformly, so there is no cycle's

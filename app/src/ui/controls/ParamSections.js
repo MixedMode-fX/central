@@ -39,7 +39,7 @@ const SECTION_WORDS = {
           'base', 'bend', 'pitch'],
   time: ['length', 'division', 'feel', 'rate', 'gate', 'width', 'delay', 'time', 'phase', 'steps',
          'pulses', 'rotation', 'repeats', 'phrase', 'decay', 'rise', 'fall', 'stall', 'swing', 'tempo',
-         'bars', 'beat'],
+         'bars', 'beat', 'attack', 'release', 'sustain'],
   level: ['velocity', 'vel ', 'accent', 'curve', 'amount', 'depth', 'offset', 'dry', 'threshold',
           'hysteresis', 'level', 'smooth', 'slew', 'scale'],
   chance: ['probability', 'chance', 'density', 'deviation', 'cadence', 'gravity', 'drift', 'chaos',
@@ -54,7 +54,8 @@ export function paramSection(pd) {
   if (pd.kind === P.ParamKind.PARAM_PITCH || pd.kind === P.ParamKind.PARAM_PITCH_CLASS) return 'pitch';
   if (pd.kind === P.ParamKind.PARAM_CHANNEL
       || pd.kind === P.ParamKind.PARAM_CHANNEL_OUT) return 'midi';
-  if (pd.kind === P.ParamKind.PARAM_MILLIS) return 'time';
+  if (pd.kind === P.ParamKind.PARAM_MILLIS
+      || pd.kind === P.ParamKind.PARAM_ENV_TIME) return 'time';
   for (const section of PARAM_SECTIONS) {
     const words = SECTION_WORDS[section.key];
     if (words?.some((word) => name === word || name.startsWith(word) || name.includes(` ${word}`))) {

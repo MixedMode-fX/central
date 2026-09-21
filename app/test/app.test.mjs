@@ -1658,10 +1658,11 @@ test('every kind of block lists the signals it carries', async () => {
   assert.deepEqual(notes.sources.map((s) => [s.key, s.role]), [['bus3', 'out']], 'and what it plays');
   assert.deepEqual(nodeRollSources(ctx, seqAt), notes.sources, 'the roll under a node is its note ports');
 
-  // A jack: the level at the jack, then the bus behind it - an output reads
-  // its bus, an input writes it.
+  // A jack: an input is its level then the bus it writes; an output is the
+  // bus it reads then its level. Inputs first, whichever way it faces.
   const out = blockSignals(ctx, { kind: BlockKind.Jack, index: 0 });
-  assert.deepEqual(out.rows.map((r) => [r.key, r.source, r.role]), [['jack0', 'jackOut', 'out'], ['gate1', 'gate', 'in']]);
+  assert.deepEqual(out.rows.map((r) => [r.key, r.source, r.role]), [['gate1', 'gate', 'in'], ['jack0', 'jackOut', 'out']],
+                   'the bus it reads, then the level it puts out');
   const inn = blockSignals(ctx, { kind: BlockKind.Jack, index: 1 });
   assert.deepEqual(inn.rows.map((r) => [r.key, r.source, r.role]), [['jack1', 'jackIn', 'in'], ['gate4', 'gate', 'out']]);
   assert.deepEqual(blockSignals(ctx, { kind: BlockKind.Jack, index: 2 }), { rows: [], sources: [] },
@@ -1689,9 +1690,21 @@ test('every kind of block lists the signals it carries', async () => {
   assert.ok(app.state.ui.traceHidden.has(`node:${seqAt}:bus3`), 'hidden under this block');
   panel = withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Node, index: seqAt }));
   assert.equal(findAll(panel, (n) => n.tag === 'canvas').length, 1, 'the roll is put away, the scope stays');
-  assert.equal(findAll(withDom(() => BlockSignalsPanel(app, { kind: BlockKind.MidiOut, index: 0 })),
-                       (n) => n.tag === 'canvas').length, 1,
-               'the same bus under another block is still shown');
+  const other = withDom(() => BlockSignalsPanel(app, { kind: BlockKind.MidiOut, index: 0 }));
+  assert.equal(findAll(other, (n) => n.tag === 'canvas').length, 2,
+               'the same bus under another block is still shown: a roll of what it read, one of what it sent');
+  assert.ok(findAll(other, (n) => n.classList?.contains('legend-chip')).every((c) => !c.classList.contains('off')),
+            'and nothing under that block is hidden');
+  // Inputs before outputs across both pictures: a converter reading notes
+  // and writing a control signal draws its roll above its scope.
+  const toCv = device.algorithms.find((d) => d?.name === 'MidiToCV');
+  patched(device, patch, toCv);
+  const toCvAt = patch.nodes.length - 1;
+  patch.nodes[toCvAt].inBuses[0] = [3];
+  const order = findAll(withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Node, index: toCvAt })),
+                        (n) => n.tag === 'canvas').map((n) => n.className);
+  assert.equal(order[0], 'roll', 'what it read, first');
+  assert.ok(order.slice(1).every((c) => c === 'scope'), 'then what it wrote');
   assert.match(words(withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Jack, index: 2 }))), /on no bus/,
                'a block on no bus says so');
   assert.equal(BlockSignalsPanel(fakeApp({ patch, device }), { kind: BlockKind.Node, index: seqAt }), null,

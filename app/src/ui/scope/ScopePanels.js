@@ -47,6 +47,10 @@ export function RollPanel(app) {
 // of a roll, and one legend lists all of them: a chip pressed puts that
 // trace away, as it does on the module tab. A block on no bus says so rather
 // than drawing an empty grid, because an empty scope looks like a broken one.
+//
+// **Inputs first, then outputs**, and within each the scope above the roll:
+// a converter that reads notes and writes a control signal shows its roll
+// first, because that is the order the signal went through it.
 export function BlockSignalsPanel(app, { kind, index }) {
   if (!app.module || !app.session.usingModule) return null;
   const { rows, sources } = blockSignals({ patch: app.state.patch, device: app.device }, { kind, index });
@@ -54,22 +58,33 @@ export function BlockSignalsPanel(app, { kind, index }) {
   const prefix = `${kind}:${index}:`;
   const hiddenKey = (key) => prefix + key;
   const isShown = (item) => !ui.traceHidden.has(hiddenKey(item.key));
-  const shownRows = rows.filter(isShown);
-  const shownSources = sources.filter(isShown);
-  const items = [...rows, ...sources].map((item) => ({ ...item, key: hiddenKey(item.key) }));
+  const items = [];
+  const pictures = [];
 
-  const scope = shownRows.length ? el('canvas', { class: 'scope',
-    'aria-label': 'the gate and control signals this block read and wrote in the last four seconds' }) : null;
-  if (scope) app.live.paint(({ module }) => drawScope(scope, module, shownRows));
-  const roll = shownSources.length
-    ? rollCanvas('the notes this block read and wrote in the last eight seconds') : null;
-  if (roll) app.live.paint(({ module }) => drawRoll(roll, module, shownSources, NODE_ROLL_H));
+  for (const role of ['in', 'out']) {
+    const ofRole = (list) => list.filter((item) => item.role === role);
+    const shownRows = ofRole(rows).filter(isShown);
+    const shownSources = ofRole(sources).filter(isShown);
+    items.push(...ofRole(rows), ...ofRole(sources));
+    const way = role === 'in' ? 'read' : 'wrote';
+    if (shownRows.length) {
+      const scope = el('canvas', { class: 'scope',
+        'aria-label': `the gate and control signals this block ${way} in the last four seconds` });
+      app.live.paint(({ module }) => drawScope(scope, module, shownRows));
+      pictures.push(el('div', { class: 'scope-wrap' }, scope));
+    }
+    if (shownSources.length) {
+      const roll = rollCanvas(`the notes this block ${way} in the last eight seconds`);
+      app.live.paint(({ module }) => drawRoll(roll, module, shownSources, NODE_ROLL_H));
+      pictures.push(el('div', { class: 'scope-wrap' }, roll));
+    }
+  }
 
   return el('div', { class: 'grid block-signals' },
     el('div', { class: 'grid-title' }, 'signals'),
     !items.length ? Hint('on no bus — patch it on the canvas to see what it carries') : null,
-    scope ? el('div', { class: 'scope-wrap' }, scope) : null,
-    roll ? el('div', { class: 'scope-wrap' }, roll) : null,
-    items.length ? Legend({ items, hidden: ui.traceHidden,
+    ...pictures,
+    items.length ? Legend({ items: items.map((item) => ({ ...item, key: hiddenKey(item.key) })),
+                            hidden: ui.traceHidden,
                             onToggle: (key) => { toggleIn(ui.traceHidden, key); app.render(); } }) : null);
 }

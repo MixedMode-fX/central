@@ -371,7 +371,11 @@ export function blockSignals({ patch, device }, { kind, index }) {
     sources.push({ key: 'out', mask: port.targetMask, role: 'out', colour: colours.note,
                    label: `sent out · ${portNames(port.targetMask).join(', ')}` });
   }
-  return { rows, sources };
+  // Inputs first, then outputs, whatever the domain: what went in is read
+  // before what came out of it, and an output jack's own level is the last
+  // thing on the way out.
+  const inFirst = (a, b) => (a.role === b.role ? 0 : a.role === 'in' ? -1 : 1);
+  return { rows: rows.sort(inFirst), sources: sources.sort(inFirst) };
 }
 
 // The roll under one node: its note ports only.

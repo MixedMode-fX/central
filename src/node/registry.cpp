@@ -37,6 +37,7 @@
 #include "algorithm/clock/transport.h"
 #include "algorithm/switch/gate_switch.h"
 #include "algorithm/switch/note_switch.h"
+#include "algorithm/switch/cv_switch.h"
 #include "algorithm/logic/flip_flop.h"
 #include "algorithm/logic/counter.h"
 #include "algorithm/logic/shift_register.h"
@@ -101,6 +102,8 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &ShiftRegister::descriptor,
     &Edge::descriptor,
     &GateToCv::descriptor,
+    &CvSwitch::descriptor,
+    &CvRouter::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

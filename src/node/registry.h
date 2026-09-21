@@ -63,6 +63,8 @@ enum AlgorithmId : uint8_t {
     ALGO_SHIFT_REGISTER = 53,
     ALGO_EDGE         = 54,
     ALGO_GATE_TO_CV   = 55,
+    ALGO_CV_SWITCH    = 56,
+    ALGO_CV_ROUTER    = 57,
 };
 
 enum ConfigError : uint8_t {

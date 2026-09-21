@@ -173,7 +173,7 @@ touched.
 | Domain | Algorithms |
 |---|---|
 | Logic | `NOT`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `XNOR`, `FlipFlop`, `Counter`, `ShiftRegister`, `Edge` |
-| Switches | `GateSwitch`, `GateRouter`, `NoteSwitch`, `NoteRouter` |
+| Switches | `GateSwitch`, `GateRouter`, `NoteSwitch`, `NoteRouter`, `CvSwitch`, `CvRouter` |
 | Clock | `ClockDiv`, `Metronome`, `Transport` |
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
@@ -389,10 +389,10 @@ is only what a parameter list cannot say.
   normalised in the HAL (`GATE_INPUT_ACTIVE_LOW`), so an unpatched input reads
   0 and cannot force an OR high. `NOT` and `Sustain` take exactly one port and
   are invalid otherwise. Logic is not clocked by the master clock.
-- **A switch is how a patch has parts.** `GateSwitch` and `NoteSwitch` carry
-  one of up to `MAX_IN - 3` inlets to one outlet; `GateRouter` and
-  `NoteRouter` carry one inlet to one of `MAX_OUT` outlets. All four are one
-  mechanism (`src/algorithm/switch/selector.h`): a `select` parameter that
+- **A switch is how a patch has parts.** `GateSwitch`, `NoteSwitch` and
+  `CvSwitch` carry one of up to `MAX_IN - 3` inlets to one outlet;
+  `GateRouter`, `NoteRouter` and `CvRouter` carry one inlet to one of
+  `MAX_OUT` outlets. All six are one mechanism (`src/algorithm/switch/selector.h`): a `select` parameter that
   reads back as the position the switch is on, a `step` edge that moves to
   the next position and wraps at `steps` - by default the last patched port,
   so two parts alternate - a `reset` edge that returns to the first, and a
@@ -402,7 +402,9 @@ is only what a parameter list cannot say.
   unselected parts where they were. **The note switches own the note-offs of
   what they pass**: moving one releases everything it let through from the
   part it is leaving, before the first event of the next part, and a note
-  already held on the part it moves to is not heard until struck again.
+  already held on the part it moves to is not heard until struck again. A
+  `CvRouter`'s unselected outlets are written by nobody, so a route from one
+  falls back to the parameter's own setting, as an unpatched route does.
 - **`FlipFlop` is one clocked bit in five shapes** - D, transparent D latch, T,
   JK and SR - with `Q`, `not Q` and an asynchronous `clear` that wins. A T
   with nothing on `data` toggles on every edge, which is a divide-by-two with

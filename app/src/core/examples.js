@@ -409,6 +409,33 @@ export const EXAMPLES = {
       midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 1 }],
     },
   },
+  'Modulation rota': {
+    category: 'modulation',
+    about: 'Three modulators, one destination, a bar each. An LFO, a SampleHold drawing its own noise at a quarter and a StepMod staircase all run all the time on their own control buses; a CvSwitch stepped once a bar by the bar metronome says which one the modulation route reads, and a CvRouter stepped every two bars says which parameter that route reaches — the arpeggio’s gate length or its transposition, an octave’s worth. An outlet the router has left is written by nobody, so its parameter falls back to its own setting rather than freezing wherever the sweep was. Nothing is plugged in: Chord plays the tonic of the key by itself and the arpeggiator plays it at a sixteenth. Enable audio under play and count the bars: smooth, stepped, staircase, then the other parameter.',
+    patch: {
+      globals: { scale: 'dorian', root: 2, bpm: 110 },
+      gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 2, dir: 'out', bus: 3 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/16' } },
+        { algo: 'Metronome', out: [1], seq: { division: '1 bar' } },
+        { algo: 'Metronome', out: [2], seq: { division: '1/4' } },
+        { algo: 'ClockDiv', in: [1], out: [3], params: [0, 2] },
+        { algo: 'LFO', out: [0], params: [2, 2, 0, 1, 1, 255, 0, 0, 2] },
+        { algo: 'SampleHold', in: [2], out: [1], params: [3, 1, 6] },
+        { algo: 'StepMod', in: [2], out: [2], params: [1, 8, 0, 255, 0, 2] },
+        { algo: 'CvSwitch', in: [0, 1, 2, null, null, null, 1], out: [3] },
+        { algo: 'CvRouter', in: [3, null, 3], out: [4, 5] },
+        { algo: 'Chord', in: [null], out: [0], params: [1, 0, 0, 4] },
+        { algo: 'Arpeggiator', in: [0, 0], out: [1], params: [0, 2, 60, 0] },
+        { algo: 'Transpose', in: [1], out: [2] },
+      ],
+      mod_map: [
+        { slot: 0, bus: 4, targetKind: 0, targetIndex: 10, param: 2, min: 20, max: 220, depth: 255, flags: 0 },
+        { slot: 1, bus: 5, targetKind: 0, targetIndex: 11, param: 0, min: 128, max: 140, depth: 255, flags: 0 },
+      ],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 2 }],
+    },
+  },
   'MIDI to CV and gate': {
     category: 'routing & MIDI',
     about: 'The converter that makes everything upstream reach something that is not a MIDI instrument. Play the keyboard under play: jack 1 is the gate, held for as long as a key is, and jack 2 is the trigger it fires on every attack. The pitch outlet is a control signal \u2014 twelve bits, one of them a fraction of a semitone so the wheel is not stepped \u2014 and a modulation route reads it straight back into a note here, which is what the DAC will do in volts. Five octaves of range from C2, so the note that comes back is the note you played; bend the wheel and it bends with you.',

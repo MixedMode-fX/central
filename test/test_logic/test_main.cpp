@@ -9,6 +9,7 @@
 #include "../fakes/recording_midi_out.h"
 #include "algorithm/switch/gate_switch.h"
 #include "algorithm/switch/note_switch.h"
+#include "algorithm/switch/cv_switch.h"
 #include "algorithm/logic/flip_flop.h"
 #include "algorithm/logic/counter.h"
 #include "algorithm/logic/shift_register.h"
@@ -255,6 +256,65 @@ static void test_note_router_releases_on_the_outlet_it_leaves() {
     TEST_ASSERT_EQUAL(1, bus.note_count(5));
     TEST_ASSERT_EQUAL(MIDI_NOTE_OFF, bus.note_read(5, 0).type);
     TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
+// ---------------------------------------------------------------------------
+// CvSwitch / CvRouter
+// ---------------------------------------------------------------------------
+
+static void test_cv_switch_carries_the_selected_signal_and_rests_on_an_empty_one() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_CV_SWITCH);
+    c.in_buses[0] = one_bus(1); c.in_buses[1] = one_bus(2);
+    c.in_buses[CvSwitch::IN_STEP] = one_bus(10);
+    c.out_buses[0] = one_bus(7);
+    c.params[CvSwitch::P_STEPS] = 3;             // the third position is empty
+    CvSwitch node(c);
+
+    bus.cv_write(1, 1000); bus.cv_write(2, -500);
+    pass(bus, node);
+    TEST_ASSERT_EQUAL(1000, bus.cv_read(7));
+
+    bus.cv_write(1, 1000); bus.cv_write(2, -500); bus.gate_write(10, true);
+    pass(bus, node);
+    TEST_ASSERT_EQUAL(-500, bus.cv_read(7));
+    TEST_ASSERT_EQUAL(2, node.get_param(CvSwitch::P_SELECT));
+
+    bus.gate_write(10, false); pass(bus, node);
+    bus.cv_write(1, 1000); bus.cv_write(2, -500); bus.gate_write(10, true);
+    pass(bus, node);
+    TEST_ASSERT_EQUAL(0, bus.cv_read(7));        // nothing patched there
+    TEST_ASSERT_EQUAL(3, node.get_param(CvSwitch::P_SELECT));
+
+    // The parameter is the position, as on every switch.
+    TEST_ASSERT_TRUE(node.set_param(CvSwitch::P_SELECT, 1));
+    bus.cv_write(1, 42); pass(bus, node);
+    TEST_ASSERT_EQUAL(42, bus.cv_read(7));
+    TEST_ASSERT_FALSE(node.set_param(CvSwitch::P_SELECT, 6));
+}
+
+static void test_cv_router_sends_the_inlet_to_the_selected_outlet_and_empties_the_rest() {
+    BusManager bus;
+    NodeConfig c = node_config(ALGO_CV_ROUTER);
+    c.in_buses[CvRouter::IN_SIGNAL] = one_bus(0);
+    c.in_buses[CvRouter::IN_SELECT] = one_bus(1);    // CV 1 addresses
+    c.out_buses[0] = one_bus(4); c.out_buses[1] = one_bus(5); c.out_buses[2] = one_bus(6);
+    CvRouter node(c);
+
+    bus.cv_write(0, 1234); bus.cv_write(1, 0);
+    pass(bus, node);
+    TEST_ASSERT_EQUAL(1234, bus.cv_read(4));
+    TEST_ASSERT_EQUAL(0, bus.cv_read(5));
+
+    // Three outlets patched: a third of the range each.
+    bus.cv_write(0, 1234); bus.cv_write(1, CV_FULL / 3 + 1);   // a third, rounded up
+    pass(bus, node);
+    TEST_ASSERT_EQUAL(0, bus.cv_read(4));        // written by nobody now
+    TEST_ASSERT_EQUAL(1234, bus.cv_read(5));
+    bus.cv_write(0, -700); bus.cv_write(1, CV_MAX);
+    pass(bus, node);
+    TEST_ASSERT_EQUAL(-700, bus.cv_read(6));
+    TEST_ASSERT_EQUAL(3, node.get_param(CvRouter::P_SELECT));
 }
 
 // ---------------------------------------------------------------------------
@@ -670,6 +730,8 @@ int main() {
     RUN_TEST(test_gate_router_sends_the_inlet_to_the_selected_outlet);
     RUN_TEST(test_note_switch_releases_what_it_leaves_and_drops_the_old_note_off);
     RUN_TEST(test_note_router_releases_on_the_outlet_it_leaves);
+    RUN_TEST(test_cv_switch_carries_the_selected_signal_and_rests_on_an_empty_one);
+    RUN_TEST(test_cv_router_sends_the_inlet_to_the_selected_outlet_and_empties_the_rest);
     RUN_TEST(test_d_flip_flop_takes_data_on_the_edge_only);
     RUN_TEST(test_d_latch_is_transparent_while_the_clock_is_open);
     RUN_TEST(test_t_flip_flop_with_nothing_on_data_divides_by_two);

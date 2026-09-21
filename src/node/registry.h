@@ -54,6 +54,15 @@ enum AlgorithmId : uint8_t {
     ALGO_TRANSPORT    = 44,
     ALGO_STEP_MOD     = 45,
     ALGO_GATE_PROBABILITY = 46,
+    ALGO_GATE_SWITCH  = 47,
+    ALGO_GATE_ROUTER  = 48,
+    ALGO_NOTE_SWITCH  = 49,
+    ALGO_NOTE_ROUTER  = 50,
+    ALGO_FLIP_FLOP    = 51,
+    ALGO_COUNTER      = 52,
+    ALGO_SHIFT_REGISTER = 53,
+    ALGO_EDGE         = 54,
+    ALGO_GATE_TO_CV   = 55,
 };
 
 enum ConfigError : uint8_t {

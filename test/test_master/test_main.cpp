@@ -454,27 +454,33 @@ static void test_eight_of_the_same_and_one_of_everything() {
     TEST_ASSERT_EQUAL(GPIO_HIGH, gpio.outputs[6]);
     TEST_ASSERT_EQUAL(GPIO_HIGH, gpio.outputs[7]);
 
-    Patch all = empty_patch();
-    all.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
-    all.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(0)};
-    uint8_t n = 0;
-    for (uint8_t i = 0; i < registry::count(); i++) {
-        const AlgorithmDescriptor* d = registry::at(i);
-        NodeConfig c = node_config(d->id);
-        for (uint8_t k = 0; k < d->min_in; k++) c.in_buses[k] = one_bus(0);
-        for (uint8_t k = 0; k < d->n_out; k++) c.out_buses[k] = one_bus(1);
-        all.nodes[n++] = c;
-    }
-    all.n_nodes = n;
-    TEST_ASSERT_EQUAL(LOAD_OK, master.load(all));
-    master.setup();
-    TEST_ASSERT_EQUAL(registry::count(), master.node_count());
-    // With the clock running, so the nodes that subscribe to the tick get one.
-    for (int i = 0; i < 100; i++) {
-        master.clock().advance();
-        master.deliver_midi(mmMIDI_USB_0, MidiEvent{(uint8_t)((i & 1) ? MIDI_NOTE_OFF : MIDI_NOTE_ON), 1, 60, 100});
-        gpio.set_input(0, (i & 2) ? GPIO_HIGH : GPIO_LOW);
-        master.pass((uint32_t)i * 1000);
+    // Every algorithm, run through the master with its required inlets on a
+    // bus. The table is wider than the pool, so it is loaded in pool-sized
+    // batches: the pool is what a patch can hold, not the table.
+    uint8_t loaded = 0;
+    while (loaded < registry::count()) {
+        Patch all = empty_patch();
+        all.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
+        all.midi_in[0] = MidiInConfig{mmMIDI_USB_0, 0, one_bus(0)};
+        uint8_t n = 0;
+        while (loaded < registry::count() && n < N_NODE) {
+            const AlgorithmDescriptor* d = registry::at(loaded++);
+            NodeConfig c = node_config(d->id);
+            for (uint8_t k = 0; k < d->min_in; k++) c.in_buses[k] = one_bus(0);
+            for (uint8_t k = 0; k < d->n_out; k++) c.out_buses[k] = one_bus(1);
+            all.nodes[n++] = c;
+        }
+        all.n_nodes = n;
+        TEST_ASSERT_EQUAL(LOAD_OK, master.load(all));
+        master.setup();
+        TEST_ASSERT_EQUAL(n, master.node_count());
+        // With the clock running, so the nodes that subscribe to the tick get one.
+        for (int i = 0; i < 100; i++) {
+            master.clock().advance();
+            master.deliver_midi(mmMIDI_USB_0, MidiEvent{(uint8_t)((i & 1) ? MIDI_NOTE_OFF : MIDI_NOTE_ON), 1, 60, 100});
+            gpio.set_input(0, (i & 2) ? GPIO_HIGH : GPIO_LOW);
+            master.pass((uint32_t)i * 1000);
+        }
     }
 }
 

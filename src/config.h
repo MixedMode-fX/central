@@ -34,14 +34,15 @@
 // MAX_SEQUENCE_LEN or NOTE_SEQ_VOICES fails here at compile time rather than
 // on the module. 45 x 640 bytes is 28 KB against 1 MB of RAM.
 //
-// **The pool is never smaller than the algorithm table.** A patch that could
-// not hold one of every algorithm is a patch a user can be refused for a
-// reason they cannot see, and it is a test this repository has always run.
-// That is the floor; the headroom above it is what a generative patch built
-// out of the module's own parts needs - a clock, two dividers, a harmony, a
-// chord, a shift register, a quantiser, a comparator, a drum grid, a handful
-// of logic and a modulator each - which reaches the high twenties before
-// anything interesting has been added to it.
+// **The pool is what a patch can hold, not the table.** The table is wider
+// than the pool, so a patch cannot hold one of every algorithm - and no patch
+// wants to; test_master runs the whole table through the pool in batches of
+// this many instead. What the number has to cover is a generative patch built
+// out of the module's own parts - a clock, two dividers, a harmony, a chord,
+// a shift register, a quantiser, a comparator, a drum grid, a handful of
+// logic and a modulator each - which reaches the high twenties before
+// anything interesting has been added to it, and a song out of two of those
+// behind a switch is most of the rest.
 //
 // The ceiling is not RAM, it is the NRPN address space: node parameters
 // occupy N_NODE x N_PARAM of the fourteen bits an NRPN address has, and the
@@ -63,12 +64,15 @@
 // algorithm/sequencer/note_sequencer.h and drum_sequencer.h). Every other
 // algorithm uses the first few bytes and leaves the rest zero, which the
 // patch protocol (#11) can exploit by not sending trailing zeros.
-// MAX_IN went from 4 to 5 for the note sequencers' step-record inlets (#22):
-// advance, reset, root, record and record-enable is five, and a sequencer
-// that could not be played into would make step-record a host-only feature.
-// It costs one byte per NodeConfig - 32 bytes of RAM and one byte per node on
-// the wire - and gives the logic gates a fifth input for free.
-#define MAX_IN 5
+// MAX_IN is set by the switches (algorithm/switch/gate_switch.h): a many-to-one
+// switch spends three inlets on choosing - select, step and reset - and what
+// is left is how many parts it can choose between, so eight is five parts,
+// the same width MAX_OUT gives the one-to-many routers. It costs two bytes
+// per inlet per NodeConfig in RAM; on the wire and in EEPROM a port list is
+// trimmed at the last connected inlet, so a node using two pays for two.
+// The note sequencers need five (advance, reset, root, record, record
+// enable) and the logic gates fold over every one they are given.
+#define MAX_IN 8
 #define MAX_OUT 8
 #define N_PARAM 336
 

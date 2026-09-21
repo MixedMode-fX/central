@@ -54,23 +54,26 @@ export class Controller {
     for (const input of this.inputs) input.onmidimessage = null;
     this.inputId = id;
     const input = this.input;
-    if (input) input.onmidimessage = (event) => this.receive(event.data);
+    if (input) input.onmidimessage = (event) => this.receive(event.data, event.timeStamp);
   }
 
   setPort(mask) { this.port = mask; }
 
-  receive(bytes) {
+  // `atMs` is the event's own `timeStamp`: when the bytes reached the
+  // browser, not when this handler got to run. The module stamps the message
+  // with it, which is what a clock measured between two bytes depends on.
+  receive(bytes, atMs = undefined) {
     const status = bytes[0];
     if (status === SYSEX_START) return;             // a controller's SysEx is not the module's business
     if (status >= REALTIME_FIRST) {
       // Clock, start, stop and continue: the module's clock reads these when
       // its source is MIDI, so an external tempo can drive the patch.
-      this.module.deliverRealtime(this.port, status);
+      this.module.deliverRealtime(this.port, status, atMs);
       return;
     }
     if (status < 0x80) return;
     const type = status & 0xf0;
     const channel = (status & 0x0f) + 1;            // the firmware counts channels from 1
-    this.module.deliverMidi(this.port, type, channel, bytes[1] ?? 0, bytes[2] ?? 0);
+    this.module.deliverMidi(this.port, type, channel, bytes[1] ?? 0, bytes[2] ?? 0, atMs);
   }
 }

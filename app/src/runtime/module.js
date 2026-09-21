@@ -307,6 +307,10 @@ export class EmbeddedModule {
   // audio clock and on a MIDI port's clock: both are offsets from it.
   wallAt(simUs) { return this.origin + simUs / 1000; }
 
+  // The inverse: where wall time `wallMs` falls in simulated microseconds.
+  // What an event that arrived at a known wall time is stamped with.
+  simAt(wallMs) { return Math.round((wallMs - this.origin) * 1000); }
+
   // Run every pass owed up to wall time `wallMs`. A late frame runs the
   // passes it owes and lands on time; a frame's odd fraction of a millisecond
   // stays owed rather than being dropped; and a gap longer than
@@ -573,21 +577,53 @@ export class EmbeddedModule {
   //
   // Returns how many ports accepted it, or null when it was consumed by the
   // control plane - which is a visible answer to "why did nothing happen?".
-  deliverMidi(port, type, channel, d1 = 0, d2 = 0) {
+  //
+  // `atMs` is when the message arrived, on the wall clock (a Web MIDI event's
+  // `timeStamp`). Given, the message lands at that instant of simulated time:
+  // see `arrival()`. Without it - the on-screen keyboard - it lands now.
+  deliverMidi(port, type, channel, d1 = 0, d2 = 0, atMs = undefined) {
     const E = this.E;
-    if (type === PROGRAM_CHANGE && E.emu_control_program_change(port, channel, d1, this.now)) return null;
-    if (type === CONTROL_CHANGE && E.emu_control_cc(port, channel, d1, d2, this.now)) return null;
-    const accepted = E.emu_deliver_midi(port, type, channel, d1, d2, this.now);
+    const at = this.arrival(atMs);
+    if (type === PROGRAM_CHANGE && E.emu_control_program_change(port, channel, d1, at)) return null;
+    if (type === CONTROL_CHANGE && E.emu_control_cc(port, channel, d1, d2, at)) return null;
+    const accepted = E.emu_deliver_midi(port, type, channel, d1, d2, at);
     // Into the roll as well, so the keyboard, a controller and the patch's own
     // output are all on one time line: what went in, and what came out of it.
-    this.rollNote('in', { t: this.now, type, d1, d2, channel, target: port });
+    this.rollNote('in', { t: at, type, d1, d2, channel, target: port });
     return accepted;
   }
 
   // A realtime byte (clock, start, stop, continue) goes straight in: it has no
   // channel and no data, and the clock is what reads it.
-  deliverRealtime(port, status) {
-    this.E.emu_deliver_midi(port, status, 0, 0, 0, this.now);
+  deliverRealtime(port, status, atMs = undefined) {
+    this.E.emu_deliver_midi(port, status, 0, 0, 0, this.arrival(atMs));
+  }
+
+  // The simulated time an incoming message is stamped with, and the passes
+  // run up to it first.
+  //
+  // On the Teensy a MIDI clock byte is stamped with `micros()` as the loop
+  // reads it, and the clock measures the tempo as the interval between two
+  // stamps (`MasterClock::external_edge`). Here the passes run from a timer
+  // that fires every TICK_MS at best and later whenever the main thread is
+  // busy, so stamping a byte with `now` - the time of the last pass that
+  // happened to have run - put up to a tick of noise on every interval, and
+  // the whole of any stall on the one after it: at 120 BPM a byte comes every
+  // 21 ms, so a few milliseconds either way is a tempo estimate a fifth out,
+  // and the interval is re-derived from every byte. A Web MIDI event carries
+  // the time it reached the browser, in the domain of `performance.now()`,
+  // and that is the stamp the firmware's clock wants.
+  //
+  // The passes owed up to that time run first, so the byte falls between the
+  // pass before it and the pass after it, as the interrupt does between two
+  // loops of `main.cpp`; then the stamp is the event's own time, not the last
+  // pass's. A byte the module has already run past - after `runAhead()` -
+  // keeps its own time too: the interval between two bytes is what the clock
+  // measures, and it has to be measured between the times they arrived.
+  arrival(atMs) {
+    if (!this.running || !Number.isFinite(atMs) || atMs <= 0) return this.now;
+    this.advanceTo(atMs);
+    return this.simAt(atMs);
   }
 
   isNote(type) { return type === NOTE_ON || type === NOTE_OFF; }

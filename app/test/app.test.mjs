@@ -75,6 +75,7 @@ import {
 import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js';
 import { OUTPUT_LATENCY_MS } from '../src/runtime/module.js';
 import { Heartbeat } from '../src/runtime/heartbeat.js';
+import { Controller } from '../src/runtime/controller.js';
 import { MidiTab, OutputPanel } from '../src/ui/tabs/MidiTab.js';
 import { CLOCK_CV_SOURCE, CLOCK_MIDI_SOURCE } from '../src/protocol/names.js';
 import {
@@ -481,6 +482,58 @@ test('running ahead of a rebuild costs nothing afterwards', async () => {
   assert.equal(module.now, 70_000, 'the module went backwards, or ran passes it was not owed');
   module.advanceTo(75);
   assert.equal(module.now, 75_000);
+});
+
+// A clock followed from a DAW over Web MIDI. The firmware measures the tempo
+// as the interval between two clock bytes' stamps, and re-derives the subtick
+// interval from every one; the page's passes run from a timer that fires
+// every few milliseconds, later when the thread is busy. Stamping a byte with
+// the time of the last pass that happened to have run put that timer's
+// jitter on every measurement - a tempo a fifth out on a bad tick, at 120 BPM
+// - so a byte is stamped with the time it arrived, from the event itself.
+test('a MIDI clock byte is stamped with its arrival, not with the last pass', async () => {
+  const { module, E } = await instantiate();
+  module.running = true;                       // as start() leaves it, without its timers
+  module.syncTo(0);
+  E.emu_clock_set_source(CLOCK_MIDI_SOURCE);
+  const period = 60_000 / 120 / P.MASTER_PPQN;  // 20.833 ms between bytes
+  const expected = Math.floor(period * 1000 / P.CLOCK_SUBTICK);
+  // Ticks come every four milliseconds and then some: a thread with other
+  // things to do. The bytes come on the beat regardless.
+  let tickAt = 0;
+  const intervals = [];
+  for (let n = 0; n < 48; n++) {
+    const at = 100 + n * period;
+    while (tickAt + 4 < at) { tickAt += 4 + (n % 5); module.advanceTo(tickAt); }
+    module.deliverRealtime(P.MidiPort.mmMIDI_USB_0, 0xf8, at);
+    // The passes owed up to the byte ran before it - a tick that got in
+    // ahead of the handler may have run further, and that is its business.
+    assert.ok(module.now >= module.simAt(at) - 1000,
+      `the byte at ${at} ms landed with the module at ${module.now} us`);
+    if (n > 0) intervals.push(E.emu_clock_interval_us());
+  }
+  assert.equal(E.emu_clock_rejected_edges(), 0);
+  const off = intervals.filter((us) => Math.abs(us - expected) > 1);
+  assert.deepEqual(off, [], `subtick intervals off ${expected} us: ${off}`);
+  // Without an arrival time - the on-screen keyboard - a message lands at the
+  // module's now, as before.
+  const before = module.now;
+  module.deliverRealtime(P.MidiPort.mmMIDI_USB_0, 0xfa);
+  assert.equal(module.now, before);
+});
+
+test('the controller passes each event\'s own time stamp to the module', () => {
+  const calls = [];
+  const controller = new Controller({
+    deliverRealtime: (...args) => calls.push(['realtime', ...args]),
+    deliverMidi: (...args) => calls.push(['midi', ...args]),
+  });
+  controller.receive([0xf8], 42.5);
+  controller.receive([0x90, 60, 100], 43.25);
+  assert.deepEqual(calls, [
+    ['realtime', controller.port, 0xf8, 42.5],
+    ['midi', controller.port, 0x90, 1, 60, 100, 43.25],
+  ]);
 });
 
 test('a jack tap is an edge, not a level', async () => {

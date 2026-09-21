@@ -1,35 +1,26 @@
-// MIDI: what comes in, what goes out, what the clock follows, and the gear
-// plugged into this computer - a controller playing the module, and the
-// outputs the module plays a synth through. What a controller *moves* is not
-// here: a binding is part of the patch, so it lives in the mod matrix. What
-// is left is the room - the cables, the channels, the clock and Program
-// Change recall, none of which a patch travels with.
-//
-// One panel per concern. The clock is what the module plays *in time with*;
-// recall is how it is told to load another patch; NRPN is a second transport
-// for the same bindings. They shared a panel once, and a panel called "clock
-// and recall" is a panel whose title had already given up.
+// MIDI: what comes in, what goes out, and the gear plugged into this
+// computer - a controller playing the module, and the outputs the module
+// plays a synth through. What a controller *moves* is not here: a binding is
+// part of the patch, so it lives in the mod matrix. Nor is what the module
+// counts time by, or what a Program Change does to it: those belong to the
+// whole module rather than to a cable, and they are on the globals tab with
+// the key (tabs/GlobalsTab.js). What is left is the room - the cables and
+// the channels, none of which a patch travels with.
 
 import { el } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
 import { Field, Fields } from '../components/Field.js';
 import { Select } from '../components/Select.js';
-import { NumberField } from '../components/NumberField.js';
-import { Switch } from '../components/Switch.js';
 import { IconButton } from '../components/IconButton.js';
-import { ChannelSelect } from '../controls/ChannelSelect.js';
-import { PortToggles } from '../controls/PortToggles.js';
-import { ClockFields } from '../controls/ClockFields.js';
 import { RouteCard } from '../panels/RouteCard.js';
-import { MUSICAL_PORTS, SWAP_TIMINGS, CLOCK_MIDI_SOURCE, portNames } from '../../protocol/names.js';
+import { MUSICAL_PORTS } from '../../protocol/names.js';
 import { describeSupport } from '../../runtime/webmidi.js';
 import { cablesOut } from '../../runtime/midiout.js';
 import '../panels/cards.css';
 
 export function MidiTab(app) {
   if (!app.device?.capabilities) return Hint('no module');
-  return el('div', {}, ControllerPanel(app), OutputPanel(app), RoutingPanel(app),
-            ClockPanel(app), RecallPanel(app), NrpnPanel(app));
+  return el('div', {}, ControllerPanel(app), OutputPanel(app), RoutingPanel(app));
 }
 
 // --- routing ---------------------------------------------------------------
@@ -58,92 +49,6 @@ function RouteSide(app, isOut) {
 
 export function RoutingPanel(app) {
   return Panel('MIDI routing', el('div', { class: 'routes' }, RouteSide(app, false), RouteSide(app, true)));
-}
-
-// --- the clock -------------------------------------------------------------
-
-// What the module counts time by, and the cables the clock is routed over.
-// The source and the tempo are the same two fields the module tab draws
-// (controls/ClockFields.js), so the two cannot disagree about what a tempo
-// is; the CV pulse rate is here because it is what the clock *is* out of a
-// jack.
-//
-// **The two masks are not MIDI routing rows**, and they are here rather than
-// in that panel because of it: clock, start, stop and continue are
-// transport-level and reach no note bus (src/patch/patch_codec.h), so there
-// is no cable to draw them on. What is left is the pair of questions a user
-// actually asks - which host this module follows, and what it clocks in turn.
-export function ClockPanel(app) {
-  const g = app.state.globals;
-  const route = (changes) => app.editor.setClockRoute(changes);
-  // The same cable in both masks with MIDI as the source is the module
-  // clocking itself: what arrives on that wire goes straight back out of it.
-  // Said rather than refused - on two DIN sockets it is a chain, and only the
-  // user can see which end of the cable is which.
-  const loop = g.clockSource === CLOCK_MIDI_SOURCE && (g.clockInMask & g.clockOutMask);
-  return Panel('clock',
-    Fields(
-      ...ClockFields(app),
-      Field({ label: 'CV pulses per quarter' }, NumberField({
-        value: g.cvPpqn, min: 1, max: 96, fallback: 4, wide: true, 'aria-label': 'CV pulses per quarter note',
-        onChange: (cvPpqn) => app.editor.setGlobals({ cvPpqn }),
-      }))),
-    Fields(
-      Field({ label: 'follows these ports', hint: 'none = any' }, PortToggles({
-        mask: g.clockInMask, label: 'clock input ports',
-        onChange: (clockInMask) => route({ clockInMask }),
-      })),
-      Field({ label: 'sends clock to', hint: 'none = nowhere' }, PortToggles({
-        mask: g.clockOutMask, label: 'clock output ports',
-        onChange: (clockOutMask) => route({ clockOutMask }),
-      }))),
-    loop ? Hint(`${portNames(g.clockInMask & g.clockOutMask).join(', ')} both follows and sends: on one cable that is the module clocking itself`) : null);
-}
-
-// --- Program Change recall --------------------------------------------------
-
-// How the module is told to load another patch: whether it listens at all,
-// and where a recall it hears lands. The pads that send one are on the
-// surface; this is the module's side of the same conversation.
-export function RecallPanel(app) {
-  const g = app.state.globals;
-  const set = (changes) => app.editor.setGlobals(changes);
-  return Panel('patch recall',
-    Fields(
-      Field({ label: 'Program Change recalls presets' }, Switch({
-        checked: g.pcEnabled !== 0, label: g.pcEnabled ? 'on' : 'off',
-        onChange: (on) => set({ pcEnabled: on ? 1 : 0 }),
-      })),
-      Field({ label: 'listens on' }, ChannelSelect({ value: g.pcChannel, onChange: (pcChannel) => set({ pcChannel }) })),
-      Field({ label: 'a recall lands' }, Select({
-        options: SWAP_TIMINGS, value: g.pcQuantise, onChange: (pcQuantise) => set({ pcQuantise }),
-      }))),
-    Fields(
-      Field({ label: 'from these ports', hint: 'none = any' }, PortToggles({
-        mask: g.pcSourceMask, label: 'Program Change source ports',
-        onChange: (pcSourceMask) => set({ pcSourceMask }),
-      }))));
-}
-
-// --- NRPN --------------------------------------------------------------------
-
-// A second transport for the bindings a CC already reaches: fourteen bits,
-// and its own channel and cables to arrive on.
-export function NrpnPanel(app) {
-  const g = app.state.globals;
-  const nrpn = (changes) => app.editor.setNrpn(changes);
-  return Panel('NRPN',
-    Fields(
-      Field({ label: 'accept NRPN' }, Switch({
-        checked: g.nrpnEnabled !== 0, label: g.nrpnEnabled ? 'on' : 'off',
-        onChange: (on) => nrpn({ nrpnEnabled: on ? 1 : 0 }),
-      })),
-      Field({ label: 'on channel' }, ChannelSelect({ value: g.nrpnChannel, onChange: (nrpnChannel) => nrpn({ nrpnChannel }) }))),
-    Fields(
-      Field({ label: 'from these ports', hint: 'none = any' }, PortToggles({
-        mask: g.nrpnSourceMask, label: 'NRPN source ports',
-        onChange: (nrpnSourceMask) => nrpn({ nrpnSourceMask }),
-      }))));
 }
 
 // --- the gear on this computer ----------------------------------------------

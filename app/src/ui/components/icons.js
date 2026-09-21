@@ -47,6 +47,10 @@ const ICONS = {
   clock: { d: 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16z M12 8v4l3 2' },
   erase: { d: 'M4 15l9-9 6 6-6 6H8z M4 21h16' },
   clear: { d: 'M4 12l6-6h9v12h-9z M12 9l4 6 M16 9l-4 6' },
+  // Three faders, each set somewhere different: the settings that belong to
+  // the whole module rather than to any one node.
+  globals: { d: 'M6 3v5 M6 12v9 M12 3v10 M12 17v4 M18 3v3 M18 10v11 '
+               + 'M4 10h4 M10 15h4 M16 8h4' },
 };
 
 const frame = (...children) => svg('svg', {

@@ -27,7 +27,7 @@ nothing serving it. The build from `main` is live at
 
 ## The shape of it
 
-Six tabs — **patch**, **key**, **MIDI**, **module**, **library**, **schema** — and
+Six tabs — **patch**, **globals**, **MIDI**, **module**, **library**, **schema** — and
 **play** as a button at the top beside *connect a module*, because those two
 answer the same question: which module am I listening to, the one in the page
 or the one on the cable. Play does not open a tab: it opens the performance
@@ -118,8 +118,9 @@ real keys, six octaves, a drag across it playing a glissando, and **a cable and
 channel of its own** — playing a part into one input of the patch while the
 pads drive another is the ordinary case.
 
-**module** — the module running: the LEDs and gate buses, the clock, the jacks,
-an on-screen keyboard and CC sender, and two views that answer questions no
+**module** — the module running: the LEDs and gate buses, the jacks — the sync
+jack among them, since no cable reaches it in a browser — an on-screen keyboard
+and CC sender, and two views that answer questions no
 lamp can. The **scope** draws every jack, gate bus and CV bus the patch uses
 against the last few seconds, which is the only way to read a divider, a
 Euclidean pattern or an LFO. The **piano roll** draws notes with a shade per
@@ -145,15 +146,24 @@ downloadable file. The gate listener blips per rising edge on a chosen gate bus
 or jack, which is the only way a clock division or a logic gate is audible at
 all.
 
-**key** — one scale, one root and one register for the whole patch, drawn on a
-keyboard: the notes of the key are lit, its root is ringed, and pressing a key
-moves the root. Nothing in the patch names a scale or a root of its own; a node
-says only which register it plays in, and its default is the key's.
+**globals** — `GlobalSettings` (`src/patch/patch_codec.h`) drawn, and all of it:
+the key, the clock, Program Change recall and NRPN. A setting is here exactly
+when it travels with the patch and belongs to no node, which is what keeps it a
+page rather than a drawer. The **key** — one scale, one root and one register
+for the whole patch — is drawn on a keyboard: the notes of the key are lit, its
+root is ringed, and pressing a key moves the root. Nothing in the patch names a
+scale or a root of its own; a node says only which register it plays in, and its
+default is the key's. The **clock**'s three settings — what drives it, how fast,
+and the CV rate — are one row at every width, with the cables it follows and
+clocks under them; where the clock is following something else, the panel says
+so, because a tempo field that is not what the module is running at is a number
+to be believed and then disbelieved.
 
-**MIDI** — the external controller, the external MIDI out, routing, the clock
-and Program Change recall: the room the module is in, none of which a patch
-travels with. What a controller *moves* is in the patch, so it is in the mod
-matrix.
+**MIDI** — the external controller, the external MIDI out and routing: the room
+the module is in, none of which a patch travels with. What a controller *moves*
+is in the patch, so it is in the mod matrix; what it counts time by, and what a
+Program Change does to it, belong to the module rather than to a cable, so they
+are on the globals tab.
 
 **library** — where a patch lives: this browser, a file, or the module's preset
 slots.

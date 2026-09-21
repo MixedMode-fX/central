@@ -1,24 +1,29 @@
 // The play surface: the module, running, with the few controls a module has
-// - two LEDs, eight jacks, a clock and its MIDI - plus the three things a
-// rack cannot give you: ears, an on-screen keyboard, and a time axis.
+// - two LEDs, its jacks and its MIDI - plus the three things a rack cannot
+// give you: ears, an on-screen keyboard, and a time axis.
+//
+// **What the clock is set to is not here.** The source, the tempo and the
+// cables it is routed over are globals (tabs/GlobalsTab.js), and a second
+// copy of them on this tab was one more place for the same two numbers to be
+// read off. What is left of the clock here is the sync jack, which is a jack:
+// the one no cable reaches in a browser, so the page has to pulse it.
 
 import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
-import { Labelled, Fields } from '../components/Field.js';
+import { Labelled } from '../components/Field.js';
 import { Select, range } from '../components/Select.js';
 import { NumberField } from '../components/NumberField.js';
 import { Switch } from '../components/Switch.js';
 import { LevelSlider } from '../components/Slider.js';
 import { IconButton } from '../components/IconButton.js';
-import { ClockFields } from '../controls/ClockFields.js';
 import { Meters } from '../panels/Meters.js';
 import { ScopePanel, RollPanel } from '../scope/ScopePanels.js';
 import { busPeers } from '../../core/patch.js';
 import { busWords } from '../../core/graph.js';
 import { Domain } from '../../core/validate.js';
 import { noteName } from '../../core/music.js';
-import { portNames } from '../../protocol/names.js';
+import { portNames, CLOCK_CV_SOURCE } from '../../protocol/names.js';
 import { MachineBadge, PortSelect } from '../components/Machine.js';
 import { Keyboard } from '../components/Keyboard.js';
 import { WAVES } from '../../runtime/audio/listener.js';
@@ -50,31 +55,8 @@ export function PlayTab(app) {
       KeyboardPanel(app));
   }
   return el('div', {},
-    Meters(app), ClockPanel(app), ScopePanel(app), RollPanel(app),
+    Meters(app), ScopePanel(app), RollPanel(app),
     JacksPanel(app), KeyboardPanel(app), ListenPanel(app), MonitorPanel(app));
-}
-
-// --- the clock ------------------------------------------------------------------
-
-function ClockPanel(app) {
-  const module = app.module;
-  const g = app.state.globals;
-  const extras = [];
-  if (g.clockSource === 1) {
-    // The sync jack is not one of the eight, so it needs its own control or
-    // a CV-clocked patch cannot be tried at all without a cable.
-    extras.push(Row(
-      el('button', { onclick: () => module.syncPulse() }, 'sync pulse'),
-      NumberField({ value: module.syncHz, min: 0, max: 100, step: 0.5, 'aria-label': 'sync pulses per second',
-                    onChange: (hz) => module.setSyncRate(hz) }),
-      el('span', { class: 'hint' }, 'Hz')));
-  }
-  if (g.clockSource === 2) extras.push(Hint('waiting for MIDI clock'));
-  // Start, stop and continue used to be here, which is exactly what made them
-  // hard to reach: they are in the shell's bar and on the surface now
-  // (components/Transport.js). What is left is the clock itself - what drives
-  // it, how fast, and the sync jack no cable reaches in a browser.
-  return Panel('clock', Fields(...ClockFields(app)), extras);
 }
 
 // --- jacks ------------------------------------------------------------------
@@ -112,10 +94,34 @@ function JacksPanel(app) {
       lamp.classList.toggle('lit', Boolean((isIn ? activity.jackIn : activity.jackOut) & (1 << j)));
     }
   });
+  // The sync jack rides in the same grid as the eight: it is a jack, and a
+  // box of its own outside the grid would sit at a different width.
+  const sync = SyncCard(app);
   return Panel('jacks',
-    cards.length ? el('div', { class: 'jack-cards' }, cards) : Hint('no jacks'),
+    cards.length || sync ? el('div', { class: 'jack-cards' }, sync, cards) : null,
+    cards.length ? null : Hint('no jack is in this patch'),
     // Eight cards saying "not used" is a screenful of nothing on a phone.
     unused.length ? Hint(`unused: ${unused.join(', ')}`) : null);
+}
+
+// The sync jack, which is not one of the eight and has no card of its own in
+// the patch: it is where an analogue clock arrives. A browser reaches no
+// cable, so a CV-clocked patch cannot be tried at all unless the page can
+// pulse it - by hand, or at a rate.
+function SyncCard(app) {
+  const module = app.module;
+  // Only when the clock is following it: a sync jack nothing is counting is
+  // a row that does nothing, and where the clock's source is set is one tab
+  // away (tabs/GlobalsTab.js).
+  if (app.state.globals.clockSource !== CLOCK_CV_SOURCE) return null;
+  return el('div', { class: 'jack-card' },
+    el('div', { class: 'jack-head' },
+      el('span', {}, 'sync jack'), el('span', { class: 'hint' }, 'the clock')),
+    Row(el('button', { onclick: () => module.syncPulse() }, 'sync pulse'),
+        NumberField({ value: module.syncHz, min: 0, max: 100, step: 0.5,
+                      'aria-label': 'sync pulses per second',
+                      onChange: (hz) => module.setSyncRate(hz) }),
+        el('span', { class: 'hint' }, 'Hz')));
 }
 
 // --- playing ----------------------------------------------------------------

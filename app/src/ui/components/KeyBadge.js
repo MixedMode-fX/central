@@ -123,7 +123,7 @@ export function KeyBadge(app, { index = null } = {}) {
   // is to change it, and the page it is changed on is two taps away otherwise.
   const badge = el('button', {
     type: 'button', class: 'kbadge', title: '',
-    onclick: () => app.showTab?.('key'),
+    onclick: () => app.showTab?.('globals'),
   }, dial, name, chord);
 
   // The root arrives while the module runs, so the chord half is written per

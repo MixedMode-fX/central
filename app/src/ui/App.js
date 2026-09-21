@@ -1,7 +1,7 @@
 // The shell: the header, the tabs, what went wrong, and the tab on screen.
 //
-// Six tabs - patch, key, MIDI, module, library, schema - in the order the work
-// happens, and **play** as a button at the top beside *connect a module*,
+// Six tabs - patch, globals, MIDI, module, library, schema - in the order the
+// work happens, and **play** as a button at the top beside *connect a module*,
 // because those two answer the same question: which module am I listening
 // to, the one in the page or the one on the cable.
 //
@@ -29,14 +29,14 @@ import { drumSources } from '../runtime/audio/drums.js';
 import { PatchTab } from './tabs/PatchTab.js';
 import { PlayTab } from './tabs/PlayTab.js';
 import { Surface } from './surface/Surface.js';
-import { KeyTab } from './tabs/KeyTab.js';
+import { GlobalsTab } from './tabs/GlobalsTab.js';
 import { MidiTab } from './tabs/MidiTab.js';
 import { LibraryTab } from './tabs/LibraryTab.js';
 import { SchemaTab } from './tabs/SchemaTab.js';
 
 const TABS = [
   { key: 'patch', label: 'patch', icon: 'patch', view: PatchTab },
-  { key: 'key', label: 'key', icon: 'key', view: KeyTab },
+  { key: 'globals', label: 'globals', icon: 'globals', view: GlobalsTab },
   { key: 'midi', label: 'MIDI', icon: 'midi', view: MidiTab },
   { key: 'module', label: 'module', icon: 'clock', view: PlayTab },
   { key: 'library', label: 'library', icon: 'library', view: LibraryTab },

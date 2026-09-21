@@ -53,7 +53,7 @@ import { Play } from '../src/services/play.js';
 import { Transport } from '../src/services/transport.js';
 import { Transport as TransportView } from '../src/ui/components/Transport.js';
 import { Device } from '../src/protocol/device.js';
-import { KeyTab } from '../src/ui/tabs/KeyTab.js';
+import { GlobalsTab, KeyPanel, ClockPanel } from '../src/ui/tabs/GlobalsTab.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
 import { shade, nodeRollSources, scopeRows, blockSignals } from '../src/ui/scope/scope.js';
 import { BlockSignalsPanel } from '../src/ui/scope/ScopePanels.js';
@@ -74,8 +74,8 @@ import {
 import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js';
 import { OUTPUT_LATENCY_MS } from '../src/runtime/module.js';
 import { Heartbeat } from '../src/runtime/heartbeat.js';
-import { OutputPanel, ClockPanel } from '../src/ui/tabs/MidiTab.js';
-import { CLOCK_MIDI_SOURCE } from '../src/protocol/names.js';
+import { MidiTab, OutputPanel } from '../src/ui/tabs/MidiTab.js';
+import { CLOCK_CV_SOURCE, CLOCK_MIDI_SOURCE } from '../src/protocol/names.js';
 import {
   instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, fakeAudioThread,
   fakePage, listening, patched, words, find, findAll, withDom, repoRoot,
@@ -1138,16 +1138,16 @@ test('a knob and a modulator can be pointed at the key', async () => {
   await device.sendPatch(patch, codec.emptyGlobals());
 });
 
-// The key tab is the only place a scale is chosen, so it has to show what the
-// choice does: a keyboard with the notes of the key lit, the root ringed, and
-// every key a way of moving the root.
-test('the key tab draws the scale on a keyboard, and a key moves the root', async () => {
+// The key panel on the globals tab is the only place a scale is chosen, so it
+// has to show what the choice does: a keyboard with the notes of the key lit,
+// the root ringed, and every key a way of moving the root.
+test('the key panel draws the scale on a keyboard, and a key moves the root', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
   const globals = { ...codec.emptyGlobals(), scale: P.ScaleId.SCALE_NATURAL_MINOR, root: 9 };
   const app = fakeApp({ device, globals });
 
-  const panel = withDom(() => KeyTab(app));
+  const panel = withDom(() => KeyPanel(app));
   const board = find(panel, (n) => n.className === 'keyboard');
   assert.ok(board, 'there is a keyboard');
   // Two octaves: fourteen white keys and ten black ones, in piano order.
@@ -1171,7 +1171,7 @@ test('the key tab draws the scale on a keyboard, and a key moves the root', asyn
   // And in a flat key it says so: the panel claims to be what a musician
   // writes down, so it cannot write the third of C minor as D sharp.
   globals.root = 0;
-  const flat = withDom(() => KeyTab(app));
+  const flat = withDom(() => KeyPanel(app));
   assert.match(words(flat), /C minor — C D E\u266d F G A\u266d B\u266d/);
   assert.ok(find(flat, (n) => n.attrs?.['aria-label'] === 'root E\u266d'),
             'the keyboard is spelled the same way as the sentence under it');
@@ -1180,6 +1180,58 @@ test('the key tab draws the scale on a keyboard, and a key moves the root', asyn
   dark.fire('click');
   assert.equal(globals.root, 1, 'pressing C# put the module in C#');
   assert.deepEqual(app.calls.at(-1), ['globals', { root: 1 }, 'key'], 'and it was sent as the key');
+});
+
+// The globals tab is `GlobalSettings` (src/patch/patch_codec.h) drawn, and
+// the point of it is that it is *all* of it: the key, the clock, Program
+// Change recall and NRPN were three tabs apart, which put the two most
+// global things in the machine - what key it is in and what it counts time
+// by - in different places.
+test('the globals tab gathers the key, the clock, recall and NRPN', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const app = fakeApp({ device, module, globals: { ...codec.emptyGlobals() } });
+
+  const said = withDom(() => words(GlobalsTab(app)));
+  for (const panel of ['the key', 'clock', 'patch recall', 'NRPN']) {
+    assert.match(said, new RegExp(panel), `${panel} is not on the globals tab`);
+  }
+
+  // And what is left of the MIDI tab is the room: the cables and the gear on
+  // this computer, with none of the globals doubled onto it.
+  const midi = withDom(() => words(MidiTab(app)));
+  assert.match(midi, /MIDI routing/);
+  assert.doesNotMatch(midi, /patch recall|NRPN|tempo/);
+});
+
+// What the clock runs on is one row - the source, the tempo and the CV rate
+// - on a phone as much as on a desk: a column of three pushed the cables the
+// clock is routed over off a phone screen. The row is a grid of its own
+// (Globals.css); what the test can say is that the three are in it.
+test('the clock runs off one row of three fields', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const app = fakeApp({ device, module, globals: { ...codec.emptyGlobals() } });
+
+  const row = withDom(() => find(ClockPanel(app), (n) => n.className === 'fields clock'));
+  assert.ok(row, 'the clock has no row of its own');
+  assert.equal(row.children.length, 3);
+  assert.match(words(row), /source.*tempo.*CV PPQN/s);
+});
+
+// A tempo that is not what the module is running at is a number to be
+// believed and then disbelieved, so the panel says which of them is driving.
+test('the clock says when the tempo is coming from somewhere else', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const globals = { ...codec.emptyGlobals() };
+  const app = fakeApp({ device, module, globals });
+
+  assert.doesNotMatch(withDom(() => words(ClockPanel(app))), /comes from/);
+  globals.clockSource = CLOCK_CV_SOURCE;
+  assert.match(withDom(() => words(ClockPanel(app))), /comes from the sync jack/);
+  globals.clockSource = CLOCK_MIDI_SOURCE;
+  assert.match(withDom(() => words(ClockPanel(app))), /comes from the MIDI clock/);
 });
 
 // A pitch class is a number and a number has no spelling, so a list of sharps

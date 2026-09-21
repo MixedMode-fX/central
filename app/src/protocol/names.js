@@ -133,6 +133,10 @@ export const CLOCK_SOURCES = [
   { value: 2, label: 'MIDI clock', hint: 'F8 from a host or a drum machine' },
 ];
 
+// MasterClock::CLOCK_CV: the one source that arrives on the sync jack, which
+// is not one of the eight and which no cable reaches in a browser.
+export const CLOCK_CV_SOURCE = 1;
+
 // MasterClock::CLOCK_MIDI: the one source that also *arrives* on a cable, and
 // so the one a clock output mask can double back on.
 export const CLOCK_MIDI_SOURCE = 2;

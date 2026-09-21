@@ -69,7 +69,7 @@ export function fakeApp({ patch, globals, device = null, module = null, controll
                       'setConnection', 'setJack', 'setMidiPort', 'setModRoute', 'setCcMap', 'learnInto',
                       'removeNode', 'removeBlock', 'applyPlan', 'add', 'addMidiPort',
                       'copyBlock', 'duplicateBlock', 'paste',
-                      'setMacro', 'setMacroDest', 'clearMacroDest', 'addMacroDest']) {
+                      'setMacro', 'setMacroDest', 'clearMacroDest', 'addMacroDest', 'setNrpn']) {
     editor[name] = record(name);
   }
   editor.caps = device?.capabilities ?? null;

@@ -127,7 +127,6 @@ export class EmbeddedModule {
     // module has ever sent and never goes backwards.
     this.midiSeq = 0;
     this.notes = [];              // what the piano roll draws: notes, in and out
-    this.accepted = null;         // ports that took the last delivered event
 
     // Sampled once per pass, which is the only rate that tells the truth: a
     // trigger is high for a millisecond or two and an animation frame is
@@ -576,19 +575,13 @@ export class EmbeddedModule {
   // control plane - which is a visible answer to "why did nothing happen?".
   deliverMidi(port, type, channel, d1 = 0, d2 = 0) {
     const E = this.E;
-    if (type === PROGRAM_CHANGE && E.emu_control_program_change(port, channel, d1, this.now)) {
-      this.accepted = null;
-      return null;
-    }
-    if (type === CONTROL_CHANGE && E.emu_control_cc(port, channel, d1, d2, this.now)) {
-      this.accepted = null;
-      return null;
-    }
-    this.accepted = E.emu_deliver_midi(port, type, channel, d1, d2, this.now);
+    if (type === PROGRAM_CHANGE && E.emu_control_program_change(port, channel, d1, this.now)) return null;
+    if (type === CONTROL_CHANGE && E.emu_control_cc(port, channel, d1, d2, this.now)) return null;
+    const accepted = E.emu_deliver_midi(port, type, channel, d1, d2, this.now);
     // Into the roll as well, so the keyboard, a controller and the patch's own
     // output are all on one time line: what went in, and what came out of it.
     this.rollNote('in', { t: this.now, type, d1, d2, channel, target: port });
-    return this.accepted;
+    return accepted;
   }
 
   // A realtime byte (clock, start, stop, continue) goes straight in: it has no

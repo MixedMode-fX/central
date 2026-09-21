@@ -2,12 +2,15 @@
 // - two LEDs, its jacks and its MIDI - plus the two things a rack cannot give
 // you: ears and a time axis.
 //
-// **There is no keyboard here.** One belongs to the performance surface,
-// summoned over it with its own cable, channel and octave strip
-// (ui/components/Keyboard.js), and two of them meant two places to set the
-// same three things and one of them always being the stale one. What is left
-// of this panel is the cable the page sends on and a CC to send down it,
-// which is the half a keyboard cannot do.
+// **Nothing here plays the module.** A keyboard and a CC sender both lived on
+// this tab and both exist on the performance surface: the keyboard summoned
+// over it with its own cable, channel and octave strip, and a CC on any of
+// the eight pots (ui/surface/Surface.js, services/surface.js). Two of each
+// meant two places to set the same cable and channel, and one of them was
+// always the stale one. What this tab is for is watching the module run -
+// the lamps, the traces, the jacks, the sound and the log - and the
+// **monitor** below says what any of it sent, which is the readout the
+// sender used to carry.
 //
 // **What the clock is set to is not here.** The source, the tempo and the
 // cables it is routed over are globals (tabs/GlobalsTab.js), and a second
@@ -31,7 +34,7 @@ import { busWords } from '../../core/graph.js';
 import { Domain } from '../../core/validate.js';
 import { noteName } from '../../core/music.js';
 import { portNames, CLOCK_CV_SOURCE } from '../../protocol/names.js';
-import { MachineBadge, PortSelect } from '../components/Machine.js';
+import { MachineBadge } from '../components/Machine.js';
 import { WAVES } from '../../runtime/audio/listener.js';
 import { KITS, PIECE_LABELS } from '../../runtime/audio/drums.js';
 import './Play.css';
@@ -57,12 +60,11 @@ export function PlayTab(app) {
         Row(MachineBadge(app)),
         Hint('its jacks, LEDs and sound are its own: the meters, the scope and the '
              + 'audio below need the module in the page'),
-        Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))),
-      SendPanel(app));
+        Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))));
   }
   return el('div', {},
     Meters(app), ScopePanel(app), RollPanel(app),
-    JacksPanel(app), SendPanel(app), ListenPanel(app), MonitorPanel(app));
+    JacksPanel(app), ListenPanel(app), MonitorPanel(app));
 }
 
 // --- jacks ------------------------------------------------------------------
@@ -128,41 +130,6 @@ function SyncCard(app) {
                       'aria-label': 'sync pulses per second',
                       onChange: (hz) => module.setSyncRate(hz) }),
         el('span', { class: 'hint' }, 'Hz')));
-}
-
-// --- sending by hand ---------------------------------------------------------
-
-// A CC sent from the page, on a chosen cable and channel: the one musical
-// message the surface's pads and pots cannot send on demand, because each of
-// those carries whatever it was assigned. Notes are played on the surface
-// (the **play** button, then the keyboard) - this is what is left when they
-// move there, and the cable is here because it is what decides whether a CC
-// sent from this page is heard at all (services/play.js).
-function SendPanel(app) {
-  const play = app.state.ui.play;
-  const accepted = el('span', { class: 'hint' }, '');
-  if (app.session.usingModule) {
-    app.live.paint(({ module: m }) => {
-      accepted.textContent = m.accepted === null ? '' : `taken by ${m.accepted} port(s)`;
-    });
-  }
-  const number = (key, min, max, label) => NumberField({
-    value: play[key], min, max, 'aria-label': label, onChange: (v) => { play[key] = v; },
-  });
-
-  return Panel('send',
-    // Which machine, and which of its cables - neither of which a view should
-    // be guessing at (services/play.js).
-    Row(MachineBadge(app, { compact: true })),
-    Row(PortSelect(app),
-        ...Labelled('channel', number('channel', 1, 16, 'channel')),
-        accepted),
-    // No all-notes-off here: it was this panel's own cable and channel only,
-    // and the panic in the bar above is every port and every channel of
-    // whatever is playing (services/transport.js).
-    Row(...Labelled('CC', number('cc', 0, 127, 'CC number')),
-        ...Labelled('value', number('ccValue', 0, 127, 'CC value')),
-        el('button', { onclick: () => app.play.cc(play.cc, play.ccValue) }, 'send')));
 }
 
 // --- listening -------------------------------------------------------------

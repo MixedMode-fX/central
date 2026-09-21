@@ -22,7 +22,7 @@
 //     `Controller.setPort` gives an external controller.
 //
 // A message may name its own cable and channel. The keyboard plays on the one
-// the play panel is set to; a surface control carries its own, because a pad
+// its own bar is set to; a surface control carries its own, because a pad
 // launching a preset and a pad playing a drum are two different inputs of the
 // module as far as the patch is concerned (services/surface.js).
 
@@ -144,7 +144,7 @@ export class Play {
 
   // `where` is anything carrying a `port` and a `channel` - a pad, a pot -
   // and each is taken on its own: a control that names a cable and not a
-  // channel plays on the panel's channel.
+  // channel plays on the keyboard's channel.
   cable(where) {
     return { port: where?.port ?? this.port, channel: where?.channel ?? this.channel };
   }

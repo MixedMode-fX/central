@@ -372,6 +372,31 @@ export const EXAMPLES = {
       midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
     },
   },
+  'Envelopes': {
+    category: 'modulation',
+    about: 'Two envelopes, and the two things an envelope is. Hold jack 8: the ADSR climbs over a whole bar, waits at the top for as long as the jack is held \u2014 that waiting is the entire difference between an envelope and an LFO \u2014 and falls away over two bars once it is let go, filling the sequencer in and thinning it out with it. Jack 1 pulses when that contour finally ends. Underneath, an AD set to loop \u2018cycle\u2019 never waits for anything: an eighth up and an eighth down, for ever, driving the velocity of every note so each beat is played with an accent shape rather than one loudness. Both are locked to the clock rather than set in milliseconds, so every stage is a note value and the whole thing moves with the tempo. Under play, set the AD\u2019s attack curve either way and the accent leans forward or back; set its loop to off and the beat goes flat until jack 8 is touched.',
+    patch: {
+      globals: { scale: 'minor', root: 0, bpm: 104 },
+      gate_ports: [{ port: 8, dir: 'in', bus: 0 }, { port: 1, dir: 'out', bus: 3 },
+                   { port: 2, dir: 'out', bus: 4 }],
+      nodes: [
+        { algo: 'Metronome', out: [1], seq: { division: '1/16' } },
+        { algo: 'RandomSequencer', in: [1], out: [2], params: [16, 0, 0, 10, 0] },
+        { algo: 'GateToNote', in: [2], out: [0], params: [48, 60, 1] },
+        // sync=clock, attack a bar, decay off, sustain full, release two bars.
+        { algo: 'ADSR', in: [0], out: [0, 3], params: [2, 0, 0, 0, 0, 4, 0, 0, 0, 0, 11, 0, 100, 0, 3] },
+        // sync=clock, an eighth up and an eighth down, cycling for ever.
+        { algo: 'AD', out: [1, 4], params: [2, 0, 0, 0, 0, 7, 0, 0, 0, 0, 7, 0, 0, 0, 3] },
+      ],
+      mod_map: [
+        { slot: 0, bus: 0, targetKind: 0, targetIndex: 1, param: 3,
+          min: 0, max: 0, depth: 255, flags: 0 },
+        { slot: 1, bus: 1, targetKind: 0, targetIndex: 2, param: 1,
+          min: 0, max: 0, depth: 255, flags: 0 },
+      ],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }],
+    },
+  },
   'Sample and hold': {
     category: 'modulation',
     about: 'The oldest modular utility there is. SampleHold takes one reading of its own noise on every trigger and holds it steady between triggers; a modulation route turns that held level into the transposition a sequence is played at, so the melody moves in whole steps rather than sliding. Slew is patched between them \u2014 set its rise and fall above zero under play to hear the steps become glides.',

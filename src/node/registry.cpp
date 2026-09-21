@@ -43,6 +43,7 @@
 #include "algorithm/logic/shift_register.h"
 #include "algorithm/logic/edge.h"
 #include "algorithm/modulator/gate_to_cv.h"
+#include "algorithm/modulator/envelope.h"
 
 // The compile-time table. Every algorithm's code is always resident; this is
 // what a patch selects an instance from.
@@ -104,6 +105,8 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &GateToCv::descriptor,
     &CvSwitch::descriptor,
     &CvRouter::descriptor,
+    &AdEnvelope::descriptor,
+    &AdsrEnvelope::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

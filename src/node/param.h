@@ -24,6 +24,7 @@ enum ParamKind : uint8_t {
     PARAM_CHANNEL,      // MIDI channel, 1..16 (0, where a descriptor allows it, is omni)
     PARAM_CENTRED,      // a byte biased by PARAM_CENTRE: the value is stored - 128
     PARAM_CHANNEL_OUT,  // the channel a node sends on; 0 keeps the incoming one
+    PARAM_ENV_TIME,     // an envelope stage's length: see ENV_TIME_UNIT_US
 };
 
 // **A channel a node *reads* and a channel a node *sends on* are not the same
@@ -34,6 +35,32 @@ enum ParamKind : uint8_t {
 // channel it arrived on. An editor showing "omni" over a transposer's output
 // is telling the player the opposite of what the byte does, so the two kinds
 // are separate and each says its own zero.
+
+// What one step of a PARAM_ENV_TIME byte is worth, at the bottom of its range.
+//
+// **An envelope stage cannot be a linear byte of milliseconds.** The stages a
+// musician wants run from an instant attack to a thirty-second swell, and one
+// byte cannot hold both linearly: at 1 ms a step the range stops at a quarter
+// of a second, and at 128 ms a step the shortest attack there is is an eighth
+// of a second, which is a pad and never a pluck. So the byte is squared -
+// `n` is `n * n * ENV_TIME_UNIT_US` microseconds - which spends its
+// resolution where the ear is: half a millisecond a step at the fast end,
+// where the difference between 5 ms and 10 ms is the difference between a
+// click and a knock, and a quarter of a second a step at the slow end, where
+// it is under one percent of a thirty-second fade.
+//
+// 1 is half a millisecond, which is one pass of the graph and is the byte
+// that means "no stage at all"; 255 is 32.5 seconds.
+//
+// A #define, and the arithmetic is one multiply, because app/src/protocol/generated.js
+// is generated from these headers and the editor has to print the same
+// seconds the firmware counts (app/tools/generate-protocol.mjs).
+#define ENV_TIME_UNIT_US 500
+
+// What a PARAM_ENV_TIME byte is worth, in microseconds.
+inline uint32_t param_env_time_us(uint8_t stored){
+    return (uint32_t)stored * (uint32_t)stored * (uint32_t)ENV_TIME_UNIT_US;
+}
 
 // The zero of a PARAM_CENTRED byte.
 //

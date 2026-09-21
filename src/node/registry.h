@@ -65,6 +65,8 @@ enum AlgorithmId : uint8_t {
     ALGO_GATE_TO_CV   = 55,
     ALGO_CV_SWITCH    = 56,
     ALGO_CV_ROUTER    = 57,
+    ALGO_AD           = 58,
+    ALGO_ADSR         = 59,
 };
 
 enum ConfigError : uint8_t {

@@ -92,7 +92,13 @@
    other room for it, and a keyboard nobody can aim is a keyboard that plays
    into whichever cable was last chosen somewhere else. */
 .pk-overlay-controls { display: flex; gap: .3rem; align-items: center; min-width: 0; }
-.pk-overlay-controls select { max-width: 6.5rem; }
+.pk-overlay-controls select { max-width: 6.5rem; min-width: 0; }
+.pk-overlay-controls .number { width: 3.1rem; }
+/* Three controls and a close button on a 360-wide case: the cable is the one
+   that can lose letters and still be read, because it is also named in the
+   surface's own header. */
+.pk-overlay-controls .machine-port { gap: .3rem; min-width: 0; }
+.pk-overlay-controls .machine-port:first-child select { max-width: 5.2rem; }
 
 @media (min-width: 34rem) {
   .pk-track { --pk-w: 2.8rem; height: 9rem; }

@@ -1,29 +1,41 @@
-// The play surface: the module, running, with the few controls a module has
-// - two LEDs, eight jacks, a clock and its MIDI - plus the three things a
-// rack cannot give you: ears, an on-screen keyboard, and a time axis.
+// The monitor: the module running, watched. Two LEDs, its jacks, its sound,
+// two time axes and its MIDI log - the things a rack shows you on its front
+// panel, plus the ones it cannot.
+//
+// **Nothing here plays the module**, which is what the tab is named after. A
+// keyboard and a CC sender both lived here and both exist on the performance
+// surface: the keyboard summoned over it with its own cable, channel and
+// octave strip, and a CC on any of the eight pots (ui/surface/Surface.js,
+// services/surface.js). Two of each meant two places to set the same cable
+// and channel, and one of them was always the stale one. So this tab watches
+// and the surface plays, and the MIDI log below says what the surface did.
+//
+// **What the clock is set to is not here.** The source, the tempo and the
+// cables it is routed over are globals (tabs/GlobalsTab.js), and a second
+// copy of them on this tab was one more place for the same two numbers to be
+// read off. What is left of the clock here is the sync jack, which is a jack:
+// the one no cable reaches in a browser, so the page has to pulse it.
 
 import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
-import { Labelled, Fields } from '../components/Field.js';
+import { Labelled } from '../components/Field.js';
 import { Select, range } from '../components/Select.js';
 import { NumberField } from '../components/NumberField.js';
 import { Switch } from '../components/Switch.js';
 import { LevelSlider } from '../components/Slider.js';
 import { IconButton } from '../components/IconButton.js';
-import { ClockFields } from '../controls/ClockFields.js';
 import { Meters } from '../panels/Meters.js';
 import { ScopePanel, RollPanel } from '../scope/ScopePanels.js';
 import { busPeers } from '../../core/patch.js';
 import { busWords } from '../../core/graph.js';
 import { Domain } from '../../core/validate.js';
 import { noteName } from '../../core/music.js';
-import { portNames } from '../../protocol/names.js';
-import { MachineBadge, PortSelect } from '../components/Machine.js';
-import { Keyboard } from '../components/Keyboard.js';
+import { portNames, CLOCK_CV_SOURCE } from '../../protocol/names.js';
+import { MachineBadge } from '../components/Machine.js';
 import { WAVES } from '../../runtime/audio/listener.js';
 import { KITS, PIECE_LABELS } from '../../runtime/audio/drums.js';
-import './Play.css';
+import './Monitor.css';
 
 const MIDI_TYPES = {
   0x80: 'note off', 0x90: 'note on', 0xa0: 'poly AT', 0xb0: 'CC', 0xc0: 'program',
@@ -34,7 +46,7 @@ const LOG_MS = 60;
 
 const peers = (app, domain, bus) => busPeers(app.device, app.state.patch, domain, bus);
 
-export function PlayTab(app) {
+export function MonitorTab(app) {
   if (!app.module) return Hint('the built-in module is not running');
   // A module on the cable has its own jacks, LEDs and sound, and the page
   // cannot show any of that. It can still be **played** - that is what
@@ -46,35 +58,11 @@ export function PlayTab(app) {
         Row(MachineBadge(app)),
         Hint('its jacks, LEDs and sound are its own: the meters, the scope and the '
              + 'audio below need the module in the page'),
-        Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))),
-      KeyboardPanel(app));
+        Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))));
   }
   return el('div', {},
-    Meters(app), ClockPanel(app), ScopePanel(app), RollPanel(app),
-    JacksPanel(app), KeyboardPanel(app), ListenPanel(app), MonitorPanel(app));
-}
-
-// --- the clock ------------------------------------------------------------------
-
-function ClockPanel(app) {
-  const module = app.module;
-  const g = app.state.globals;
-  const extras = [];
-  if (g.clockSource === 1) {
-    // The sync jack is not one of the eight, so it needs its own control or
-    // a CV-clocked patch cannot be tried at all without a cable.
-    extras.push(Row(
-      el('button', { onclick: () => module.syncPulse() }, 'sync pulse'),
-      NumberField({ value: module.syncHz, min: 0, max: 100, step: 0.5, 'aria-label': 'sync pulses per second',
-                    onChange: (hz) => module.setSyncRate(hz) }),
-      el('span', { class: 'hint' }, 'Hz')));
-  }
-  if (g.clockSource === 2) extras.push(Hint('waiting for MIDI clock'));
-  // Start, stop and continue used to be here, which is exactly what made them
-  // hard to reach: they are in the shell's bar and on the surface now
-  // (components/Transport.js). What is left is the clock itself - what drives
-  // it, how fast, and the sync jack no cable reaches in a browser.
-  return Panel('clock', Fields(...ClockFields(app)), extras);
+    Meters(app), ScopePanel(app), RollPanel(app),
+    JacksPanel(app), ListenPanel(app), LogPanel(app));
 }
 
 // --- jacks ------------------------------------------------------------------
@@ -112,51 +100,34 @@ function JacksPanel(app) {
       lamp.classList.toggle('lit', Boolean((isIn ? activity.jackIn : activity.jackOut) & (1 << j)));
     }
   });
+  // The sync jack rides in the same grid as the eight: it is a jack, and a
+  // box of its own outside the grid would sit at a different width.
+  const sync = SyncCard(app);
   return Panel('jacks',
-    cards.length ? el('div', { class: 'jack-cards' }, cards) : Hint('no jacks'),
+    cards.length || sync ? el('div', { class: 'jack-cards' }, sync, cards) : null,
+    cards.length ? null : Hint('no jack is in this patch'),
     // Eight cards saying "not used" is a screenful of nothing on a phone.
     unused.length ? Hint(`unused: ${unused.join(', ')}`) : null);
 }
 
-// --- playing ----------------------------------------------------------------
-
-function KeyboardPanel(app) {
-  const play = app.state.ui.play;
-  const accepted = el('span', { class: 'hint' }, '');
-  if (app.session.usingModule) {
-    app.live.paint(({ module: m }) => {
-      accepted.textContent = m.accepted === null ? '' : `taken by ${m.accepted} port(s)`;
-    });
-  }
-  const number = (key, min, max, label) => NumberField({
-    value: play[key], min, max, 'aria-label': label, onChange: (v) => { play[key] = v; },
-  });
-
-  return Panel('play',
-    // Which machine, and which of its cables - both of which decide whether a
-    // key played here is heard at all, and neither of which a view should be
-    // guessing at (services/play.js).
-    Row(MachineBadge(app, { compact: true })),
-    Row(PortSelect(app),
-        ...Labelled('channel', number('channel', 1, 16, 'channel')),
-        ...Labelled('velocity', number('velocity', 1, 127, 'velocity')),
-        accepted),
-    // The one keyboard component (ui/components/Keyboard.js). It takes
-    // callbacks and knows nothing about where a note goes.
-    Keyboard({
-      octave: play.octave, velocity: play.velocity,
-      mounted: (fn) => app.live.onMount(fn),
-      onOctave: (octave) => { play.octave = octave; },
-      onNoteOn: (pitch, velocity) => app.play.noteOn(pitch, velocity),
-      onNoteOff: (pitch) => app.play.noteOff(pitch),
-    }),
-    Hint('a key is louder towards its bottom edge; the velocity above is its loud end'),
-    // No all-notes-off here: it was this panel's own cable and channel only,
-    // and the panic in the bar above is every port and every channel of
-    // whatever is playing (services/transport.js).
-    Row(...Labelled('CC', number('cc', 0, 127, 'CC number')),
-        ...Labelled('value', number('ccValue', 0, 127, 'CC value')),
-        el('button', { onclick: () => app.play.cc(play.cc, play.ccValue) }, 'send')));
+// The sync jack, which is not one of the eight and has no card of its own in
+// the patch: it is where an analogue clock arrives. A browser reaches no
+// cable, so a CV-clocked patch cannot be tried at all unless the page can
+// pulse it - by hand, or at a rate.
+function SyncCard(app) {
+  const module = app.module;
+  // Only when the clock is following it: a sync jack nothing is counting is
+  // a row that does nothing, and where the clock's source is set is one tab
+  // away (tabs/GlobalsTab.js).
+  if (app.state.globals.clockSource !== CLOCK_CV_SOURCE) return null;
+  return el('div', { class: 'jack-card' },
+    el('div', { class: 'jack-head' },
+      el('span', {}, 'sync jack'), el('span', { class: 'hint' }, 'the clock')),
+    Row(el('button', { onclick: () => module.syncPulse() }, 'sync pulse'),
+        NumberField({ value: module.syncHz, min: 0, max: 100, step: 0.5,
+                      'aria-label': 'sync pulses per second',
+                      onChange: (hz) => module.setSyncRate(hz) }),
+        el('span', { class: 'hint' }, 'Hz')));
 }
 
 // --- listening -------------------------------------------------------------
@@ -380,13 +351,13 @@ function nextGateSource(app) {
   return { kind: 'jacks', index: 0 };
 }
 
-// --- the MIDI monitor ----------------------------------------------------------
+// --- the MIDI log --------------------------------------------------------------
 
 // The log, rebuilt when there is something new in it. "Something new" is the
 // sequence number, not the length: the log is a ring, so once it is full its
 // length never changes again. Whether to follow the tail is the reader's
 // choice: scrolling back must not be undone by the next event.
-function MonitorPanel(app) {
+function LogPanel(app) {
   const log = el('div', { class: 'log' });
   const scroll = el('div', { class: 'log-scroll' }, log);
   let seq = null;
@@ -408,7 +379,7 @@ function MonitorPanel(app) {
       el('span', { class: 'log-where' }, `ch ${event.channel} → ${portNames(event.target).join(', ') || event.target}`))));
     if (following) scroll.scrollTop = scroll.scrollHeight;
   });
-  return Panel('MIDI monitor', scroll,
+  return Panel('MIDI log', scroll,
     Row(IconButton({ icon: 'clear', label: 'clear the log', text: 'clear', class: 'ghost',
                      onclick: () => { app.module.clearMidiLog(); app.refreshLive(); } })));
 }

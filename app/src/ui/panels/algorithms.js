@@ -24,6 +24,7 @@ import { chromatic, hasLeadingTone } from '../../core/music.js';
 import { StepGrid, DrumGrid, NoteLane } from './grids/Sequencers.js';
 import { HarmonyCircle } from './grids/HarmonyCircle.js';
 import { EuclidCircle } from './grids/EuclidCircle.js';
+import { KeyNow } from './grids/KeyNow.js';
 
 // Tonnetz's fourth cycle, the LFO's clock-locked sync, and the handful of
 // envelope values a rule below has to compare against. The descriptors number
@@ -72,6 +73,10 @@ const envRules = (stages) => [
 
 const ALGORITHMS = {
   StepSequencer: { grid: StepGrid },
+  // The one node whose subject is the key, and the only one that wore no key:
+  // the badge every other card has is drawn from `reads_key`, and this writes
+  // it instead (grids/KeyNow.js).
+  Key: { grid: KeyNow },
   EuclidianSequencer: { grid: EuclidCircle },
   DrumSeqGate: { grid: (app, index) => DrumGrid(app, index, false) },
   DrumSeqMidi: { grid: (app, index) => DrumGrid(app, index, true) },

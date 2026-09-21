@@ -1,0 +1,25 @@
+/* The globals tab. The keyboard the key panel draws is a component of its
+   own (components/ScaleKeys.js), because the Key node draws one too. */
+
+/* The clock's three settings on one row at every width, a phone included:
+   what drives it, how fast, and the CV rate are read and set together, and
+   stacked they pushed the cables the clock is routed over off the screen.
+   The numbers are given the width they need and the source takes the rest,
+   which is why it is a grid and not a `.row` of things that wrap. */
+.panel .fields.clock {
+  grid-template-columns: minmax(0, 1fr) 4.3rem 4.3rem;
+  gap: .5rem; align-items: end;
+}
+.fields.clock input.number { width: 100%; }
+/* The label is what overflows first: three of them are the widest thing in
+   the row, and a wrapped one makes its column two lines taller than the
+   others. */
+.fields.clock .field-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Off the phone there is room for the three to be equal, which is what every
+   other panel's fields are: a source select three times the width of the
+   page's other selects only draws the eye to the least interesting of them. */
+@media (min-width: 34rem) {
+  .panel .fields.clock { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fields.clock input.number { width: 6rem; }
+}

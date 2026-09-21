@@ -111,9 +111,9 @@ export class MidiOutputs {
     this.remember();
   }
 
-  // Everything sounding, taken back. The play panel's own panic reaches the
-  // module; this is for the notes already out of the page, which no message
-  // to the module can end.
+  // Everything sounding, taken back. The panic in the bar reaches the module;
+  // this is for the notes already out of the page, which no message to the
+  // module can end.
   panic() {
     for (const cable of [...this.sounding.keys()]) this.release(cable);
   }

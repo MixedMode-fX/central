@@ -15,7 +15,8 @@ import { MUSICAL_PORTS } from '../../protocol/names.js';
 import './Machine.css';
 
 // `port` names the cable the badge is about - the surface's lead, say, rather
-// than the keyboard's. Left out, it is whatever the play panel is set to.
+// than the keyboard's. Left out, it is whatever the keyboard's own bar is set
+// to (`ui.play.port`), which is the one cable the page plays on.
 export function MachineBadge(app, { compact = false, port = undefined } = {}) {
   const machine = app.play.machine(port);
   return el('div', { class: classes('machine', machine.ok ? 'ok' : 'warn', compact && 'compact') },

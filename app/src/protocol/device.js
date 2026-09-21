@@ -469,6 +469,24 @@ export class Device extends EventTarget {
     };
   }
 
+  // Any control target, by kind and index, as the module has it **now**
+  // (SYSEX_GET_CONTROL). The patch holds what a setting was saved as; this is
+  // what it currently is, and the two are different numbers the moment
+  // something other than the editor has moved it - a Key node walking the
+  // root off a note bus, a CC or an NRPN bound to the key or the clock, a
+  // modulation route, a tap on the tempo.
+  //
+  // A module that does not know the message answers with a NAK, which reads
+  // as null: the indicator falls back to the stored value and nothing else in
+  // the editor notices.
+  async getControl(kind, index, param) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_CONTROL, [kind, index, ...codec.u14(param)]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_CONTROL_VALUE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    if (!reply || this.isReply(reply, P.SysexCommand.SYSEX_NAK)) return null;
+    return codec.readU14(reply, 9);
+  }
+
   // Macros ---------------------------------------------------------------
   // A macro is a *target*: nothing here moves one. It is moved by a source -
   // a knob through the binding table, a CV bus through the matrix - so what

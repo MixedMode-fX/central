@@ -15,6 +15,13 @@
 // patched root legible - "A, which is the fifth of D minor" is a musical
 // fact, where "root inlet: note bus 3" is a wiring diagram.
 //
+// **The key it names is the one playing, not the one stored.** A Key node
+// walking the root off a note bus, or a controller bound to the key, moves
+// what every node here is reading and leaves the patch alone on purpose
+// (src/midi/global_key.h) - so a badge drawn from `state.globals` would name
+// the key each of these nodes is *not* in. It is asked for instead
+// (core/globals.js).
+//
 // The dial is the circle of fifths, at the size of a word: twelve positions
 // in fifths from the tonic at the top, filled where the key has a note.
 // It is the same geometry the Harmony panel draws large, on purpose - a
@@ -29,6 +36,7 @@ import { inletName } from '../../core/patch.js';
 import { keySpelling, fifthsFrom, degreeOf, scaleTriad, triadQuality, romanNumeral,
          QUALITY_MARK, octaveOf } from '../../core/music.js';
 import { NO_NOTE } from '../../runtime/module.js';
+import { keyNow } from '../../core/globals.js';
 import './KeyBadge.css';
 
 const DIAL = { mid: 11, ring: 7.6, dot: 1.3, mark: 2.6 };
@@ -53,10 +61,10 @@ export function rootInlet(descriptor) {
 // patched and has played nothing yet, which is a state worth showing - it
 // says the key is not what this node is listening to.
 function reading(app, index) {
-  const g = app.state.globals ?? {};
-  const root = (g.root ?? 0) % 12;
-  const mask = scaleMaskById(g.scale);
-  const shape = { root, mask, spelling: keySpelling(root, mask), scale: scaleName(g.scale) };
+  const key = keyNow(app);
+  const root = key.root;
+  const mask = scaleMaskById(key.scale);
+  const shape = { root, mask, spelling: keySpelling(root, mask), scale: scaleName(key.scale) };
   if (index === null) return { ...shape, inlet: null, note: null };
 
   const node = app.state.patch.nodes[index];
@@ -104,31 +112,35 @@ export function KeyBadge(app, { index = null } = {}) {
   // Twelve ticks, always: that is what makes it the circle of fifths rather
   // than a ring of seven dots, and it is what gives a root outside the key
   // somewhere to be.
+  // The positions never move - the tonic is position 0 whatever the key is -
+  // so what a key change rewrites is which of them are filled.
   const ticks = Array.from({ length: 12 }, (_, k) => {
-    const pc = (shape.root + k * 7) % 12;
     const [x, y] = dialPoint(k, DIAL.ring);
-    return svg('circle', {
-      class: classes('kbadge-tick', ((shape.mask >> (((pc - shape.root) % 12 + 12) % 12)) & 1) && 'in',
-                     k === 0 && 'tonic'),
-      cx: x, cy: y, r: DIAL.dot,
-    });
+    return svg('circle', { class: 'kbadge-tick', cx: x, cy: y, r: DIAL.dot });
   });
+  const fillTicks = ({ root, mask }) => {
+    for (let k = 0; k < 12; k++) {
+      const pc = (root + k * 7) % 12;
+      ticks[k].setAttribute('class',
+        classes('kbadge-tick', ((mask >> (((pc - root) % 12 + 12) % 12)) & 1) && 'in', k === 0 && 'tonic'));
+    }
+  };
   const mark = svg('circle', { class: 'kbadge-mark off', r: DIAL.mark });
   const dial = svg('svg', { class: 'kbadge-dial', viewBox: `0 0 ${DIAL.mid * 2} ${DIAL.mid * 2}`,
                             'aria-hidden': 'true' }, ticks, mark);
 
-  const name = el('span', { class: 'kbadge-key' }, `${shape.spelling[shape.root]} ${shape.scale}`);
+  const name = el('span', { class: 'kbadge-key' }, '');
   const chord = el('span', { class: 'kbadge-chord off' });
   // A button, because the next thing somebody who has just read the key wants
   // is to change it, and the page it is changed on is two taps away otherwise.
   const badge = el('button', {
     type: 'button', class: 'kbadge', title: '',
-    onclick: () => app.showTab?.('key'),
+    onclick: () => app.showTab?.('globals'),
   }, dial, name, chord);
 
-  // The root arrives while the module runs, so the chord half is written per
-  // frame into elements that already exist - rebuilding a card because a
-  // sequencer moved the root would fight every control on it.
+  // The key and the root both arrive while the module runs, so the whole
+  // badge is written per frame into elements that already exist - rebuilding
+  // a card because a sequencer moved the key would fight every control on it.
   let drawn = null;
   const paint = () => {
     const now = reading(app, index);
@@ -137,6 +149,8 @@ export function KeyBadge(app, { index = null } = {}) {
     const key = `${now.root}:${now.mask}:${now.inlet}:${now.note}`;
     if (key === drawn) return;
     drawn = key;
+    fillTicks(now);
+    name.textContent = `${now.spelling[now.root]} ${now.scale}`;
     const named = now.note === null ? null : chordOf(now, now.note);
     const at = named ? fifthsFrom(named.pc, now.root) : -1;
     if (at >= 0) {
@@ -160,6 +174,9 @@ export function KeyBadge(app, { index = null } = {}) {
         : `the ${now.inlet} inlet has played nothing yet — the key is ${now.spelling[now.root]} ${now.scale}`);
   };
   paint();
-  if (shape.inlet !== null) app.live?.paint(paint);
+  // Repainted every frame whatever the node is: the key itself moves now, so
+  // a badge that only followed a rooted cable would be stale on every other
+  // card the moment a Key node ran.
+  app.live?.paint(paint);
   return badge;
 }

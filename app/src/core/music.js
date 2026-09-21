@@ -61,6 +61,20 @@ export function degreeOf(pc, root, mask) {
   return degree;
 }
 
+// Every pitch class's degree at once, numbered from 1, with 0 for the ones
+// the key does not contain: what a drawing of a whole keyboard needs, where
+// `degreeOf` answers about one note at a time.
+export function scaleDegrees(mask, root) {
+  const of = new Array(12).fill(0);
+  let n = 0;
+  for (let step = 0; step < 12; step++) {
+    if (!((mask >> step) & 1)) continue;
+    n += 1;
+    of[(root + step) % 12] = n;
+  }
+  return of;
+}
+
 // The triad the key stacks on one of its degrees, as a set of pitch classes.
 // Thirds counted in scale steps rather than in semitones, which is what makes
 // the key decide the quality - the same stack Harmony plays.

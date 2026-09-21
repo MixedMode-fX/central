@@ -27,7 +27,7 @@ nothing serving it. The build from `main` is live at
 
 ## The shape of it
 
-Six tabs — **patch**, **key**, **MIDI**, **module**, **library**, **schema** — and
+Six tabs — **patch**, **globals**, **MIDI**, **monitor**, **library**, **schema** — and
 **play** as a button at the top beside *connect a module*, because those two
 answer the same question: which module am I listening to, the one in the page
 or the one on the cable. Play does not open a tab: it opens the performance
@@ -58,7 +58,7 @@ scope row per gate and control bus it reads or writes, a piano roll of its
 note buses, a jack's own level, and a MIDI port's cables beside its buses — so
 a sequencer's notes, a divider's pulses and a transformation's two sides are
 each read off the block itself, in the same shades and with the same hiding
-chips as the module tab's scope and roll. The picture takes the **whole window** from the button in the bar
+chips as the monitor tab's scope and roll. The picture takes the **whole window** from the button in the bar
 or **F** — the canvas and the details of what is selected, and nothing else —
 and **Esc** gives it back. Parameters are sorted onto the same sections on every
 node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in
@@ -114,13 +114,17 @@ sends, what it is called and what colour it is are **yours, not the patch's** �
 live in this browser beside the canvas arrangement, keyed globally rather than
 per patch, because a pad that changed meaning with every patch load is one
 nobody could learn. A **keyboard** is summoned over it: one scrolling row of
-real keys, six octaves, a drag across it playing a glissando, and **a cable and
-channel of its own** — playing a part into one input of the patch while the
-pads drive another is the ordinary case.
+real keys, six octaves, a drag across it playing a glissando, and **a cable, a
+channel and a loud end of its own** — playing a part into one input of the
+patch while the pads drive another is the ordinary case. It is the app's only
+keyboard, as a pot is the only way to send a CC by hand: one place to aim
+each, and no second copy to be the stale one.
 
-**module** — the module running: the LEDs and gate buses, the clock, the jacks,
-an on-screen keyboard and CC sender, and two views that answer questions no
-lamp can. The **scope** draws every jack, gate bus and CV bus the patch uses
+**monitor** — the module running, watched: the LEDs and gate buses, the jacks —
+the sync jack among them, since no cable reaches it in a browser — the sound,
+the MIDI log, and two views that answer questions no lamp can. **Nothing here
+plays it**, which is what the tab is named after: the keyboard and the CC both
+live on the surface, and this is where you watch what they did. The **scope** draws every jack, gate bus and CV bus the patch uses
 against the last few seconds, which is the only way to read a divider, a
 Euclidean pattern or an LFO. The **piano roll** draws notes with a shade per
 place they were seen — played in, sent out, and each note bus the patch writes
@@ -145,15 +149,24 @@ downloadable file. The gate listener blips per rising edge on a chosen gate bus
 or jack, which is the only way a clock division or a logic gate is audible at
 all.
 
-**key** — one scale, one root and one register for the whole patch, drawn on a
-keyboard: the notes of the key are lit, its root is ringed, and pressing a key
-moves the root. Nothing in the patch names a scale or a root of its own; a node
-says only which register it plays in, and its default is the key's.
+**globals** — `GlobalSettings` (`src/patch/patch_codec.h`) drawn, and all of it:
+the key, the clock, Program Change recall and NRPN. A setting is here exactly
+when it travels with the patch and belongs to no node, which is what keeps it a
+page rather than a drawer. The **key** — one scale, one root and one register
+for the whole patch — is drawn on a keyboard: the notes of the key are lit, its
+root is ringed, and pressing a key moves the root. Nothing in the patch names a
+scale or a root of its own; a node says only which register it plays in, and its
+default is the key's. The **clock**'s three settings — what drives it, how fast,
+and the CV rate — are one row at every width, with the cables it follows and
+clocks under them; where the clock is following something else, the panel says
+so, because a tempo field that is not what the module is running at is a number
+to be believed and then disbelieved.
 
-**MIDI** — the external controller, the external MIDI out, routing, the clock
-and Program Change recall: the room the module is in, none of which a patch
-travels with. What a controller *moves* is in the patch, so it is in the mod
-matrix.
+**MIDI** — the external controller, the external MIDI out and routing: the room
+the module is in, none of which a patch travels with. What a controller *moves*
+is in the patch, so it is in the mod matrix; what it counts time by, and what a
+Program Change does to it, belong to the module rather than to a cable, so they
+are on the globals tab.
 
 **library** — where a patch lives: this browser, a file, or the module's preset
 slots.
@@ -242,7 +255,18 @@ wrong place to have to look it up. So a node whose descriptor says it reads the
 key carries a badge naming it, and a cable on that node's root inlet renames it
 after the chord the cable is playing: what it is called, what degree it is, and
 where it sits on the circle of fifths. Which algorithms those are is the
-module's own answer (`reads_key`), never a list in the app.
+module's own answer (`reads_key`), never a list in the app. The **Key** node is
+the exception that proves it: it writes the key instead of reading one, so its
+card draws the key on a keyboard rather than wearing a badge about it.
+
+**What the patch stores and what the module is playing are two numbers.** A
+Key node moves the key off a note bus, a bound controller or a tap moves the
+key or the clock, and none of them touch the stored settings — deliberately,
+so a preset saved mid-performance keeps the key the patch was written in. So a
+control shows what it writes, the badges and the Key node's keyboard show what
+is playing, and a setting something else has taken wears a mark saying where
+to. The live value is asked for over the protocol (`SYSEX_GET_CONTROL`), polled
+only for the settings on screen, and never guessed at from the patch.
 
 **A picture of an algorithm is the algorithm's own numbers.** The arrows on
 the circle of fifths are `Harmony::weigh`, read off the running node through

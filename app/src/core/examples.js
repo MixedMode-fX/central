@@ -41,7 +41,7 @@ export const EXAMPLE_CATEGORIES = [
 export const EXAMPLES = {
   'Pedal and pulse': {
     category: 'starting points',
-    about: 'A metronome at a quarter note pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. A module boots empty, so this is the smallest patch worth opening: it is already running \u2014 watch jack 1 under play.',
+    about: 'A metronome at a quarter note pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. A module boots empty, so this is the smallest patch worth opening: it is already running \u2014 watch jack 1 under monitor.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 8, dir: 'in', bus: 0 }],
       nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }, { algo: 'Metronome', out: [1], seq: { division: '1/4' } }],
@@ -88,7 +88,7 @@ export const EXAMPLES = {
   },
   'MIDI router': {
     category: 'routing & MIDI',
-    about: 'Pure routing, no nodes. Play into DIN 1 under play and both USB 1 and DIN 2 receive; switch "into" to USB 1 and only DIN 1 receives; play into DIN 2 and nothing is accepted.',
+    about: 'Pure routing, no nodes. Play the surface keyboard into DIN 1 and both USB 1 and DIN 2 receive; switch its "into" to USB 1 and only DIN 1 receives; play into DIN 2 and nothing is accepted.',
     patch: {
       midi_in: [{ port: 1, sources: ['DIN 1'], channel: 0, bus: 0 }, { port: 2, sources: ['USB 1'], channel: 0, bus: 1 }],
       midi_out: [{ port: 1, targets: ['USB 1', 'DIN 2'], channel: 0, bus: 0 }, { port: 2, targets: ['DIN 1'], channel: 0, bus: 1 }],
@@ -96,7 +96,7 @@ export const EXAMPLES = {
   },
   'Channel split and merge': {
     category: 'routing & MIDI',
-    about: 'Two input ports read the same DIN with different channel filters; a third merges the USB host into the first bus. Change the channel under play and watch which port the MIDI log says received it.',
+    about: 'Two input ports read the same DIN with different channel filters; a third merges the USB host into the first bus. Change the channel on the surface keyboard and watch which port the MIDI log says received it.',
     patch: {
       midi_in: [{ port: 1, sources: ['DIN 1'], channel: 1, bus: 0 }, { port: 2, sources: ['DIN 1'], channel: 2, bus: 1 }, { port: 3, sources: ['USB host'], channel: 0, bus: 0 }],
       midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 0 }, { port: 2, targets: ['USB 2'], channel: 0, bus: 1 }],

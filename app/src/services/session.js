@@ -5,6 +5,7 @@
 
 import * as P from '../protocol/generated.js';
 import { Device } from '../protocol/device.js';
+import { LIVE_GLOBALS } from '../protocol/names.js';
 
 // How often the page asks the module what its modulation routes are doing. A
 // meter drawn faster than this says nothing more, and over a DIN cable every
@@ -29,6 +30,13 @@ export class Session extends EventTarget {
     // one - and like modLive it is live state: nothing here is saved,
     // exported or sent anywhere.
     this.macroLive = new Map();
+    // What the module has each global set to *now*, by the name the stored
+    // settings give it (protocol/names.js, LIVE_GLOBALS). The patch holds
+    // what a setting was saved as, and a Key node or a bound controller
+    // moves the running one without touching it (src/midi/global_key.h), so
+    // these are two different numbers and an indicator showing only the
+    // first is showing the wrong one.
+    this.globalsLive = new Map();
     this.modPolling = false;
     this.stopModPoll = null;
   }
@@ -111,9 +119,11 @@ export class Session extends EventTarget {
     if (this.modPolling || !this.device || this.state.diverged) return;
     const slots = [...this.live.modSlots];
     const macros = [...this.live.macroSlots];
+    const globals = [...this.live.globalNames];
     if (!slots.length) this.modLive.clear();
     if (!macros.length) this.macroLive.clear();
-    if (!slots.length && !macros.length) return;
+    if (!globals.length) this.globalsLive.clear();
+    if (!slots.length && !macros.length && !globals.length) return;
     this.modPolling = true;
     try {
       for (const slot of slots) {
@@ -124,11 +134,18 @@ export class Session extends EventTarget {
         const state = await this.device.getMacroState(index);
         if (state) this.macroLive.set(index, state); else this.macroLive.delete(index);
       }
+      for (const name of globals) {
+        const target = LIVE_GLOBALS[name];
+        if (!target) continue;
+        const value = await this.device.getControl(target.kind, 0, target.param);
+        if (value === null) this.globalsLive.delete(name); else this.globalsLive.set(name, value);
+      }
     } catch {
       // A module that has gone away is the connection's problem, not this
       // view's: the meters go quiet and every other panel is unaffected.
       this.modLive.clear();
       this.macroLive.clear();
+      this.globalsLive.clear();
     } finally {
       this.modPolling = false;
     }

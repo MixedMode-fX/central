@@ -1,0 +1,5 @@
+/* The Key node's picture. The keyboard is the shared component's
+   (components/ScaleKeys.css); what is left is the sentence under it. */
+.key-now-said { margin: 0 0 .4rem; font-size: .9rem; }
+.key-now-said .hint { font-size: inherit; }
+.key-now-board { display: contents; }

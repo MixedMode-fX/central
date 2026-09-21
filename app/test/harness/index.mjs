@@ -49,7 +49,8 @@ export async function connected(module) {
 // an editor whose every command is recorded rather than sent. `calls` is what
 // a test reads back to see what a press asked for.
 export function fakeApp({ patch, globals, device = null, module = null, controller = null,
-                          offline = false, modLive = new Map(), macroLive = new Map() } = {}) {
+                          offline = false, modLive = new Map(), macroLive = new Map(),
+                          globalsLive = new Map() } = {}) {
   const state = createState();
   if (patch) state.patch = patch;
   if (globals) state.globals = globals;
@@ -76,7 +77,7 @@ export function fakeApp({ patch, globals, device = null, module = null, controll
   return {
     state, device, module, controller, calls, editor,
     live: new Live(),
-    session: { offline, usingModule: Boolean(module), modLive, macroLive },
+    session: { offline, usingModule: Boolean(module), modLive, macroLive, globalsLive },
     render: () => {},
     say: record('say'),
     fail: record('fail'),

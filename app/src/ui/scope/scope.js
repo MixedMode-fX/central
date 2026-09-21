@@ -306,7 +306,7 @@ export function rollSources(watchedBuses) {
 // jack or a MIDI port is where the patch meets the world, so it shows the
 // world's side too - the level at the jack, the notes on its cables.
 //
-// Every row and source keeps the key and the shade it has on the module tab,
+// Every row and source keeps the key and the shade it has on the monitor tab,
 // so a bus is the same colour in every picture of it.
 const verb = (role, name) => `${role === 'in' ? 'reads' : 'writes'}${name ? ` ${name}` : ''}`;
 const gateRow = (bus, role, name) => ({
@@ -501,7 +501,7 @@ export function drawRoll(canvas, module, sources, height) {
 // has touched it since it last did - and the painters touch it every frame, a
 // readout here and a lamp there - so a scope that asked every frame was
 // costing a whole layout per canvas per frame, most of the frame's budget on
-// the module tab. A ResizeObserver is told after layout, and forces none.
+// the monitor tab. A ResizeObserver is told after layout, and forces none.
 const boxes = new WeakMap();      // canvas -> { width }, its CSS box as last laid out
 function cssWidth(canvas) {
   let box = boxes.get(canvas);

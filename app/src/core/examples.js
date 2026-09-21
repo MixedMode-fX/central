@@ -41,7 +41,7 @@ export const EXAMPLE_CATEGORIES = [
 export const EXAMPLES = {
   'Pedal and pulse': {
     category: 'starting points',
-    about: 'A metronome at a quarter note pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. A module boots empty, so this is the smallest patch worth opening: it is already running \u2014 watch jack 1 under module.',
+    about: 'A metronome at a quarter note pulses jack 1, and a sustain pedal on jack 8 sends CC 64 to every port. A module boots empty, so this is the smallest patch worth opening: it is already running \u2014 watch jack 1 under monitor.',
     patch: {
       gate_ports: [{ port: 1, dir: 'out', bus: 1 }, { port: 8, dir: 'in', bus: 0 }],
       nodes: [{ algo: 'Sustain', in: [0], out: [0], params: [1, 64, 0] }, { algo: 'Metronome', out: [1], seq: { division: '1/4' } }],

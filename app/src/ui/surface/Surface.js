@@ -172,7 +172,7 @@ function TopBar(app, display) {
 // Where the keys play: the cable first, because a channel on the wrong cable
 // is heard by nothing. This pair is the keyboard's own - the pads and pots are
 // on the surface's lead, chosen in the bar - and it is the same pair the play
-// panel on the module tab shows.
+// panel on the monitor tab shows.
 function Cable(app) {
   const play = app.state.ui.play;
   return [
@@ -182,7 +182,7 @@ function Cable(app) {
       options: range(17, (c) => `ch ${c}`, 1), value: play.channel,
       onChange: (channel) => { play.channel = channel; app.render(); },
     }),
-    // How hard the bottom of a key is. It rode on the module tab beside the
+    // How hard the bottom of a key is. It rode on the monitor tab beside the
     // keyboard that used to be there; this is the only keyboard now, and a
     // loud end set on another tab is one nobody finds.
     el('label', { class: 'machine-port' },

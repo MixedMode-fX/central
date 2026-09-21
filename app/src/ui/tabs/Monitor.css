@@ -1,4 +1,4 @@
-/* The play tab: the module running. */
+/* The monitor tab: the module running, watched. */
 .meter-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
 .clock-readout { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 10rem; }
 .gate-dots { display: flex; gap: 3px; flex-wrap: wrap; }

@@ -18,6 +18,8 @@ import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
 import { Panel, Hint } from '../components/Panel.js';
 import { Field, Fields } from '../components/Field.js';
+import { ScaleKeys } from '../components/ScaleKeys.js';
+import { LiveMark } from '../components/LiveMark.js';
 import { Select, range } from '../components/Select.js';
 import { NumberField } from '../components/NumberField.js';
 import { Switch } from '../components/Switch.js';
@@ -27,16 +29,9 @@ import {
   SCALES, scaleMaskById, CLOCK_SOURCES, CLOCK_MIDI_SOURCE, SWAP_TIMINGS, portNames,
 } from '../../protocol/names.js';
 import {
-  keySpelling, noteName, registerNote, hasSharpAbove, WHITE_PITCH_CLASSES,
-  DEFAULT_KEY_OCTAVE, MAX_KEY_OCTAVE,
+  keySpelling, noteName, registerNote, scaleDegrees, DEFAULT_KEY_OCTAVE, MAX_KEY_OCTAVE,
 } from '../../core/music.js';
 import './Globals.css';
-
-// Two octaves from C, which is enough for the shape of any scale to repeat
-// and short enough to fit a phone. Which notes are white, and which of them a
-// black key sits above, are the keyboard arithmetic every drawing of one
-// shares (core/music.js).
-const OCTAVES = 2;
 
 // The clock's three settings, side by side at every width (Globals.css).
 const ClockRow = (...fields) => el('div', { class: 'fields clock' }, ...fields);
@@ -56,59 +51,20 @@ export function GlobalsTab(app) {
 
 // --- the key ----------------------------------------------------------------
 
-// Where each pitch class sits in the scale: 0 when it is not in it, otherwise
-// its degree counted from the root.
-function degrees(mask, root) {
-  const of = new Array(12).fill(0);
-  let n = 0;
-  for (let step = 0; step < 12; step++) {
-    if (!((mask >> step) & 1)) continue;
-    n += 1;
-    of[(root + step) % 12] = n;
-  }
-  return of;
-}
-
-// Every key is a button: pressing one moves the root, which is the fastest
-// way to say "put this in F" and the only one that shows what that does to
-// the rest of the notes before you commit to it.
-function Keyboard({ root, mask, spelling, setRoot }) {
-  const degree = degrees(mask, root);
-  const step = 100 / (OCTAVES * WHITE_PITCH_CLASSES.length);
-  const key = (pitchClass, black, left) => {
-    const d = degree[pitchClass];
-    const name = spelling[pitchClass];
-    return el('button', {
-      type: 'button',
-      class: classes('kb-key', black ? 'kb-black' : 'kb-white', d && 'in', pitchClass === root && 'root'),
-      style: black ? `left:${left}%` : null,
-      title: d ? `${name}: degree ${d} of the key` : `${name}: not in the key`,
-      'aria-label': `root ${name}`,
-      'aria-pressed': pitchClass === root ? 'true' : 'false',
-      onclick: () => setRoot(pitchClass),
-    }, el('span', { class: 'kb-label' }, d ? String(d) : ''));
-  };
-  const keys = [];
-  let index = 0;
-  for (let octave = 0; octave < OCTAVES; octave++) {
-    for (const pitchClass of WHITE_PITCH_CLASSES) {
-      keys.push(key(pitchClass, false, 0));
-      // The black key above this one, centred on the border it straddles.
-      if (hasSharpAbove(pitchClass)) keys.push(key((pitchClass + 1) % 12, true, (index + 1) * step));
-      index += 1;
-    }
-  }
-  return el('div', { class: 'keyboard', role: 'group', 'aria-label': 'the notes of the key' }, keys);
-}
-
 // One scale, one root, one register, for the whole patch. Not a MIDI setting:
 // a key is the most musical decision in the patch.
 export function KeyPanel(app) {
   const g = app.state.globals;
   const set = (changes) => app.editor.setGlobals(changes, 'key');
-  const root = g.root ?? 0;
+  // **This panel is the patch's**, keyboard and all: the keys are buttons
+  // that set the stored root, and a board that drew a key a sequencer was
+  // moving would jump under the finger pressing it. Where something else has
+  // taken one of these, the mark beside the control says where to
+  // (components/LiveMark.js) - the Key node's card is where the playing key
+  // is the picture (panels/grids/KeyNow.js).
+  const root = (g.root ?? 0) % 12;
   const mask = scaleMaskById(g.scale);
-  const degree = degrees(mask, root);
+  const degree = scaleDegrees(mask, root);
   // Spelled by the key, like everything else here: a keyboard reading E flat
   // over a list reading D sharp is two answers to one question.
   const spelling = keySpelling(root, mask);
@@ -122,25 +78,28 @@ export function KeyPanel(app) {
   }
 
   return Panel('the key',
-    Keyboard({ root, mask, spelling, setRoot: (pitchClass) => set({ root: pitchClass }) }),
+    ScaleKeys({ root, mask, spelling, onRoot: (pitchClass) => set({ root: pitchClass }) }),
     el('p', { class: 'hint kb-notes' },
       `${spelling[root]} ${SCALES.find((s) => s.value === g.scale)?.label ?? ''} — ${notes.join(' ')}`),
     Fields(
-      Field({ label: 'scale', hint: 'which notes' }, Select({
-        options: SCALES, value: g.scale, onChange: (scale) => set({ scale }),
-      })),
-      Field({ label: 'root', hint: 'which of them is home' }, Select({
-        options: range(12, (pc) => spelling[pc]), value: root, onChange: (chosen) => set({ root: chosen }),
-      })),
+      Field({ label: 'scale', hint: 'which notes' },
+        Select({ options: SCALES, value: g.scale, onChange: (scale) => set({ scale }) }),
+        LiveMark(app, 'scale', (v) => SCALES.find((o) => o.value === v)?.label ?? String(v))),
+      Field({ label: 'root', hint: 'which of them is home' },
+        Select({ options: range(12, (pc) => spelling[pc]), value: root,
+                 onChange: (chosen) => set({ root: chosen }) }),
+        LiveMark(app, 'root', (v) => spelling[v % 12])),
       // The register: where the key's root sits as a pitch, and so where
       // every node that names no octave of its own plays.
-      Field({ label: 'register', hint: 'where home sits' }, Select({
-        options: range(MAX_KEY_OCTAVE + 1, (o) => {
-          const note = registerNote(o, root);
-          return `${o} — ${noteName(note)}, note ${note}`;
-        }, 1),
-        value: octave, onChange: (rootOctave) => set({ rootOctave }),
-      }))),
+      Field({ label: 'register', hint: 'where home sits' },
+        Select({
+          options: range(MAX_KEY_OCTAVE + 1, (o) => {
+            const note = registerNote(o, root);
+            return `${o} — ${noteName(note)}, note ${note}`;
+          }, 1),
+          value: octave, onChange: (rootOctave) => set({ rootOctave }),
+        }),
+        LiveMark(app, 'rootOctave', (v) => `register ${v || DEFAULT_KEY_OCTAVE}`))),
     Hint('Every node plays in this key: nothing in the patch names a scale or a root of its own. '
       + 'A node’s "octave" says which register it plays in, and "key" — its default — is the one '
       + 'named here, so one setting moves the whole patch and a part that has been placed keeps '
@@ -165,6 +124,8 @@ export function KeyPanel(app) {
 export function ClockPanel(app) {
   const g = app.state.globals;
   const set = (changes) => app.editor.setGlobals(changes);
+  // A tap, a bound CC or a modulation route moves the running clock without
+  // touching the patch, exactly as they do the key (components/LiveMark.js).
   const route = (changes) => app.editor.setClockRoute(changes);
   // The same cable in both masks with MIDI as the source is the module
   // clocking itself: what arrives on that wire goes straight back out of it.
@@ -173,19 +134,23 @@ export function ClockPanel(app) {
   const loop = g.clockSource === CLOCK_MIDI_SOURCE && (g.clockInMask & g.clockOutMask);
   return Panel('clock',
     ClockRow(
-      Field({ label: 'source' }, Select({
-        options: CLOCK_SOURCES, value: g.clockSource, 'aria-label': 'what the clock follows',
-        onChange: (clockSource) => set({ clockSource }),
-      })),
-      Field({ label: 'tempo' }, NumberField({
-        value: g.bpm, min: P.CLOCK_MIN_BPM, max: P.CLOCK_MAX_BPM, fallback: P.CLOCK_DEFAULT_BPM,
-        'aria-label': `tempo in BPM, ${P.CLOCK_MIN_BPM} to ${P.CLOCK_MAX_BPM}`,
-        onChange: (bpm) => set({ bpm }),
-      })),
-      Field({ label: 'CV PPQN' }, NumberField({
-        value: g.cvPpqn, min: 1, max: 96, fallback: 4, 'aria-label': 'CV pulses per quarter note',
-        onChange: (cvPpqn) => set({ cvPpqn }),
-      }))),
+      Field({ label: 'source' },
+        Select({ options: CLOCK_SOURCES, value: g.clockSource, 'aria-label': 'what the clock follows',
+                 onChange: (clockSource) => set({ clockSource }) }),
+        LiveMark(app, 'clockSource', (v) => CLOCK_SOURCES.find((o) => o.value === v)?.label ?? String(v))),
+      Field({ label: 'tempo' },
+        NumberField({
+          value: g.bpm, min: P.CLOCK_MIN_BPM, max: P.CLOCK_MAX_BPM, fallback: P.CLOCK_DEFAULT_BPM,
+          'aria-label': `tempo in BPM, ${P.CLOCK_MIN_BPM} to ${P.CLOCK_MAX_BPM}`,
+          onChange: (bpm) => set({ bpm }),
+        }),
+        LiveMark(app, 'bpm', (v) => `${v} BPM`)),
+      Field({ label: 'CV PPQN' },
+        NumberField({
+          value: g.cvPpqn, min: 1, max: 96, fallback: 4, 'aria-label': 'CV pulses per quarter note',
+          onChange: (cvPpqn) => set({ cvPpqn }),
+        }),
+        LiveMark(app, 'cvPpqn'))),
     CLOCK_DRIVEN[g.clockSource] ? Hint(CLOCK_DRIVEN[g.clockSource]) : null,
     Fields(
       Field({ label: 'follows these ports', hint: 'none = any' }, PortToggles({

@@ -31,6 +31,11 @@ export class Live {
     // position is not in the patch, so the only way to draw a pot where the
     // module has it is to ask - and only about the ones being looked at.
     this.macroSlots = new Set();
+    // The globals with an indicator on screen, by the name the settings give
+    // them (protocol/names.js, LIVE_GLOBALS): the key a Key node has moved
+    // the patch to, the tempo a tap has changed. Same rule again - a setting
+    // nobody is looking at is a round trip nobody needs.
+    this.globalNames = new Set();
   }
 
   reset() {
@@ -38,6 +43,7 @@ export class Live {
     this.mounted.length = 0;
     this.modSlots.clear();
     this.macroSlots.clear();
+    this.globalNames.clear();
   }
 
   // Called every animation frame, and once after every render, with what the
@@ -50,6 +56,8 @@ export class Live {
   watchMod(slot) { this.modSlots.add(slot); }
 
   watchMacro(index) { this.macroSlots.add(index); }
+
+  watchGlobal(name) { this.globalNames.add(name); }
 
   tick(frame) {
     for (const painter of this.painters) painter(frame);

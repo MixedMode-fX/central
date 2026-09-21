@@ -1,6 +1,6 @@
 // The shell: the header, the tabs, what went wrong, and the tab on screen.
 //
-// Six tabs - patch, globals, MIDI, module, library, schema - in the order the
+// Six tabs - patch, globals, MIDI, monitor, library, schema - in the order the
 // work happens, and **play** as a button at the top beside *connect a module*,
 // because those two answer the same question: which module am I listening
 // to, the one in the page or the one on the cable.
@@ -13,8 +13,9 @@
 // own shell and takes the whole viewport (ui/surface/Surface.js): an
 // instrument rather than an instrument panel. The panels that used to be
 // behind the play button - the meters, the scope, the roll, the jacks, the
-// listener, the monitor - are the **module** tab, which is where an
-// instrument panel belongs.
+// listener, the log - are the **monitor** tab, which is where an instrument
+// panel belongs. Nothing on that tab plays: what does is here and on the
+// surface.
 
 import { el, classes } from './dom.js';
 import { icon } from './components/icons.js';
@@ -27,7 +28,7 @@ import { Domain } from '../core/validate.js';
 import { busPeers } from '../core/patch.js';
 import { drumSources } from '../runtime/audio/drums.js';
 import { PatchTab } from './tabs/PatchTab.js';
-import { PlayTab } from './tabs/PlayTab.js';
+import { MonitorTab } from './tabs/MonitorTab.js';
 import { Surface } from './surface/Surface.js';
 import { GlobalsTab } from './tabs/GlobalsTab.js';
 import { MidiTab } from './tabs/MidiTab.js';
@@ -38,7 +39,7 @@ const TABS = [
   { key: 'patch', label: 'patch', icon: 'patch', view: PatchTab },
   { key: 'globals', label: 'globals', icon: 'globals', view: GlobalsTab },
   { key: 'midi', label: 'MIDI', icon: 'midi', view: MidiTab },
-  { key: 'module', label: 'module', icon: 'clock', view: PlayTab },
+  { key: 'monitor', label: 'monitor', icon: 'monitor', view: MonitorTab },
   { key: 'library', label: 'library', icon: 'library', view: LibraryTab },
   { key: 'schema', label: 'schema', icon: 'schema', view: SchemaTab },
 ];
@@ -67,7 +68,7 @@ export function App(app) {
     // The transport travels with the tabs, stuck to the top of the page: a
     // start button that scrolls away with the header is one you have to go
     // and find again, which was the whole complaint against keeping it inside
-    // the module tab's clock panel.
+    // the clock panel it used to sit in.
     el('div', { class: 'bar' }, Tabs(app), Transport(app)),
     state.error ? Notice({ kind: 'error', text: state.error, onClick: app.dismissError }) : null,
     problems.length ? Notice({ kind: 'problems', title: state.diverged ? 'not sent' : 'rejected', items: said(problems) }) : null,

@@ -174,6 +174,23 @@ export const KEY_TARGETS = labelled(P.CcKeyTarget, {
   CC_KEY_TARGETS: '',
 }, 'CcKeyTarget').filter((t) => t.label);
 
+// **The globals something other than the editor can move**, by the name the
+// stored settings give each one, so a view can hold the two side by side:
+// `state.globals[name]` is what the patch says and `session.globalsLive` is
+// what the module has. A Key node walks the root off a note bus; a CC, an
+// NRPN or a modulation route reaches the key or the clock; a tap moves the
+// tempo; a host being followed decides it outright. The rest of
+// GlobalSettings - recall and NRPN's own settings - has no second writer, so
+// there is nothing for it to disagree with and nothing to poll for.
+export const LIVE_GLOBALS = {
+  scale: { kind: P.CcTargetKind.CC_TARGET_KEY, param: P.CcKeyTarget.CC_KEY_SCALE },
+  root: { kind: P.CcTargetKind.CC_TARGET_KEY, param: P.CcKeyTarget.CC_KEY_ROOT },
+  rootOctave: { kind: P.CcTargetKind.CC_TARGET_KEY, param: P.CcKeyTarget.CC_KEY_OCTAVE },
+  clockSource: { kind: P.CcTargetKind.CC_TARGET_CLOCK, param: P.CcClockTarget.CC_CLOCK_SOURCE },
+  bpm: { kind: P.CcTargetKind.CC_TARGET_CLOCK, param: P.CcClockTarget.CC_CLOCK_TEMPO },
+  cvPpqn: { kind: P.CcTargetKind.CC_TARGET_CLOCK, param: P.CcClockTarget.CC_CLOCK_PPQN },
+};
+
 export const TRANSPORT_TARGETS = labelled(P.CcTransportTarget, {
   CC_TRANSPORT_START: 'start',
   CC_TRANSPORT_STOP: 'stop',

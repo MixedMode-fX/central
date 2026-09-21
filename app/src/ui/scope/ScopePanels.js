@@ -42,10 +42,10 @@ export function RollPanel(app) {
 }
 
 // The signals under one block - a node, a jack, a MIDI port - in the shades
-// the buses have on the module tab's scope and roll, so the two views agree.
+// the buses have on the monitor tab's scope and roll, so the two views agree.
 // Its gate and control ports are rows of a scope, its note ports are sources
 // of a roll, and one legend lists all of them: a chip pressed puts that
-// trace away, as it does on the module tab. A block on no bus says so rather
+// trace away, as it does on the monitor tab. A block on no bus says so rather
 // than drawing an empty grid, because an empty scope looks like a broken one.
 //
 // **Inputs first, then outputs**, and within each the scope above the roll:

@@ -51,6 +51,9 @@ const ICONS = {
   // the whole module rather than to any one node.
   globals: { d: 'M6 3v5 M6 12v9 M12 3v10 M12 17v4 M18 3v3 M18 10v11 '
                + 'M4 10h4 M10 15h4 M16 8h4' },
+  // A trace on a screen: the tab that watches the module rather than playing
+  // it.
+  monitor: { d: 'M3 5h18v13H3z M6 13c1.4 0 1.4-4 2.8-4s1.4 6 2.8 6 1.4-5 2.8-5 1.4 2.5 2.8 2.5' },
 };
 
 const frame = (...children) => svg('svg', {

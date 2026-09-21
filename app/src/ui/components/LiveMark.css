@@ -1,0 +1,9 @@
+/* The same mark a modulated parameter wears (controls/Param.css): the colour
+   of a control signal, because that is usually what has taken it. Hidden
+   rather than removed while the two agree - it is written into per frame, so
+   it has to still be there. */
+.live-mark {
+  color: var(--cv); font-size: .72rem; font-variant-numeric: tabular-nums;
+  justify-self: start;
+}
+.live-mark.empty { display: none; }

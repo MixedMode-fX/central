@@ -54,6 +54,7 @@ import { Transport } from '../src/services/transport.js';
 import { Transport as TransportView } from '../src/ui/components/Transport.js';
 import { Device } from '../src/protocol/device.js';
 import { GlobalsTab, KeyPanel, ClockPanel } from '../src/ui/tabs/GlobalsTab.js';
+import { KeyNow } from '../src/ui/panels/grids/KeyNow.js';
 import { SchemaTab } from '../src/ui/tabs/SchemaTab.js';
 import { shade, nodeRollSources, scopeRows, blockSignals } from '../src/ui/scope/scope.js';
 import { BlockSignalsPanel } from '../src/ui/scope/ScopePanels.js';
@@ -1232,6 +1233,113 @@ test('the clock says when the tempo is coming from somewhere else', async () => 
   assert.match(withDom(() => words(ClockPanel(app))), /comes from the sync jack/);
   globals.clockSource = CLOCK_MIDI_SOURCE;
   assert.match(withDom(() => words(ClockPanel(app))), /comes from the MIDI clock/);
+});
+
+// --- the key that is playing, not the key that is stored ---------------------
+//
+// A Key node moves the running key off a note bus and leaves the settings
+// alone, on purpose: a preset saved mid-performance captures the key the
+// patch was written in (src/midi/global_key.h). That is exactly what makes
+// the editor's own copy the wrong number to draw, so it asks the module.
+
+test('the module reports the key it is playing, which the patch does not hold', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const globals = { ...codec.emptyGlobals(), scale: P.ScaleId.SCALE_NATURAL_MINOR, root: 0 };
+  // A cable onto a note bus, and the Key node reading it: that is the whole
+  // instrument - a note bus moving the root every node plays in.
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patched(device, patch, idOf('Key', device));
+  patch.nodes[0].inBuses[0] = [0];
+  await device.sendPatch(patch, globals);
+
+  const root = () => device.getControl(P.CcTargetKind.CC_TARGET_KEY, 0, P.CcKeyTarget.CC_KEY_ROOT);
+  assert.equal(await root(), 0, 'it starts on the key the patch was sent with');
+
+  // A note-on on the bus the node reads is what moves it. Nothing else does:
+  // a note-off is not a key change, because a key is a place the music is.
+  module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 65, 100);   // F
+  module.advance(5000);
+  assert.equal(await root(), 5, 'the Key node did not move the running root');
+  assert.equal(globals.root, 0, 'and it must not have touched the stored settings');
+  // The scale is the patch's either way: this node moves the root alone.
+  assert.equal(await device.getControl(P.CcTargetKind.CC_TARGET_KEY, 0, P.CcKeyTarget.CC_KEY_SCALE),
+               P.ScaleId.SCALE_NATURAL_MINOR);
+});
+
+// The Key node's card is the one place that question is the whole question,
+// and it was the one card with no answer on it: the badge every other node
+// wears is drawn from `reads_key`, and this node writes the key instead.
+test('the Key node draws the key it has moved the patch to', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  patched(device, patch, idOf('Key', device));
+  const globals = { ...codec.emptyGlobals(), scale: P.ScaleId.SCALE_NATURAL_MINOR, root: 0 };
+  const app = fakeApp({ patch, device, module, globals });
+
+  // Agreeing, which is the ordinary case: the card says so and names no
+  // second key.
+  let panel = withDom(() => KeyNow(app));
+  assert.match(words(panel), /C minor/);
+  assert.match(words(panel), /nothing has moved it/);
+  assert.equal(findAll(panel, (n) => n.className?.includes('kb-key')).length, 24,
+               'two octaves of keys, as the globals tab draws');
+  // And they are a picture here: the root is the cable's to move.
+  assert.ok(findAll(panel, (n) => n.className?.includes('kb-key')).every((k) => k.tag !== 'button'),
+            'a key on this card must not be a second way to set the root');
+
+  // Moved: the card follows the module and says where the patch will come
+  // back to, which is the fact a performance hides.
+  app.session.globalsLive.set('root', 5);
+  app.session.globalsLive.set('scale', P.ScaleId.SCALE_NATURAL_MINOR);
+  panel = withDom(() => KeyNow(app));
+  assert.match(words(panel), /F minor/, 'the card is not on the key the module is playing');
+  assert.match(words(panel), /this node has moved it/);
+  assert.match(words(panel), /saved in C minor/);
+});
+
+// Every node that plays in the key wears it, so every one of those badges is
+// wrong the moment a Key node runs unless it asks too.
+test('a node badge names the key that is playing', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const patch = codec.emptyPatch();
+  const reader = device.algorithms.find((d) => d?.readsKey);
+  patched(device, patch, reader);
+  const globals = { ...codec.emptyGlobals(), scale: P.ScaleId.SCALE_NATURAL_MINOR, root: 0 };
+  const app = fakeApp({ patch, device, module, globals });
+
+  assert.match(withDom(() => words(KeyBadge(app, { index: 0 }))), /C minor/);
+  app.session.globalsLive.set('root', 7);
+  assert.match(withDom(() => words(KeyBadge(app, { index: 0 }))), /G minor/,
+               'the badge is naming the key this node is not in');
+});
+
+// The controls on the globals tab keep saying what the patch holds - that is
+// what they write - and wear a mark saying where it has been taken.
+test('a global that something else is moving says so beside its control', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const globals = { ...codec.emptyGlobals(), root: 0, bpm: 120 };
+  const app = fakeApp({ device, module, globals });
+
+  const marks = (panel) => withDom(() => findAll(panel(app), (n) => n.className?.includes('live-mark')));
+  // One per field, always there and saying nothing while the two agree: they
+  // are written into per frame, so they cannot be built only when there is
+  // news.
+  assert.ok(marks(KeyPanel).length && marks(KeyPanel).every(
+    (m) => m.textContent === '' && m.className.includes('empty')), 'nothing to say, and out of the way');
+
+  app.session.globalsLive.set('root', 5);
+  app.session.globalsLive.set('bpm', 140);
+  // Scale, root, register on one panel; source, tempo, CV rate on the other -
+  // so this says the mark landed on the field it is about, not just somewhere.
+  assert.deepEqual(marks(KeyPanel).map((m) => m.textContent), ['', 'now F', '']);
+  assert.deepEqual(marks(ClockPanel).map((m) => m.textContent), ['', 'now 140 BPM', '']);
+  // The control still offers the stored value, because that is what it writes.
+  assert.equal(app.state.globals.root, 0, 'the mark must not write anything');
 });
 
 // A pitch class is a number and a number has no spelling, so a list of sharps

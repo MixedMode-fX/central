@@ -1,16 +1,14 @@
-// The play surface: the module, running, with the few controls a module has
-// - two LEDs, its jacks and its MIDI - plus the two things a rack cannot give
-// you: ears and a time axis.
+// The monitor: the module running, watched. Two LEDs, its jacks, its sound,
+// two time axes and its MIDI log - the things a rack shows you on its front
+// panel, plus the ones it cannot.
 //
-// **Nothing here plays the module.** A keyboard and a CC sender both lived on
-// this tab and both exist on the performance surface: the keyboard summoned
-// over it with its own cable, channel and octave strip, and a CC on any of
-// the eight pots (ui/surface/Surface.js, services/surface.js). Two of each
-// meant two places to set the same cable and channel, and one of them was
-// always the stale one. What this tab is for is watching the module run -
-// the lamps, the traces, the jacks, the sound and the log - and the
-// **monitor** below says what any of it sent, which is the readout the
-// sender used to carry.
+// **Nothing here plays the module**, which is what the tab is named after. A
+// keyboard and a CC sender both lived here and both exist on the performance
+// surface: the keyboard summoned over it with its own cable, channel and
+// octave strip, and a CC on any of the eight pots (ui/surface/Surface.js,
+// services/surface.js). Two of each meant two places to set the same cable
+// and channel, and one of them was always the stale one. So this tab watches
+// and the surface plays, and the MIDI log below says what the surface did.
 //
 // **What the clock is set to is not here.** The source, the tempo and the
 // cables it is routed over are globals (tabs/GlobalsTab.js), and a second
@@ -37,7 +35,7 @@ import { portNames, CLOCK_CV_SOURCE } from '../../protocol/names.js';
 import { MachineBadge } from '../components/Machine.js';
 import { WAVES } from '../../runtime/audio/listener.js';
 import { KITS, PIECE_LABELS } from '../../runtime/audio/drums.js';
-import './Play.css';
+import './Monitor.css';
 
 const MIDI_TYPES = {
   0x80: 'note off', 0x90: 'note on', 0xa0: 'poly AT', 0xb0: 'CC', 0xc0: 'program',
@@ -48,7 +46,7 @@ const LOG_MS = 60;
 
 const peers = (app, domain, bus) => busPeers(app.device, app.state.patch, domain, bus);
 
-export function PlayTab(app) {
+export function MonitorTab(app) {
   if (!app.module) return Hint('the built-in module is not running');
   // A module on the cable has its own jacks, LEDs and sound, and the page
   // cannot show any of that. It can still be **played** - that is what
@@ -64,7 +62,7 @@ export function PlayTab(app) {
   }
   return el('div', {},
     Meters(app), ScopePanel(app), RollPanel(app),
-    JacksPanel(app), ListenPanel(app), MonitorPanel(app));
+    JacksPanel(app), ListenPanel(app), LogPanel(app));
 }
 
 // --- jacks ------------------------------------------------------------------
@@ -353,13 +351,13 @@ function nextGateSource(app) {
   return { kind: 'jacks', index: 0 };
 }
 
-// --- the MIDI monitor ----------------------------------------------------------
+// --- the MIDI log --------------------------------------------------------------
 
 // The log, rebuilt when there is something new in it. "Something new" is the
 // sequence number, not the length: the log is a ring, so once it is full its
 // length never changes again. Whether to follow the tail is the reader's
 // choice: scrolling back must not be undone by the next event.
-function MonitorPanel(app) {
+function LogPanel(app) {
   const log = el('div', { class: 'log' });
   const scroll = el('div', { class: 'log-scroll' }, log);
   let seq = null;
@@ -381,7 +379,7 @@ function MonitorPanel(app) {
       el('span', { class: 'log-where' }, `ch ${event.channel} → ${portNames(event.target).join(', ') || event.target}`))));
     if (following) scroll.scrollTop = scroll.scrollHeight;
   });
-  return Panel('MIDI monitor', scroll,
+  return Panel('MIDI log', scroll,
     Row(IconButton({ icon: 'clear', label: 'clear the log', text: 'clear', class: 'ghost',
                      onclick: () => { app.module.clearMidiLog(); app.refreshLive(); } })));
 }

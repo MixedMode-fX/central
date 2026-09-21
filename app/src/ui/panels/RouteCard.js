@@ -17,6 +17,7 @@ import { PortToggles } from '../controls/PortToggles.js';
 import { BusNeighbours } from '../controls/BusNeighbours.js';
 import { Domain } from '../../core/validate.js';
 import { BlockKind } from '../../core/graph.js';
+import { BlockSignalsPanel } from '../scope/ScopePanels.js';
 import './cards.css';
 
 export function RouteCard(app, index, isOut, { header = true } = {}) {
@@ -62,5 +63,9 @@ export function RouteCard(app, index, isOut, { header = true } = {}) {
                                 { kind: isOut ? BlockKind.MidiOut : BlockKind.MidiIn, index }) })
                : null)),
     isOut ? [leg('from', wiring), leg('to', cables, channel)]
-          : [leg('from', cables, channel), leg('to', wiring)]);
+          : [leg('from', cables, channel), leg('to', wiring)],
+    // The notes on both legs, over time: what its cables carried and what
+    // its buses did, so a port that takes a keyboard and puts it on a bus
+    // nobody reads is visible as exactly that.
+    BlockSignalsPanel(app, { kind: isOut ? BlockKind.MidiOut : BlockKind.MidiIn, index }));
 }

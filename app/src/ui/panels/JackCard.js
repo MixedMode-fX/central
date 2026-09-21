@@ -2,7 +2,8 @@
 //
 // **A direction is a setting, not a kind of jack.** Which way it faces is the
 // one control here; where it is patched is the canvas's to say, and this only
-// reports it (see `NodeCard`).
+// reports it (see `NodeCard`). Under that, the level at the jack and on the
+// bus behind it, over time.
 
 import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
@@ -10,6 +11,8 @@ import { Segmented } from '../components/Segmented.js';
 import { BusNeighbours } from '../controls/BusNeighbours.js';
 import { GATE_DIRECTIONS } from '../../protocol/names.js';
 import { Domain } from '../../core/validate.js';
+import { BlockKind } from '../../core/graph.js';
+import { BlockSignalsPanel } from '../scope/ScopePanels.js';
 import './cards.css';
 
 export function JackCard(app, index) {
@@ -30,5 +33,6 @@ export function JackCard(app, index) {
       el('div', { class: 'port-head' },
         el('span', { class: 'port-name' }, writes ? 'writes' : 'reads')),
       BusNeighbours(app, { domain: Domain.Gate, buses: port.buses, self: `jack:${index}`, writes,
-                           unused: 'not connected — patch it on the canvas' })) : null);
+                           unused: 'not connected — patch it on the canvas' })) : null,
+    used ? BlockSignalsPanel(app, { kind: BlockKind.Jack, index }) : null);
 }

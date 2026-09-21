@@ -46,6 +46,8 @@ export function createState() {
       scopeAll: false,
       scopeHidden: new Set(),
       rollHidden: new Set(),
+      // The same, under a block's own signals, keyed by the block.
+      traceHidden: new Set(),
       // Per harmony node: which chord the arrows come from, and which of the
       // two pictures is up.
       harmony: new Map(),

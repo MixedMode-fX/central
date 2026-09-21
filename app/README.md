@@ -50,10 +50,15 @@ on iOS, where Web MIDI does not exist at all.
 **patch** — the graph, as a canvas: a box per node, jack and MIDI port, a
 socket per port, an arrow wherever two are on the same bus, and the bar above
 it is where things are added. Selecting a block opens its **details** below
-the picture — every port with what it is wired to, every parameter as a
-control, and the roll of what it read and wrote — in a panel that folds to its title bar and
-closes with its cross, beside the buttons that copy, duplicate and remove the
-block whole. The picture takes the **whole window** from the button in the bar
+the picture — every port with what it is wired to, its **signals**, and every
+parameter as a control — in a panel that folds to its title bar and closes
+with its cross, beside the buttons that copy, duplicate and remove the block
+whole. The signals are the block's ports over time, whatever the block is: a
+scope row per gate and control bus it reads or writes, a piano roll of its
+note buses, a jack's own level, and a MIDI port's cables beside its buses — so
+a sequencer's notes, a divider's pulses and a transformation's two sides are
+each read off the block itself, in the same shades and with the same hiding
+chips as the module tab's scope and roll. The picture takes the **whole window** from the button in the bar
 or **F** — the canvas and the details of what is selected, and nothing else —
 and **Esc** gives it back. Parameters are sorted onto the same sections on every
 node (behaviour, pitch, timing, dynamics, chance, MIDI) rather than left in

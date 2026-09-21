@@ -18,6 +18,8 @@ import * as P from '../../protocol/generated.js';
 import { Domain } from '../../core/validate.js';
 import { usedBuses, inletName, outletName } from '../../core/patch.js';
 import { noteName } from '../../core/music.js';
+import { BlockKind } from '../../core/graph.js';
+import { portNames } from '../../protocol/names.js';
 
 const ROW_H = 18;            // one gate trace
 const CV_ROW_H = 46;         // a control signal needs room to be a curve
@@ -294,34 +296,96 @@ export function rollSources(watchedBuses) {
   ];
 }
 
-// The roll under one node: what it reads on its note inlets and what it
-// writes on its note outlets, on one time line. An arpeggiator, a chord node
+// --- what one block carries -----------------------------------------------
+//
+// The signals under one block, whatever kind it is: every port it reads and
+// writes, as the scope's rows for its gate and control ports and the roll's
+// sources for its note ports, each over its own window. An arpeggiator, a chord node
 // or a Tonnetz is a transformation, and the only way to see one is to see
-// both sides of it.
-export function nodeRollSources({ patch, device }, index) {
-  const node = patch.nodes[index];
-  const d = device?.byId.get(node?.algorithmId);
-  if (!d) return [];
+// both sides of it; a divider is only readable against what clocks it; and a
+// jack or a MIDI port is where the patch meets the world, so it shows the
+// world's side too - the level at the jack, the notes on its cables.
+//
+// Every row and source keeps the key and the shade it has on the module tab,
+// so a bus is the same colour in every picture of it.
+const verb = (role, name) => `${role === 'in' ? 'reads' : 'writes'}${name ? ` ${name}` : ''}`;
+const gateRow = (bus, role, name) => ({
+  key: `gate${bus}`, kind: 'gate', bit: bus, source: 'gate', role, height: ROW_H,
+  label: `${verb(role, name)} · gate ${bus}`, short: `g${bus}`, colour: palette().gate,
+});
+const cvRow = (bus, role, name) => ({
+  key: `cv${bus}`, kind: 'cv', bit: bus, source: 'cv', role, height: CV_ROW_H,
+  label: `${verb(role, name)} · CV ${bus}`, short: `c${bus}`, colour: shade(palette().cv, bus),
+});
+const noteSource = (bus, role, name) => ({
+  key: `bus${bus}`, bus, role, colour: noteBusColour(bus), label: `${verb(role, name)} · bus ${bus}`,
+});
+
+export function blockSignals({ patch, device }, { kind, index }) {
+  const rows = [];
   const sources = [];
   const seen = new Set();
-  const add = (bus, role, name) => {
-    if (bus === undefined || seen.has(bus)) return;
-    seen.add(bus);
-    sources.push({ key: `bus${bus}`, bus, role, colour: noteBusColour(bus),
-                   label: `${role === 'in' ? 'reads' : 'writes'} ${name} · bus ${bus}` });
+  const add = (domain, bus, role, name) => {
+    const key = `${domain}:${bus}`;
+    if (bus === undefined || seen.has(key)) return;
+    seen.add(key);
+    if (domain === Domain.Gate) rows.push(gateRow(bus, role, name));
+    else if (domain === Domain.CV) rows.push(cvRow(bus, role, name));
+    else sources.push(noteSource(bus, role, name));
   };
-  for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
-    if (d.inDomain[i] !== Domain.Note) continue;
-    for (const bus of node.inBuses[i] ?? []) add(bus, 'in', inletName(d, i));
+  const colours = palette();
+
+  if (kind === BlockKind.Node) {
+    const node = patch.nodes[index];
+    const d = device?.byId.get(node?.algorithmId);
+    if (!d) return { rows, sources };
+    for (let i = 0; i < d.nIn && i < P.MAX_IN; i++) {
+      for (const bus of node.inBuses[i] ?? []) add(d.inDomain[i], bus, 'in', inletName(d, i));
+    }
+    for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
+      for (const bus of node.outBuses[i] ?? []) add(d.outDomain[i], bus, 'out', outletName(d, i));
+    }
+  } else if (kind === BlockKind.Jack) {
+    const port = patch.gatePorts[index];
+    const direction = port?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
+    if (direction === P.GatePortDirection.GATE_PORT_UNUSED) return { rows, sources };
+    const out = direction === P.GatePortDirection.GATE_PORT_OUT;
+    // The jack itself, which is a gate whichever way it faces, and then the
+    // buses behind it: an input writes them, an output reads them.
+    rows.push({ key: `jack${index}`, kind: 'gate', bit: index, source: out ? 'jackOut' : 'jackIn',
+                role: out ? 'out' : 'in', height: ROW_H,
+                label: `jack ${index + 1} ${out ? 'out' : 'in'}`, short: `J${index + 1}${out ? 'o' : 'i'}`,
+                colour: out ? shade(colours.gate, 1) : colours.gate });
+    for (const bus of port.buses ?? []) add(Domain.Gate, bus, out ? 'in' : 'out', '');
+  } else if (kind === BlockKind.MidiIn) {
+    const port = patch.midiIn[index];
+    if (!port?.sourceMask) return { rows, sources };
+    // What arrived on its cables, then the buses it put it on.
+    sources.push({ key: 'in', mask: port.sourceMask, role: 'in', colour: shade(colours.note, 9),
+                   label: `played in · ${portNames(port.sourceMask).join(', ')}` });
+    for (const bus of port.buses ?? []) add(Domain.Note, bus, 'out', '');
+  } else if (kind === BlockKind.MidiOut) {
+    const port = patch.midiOut[index];
+    if (!port?.targetMask) return { rows, sources };
+    for (const bus of port.buses ?? []) add(Domain.Note, bus, 'in', '');
+    sources.push({ key: 'out', mask: port.targetMask, role: 'out', colour: colours.note,
+                   label: `sent out · ${portNames(port.targetMask).join(', ')}` });
   }
-  for (let i = 0; i < d.nOut && i < P.MAX_OUT; i++) {
-    if (d.outDomain[i] !== Domain.Note) continue;
-    for (const bus of node.outBuses[i] ?? []) add(bus, 'out', outletName(d, i));
-  }
-  return sources;
+  return { rows, sources };
 }
 
+// The roll under one node: its note ports only.
+export const nodeRollSources = (ctx, index) =>
+  blockSignals(ctx, { kind: BlockKind.Node, index }).sources;
+
 const sourceKey = (note) => (note.direction === 'bus' ? `bus${note.bus}` : note.direction);
+
+// A source naming a cable mask shows only the notes that went through one of
+// those cables: a MIDI in port's "played in" is what *it* took, not what the
+// keyboard sent down another cable.
+const onSource = (source, note) =>
+  !source.mask || (note.port !== null && note.port !== undefined && (note.port & source.mask) !== 0);
+
 
 // --- the piano roll -----------------------------------------------------------
 
@@ -334,7 +398,8 @@ export function drawRoll(canvas, module, sources, height) {
   const now = module.now;
   const from = now - span;
   const byKey = new Map(sources.map((source) => [source.key, source]));
-  const notes = module.notes.filter((n) => (n.end ?? now) >= from && byKey.has(sourceKey(n)));
+  const notes = module.notes.filter((n) => (n.end ?? now) >= from
+    && byKey.has(sourceKey(n)) && onSource(byKey.get(sourceKey(n)), n));
 
   ctx.fillStyle = colours.back;
   ctx.fillRect(0, 0, width, height);

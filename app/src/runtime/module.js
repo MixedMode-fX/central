@@ -564,6 +564,8 @@ export class EmbeddedModule {
 
   rollSpan() { return ROLL_US; }
 
+  clearNotes() { this.notes.length = 0; }
+
   // One incoming message, offered to the module exactly as main.cpp's loop
   // offers it: preset recall first, then NRPN, then the controller bindings,
   // and only what is left reaches the graph. Getting this order right is what

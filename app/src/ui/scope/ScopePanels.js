@@ -1,11 +1,12 @@
-// The scope and a block's own signals as panels: a canvas, its legend, and a
+// The scope and the piano rolls as panels: a canvas, its legend, and a
 // painter that draws it every frame.
 
 import { el } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
 import { Legend, toggleIn } from '../components/Legend.js';
 import { Switch } from '../components/Switch.js';
-import { scopeRows, blockSignals, drawScope, drawRoll, NODE_ROLL_H } from './scope.js';
+import { IconButton } from '../components/IconButton.js';
+import { scopeRows, rollSources, blockSignals, drawScope, drawRoll, ROLL_H, NODE_ROLL_H } from './scope.js';
 import './Scope.css';
 
 const rollCanvas = (label) => el('canvas', { class: 'roll', 'aria-label': label });
@@ -23,6 +24,21 @@ export function ScopePanel(app) {
                            onToggle: (key) => { toggleIn(ui.scopeHidden, key); app.render(); } }) : null,
     Row(Switch({ checked: ui.scopeAll, label: 'every jack and bus',
                  onChange: (on) => { ui.scopeAll = on; app.render(); } })));
+}
+
+export function RollPanel(app) {
+  const { ui } = app.state;
+  const sources = rollSources(app.watchedBuses);
+  const shown = sources.filter((source) => !ui.rollHidden.has(source.key));
+  const canvas = rollCanvas('the notes of the last eight seconds');
+  app.live.paint(({ module }) => drawRoll(canvas, module, shown, ROLL_H));
+  return Panel('piano roll',
+    el('div', { class: 'scope-wrap' }, canvas),
+    el('div', { class: 'row legend-row' },
+      Legend({ items: sources, hidden: ui.rollHidden,
+               onToggle: (key) => { toggleIn(ui.rollHidden, key); app.render(); } }),
+      IconButton({ icon: 'clear', label: 'clear the roll', class: 'ghost',
+                   onclick: () => app.module.clearNotes() })));
 }
 
 // The signals under one block - a node, a jack, a MIDI port - in the shades

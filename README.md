@@ -728,8 +728,8 @@ A note sequencer stores degrees and a keyboard sends pitches, so entry is a
 conversion. A `record` note inlet and a `record enable` gate inlet: a note-on
 writes the step under the record cursor and advances it; reset returns both
 cursors to the first step. A note outside the scale snaps to the nearest tone
-in it and the snap is counted. `rest key` and `tie key` (default MIDI notes 0
-and 1, configurable) enter rests and ties.
+in it and the snap is counted. MIDI notes 0 and 1, below any keyboard, enter a
+rest and a tie.
 
 ## The module in a browser
 

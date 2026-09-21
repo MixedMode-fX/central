@@ -193,7 +193,18 @@ export const chromatic = (mask) => (mask & 0xfff) === 0xfff;
 export const hasLeadingTone = (mask) => Boolean((mask >> 11) & 1);
 export const inScale = (mask, step) => Boolean((mask >> (((step % 12) + 12) % 12)) & 1);
 
-// The key's default register, as a MIDI note (src/midi/global_key.h).
-export const registerNote = (octave, root) => Math.min(127, octave * 12 + root);
+// The key's root as a pitch, in a register: the key's own when `octave` is
+// its register, or the one a node names with its `octave` parameter. Folded
+// rather than clipped above the top of the keyboard, as global_key::tonic()
+// folds it (src/midi/global_key.h), so the pitch shown is the one played.
+export function registerNote(octave, root) {
+  let note = octave * 12 + root;
+  while (note > 127) note -= 12;
+  return note;
+}
+// Where a node measures its degrees from: its own register if it names one,
+// the key's otherwise - the firmware's `tonic(node_octave)`.
+export const tonicOf = (nodeOctave, keyOctave, root) =>
+  registerNote(nodeOctave ? Math.min(nodeOctave, P.KEY_MAX_OCTAVE) : keyOctave, root);
 export const DEFAULT_KEY_OCTAVE = P.KEY_DEFAULT_OCTAVE;
 export const MAX_KEY_OCTAVE = P.KEY_MAX_OCTAVE;

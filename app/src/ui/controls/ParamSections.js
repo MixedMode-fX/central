@@ -35,7 +35,7 @@ const SECTION_WORDS = {
          'link', 'map', 'cycle', 'sync', 'polarity', 'loop', 'retrigger', 'snap', 'fixed', 'quality',
          'voicing', 'inversion', 'diatonic', 'cells'],
   pitch: ['root', 'octave', 'transpose', 'semitone', 'interval', 'degree', 'note',
-          'spread', 'range', 'low', 'high', 'fifths', 'leading', 'bass', 'voices', 'tie key', 'rest key',
+          'spread', 'range', 'low', 'high', 'fifths', 'leading', 'bass', 'voices',
           'base', 'bend', 'pitch'],
   time: ['length', 'division', 'feel', 'rate', 'gate', 'width', 'delay', 'time', 'phase', 'steps',
          'pulses', 'rotation', 'repeats', 'phrase', 'decay', 'rise', 'fall', 'stall', 'swing', 'tempo',

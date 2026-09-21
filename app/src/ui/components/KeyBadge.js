@@ -60,21 +60,28 @@ export function rootInlet(descriptor) {
 // rooted this node on if there is one. `note` is null while the inlet is
 // patched and has played nothing yet, which is a state worth showing - it
 // says the key is not what this node is listening to.
+// The note a cable on a node's root inlet has rooted it on: `{ inlet, note }`,
+// with `inlet` null when nothing is patched there and `note` null while the
+// cable has played nothing yet. The same reading a sequencer's note lane
+// takes, so both name the pitch the firmware is actually playing from.
+export function rootedNote(app, index) {
+  const node = app.state.patch.nodes[index];
+  const descriptor = node && app.device?.byId.get(node.algorithmId);
+  const inlet = descriptor ? rootInlet(descriptor) : -1;
+  const rooted = (node?.inBuses?.[inlet] ?? [])[0];
+  if (inlet < 0 || rooted === undefined) return { inlet: null, note: null };
+  const played = app.session?.usingModule ? app.module?.busNote(rooted) : NO_NOTE;
+  return { inlet: inletName(descriptor, inlet),
+           note: played === undefined || played === NO_NOTE ? null : played };
+}
+
 function reading(app, index) {
   const key = keyNow(app);
   const root = key.root;
   const mask = scaleMaskById(key.scale);
   const shape = { root, mask, spelling: keySpelling(root, mask), scale: scaleName(key.scale) };
   if (index === null) return { ...shape, inlet: null, note: null };
-
-  const node = app.state.patch.nodes[index];
-  const descriptor = node && app.device?.byId.get(node.algorithmId);
-  const inlet = descriptor ? rootInlet(descriptor) : -1;
-  const rooted = (node.inBuses?.[inlet] ?? [])[0];
-  if (inlet < 0 || rooted === undefined) return { ...shape, inlet: null, note: null };
-  const played = app.session?.usingModule ? app.module?.busNote(rooted) : NO_NOTE;
-  return { ...shape, inlet: inletName(descriptor, inlet),
-           note: played === undefined || played === NO_NOTE ? null : played };
+  return { ...shape, ...rootedNote(app, index) };
 }
 
 // Where a position on the circle is, in words: clockwise of the tonic is

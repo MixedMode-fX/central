@@ -45,6 +45,7 @@ node .claude/skills/app-screenshots/scripts/screenshot.mjs --width phone --width
 | `--click <selector>` | Repeatable, applied in order — open a tab, expand a panel. |
 | `--theme light\|dark` | Force a colour scheme rather than taking the runner's. |
 | `--full-page` | Capture the whole scroll height, not just the viewport. |
+| `--element <selector>` | Capture one element (the first match) rather than the page — a lane or a card at the foot of a long page. |
 | `--wait <ms>` | Settle time before the shot, for the clock or a trace to fill. |
 | `--name <slug>` | Filename prefix. |
 | `--base <url>` | Override `.dev/base_url`. |

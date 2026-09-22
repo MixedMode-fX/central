@@ -3,13 +3,19 @@
 #include "version.h"
 
 namespace {
-    // The page, for whatever the root URL is asked as.
+    // The page, for whatever the root URL is asked as. It is UTF-8, and it
+    // says so in its head and in the content type; WebKit behind JUCE's
+    // resource scheme read it as Latin-1 anyway, so it leads with the byte
+    // order mark, which every decoder consults before anything else.
     std::optional<juce::WebBrowserComponent::Resource> page(const juce::String& url){
         const juce::String path = url.trimCharactersAtStart("/");
         if (path.isNotEmpty() && path != "index.html") return std::nullopt;
         const auto* data = reinterpret_cast<const std::byte*>(mmmc_page::index_html);
-        return juce::WebBrowserComponent::Resource{
-            std::vector<std::byte>(data, data + mmmc_page::index_htmlSize), "text/html; charset=utf-8"};
+        std::vector<std::byte> bytes;
+        bytes.reserve((size_t)mmmc_page::index_htmlSize + 3);
+        bytes.push_back(std::byte{0xEF}); bytes.push_back(std::byte{0xBB}); bytes.push_back(std::byte{0xBF});
+        bytes.insert(bytes.end(), data, data + mmmc_page::index_htmlSize);
+        return juce::WebBrowserComponent::Resource{std::move(bytes), "text/html; charset=utf-8"};
     }
 
     // Bytes out of a payload the page sent as a JSON array of numbers.

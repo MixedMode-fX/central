@@ -134,8 +134,7 @@ if(MMMC_VST3)
         juce::juce_audio_utils
         juce::juce_gui_extra
         PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags)
+        juce::juce_recommended_config_flags)
     # JUCE's module sources compile inside this target, with their own idea
     # of a warning, so the flags go on the two files that are ours; and
     # JUCE's headers are not -Weffc++ clean, so those two are held to the

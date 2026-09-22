@@ -77,6 +77,7 @@ import { MidiOutputs, cablesOut, messageBytes } from '../src/runtime/midiout.js'
 import { OUTPUT_LATENCY_MS } from '../src/runtime/module.js';
 import { Heartbeat } from '../src/runtime/heartbeat.js';
 import { Controller } from '../src/runtime/controller.js';
+import { hosted, hostBuild, HostTransport } from '../src/runtime/host.js';
 import { MidiTab, OutputPanel } from '../src/ui/tabs/MidiTab.js';
 import { CLOCK_CV_SOURCE, CLOCK_MIDI_SOURCE } from '../src/protocol/names.js';
 import {
@@ -4237,4 +4238,81 @@ test('a white key is notched where a black key stands over it', async () => {
   // so its top is whole on that side.
   assert.deepEqual(cuts('C4'), ['pk-cut-r']);
   assert.deepEqual(cuts('C5'), [], 'and the last key of the range keeps both shoulders');
+});
+
+// --- the plugin around the page ------------------------------------------------
+
+// The bridge as the plugin's window provides it (plugin/src/editor.cpp): the
+// page emits an event and the plugin's listener gets its JSON; the plugin
+// emits one and the page's listener gets it. The payload crosses as JSON both
+// ways, so it is copied through JSON here too.
+function fakeBackend() {
+  const listeners = new Map();
+  const emitted = [];
+  return {
+    emitted,
+    addEventListener(id, fn) { listeners.set(id, [...(listeners.get(id) ?? []), fn]); return [id, 0]; },
+    emitEvent(id, payload) { emitted.push([id, JSON.parse(JSON.stringify(payload))]); },
+    fire(id, payload) { for (const fn of listeners.get(id) ?? []) fn(JSON.parse(JSON.stringify(payload))); },
+  };
+}
+
+test('the page knows when it is the plugin’s window', () => {
+  assert.equal(hosted(), false, 'a page in Node is in nothing');
+  const had = globalThis.window;
+  globalThis.window = { __JUCE__: { initialisationData: { mmmcHost: ['0.1.0+abc'] }, backend: fakeBackend() } };
+  try {
+    assert.equal(hosted(), true);
+    assert.equal(hostBuild(), '0.1.0+abc');
+    // JUCE's placeholder object, in a page the plugin did not name itself
+    // to, is not the plugin.
+    globalThis.window = { __JUCE__: { initialisationData: { mmmcHost: [] }, backend: fakeBackend() } };
+    assert.equal(hosted(), false);
+  } finally {
+    globalThis.window = had;
+  }
+});
+
+test('the plugin is a transport the Device drives over the real protocol', async () => {
+  const { module } = await instantiate();
+  const backend = fakeBackend();
+  // The plugin's end of the bridge, with the real module standing in for its
+  // engine: what the page emits reaches the module, and what the module
+  // answers comes back as events, one message each.
+  module.onMessage((reply) => backend.fire('mmmc.message', Array.from(reply)));
+  const emitEvent = backend.emitEvent;
+  backend.emitEvent = (id, payload) => {
+    emitEvent(id, payload);
+    if (id === 'mmmc.sysex') module.send(Uint8Array.from(payload));
+  };
+  const transport = new HostTransport(backend);
+  assert.equal(transport.name, 'the plugin');
+  const device = new Device(transport);
+  await device.readCapabilities();
+  assert.equal(device.capabilities.nodes, P.N_NODE);
+  assert.equal(device.capabilities.slots, P.PATCH_SLOTS);
+  await device.readAlgorithms();
+  assert.ok(device.algorithms.length > 0, 'the algorithms are read off the plugin');
+  const dumped = await device.dump();
+  assert.ok(dumped.patch && dumped.globals, 'the running patch is read off the plugin');
+  assert.ok(backend.emitted.every(([id]) => id === 'mmmc.sysex'), 'the protocol is all that crossed');
+});
+
+test('a note played in the plugin goes to its MIDI input on the page’s cable', () => {
+  const app = fakeApp();
+  const backend = fakeBackend();
+  const host = new HostTransport(backend);
+  const play = new Play({ state: app.state, session: app.session, render: () => {} });
+  play.attachHost(host);
+  assert.equal(play.machine().ok, true);
+  assert.equal(play.machine().name, 'the plugin');
+  play.noteOn(60, 100);
+  play.cc(74, 40, { port: P.MidiPort.mmMIDI_USB_1, channel: 3 });
+  assert.deepEqual(backend.emitted, [
+    ['mmmc.midi', [app.state.ui.play.port, 0x90, app.state.ui.play.channel, 60, 100]],
+    ['mmmc.midi', [P.MidiPort.mmMIDI_USB_1, 0xb0, 3, 74, 40]],
+  ]);
+  // Never the control cable: it carries the protocol.
+  play.noteOn(61, 100, { port: P.MIDI_CONTROL_PORT });
+  assert.equal(backend.emitted.length, 2);
 });

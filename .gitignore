@@ -5,6 +5,10 @@
 # Emulator build output (emulator/build.sh)
 emulator/dist
 
+# The plugin's build tree (plugin/CMakeLists.txt), JUCE fetched into it
+plugin/build
+plugin/build-*
+
 # The app's dependencies (app/package.json)
 node_modules
 

@@ -41,10 +41,12 @@ changed=$(git diff --cached --name-only --diff-filter=ACMR; git diff --name-only
 scopes=()
 grep -Eq '^(src/|test/|lib/|include/|platformio\.ini$|scripts/(version|project_warnings)\.py$)' <<<"$changed" && scopes+=(firmware)
 grep -Eq '^(src/|app/|emulator/)' <<<"$changed" && scopes+=(app)
+# The plugin's engine is the core once more, so src/ is in this list too.
+grep -Eq '^(src/|plugin/)' <<<"$changed" && scopes+=(plugin)
 
 # A change to the gate itself is checked by the gate itself.
 if grep -Eq '^scripts/(checks|start_app)\.sh$' <<<"$changed"; then
-  scopes=(firmware app)
+  scopes=(firmware app plugin)
 fi
 
 # Nothing this gate can check — a README, a workflow, a hook — passes straight

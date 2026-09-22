@@ -90,7 +90,8 @@ function Header(app) {
         class: classes(playing && 'active'), 'aria-pressed': playing ? 'true' : 'false',
         onclick: () => app.togglePlay(),
       }),
-      IconButton({
+      // Inside the plugin there is no cable to look for: the DAW has them.
+      app.hosted ? null : IconButton({
         icon: 'plug', text: session.usingModule ? 'connect' : 'reconnect',
         label: session.usingModule ? 'connect a module over MIDI' : 'reconnect the module',
         onclick: () => app.connect(),

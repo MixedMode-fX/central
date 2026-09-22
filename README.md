@@ -22,6 +22,8 @@ make size      # flash and RAM usage
 make upload    # flash an attached Teensy
 make app       # the WebAssembly build and the browser app (clang, lld, node)
 make dev       # the app with hot reload; make preview serves the built page
+make plugin    # the plugin's engine, built natively, and its test (cmake)
+make vst3      # the VST3 plugin and a standalone app (cmake, fetches JUCE)
 ```
 
 `make` bootstraps PlatformIO on first use, so a fresh clone needs only
@@ -49,6 +51,10 @@ fakes in `test/fakes/`. Everything else is framework-free and builds on the
 host: `pio test -e native`. Nothing under `src/algorithm/` includes
 `Arduino.h`. CI builds firmware and runs the native tests on every push and
 pull request.
+
+The same core runs in a browser (`emulator/README.md`) and as a VST3 plugin
+with MIDI as its only output (`plugin/README.md`); CI builds the plugin for
+Windows.
 
 ## Signal bus model
 

@@ -45,7 +45,10 @@ is both the *transport* the editor talks to (`Device` talks to a transport, not
 to Web MIDI, so every edit is the SysEx message a cable would have carried and
 the validator is the firmware's own) and a *machine that runs* (the page is its
 main loop, interval timer and sync pin). That is also what makes the app usable
-on iOS, where Web MIDI does not exist at all.
+on iOS, where Web MIDI does not exist at all. The one page that runs no module
+of its own is the plugin's window (`plugin/README.md`): there the module is
+the plugin, reached over the same protocol through `runtime/host.js`, and
+the page finds that out by what answers, not by being built differently.
 
 **patch** — the graph, as a canvas: a box per node, jack and MIDI port, a
 socket per port, an arrow wherever two are on the same bus, and the bar above
@@ -403,10 +406,11 @@ app/
                       drags), layout.js, validate.js, patchjson.js,
                       schema.js, catalogue.js, music.js, examples.js
     runtime/          the machine and its peripherals: module.js (the
-                      firmware in the page), wasm.js, webmidi.js,
-                      controller.js (a controller playing it), midiout.js
-                      (what it plays, out of this computer), audio/ (the
-                      listener and the drum kits)
+                      firmware in the page), wasm.js, webmidi.js, host.js
+                      (the plugin around the page), controller.js (a
+                      controller playing it), midiout.js (what it plays,
+                      out of this computer), audio/ (the listener and the
+                      drum kits)
     services/         the app's state and every command on it: state.js,
                       render.js (the coalesced re-render and the per-frame
                       painters), session.js (the device), editor.js (every

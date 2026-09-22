@@ -116,10 +116,12 @@ jobs:
           Expand-Archive -Path $nupkg -DestinationPath (Join-Path $dir "Microsoft.Web.WebView2.$version") -Force
           "WEBVIEW2_PACKAGES=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      # No generator named: CMake's default on Windows is the newest Visual
+      # Studio on the runner, and the image's version moves under a name.
       - name: Configure
         shell: pwsh
         run: >
-          cmake -S plugin -B plugin/build -G "Visual Studio 17 2022" -A x64
+          cmake -S plugin -B plugin/build -A x64
           -DMMMC_APP_PAGE="${{ github.workspace }}/emulator/dist/index.html"
           -DJUCE_WEBVIEW2_PACKAGE_LOCATION="$env:WEBVIEW2_PACKAGES"
 

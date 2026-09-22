@@ -137,7 +137,7 @@ export function createApp({ root, view, wasmUrl }) {
       app.host = new HostTransport();
       play.attachHost(app.host);
       await session.adopt(app.host);
-      state.current = { id: null, name: 'in the plugin', dirty: true, savedAt: 0 };
+      state.current = noPatch();
       state.savedJson = null;
       arrangement.reset();
     } catch (error) {

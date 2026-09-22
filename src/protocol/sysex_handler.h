@@ -70,6 +70,12 @@ class SysexHandler : public ISysexIn {
         // meant for a downstream synth is not silently swallowed.
         bool program_change(uint8_t source, uint8_t channel, uint8_t program, uint32_t now_us);
 
+        // A patch arrived by a path no message carried - a plugin host
+        // restoring its project (plugin/src/engine.cpp) - and is running.
+        // Said the way a quantised swap going live is said, so an editor
+        // re-reads the module by the path it already has for that.
+        void announce_patch_applied(){ notify(SYSEX_EVENT_PATCH_APPLIED, 0); }
+
         // This module's id, so two on one bus can be addressed separately.
         void set_device_id(uint8_t id){ device = (uint8_t)(id & 0x7F); }
         uint8_t device_id() const { return device; }

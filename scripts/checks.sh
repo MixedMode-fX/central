@@ -5,6 +5,7 @@
 #   bash scripts/checks.sh             everything
 #   bash scripts/checks.sh firmware    the native unit tests, and the purity grep
 #   bash scripts/checks.sh app         the module, the protocol, the app's tests
+#   bash scripts/checks.sh plugin      the plugin's engine and its test, no JUCE
 #
 # Prints a failure report and exits 1; exits 0 silently on success.
 # Silence is the pass.
@@ -14,11 +15,13 @@
 # a pull request that was green locally.
 #
 # What belongs here: everything fast enough to sit between a change and a
-# commit. Both scopes are under a minute — the native tests because they are
+# commit. Every scope is under a minute — the native tests because they are
 # host builds with no Teensy in sight, the app because the wasm link is
-# seconds and the tests are node. What does not belong: the teensy41 build,
-# which needs the ARM toolchain and proves something only a flash proves. CI
-# does that on every push.
+# seconds and the tests are node, the plugin because its engine is the core
+# again with a host compiler. What does not belong: the teensy41 build, which
+# needs the ARM toolchain and proves something only a flash proves, and the
+# VST3 itself, which fetches and builds a plugin framework. CI does both on
+# every push.
 set -uo pipefail
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || repo_root=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,13 +32,13 @@ if [[ ${#scopes[@]} -eq 0 ]]; then
   # A bare run means everything, never nothing: a run that silently checked
   # nothing is indistinguishable at the call site from one that passed, and a
   # bare run is what CLAUDE.md tells a reader to type.
-  scopes=(firmware app)
+  scopes=(firmware app plugin)
 fi
 
 for scope in "${scopes[@]}"; do
   case "$scope" in
-    firmware|app) ;;
-    *) echo "unknown scope: $scope (expected 'firmware' or 'app')" >&2; exit 2 ;;
+    firmware|app|plugin) ;;
+    *) echo "unknown scope: $scope (expected 'firmware', 'app' or 'plugin')" >&2; exit 2 ;;
   esac
 done
 
@@ -104,6 +107,30 @@ if has app; then
     # over real SysEx, and the library, the runtime seam, the panels.
     run "app tests" npm --prefix app test --silent
   fi
+fi
+
+# --- plugin ------------------------------------------------------------------
+
+# The engine (plugin/src/engine.cpp) is the module over the plugin's HAL with
+# no framework in it, so this is a host build of the core plus one test
+# binary: cmake and a C++ compiler, and nothing fetched. The VST3 itself is
+# CI's (ci.yml), as the teensy41 build is.
+plugin_engine_test() {
+  cmake -S plugin -B plugin/build -DMMMC_VST3=OFF -DCMAKE_BUILD_TYPE=Debug >/dev/null \
+    && cmake --build plugin/build --target engine_test \
+    && plugin/build/engine_test
+}
+
+if has plugin; then
+  missing=()
+  for tool in cmake c++; do
+    command -v "$tool" >/dev/null || missing+=("$tool")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Checks failed: missing ${missing[*]} — the plugin's engine needs cmake and a C++ compiler (apt install cmake g++)."
+    exit 1
+  fi
+  run "plugin engine test" plugin_engine_test
 fi
 
 # --- report ------------------------------------------------------------------

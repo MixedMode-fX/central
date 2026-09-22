@@ -12,6 +12,7 @@ import { Heartbeat } from '../runtime/heartbeat.js';
 import { Controller } from '../runtime/controller.js';
 import { MidiOutputs } from '../runtime/midiout.js';
 import { describeSupport, access, discover, WebMidiTransport } from '../runtime/webmidi.js';
+import { hosted, HostTransport } from '../runtime/host.js';
 import { Library } from './storage.js';
 import { createState, noPatch } from './state.js';
 import { Live, Renderer } from './render.js';
@@ -34,6 +35,11 @@ export function createApp({ root, view, wasmUrl }) {
     controller: null,       // a MIDI controller plugged into this computer
     outputs: null,          // where what the module plays leaves this computer
     heartbeat: null,        // what keeps the module running while the page is hidden
+    // Whether this page is the plugin's window (runtime/host.js). Then the
+    // module is the plugin, there is nothing in the page to run, and no
+    // cable to look for: the DAW has the cables.
+    hosted: hosted(),
+    host: null,
     get device() { return session.device; },
   };
   const render = () => renderer.render();
@@ -96,6 +102,7 @@ export function createApp({ root, view, wasmUrl }) {
   // is running" cannot open with it stopped.
   app.boot = async () => {
     render();
+    if (app.hosted) { await app.useHost(); return; }
     try {
       app.module = await EmbeddedModule.instantiate(await loadWasm(wasmUrl));
       app.listener = new Listener(app.module);
@@ -120,6 +127,25 @@ export function createApp({ root, view, wasmUrl }) {
   };
 
   let stopLive = null;
+
+  // The plugin around the page: the module is its engine, reached over the
+  // protocol like one on a cable, and its running patch - what the DAW's
+  // project holds - is what is on screen. The page's own module is never
+  // started: two modules in one window would be two of everything.
+  app.useHost = async () => {
+    try {
+      app.host = new HostTransport();
+      play.attachHost(app.host);
+      await session.adopt(app.host);
+      state.current = noPatch();
+      state.savedJson = null;
+      arrangement.reset();
+    } catch (error) {
+      state.status = `the plugin did not answer: ${error.message}`;
+      state.error = 'no algorithms: the plugin did not answer the page';
+    }
+    render();
+  };
 
   // Back to (or on to) the module in the page.
   app.useModule = async ({ silent = false } = {}) => {

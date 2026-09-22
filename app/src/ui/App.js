@@ -90,13 +90,17 @@ function Header(app) {
         class: classes(playing && 'active'), 'aria-pressed': playing ? 'true' : 'false',
         onclick: () => app.togglePlay(),
       }),
-      IconButton({
+      // Inside the plugin there is no cable to look for: the DAW has them.
+      app.hosted ? null : IconButton({
         icon: 'plug', text: session.usingModule ? 'connect' : 'reconnect',
         label: session.usingModule ? 'connect a module over MIDI' : 'reconnect the module',
         onclick: () => app.connect(),
       })),
     el('p', { class: classes('status', session.offline ? 'offline' : 'online', state.diverged && 'warn') },
-      state.status, el('span', { class: 'hint' }, ` · ${session.transportName}`)));
+      state.status,
+      // Which module the page is talking to, where there could be two; in
+      // the plugin there is one, and naming it is noise.
+      app.hosted ? null : el('span', { class: 'hint' }, ` · ${session.transportName}`)));
 }
 
 function Tabs(app) {

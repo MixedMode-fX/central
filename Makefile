@@ -16,7 +16,7 @@ FIRMWARE_ENV := teensy41
 VERSION := $(shell cat VERSION)
 
 .PHONY: help setup ready build test size upload app module emulator editor \
-        checks dev preview stop shots clean distclean
+        plugin vst3 checks dev preview stop shots clean distclean
 
 help:
 	@echo "make setup    - install PlatformIO and pre-fetch the toolchains"
@@ -28,6 +28,8 @@ help:
 	@echo "make size     - report firmware flash and RAM usage"
 	@echo "make module   - compile the firmware to WebAssembly (needs clang + lld) and build the app"
 	@echo "make app      - build the module, then check the app against it"
+	@echo "make plugin   - build the plugin's engine natively and run its test (needs cmake)"
+	@echo "make vst3     - build the VST3 and the standalone app (fetches JUCE; needs cmake)"
 	@echo "make upload   - flash an attached Teensy"
 	@echo ""
 	@echo "make dev      - the app with hot reload, from the source tree"
@@ -87,6 +89,17 @@ app:
 emulator: module
 editor: app
 
+# The module as a plugin (plugin/README.md). The engine is the core over the
+# plugin's HAL with no framework in it, so `plugin` is a host build and a
+# test; `vst3` is the plugin itself, which fetches JUCE and embeds the page
+# `module` built, so that comes first.
+plugin:
+	bash scripts/checks.sh plugin
+
+vst3: module
+	cmake -S plugin -B plugin/build -DMMMC_VST3=ON -DCMAKE_BUILD_TYPE=Release
+	cmake --build plugin/build --config Release --target mmmc_VST3
+
 # --- Run it ------------------------------------------------------------------
 
 dev:
@@ -106,4 +119,4 @@ clean: $(PIO)
 	$(PIO) run -t clean
 
 distclean:
-	rm -rf .pio .venv .dev emulator/dist
+	rm -rf .pio .venv .dev emulator/dist plugin/build

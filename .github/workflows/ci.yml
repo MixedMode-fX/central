@@ -74,3 +74,74 @@ jobs:
             .pio/build/teensy41/*.elf
           if-no-files-found: error
           retention-days: 14
+
+  # The module as a VST3 for Windows (plugin/README.md). Not in the gate for
+  # the reason the firmware is not: it fetches and builds a plugin framework
+  # on a runner with the toolchain for it. The engine inside it is what the
+  # gate already tested with a host compiler; this proves the same core
+  # compiles under MSVC and links into a plugin a DAW can load.
+  vst3:
+    name: VST3 for Windows
+    needs: checks
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # plugin/CMakeLists.txt stamps `git describe` into the plugin as
+          # scripts/version.py does into the firmware.
+          fetch-depth: 0
+
+      # The editor is the page the checks job just built and uploaded: one
+      # file, the module inlined. Built once, by the tools that build it,
+      # rather than a second time with a Windows clang.
+      - name: Download the app
+        uses: actions/download-artifact@v4
+        with:
+          name: app-${{ github.event.pull_request.head.sha || github.sha }}
+          path: emulator/dist
+
+      # WebView2 is how the page is shown on Windows, and its loader is
+      # linked statically, so the NuGet package with the header and the
+      # library has to be on the disk at build time. JUCE looks for it where
+      # JUCE_WEBVIEW2_PACKAGE_LOCATION points (extras/Build/CMake/FindWebView2.cmake).
+      - name: Fetch the WebView2 package
+        shell: pwsh
+        run: |
+          $version = "1.0.3485.44"
+          $dir = Join-Path $env:RUNNER_TEMP "webview2"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $nupkg = Join-Path $dir "Microsoft.Web.WebView2.$version.zip"
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$version" -OutFile $nupkg
+          Expand-Archive -Path $nupkg -DestinationPath (Join-Path $dir "Microsoft.Web.WebView2.$version") -Force
+          "WEBVIEW2_PACKAGES=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # No generator named: CMake's default on Windows is the newest Visual
+      # Studio on the runner, and the image's version moves under a name.
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S plugin -B plugin/build -A x64
+          -DMMMC_APP_PAGE="${{ github.workspace }}/emulator/dist/index.html"
+          -DJUCE_WEBVIEW2_PACKAGE_LOCATION="$env:WEBVIEW2_PACKAGES"
+
+      # The engine's test under MSVC first: the same test the gate ran with
+      # GCC, on the compiler the plugin ships from.
+      - name: Engine test
+        shell: pwsh
+        run: |
+          cmake --build plugin/build --config Release --target engine_test
+          plugin/build/Release/engine_test.exe
+
+      - name: Build the VST3
+        shell: pwsh
+        run: cmake --build plugin/build --config Release --target mmmc_VST3
+
+      # The bundle, whole: a folder a DAW loads from its VST3 directory.
+      - name: Upload the VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: vst3-windows-${{ github.event.pull_request.head.sha || github.sha }}
+          path: plugin/build/mmmc_artefacts/Release/VST3/MMMC.vst3
+          if-no-files-found: error
+          retention-days: 14

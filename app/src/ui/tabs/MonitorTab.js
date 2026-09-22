@@ -47,6 +47,15 @@ const LOG_MS = 60;
 const peers = (app, domain, bus) => busPeers(app.device, app.state.patch, domain, bus);
 
 export function MonitorTab(app) {
+  // The plugin's MIDI is the track's, and the DAW is where it is watched;
+  // the page can still play it (`services/play.js`), so this says so.
+  if (app.hosted) {
+    return el('div', {},
+      Panel('the module in the plugin',
+        Row(MachineBadge(app)),
+        Hint('what it plays leaves by the plugin\'s MIDI output, on the track: '
+             + 'the meters, the scope and the audio here are the page\'s own module\'s')));
+  }
   if (!app.module) return Hint('the built-in module is not running');
   // A module on the cable has its own jacks, LEDs and sound, and the page
   // cannot show any of that. It can still be **played** - that is what

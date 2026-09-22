@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 Firmware for a Eurorack CV & MIDI processor on a Teensy 4.1, plus a WebAssembly
-build of the same core and a browser app that drives it. `README.md` is the
-reference for the machine itself.
+build of the same core, a browser app that drives it, and the same core as a
+VST3 plugin. `README.md` is the reference for the machine itself.
 
 ## Where things live
 
@@ -15,6 +15,9 @@ reference for the machine itself.
   in for the hardware. Nothing under `src/` is duplicated to make this work.
 - `app/` — the browser app, a client of the firmware's protocol. A Vite app:
   `emulator/build.sh` builds it into one file beside the module.
+- `plugin/` — the same core in a DAW, with MIDI as its only output and the
+  app in a web view as its editor. `plugin/src/engine.cpp` is framework-free
+  and tested natively; JUCE is fetched only for the VST3 itself.
 - `scripts/` — provisioning and the checks, reached by path from the hooks,
   from CI and from `make`.
 
@@ -28,20 +31,22 @@ it has returned.
 
 **The commit gate**: `bash scripts/checks.sh` — the native unit tests, the
 algorithm purity grep, the WebAssembly build, the module smoke test, the
-generated protocol and the app's suites. Silence is the pass. It takes scopes:
-`firmware`, `app`, or neither for both. The Claude `PreToolUse` hook runs it
-before every `git commit`, scoped to what the commit touches, so a red branch
-cannot be committed by accident.
+generated protocol, the app's suites and the plugin engine's test. Silence is
+the pass. It takes scopes: `firmware`, `app`, `plugin`, or none for all
+three. The Claude `PreToolUse` hook runs it before every `git commit`, scoped
+to what the commit touches, so a red branch cannot be committed by accident.
 
-**`src/` is both scopes.** A change to a header under `src/protocol/` breaks
+**`src/` is every scope.** A change to a header under `src/protocol/` breaks
 the app without touching a line of JavaScript, because `app/src/protocol/generated.js` is
-generated from those headers and the module is compiled from that core. The
-hook routes it to both; do not talk yourself out of the second one.
+generated from those headers and the module is compiled from that core; the
+plugin's engine is that core once more. The hook routes it to all of them; do
+not talk yourself out of the others.
 
 **The pre-PR gate**: `bash scripts/checks.sh && make build`. The teensy41 build
 is not in the commit gate — it needs the ARM toolchain, and it is the only
 thing that says the firmware still fits on the board and links against the
-Teensy core.
+Teensy core. The VST3 is not either: it fetches and builds JUCE, and CI
+builds it for Windows on every push (`make vst3` builds it here).
 
 **Done means seen, not green.** Any change visible in the app gets exercised in
 the running app and shown as screenshots (load the `app-screenshots` skill),
@@ -115,8 +120,8 @@ Breaking changes are the expected cost of getting the shape right.
 
 ## Documentation
 
-There are four documents and there should not be a fifth: `README.md`,
-`app/README.md`, `emulator/README.md` and this file. Do not add design notes,
+There are five documents and there should not be a sixth: `README.md`,
+`app/README.md`, `emulator/README.md`, `plugin/README.md` and this file. Do not add design notes,
 audits, migration guides, changelogs or `docs/` — put the reasoning in a commit
 message or a comment next to the code it explains. A `SKILL.md` under
 `.claude/skills/` is not a fifth document: it is an instruction loaded for the

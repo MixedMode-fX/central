@@ -63,6 +63,10 @@ export class Play {
     this.access = null;
     this.control = null;
     this.deviceName = '';
+    // The plugin around the page, when there is one (runtime/host.js): a
+    // note goes to its MIDI input, on the cable the page chose, as a note
+    // on a cable would.
+    this.host = null;
   }
 
   get ui() { return this.state.ui.play; }
@@ -83,6 +87,8 @@ export class Play {
     this.deviceName = '';
   }
 
+  attachHost(host) { this.host = host; }
+
   // Which machine a note played now would reach, and what it would reach it
   // through. A surface that looks like a rack while it is playing a module
   // inside a browser tab is the failure this exists to prevent, so this is
@@ -94,6 +100,9 @@ export class Play {
       return module
         ? { kind: 'module', name: 'the built-in module', reaches: 'this page', ok: true }
         : { kind: 'nothing', name: 'no module', reaches: 'nothing is running', ok: false };
+    }
+    if (this.host) {
+      return { kind: 'device', name: this.host.name, reaches: 'the plugin\'s MIDI input', ok: true };
     }
     const output = this.output(port);
     if (!output) {
@@ -172,6 +181,10 @@ export class Play {
       // frames; a note played between two of them has to show at once.
       this.refresh();
       return accepted;
+    }
+    if (this.host) {
+      this.host.play(port, type, channel, d1, d2);
+      return null;
     }
     const output = this.output(port);
     if (!output) return null;

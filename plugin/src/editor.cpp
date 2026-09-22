@@ -9,7 +9,7 @@ namespace {
         if (path.isNotEmpty() && path != "index.html") return std::nullopt;
         const auto* data = reinterpret_cast<const std::byte*>(mmmc_page::index_html);
         return juce::WebBrowserComponent::Resource{
-            std::vector<std::byte>(data, data + mmmc_page::index_htmlSize), "text/html"};
+            std::vector<std::byte>(data, data + mmmc_page::index_htmlSize), "text/html; charset=utf-8"};
     }
 
     // Bytes out of a payload the page sent as a JSON array of numbers.

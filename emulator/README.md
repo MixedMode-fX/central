@@ -30,6 +30,7 @@ implementation of the hardware seam, next to the Teensy one:
 | MIDI input | `mm_midi_read()` and the input queue | `deliver_midi()` from the page |
 | the control plane | `main.cpp`'s loop tail | `emu_control_service()`, the same calls in the same order |
 | entropy at boot | cycle counter, floating ADC | `Math.random()` |
+| the editor's picture of it | `SYSEX_MONITOR` over the control cable | the same message, over the same handler |
 
 **Why it needs no rewrite.** The firmware reaches hardware only through `IGpio`
 and `IMidiOut` (`src/hal/`); `main.cpp` and `src/hal/teensy/` are the only
@@ -58,7 +59,12 @@ rather than the page.
 The page never sees a struct. It builds a patch through `emu_patch_*`, reads
 the registry through `emu_algo_*` and the sizing constants through
 `emu_const_*`, so a change to `config.h`, the registry or the preset format is
-picked up by rebuilding. The only firmware values written into JavaScript are
+picked up by rebuilding. What the running module is *doing* — the lights, the
+buses, the notes, where each sequencer is — the page does not read off the
+module at all: it asks over the protocol (`src/monitor/monitor.h`), as it would
+a module in a plugin or on a cable, so there is no picture of the module the
+page can draw that the plugin and the hardware cannot. The one level read off
+the module directly is the gate buses per pass, for the page's own sound. The only firmware values written into JavaScript are
 enum names, and those are generated into `app/src/protocol/generated.js`.
 
 ## What it can and cannot verify

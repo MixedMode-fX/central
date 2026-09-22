@@ -125,7 +125,10 @@ each, and no second copy to be the stale one.
 
 **monitor** — the module running, watched: the LEDs and gate buses, the jacks —
 the sync jack among them, since no cable reaches it in a browser — the sound,
-the MIDI log, and two views that answer questions no lamp can. **Nothing here
+the MIDI log, and two views that answer questions no lamp can. It is the same
+tab for a module in the page, in a plugin or on a cable: everything on it but
+the sound is what the module reports (`runtime/monitor.js`), and only the
+page's own module has jacks the page can drive. **Nothing here
 plays it**, which is what the tab is named after: the keyboard and the CC both
 live on the surface, and this is where you watch what they did. The **scope** draws every jack, gate bus and CV bus the patch uses
 against the last few seconds, which is the only way to read a divider, a
@@ -324,11 +327,19 @@ the port that is holding it before it is pointed anywhere else, because a
 note-off is the only thing that ends a note.
 
 **What is live is sampled by the module, not polled by the page.** The jacks,
-the gate buses, the LEDs and the note buses are read once per *pass*, and the
-page folds together everything since it last painted. A trigger is high for one
-or two passes and an animation frame is sixteen milliseconds, so reading at
-paint time shows a pattern nobody is playing. A bus is only read when something
-is listening to it.
+the gate buses, the LEDs and the note buses are read once per *pass* by the
+module itself (`src/monitor/monitor.h`), folded into a frame the page asks for
+over the protocol once per animation frame (`SYSEX_MONITOR_REQUEST`,
+`runtime/monitor.js`), and every light, trace, roll and playhead is painted
+from that frame — whichever transport the module is on the end of. A trigger
+is high for one or two passes and an animation frame is sixteen milliseconds,
+so reading at paint time shows a pattern nobody is playing. A bus is only
+read when something is listening to it, and a node's position only asked for
+while its card is open. The frame carries the module's own time and each
+note's age, so the scope and the roll are drawn in the module's clock however
+late the frame came. What the page itself needs at pass rate — the gate edges
+its audio listener clicks on — it reads off its own module, because that is
+sound rather than a picture.
 
 **The module keeps wall-clock time, and what it plays is heard at that time.**
 Simulated time is `performance.now()` from a fixed origin (`runtime/module.js`):
@@ -455,9 +466,6 @@ user who cannot set their module up, so the page says plainly what is wrong and
 
 ## Not built
 
-- Live bus activity **from a real module**, streamed on the control cable. It
-  would have to be rate-limited and disable-able, since it competes with
-  musical traffic.
 - Per-step velocity, length, tie/rest and probability in the note lane.
 - A dial-and-preview for the Euclidean parameters.
 - Naming preset slots, which needs a place in the patch format for a name.

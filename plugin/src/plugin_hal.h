@@ -144,8 +144,9 @@ class PluginEeprom : public IEeprom {
         uint8_t cells[EEPROM_BYTES];
 };
 
-// ILeds over two bytes. Nothing draws them yet; they are kept so the
-// module's feedback vocabulary is there for a window that wants it.
+// ILeds over two bytes. The window draws them from the monitor's frame
+// (monitor/monitor.h), which reads the levels off StatusLeds rather than
+// off this; these are the driver's own copy, for the tests.
 class PluginLeds : public ILeds {
     public:
         PluginLeds() : levels() {}

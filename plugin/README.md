@@ -23,12 +23,14 @@ implementation of the hardware seam, beside the Teensy's and the page's:
 |---|---|---|---|
 | `IGpio` (the jacks) | `src/hal/teensy/teensy_gpio.cpp` | `WebGpio` | `PluginGpio`: **no jacks** |
 | `IMidiOut` | `teensy_midi.cpp` | `WebMidiOut` | `PluginMidiOut`: every cable is the host's MIDI output |
+| the tap on both (`src/monitor/hal_tap.h`) | `HalTap` | `HalTap` | `HalTap`: what the monitor reads the jacks and the sent notes off |
 | `IEeprom` | `teensy_eeprom.cpp` | `WebEeprom` | `PluginEeprom`: RAM, saved with the project |
 | main loop | `src/main.cpp` | `app/src/runtime/module.js` | `Engine::process`: passes on the sample clock |
 | clock timer | `teensy_clock.cpp` | `module.js` | `Engine::drive_clock` |
 | clock source | the timer, the sync jack, MIDI clock | the same, simulated | **the host's playhead, as MIDI clock** |
 | MIDI input | `mm_midi_read()` | `deliver_midi()` | the block's MIDI, at its sample offsets |
 | the editor | the console, the app over a cable | the app, in the page | the app, in the plugin's window |
+| what the editor is shown | `SYSEX_MONITOR`, over the cable | the same message | the same message, over the bridge |
 
 `src/engine.h` is all of that with no plugin framework in it: `main.cpp`'s
 loop over the plugin's HAL, built and tested by `test/engine_test.cpp` with
@@ -95,7 +97,11 @@ hardware, by what answers (`app/src/runtime/host.js`), and the bridge
 carries three things, all of them bytes a cable could carry: a SysEx message
 each way, and a channel message from the page's keyboard on the cable it
 chose. The plugin's window therefore sees exactly what its MIDI input would,
-and the app is the same client of `src/protocol/sysex.h` it is everywhere.
+and the app is the same client of `src/protocol/sysex.h` it is everywhere -
+which is also how it watches the plugin: the lights, the scope, the rolls and
+the playheads are the frames the engine answers `SYSEX_MONITOR_REQUEST` with
+(`src/monitor/monitor.h`), asked for once per animation frame over the same
+bridge. The jacks in those frames are the plugin's, which is to say dark.
 
 ## Threads
 

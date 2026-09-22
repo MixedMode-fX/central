@@ -12,6 +12,7 @@
 #include "control/macros.h"
 #include "control/mod_matrix.h"
 #include "led/status_leds.h"
+#include "monitor/monitor.h"
 
 // The patch protocol's device end (#11).
 //
@@ -53,7 +54,8 @@ class SysexHandler : public ISysexIn {
 
         SysexHandler(PatchManager& patches, MixedModeMaster& master,
                      PatchStore& store, StatusLeds& leds, IMidiOut& midi, CcMapper& mapper,
-                     ModMatrix& matrix, const Macros& macros, const ControlSum& sum);
+                     ModMatrix& matrix, const Macros& macros, const ControlSum& sum,
+                     Monitor& watch);
         SysexHandler(const SysexHandler&) = delete;
         SysexHandler& operator=(const SysexHandler&) = delete;
 
@@ -107,6 +109,7 @@ class SysexHandler : public ISysexIn {
         void reply_macro_dest(uint8_t source, uint8_t slot);
         void reply_macro_state(uint8_t source, uint8_t index);
         void reply_pattern(uint8_t source, uint8_t node, uint16_t offset, uint16_t length);
+        void reply_monitor(uint8_t source, const uint8_t* nodes, uint8_t count);
         void ack(uint8_t source);
         void nak(uint8_t source, SysexError code);
         void notify(uint8_t event, uint8_t detail);
@@ -127,6 +130,11 @@ class SysexHandler : public ISysexIn {
         static constexpr uint8_t SUMMARY_MAX = 96;
         void put_string(const char* text, uint8_t limit = TEXT_MAX);
         void put_u14(uint16_t value){ put((uint8_t)(value & 0x7F)); put((uint8_t)((value >> 7) & 0x7F)); }
+        // Thirty-two bits as five data bytes, low septet first: a time in
+        // microseconds, a subtick count, a word of gate buses.
+        void put_u32(uint32_t value){
+            for (uint8_t i = 0; i < 5; i++) put((uint8_t)((value >> (7u * i)) & 0x7F));
+        }
         // A port's set of buses (bus/domain.h): sixteen bits, so three data
         // bytes rather than a u14's two.
         void put_set(BusSet set){
@@ -168,6 +176,9 @@ class SysexHandler : public ISysexIn {
         // principle. It reports where a macro is; it does not put it there.
         const Macros& macros;
         const ControlSum& sum;
+        // Read and taken: a request is what arms the monitor and what
+        // empties its record, and both happen here.
+        Monitor& monitor;
 
         // The staging image a bulk transfer accumulates into. The live graph
         // is untouched until the last chunk has arrived and the whole image

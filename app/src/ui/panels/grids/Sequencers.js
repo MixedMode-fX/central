@@ -15,7 +15,7 @@ import { noteName, degreeToSemitone, tonicOf, DEFAULT_KEY_OCTAVE } from '../../.
 import { scaleMaskById } from '../../../protocol/names.js';
 import { keyNow, globalNow } from '../../../core/globals.js';
 import { rootedNote } from '../../components/KeyBadge.js';
-import { paintPlayhead } from './playhead.js';
+import { NO_STEP, paintPlayhead } from './playhead.js';
 import '../Grid.css';
 
 // The box a grid lives in: a title, and the lanes in a remembered scroller.
@@ -30,12 +30,14 @@ const Lane = (name, cells, klass = '') => el('div', { class: 'lane-row' },
   el('span', { class: 'lane-name' }, name),
   el('div', { class: classes('lane', klass) }, cells));
 
-// The step each lane is sounding, painted onto its cells every frame.
-// Nothing is rebuilt: a class moves from one cell to the next.
+// The step each lane is sounding, painted onto its cells every frame from
+// where the module says the node is (runtime/monitor.js). Nothing is
+// rebuilt: a class moves from one cell to the next.
 function playhead(app, index, lanes) {
-  app.live?.paint(({ module }) => {
-    if (index >= module.nodeCount() || !module.seqKind(index)) return;
-    lanes.forEach((cells, lane) => paintPlayhead(cells, module.seqPosition(index, lane)));
+  app.live?.watchNode(index);
+  app.live?.paint(({ monitor }) => {
+    const at = monitor.positionsOf(index);
+    lanes.forEach((cells, lane) => paintPlayhead(cells, at[lane] ?? NO_STEP));
   });
 }
 

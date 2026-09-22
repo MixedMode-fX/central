@@ -10,6 +10,8 @@
 #include "patch/patch_store.h"
 #include "patch/patch_manager.h"
 #include "protocol/sysex_handler.h"
+#include "monitor/hal_tap.h"
+#include "monitor/monitor.h"
 #include "control/macros.h"
 #include "control/cc_mapper.h"
 #include "control/control_sum.h"
@@ -169,8 +171,10 @@ class Engine {
         PluginMidiOut   midi_out;
         PluginEeprom    eeprom;
         PluginLeds      led_driver;
+        HalTap          panel;
         MixedModeMaster mm;
         StatusLeds      status;
+        Monitor         monitor;
         PatchStore      patch_store;
         PatchManager    patch_manager;
         Macros          macros;

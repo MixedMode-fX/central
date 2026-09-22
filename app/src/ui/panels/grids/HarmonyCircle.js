@@ -39,6 +39,18 @@ const setView = (app, index, changes) => {
   app.render();
 };
 
+// Where the walk is, as the module last reported it (runtime/monitor.js): the
+// degree sounding, the slot of the loop it is sounding in, and the degree
+// written in each slot. NO_STEP for each before there is one.
+function harmonyLive(monitor, index) {
+  const at = monitor?.positionsOf(index) ?? [];
+  return {
+    degree: at[0] ?? NO_STEP,
+    slot: at[1] ?? NO_STEP,
+    chord: (slot) => at[2 + slot] ?? NO_STEP,
+  };
+}
+
 // Everything the picture needs, read from the running node in one place.
 function harmonyShape(app, index) {
   const m = app.module;
@@ -117,8 +129,9 @@ export function HarmonyCircle(app, index) {
   const slots = loopLength ? LoopSlots(loopLength) : null;
 
   const view = { fan, caption, dots, slots, drawn: null };
-  drawHarmony(app, index, view);
-  app.live?.paint(() => paintHarmony(app, index, view));
+  drawHarmony(app, index, view, harmonyLive(app.monitor, index));
+  app.live?.watchNode(index);
+  app.live?.paint(({ monitor }) => paintHarmony(app, index, view, monitor));
 
   return el('div', { class: 'grid harmony' },
     el('div', { class: 'grid-title' }, `circle of fifths · ${shape.chords[0].name} · ${shape.n} chords`),
@@ -182,24 +195,24 @@ function arc(index, a, b, attrs) {
 // The arrows and the sentence under them, drawn into elements that already
 // exist: while the arrows follow the music they are redrawn as each chord
 // lands, and nothing else on the card is rebuilt.
-function drawHarmony(app, index, view) {
+function drawHarmony(app, index, view, live) {
   const shape = harmonyShape(app, index);
   if (!shape) return;
   const m = app.module;
-  const playing = m.harmonyDegree(index);
+  const playing = live.degree;
   const pinned = viewOf(app, index).focus ?? null;
   const from = pinned !== null ? Math.min(pinned, shape.n - 1)
              : (playing === NO_STEP ? 0 : Math.min(playing, shape.n - 1));
   const loopLength = m.harmonyLoopLength(index);
   const mode = modeOf(app, index, loopLength);
-  view.drawn = `${mode}:${from}:${loopLength}:${m.harmonyLoopPosition(index)}`;
+  view.drawn = `${mode}:${from}:${loopLength}:${live.slot}`;
   clear(view.fan);
   const { fan, caption } = view;
 
   if (mode === 'loop') {
     const chords = [];
     for (let slot = 0; slot < loopLength; slot++) {
-      const degree = m.harmonyLoopChord(index, slot);
+      const degree = live.chord(slot);
       if (degree !== NO_STEP && degree < shape.n) chords.push(shape.chords[degree]);
     }
     for (let i = 0; i + 1 < chords.length; i++) {
@@ -246,17 +259,18 @@ function drawHarmony(app, index, view) {
 // slot of the loop it is sounding in, and - while the arrows follow rather than being
 // pinned - the fan redrawn as each chord lands. Redrawn only when what it
 // would draw has changed, so a card that is merely open costs nothing.
-function paintHarmony(app, index, view) {
+function paintHarmony(app, index, view, monitor) {
   const m = app.module;
   if (index >= m.nodeCount() || !m.harmonyDegrees(index)) return;
-  const degree = m.harmonyDegree(index);
+  const live = harmonyLive(monitor, index);
+  const degree = live.degree;
   paintPlayhead(view.dots, degree);
   const loopLength = m.harmonyLoopLength(index);
-  const at = m.harmonyLoopPosition(index);
+  const at = live.slot;
   if (view.slots) {
     let shape = null;
     view.slots.forEach((chip, slot) => {
-      const written = m.harmonyLoopChord(index, slot);
+      const written = live.chord(slot);
       if (chip.getAttribute('data-degree') !== String(written)) {
         shape ??= harmonyShape(app, index);
         if (shape) fillSlot(chip, shape, written, slot);
@@ -266,5 +280,5 @@ function paintHarmony(app, index, view) {
   }
   const pinned = viewOf(app, index).focus ?? null;
   const from = pinned !== null ? pinned : (degree === NO_STEP ? 0 : degree);
-  if (view.drawn !== `${modeOf(app, index, loopLength)}:${from}:${loopLength}:${at}`) drawHarmony(app, index, view);
+  if (view.drawn !== `${modeOf(app, index, loopLength)}:${from}:${loopLength}:${at}`) drawHarmony(app, index, view, live);
 }

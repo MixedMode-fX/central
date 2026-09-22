@@ -28,8 +28,6 @@ export function Transport(app, { compact = false, class: klass = '' } = {}) {
     // "everything sounding, released" is not a thing anybody recognises.
     button({ icon: 'panic', text: 'panic', class: 'ghost danger',
              label: 'panic: all notes off, on every port and channel', onclick: () => t.panic() }));
-  if (app.module && app.session.usingModule) {
-    app.live.paint(({ module }) => group.classList.toggle('running', module.clock().running));
-  }
+  app.live?.paint(({ monitor }) => group.classList.toggle('running', monitor.clock.running));
   return group;
 }

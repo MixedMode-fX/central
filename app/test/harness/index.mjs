@@ -12,6 +12,7 @@ import * as P from '../../src/protocol/generated.js';
 import { Device } from '../../src/protocol/device.js';
 import { EmbeddedModule } from '../../src/runtime/module.js';
 import { Listener } from '../../src/runtime/audio/listener.js';
+import { Monitor } from '../../src/runtime/monitor.js';
 import { createState } from '../../src/services/state.js';
 import { Live } from '../../src/services/render.js';
 import { emptyNode } from '../../src/protocol/codec.js';
@@ -34,6 +35,21 @@ export async function instantiate() {
   return { module: made, E: instance.exports };
 }
 
+// The module watched as the app watches it (runtime/monitor.js): a monitor,
+// and `frame()`, which asks the module over the protocol for everything since
+// the last ask - for the buses the monitor is reading and the nodes named -
+// and takes it in. The first ask arms the module's monitor; nothing is
+// recorded before it.
+export function watching(module, device) {
+  const monitor = new Monitor();
+  const frame = async (nodes = []) => {
+    const got = await device.monitorFrame(monitor.noteMask, nodes);
+    monitor.ingest(got);
+    return got;
+  };
+  return { monitor, frame };
+}
+
 // A Device over the embedded module, as the app builds one.
 export async function connected(module) {
   const device = new Device(module);
@@ -49,8 +65,8 @@ export async function connected(module) {
 // an editor whose every command is recorded rather than sent. `calls` is what
 // a test reads back to see what a press asked for.
 export function fakeApp({ patch, globals, device = null, module = null, controller = null,
-                          offline = false, modLive = new Map(), macroLive = new Map(),
-                          globalsLive = new Map() } = {}) {
+                          monitor = new Monitor(), offline = false, modLive = new Map(),
+                          macroLive = new Map(), globalsLive = new Map() } = {}) {
   const state = createState();
   if (patch) state.patch = patch;
   if (globals) state.globals = globals;
@@ -75,9 +91,9 @@ export function fakeApp({ patch, globals, device = null, module = null, controll
   }
   editor.caps = device?.capabilities ?? null;
   return {
-    state, device, module, controller, calls, editor,
+    state, device, module, monitor, controller, calls, editor,
     live: new Live(),
-    session: { offline, usingModule: Boolean(module), modLive, macroLive, globalsLive },
+    session: { offline, usingModule: Boolean(module), modLive, macroLive, globalsLive, monitor },
     render: () => {},
     say: record('say'),
     fail: record('fail'),
@@ -339,10 +355,10 @@ export function fakeAudioContext() {
   };
 }
 
-// The module as the listener uses it: somewhere to hang the hooks, the gate
-// levels of the current pass, and the note-bus watches.
+// The module as the listener uses it: somewhere to hang the hooks, and the
+// gate and jack levels of the current pass.
 export function fakeModule() {
-  const hooks = { midi: [], bus: [], frame: [], pass: [] };
+  const hooks = { midi: [], frame: [], pass: [] };
   return {
     now: 0,
     // Simulated time is wall time, from an origin of zero.
@@ -350,40 +366,35 @@ export function fakeModule() {
     levels: { jackIn: 0, jackOut: 0, gate: 0, green: 0, red: 0 },
     jackSources: Array.from({ length: P.GPIO_N }, () => ({ level: 0, hz: 0, pulseUntil: 0 })),
     modes: new Array(P.GPIO_N).fill(0),
-    watches: new Map(),
     jackMode(jack) { return this.modes[jack]; },
     jackOutput(jack) { return (this.levels.jackOut >> jack) & 1; },
     jackInput(jack) { return (this.levels.jackIn >> jack) & 1; },
+    gateBuses() { return this.levels.gate; },
     onMidi(fn) { hooks.midi.push(fn); },
-    onNoteBus(fn) { hooks.bus.push(fn); },
     onFrame(fn) { hooks.frame.push(fn); },
     onPass(fn) { hooks.pass.push(fn); },
-    watchNoteBus(bus) { this.watches.set(bus, (this.watches.get(bus) ?? 0) + 1); },
-    unwatchNoteBus(bus) {
-      const held = this.watches.get(bus);
-      if (!held) return;
-      if (held <= 1) this.watches.delete(bus); else this.watches.set(bus, held - 1);
-    },
     pass() { for (const fn of hooks.pass) fn(this.now); },
     hooks,
   };
 }
 
-// A listener with the audio on, over both fakes. `toggle()` is the real one:
-// it is where the master gain, the click gain and every voice get wired up.
+// A listener with the audio on, over the fakes and a real monitor. `toggle()`
+// is the real one: it is where the master gain, the click gain and every
+// voice get wired up.
 export async function listening() {
   const module = fakeModule();
+  const monitor = new Monitor();
   const ctx = fakeAudioContext();
   const had = globalThis.AudioContext;
   globalThis.AudioContext = function AudioContext() { return ctx; };
   try {
-    const listener = new Listener(module);
-    // The two ways an event reaches it, as the module delivers them: off the
-    // cable, and off a note bus.
-    listener.noteBus = (event) => { for (const fn of module.hooks.bus) fn(event); };
+    const listener = new Listener(module, monitor);
+    // The two ways an event reaches it: off the cable, from the module, and
+    // off a note bus, from the monitor's frame.
+    listener.noteBus = (event) => { for (const fn of monitor.noteListeners) fn(event); };
     await listener.toggle();
     assert.ok(listener.enabled, 'the fake context should come up running');
-    return { listener, module, ctx };
+    return { listener, module, monitor, ctx };
   } finally {
     globalThis.AudioContext = had;
   }

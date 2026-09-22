@@ -41,6 +41,9 @@ export function createApp({ root, view, wasmUrl }) {
     hosted: hosted(),
     host: null,
     get device() { return session.device; },
+    // The running module as it reports itself, whichever transport it is on
+    // (runtime/monitor.js): what every light, trace and playhead reads.
+    get monitor() { return session.monitor; },
   };
   const render = () => renderer.render();
   const renderer = new Renderer({
@@ -79,13 +82,10 @@ export function createApp({ root, view, wasmUrl }) {
   app.fail = (message) => editor.fail(message);
   app.dismissError = () => { state.error = null; render(); };
 
-  // The lights, the playheads, the scope and the meters, painted once per
-  // animation frame off the module's own frame callback: the module is the
-  // thing that knows when a frame's worth of passes has just run.
-  app.refreshLive = () => {
-    if (!app.module || !session.usingModule) return;
-    live.tick({ module: app.module, activity: app.module.takeActivity() });
-  };
+  // The lights, the playheads, the scope and the meters, painted from what
+  // the module last reported: the session paints after every frame it is
+  // answered, and this is for the page that was just rebuilt.
+  app.refreshLive = () => session.tickLive();
 
   session.addEventListener('replaced', (e) => patches.adopt(e.detail));
   // The module's learn is the truth about whether one is running: when it
@@ -105,7 +105,7 @@ export function createApp({ root, view, wasmUrl }) {
     if (app.hosted) { await app.useHost(); return; }
     try {
       app.module = await EmbeddedModule.instantiate(await loadWasm(wasmUrl));
-      app.listener = new Listener(app.module);
+      app.listener = new Listener(app.module, session.monitor);
       app.listener.restore(library.readListen());
       editor.listener = app.listener;
       patches.listener = app.listener;
@@ -125,8 +125,6 @@ export function createApp({ root, view, wasmUrl }) {
     }
     render();
   };
-
-  let stopLive = null;
 
   // The plugin around the page: the module is its engine, reached over the
   // protocol like one on a cable, and its running patch - what the DAW's
@@ -157,8 +155,6 @@ export function createApp({ root, view, wasmUrl }) {
     state.current = noPatch();
     state.savedJson = null;
     arrangement.reset();
-    stopLive?.();
-    stopLive = app.module.onFrame(app.refreshLive);
     render();
   };
 
@@ -179,8 +175,6 @@ export function createApp({ root, view, wasmUrl }) {
       // one once it has stopped.
       app.outputs?.panic();
       app.module?.stop();
-      stopLive?.();
-      stopLive = null;
       await session.adopt(new WebMidiTransport(port.input, port.output), { deviceId: port.deviceId });
       // Musical MIDI goes out a different cable from the protocol's, which is
       // why cable 3 is reserved: a dump in flight and a pad being hit must not

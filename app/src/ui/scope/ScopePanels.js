@@ -17,7 +17,7 @@ export function ScopePanel(app) {
   const shown = rows.filter((row) => !ui.scopeHidden.has(row.key));
   const canvas = el('canvas', { class: 'scope',
                                 'aria-label': 'jack, gate bus and CV bus levels over the last four seconds' });
-  app.live.paint(({ module }) => drawScope(canvas, module, shown));
+  app.live.paint(({ monitor }) => drawScope(canvas, monitor, shown));
   return Panel('scope',
     rows.length ? el('div', { class: 'scope-wrap' }, canvas) : Hint('no jack, no gate bus, no CV bus'),
     rows.length ? Legend({ items: rows, hidden: ui.scopeHidden,
@@ -28,17 +28,17 @@ export function ScopePanel(app) {
 
 export function RollPanel(app) {
   const { ui } = app.state;
-  const sources = rollSources(app.watchedBuses);
+  const sources = rollSources(app.monitor.watchedBuses);
   const shown = sources.filter((source) => !ui.rollHidden.has(source.key));
   const canvas = rollCanvas('the notes of the last eight seconds');
-  app.live.paint(({ module }) => drawRoll(canvas, module, shown, ROLL_H));
+  app.live.paint(({ monitor }) => drawRoll(canvas, monitor, shown, ROLL_H));
   return Panel('piano roll',
     el('div', { class: 'scope-wrap' }, canvas),
     el('div', { class: 'row legend-row' },
       Legend({ items: sources, hidden: ui.rollHidden,
                onToggle: (key) => { toggleIn(ui.rollHidden, key); app.render(); } }),
       IconButton({ icon: 'clear', label: 'clear the roll', class: 'ghost',
-                   onclick: () => app.module.clearNotes() })));
+                   onclick: () => app.monitor.clearNotes() })));
 }
 
 // The signals under one block - a node, a jack, a MIDI port - in the shades
@@ -52,7 +52,6 @@ export function RollPanel(app) {
 // a converter that reads notes and writes a control signal shows its roll
 // first, because that is the order the signal went through it.
 export function BlockSignalsPanel(app, { kind, index }) {
-  if (!app.module || !app.session.usingModule) return null;
   const { rows, sources } = blockSignals({ patch: app.state.patch, device: app.device }, { kind, index });
   const { ui } = app.state;
   const prefix = `${kind}:${index}:`;
@@ -70,12 +69,12 @@ export function BlockSignalsPanel(app, { kind, index }) {
     if (shownRows.length) {
       const scope = el('canvas', { class: 'scope',
         'aria-label': `the gate and control signals this block ${way} in the last four seconds` });
-      app.live.paint(({ module }) => drawScope(scope, module, shownRows));
+      app.live.paint(({ monitor }) => drawScope(scope, monitor, shownRows));
       pictures.push(el('div', { class: 'scope-wrap' }, scope));
     }
     if (shownSources.length) {
       const roll = rollCanvas(`the notes this block ${way} in the last eight seconds`);
-      app.live.paint(({ module }) => drawRoll(roll, module, shownSources, NODE_ROLL_H));
+      app.live.paint(({ monitor }) => drawRoll(roll, monitor, shownSources, NODE_ROLL_H));
       pictures.push(el('div', { class: 'scope-wrap' }, roll));
     }
   }

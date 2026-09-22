@@ -6,6 +6,7 @@
 import * as P from '../protocol/generated.js';
 import { Device } from '../protocol/device.js';
 import { LIVE_GLOBALS } from '../protocol/names.js';
+import { Monitor } from '../runtime/monitor.js';
 
 // How often the page asks the module what its modulation routes are doing. A
 // meter drawn faster than this says nothing more, and over a DIN cable every
@@ -37,8 +38,13 @@ export class Session extends EventTarget {
     // these are two different numbers and an indicator showing only the
     // first is showing the wrong one.
     this.globalsLive = new Map();
+    // The running module, as it reports itself (runtime/monitor.js): what
+    // everything live on the page is painted from, whichever transport the
+    // module is on the end of.
+    this.monitor = new Monitor();
     this.modPolling = false;
-    this.stopModPoll = null;
+    this.monitorPolling = false;
+    this.stopPolls = null;
   }
 
   get transportName() { return this.usingModule ? 'built-in' : (this.device?.transport.name ?? 'nothing'); }
@@ -47,6 +53,7 @@ export class Session extends EventTarget {
   async adopt(transport, { deviceId = P.SYSEX_DEFAULT_DEVICE, usingModule = false } = {}) {
     this.device = new Device(transport);
     this.device.deviceId = deviceId;
+    this.monitor.reset();
     this.device.addEventListener('device-event', (e) => this.onDeviceEvent(e.detail));
     await this.device.readCapabilities();
     await this.device.readAlgorithms();
@@ -58,7 +65,13 @@ export class Session extends EventTarget {
     this.usingModule = usingModule;
     this.offline = false;
     this.state.status = 'connected';
-    this.startModPoll();
+    this.startPolls();
+  }
+
+  // Paint what moves from what the module last reported: after a frame,
+  // and after a rebuild of the page, whose new elements have not seen one.
+  tickLive() {
+    this.live.tick({ monitor: this.monitor, activity: this.monitor.takeActivity() });
   }
 
   // The module originates a few things on its own - a Program Change recall,
@@ -88,29 +101,54 @@ export class Session extends EventTarget {
     this.render();
   }
 
-  // --- what modulation is doing --------------------------------------------
+  // --- what the module is doing ----------------------------------------------
 
-  // A modulation route moves a parameter between passes, so the number in
-  // the patch is the set point and not what the node is running. The module
-  // knows both, and the only honest way to show it is to ask.
+  // Two questions, asked on the animation frame and never in a page that is
+  // not being looked at - `requestAnimationFrame` does not fire there.
   //
-  // Polled, and only while somebody is looking: the question is only asked
-  // about routes that have a meter on the page, and a tab in the background
-  // asks nothing at all - `requestAnimationFrame` does not fire there.
-  startModPoll() {
-    if (this.stopModPoll || !globalThis.requestAnimationFrame) return;
+  // The monitor's frame is asked for every animation frame, one at a time:
+  // it is everything since the last ask, so a slow cable answers slower and
+  // loses nothing, and asking twice at once would split one record in two.
+  // What modulation is doing is asked less often: a meter drawn faster than
+  // MOD_POLL_MS says nothing more.
+  startPolls() {
+    if (this.stopPolls || !globalThis.requestAnimationFrame) return;
     let running = true;
     let last = 0;
     const tick = (ts) => {
       if (!running) return;
       requestAnimationFrame(tick);
+      this.pollMonitor();
       if (ts - last < MOD_POLL_MS) return;
       last = ts;
       this.pollModState();
     };
     requestAnimationFrame(tick);
-    this.stopModPoll = () => { running = false; };
+    this.stopPolls = () => { running = false; };
   }
+
+  // One frame of the monitor (runtime/monitor.js): the buses the page is
+  // reading and the nodes with a playhead on screen, then everything live is
+  // painted from what came back.
+  async pollMonitor() {
+    if (this.monitorPolling || !this.device) return;
+    this.monitorPolling = true;
+    try {
+      const frame = await this.device.monitorFrame(this.monitor.noteMask, [...this.live.nodeSlots]);
+      this.monitor.ingest(frame);
+      this.tickLive();
+    } catch {
+      // A module that has gone away is the connection's problem, not the
+      // lights': they stay where the last frame left them.
+    } finally {
+      this.monitorPolling = false;
+    }
+  }
+
+  // A modulation route moves a parameter between passes, so the number in
+  // the patch is the set point and not what the node is running. The module
+  // knows both, and the only honest way to show it is to ask - and only
+  // about the routes that have a meter on the page.
 
   // One round of questions, never two at once: over a DIN cable a round trip
   // is milliseconds, and a queue of overlapping polls would outlive whatever

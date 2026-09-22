@@ -29,6 +29,8 @@
 #include "control/nrpn.h"
 #include "control/mod_matrix.h"
 #include "led/status_leds.h"
+#include "monitor/hal_tap.h"
+#include "monitor/monitor.h"
 #include "web_hal.h"
 
 #define EMU_EXPORT extern "C" __attribute__((visibility("default")))
@@ -37,7 +39,8 @@ static WebGpio gpio;
 static WebMidiOut midi;
 static WebEeprom eeprom;
 static WebLeds led_driver;
-static MixedModeMaster master(gpio, midi);
+static HalTap panel(gpio, midi);
+static MixedModeMaster master(panel, panel);
 
 // The control plane, exactly as main.cpp wires it (#7, #11, #21, #22). The
 // page can therefore drive the module the way a host does - identity request,
@@ -52,8 +55,9 @@ static CcMapper cc_map(patches, master, macros);
 static ControlSum control_sum(cc_map);
 static ModMatrix mod_matrix(patches, cc_map, control_sum);
 static NrpnDecoder nrpn(patches, cc_map);
-static SysexHandler protocol(patches, master, store, leds, midi, cc_map, mod_matrix,
-                             macros, control_sum);
+static Monitor monitor(master, panel, leds);
+static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_matrix,
+                             macros, control_sum, monitor);
 
 // The patch under construction. Separate from what is running: the page fills
 // this through the emu_patch_* setters and calls emu_load() to make it live.
@@ -193,7 +197,12 @@ EMU_EXPORT uint32_t emu_node_count(){ return master.node_count(); }
 
 // Running -----------------------------------------------------------------
 
-EMU_EXPORT void emu_pass(uint32_t now_us){ master.pass(now_us); }
+// One pass, and then the monitor's record of it (monitor/monitor.h): the
+// same place main.cpp samples, after the buses have published.
+EMU_EXPORT void emu_pass(uint32_t now_us){
+    master.pass(now_us);
+    monitor.sample(now_us);
+}
 // Offers a message to every MidiInPort, as main.cpp does when it drains the
 // transport queue. System realtime messages go to the clock instead.
 EMU_EXPORT uint32_t emu_deliver_midi(uint32_t source, uint32_t type, uint32_t channel, uint32_t d1, uint32_t d2, uint32_t now_us){
@@ -213,11 +222,8 @@ EMU_EXPORT void emu_entropy_stir(uint32_t value){ entropy::stir(value); }
 EMU_EXPORT void emu_clock_advance(){ master.clock().advance(); }
 EMU_EXPORT uint32_t emu_clock_interval_us(){ return master.clock().subtick_interval_us(); }
 EMU_EXPORT uint32_t emu_clock_take_interval_change(){ return master.clock().take_interval_change() ? 1 : 0; }
-EMU_EXPORT uint32_t emu_clock_count(){ return master.clock().count(); }
-EMU_EXPORT uint32_t emu_clock_running(){ return master.clock().running() ? 1 : 0; }
 EMU_EXPORT uint32_t emu_clock_source(){ return master.clock().source(); }
 EMU_EXPORT void emu_clock_set_source(uint32_t source){ master.clock().set_source((uint8_t)source); }
-EMU_EXPORT uint32_t emu_clock_bpm(){ return master.clock().bpm(); }
 EMU_EXPORT void emu_clock_set_bpm(uint32_t bpm){ master.clock().set_bpm((uint16_t)bpm); }
 EMU_EXPORT uint32_t emu_clock_cv_ppqn(){ return master.clock().cv_ppqn(); }
 EMU_EXPORT void emu_clock_set_cv_ppqn(uint32_t ppqn){ master.clock().set_cv_ppqn((uint8_t)ppqn); }
@@ -233,29 +239,30 @@ EMU_EXPORT uint32_t emu_jack_input(uint32_t port){ return port < GPIO_N ? gpio.i
 EMU_EXPORT uint32_t emu_jack_output(uint32_t port){ return port < GPIO_N ? gpio.outputs[port] : 0; }
 EMU_EXPORT uint32_t emu_jack_mode(uint32_t port){ return port < GPIO_N ? gpio.modes[port] : 0; }
 
-// Buses (the front buffer: what readers saw this pass) ----------------------
+// The gate buses, high this pass -------------------------------------------
+//
+// For the page's own sound and nothing else: the audio listener clicks on
+// the edge of a gate, and an edge is a pass. What the page *shows* about the
+// buses - the lights, the scope, the notes on a bus - it asks for over the
+// protocol like any other editor (SYSEX_MONITOR_REQUEST, monitor/monitor.h),
+// so there is no second way to watch a module here that a plugin or a cable
+// has not got.
 
 EMU_EXPORT uint32_t emu_gate_buses(){
     uint32_t mask = 0;
     for (uint8_t b = 0; b < N_GATE_BUS; b++) if (master.buses().gate_read(b)) mask |= (1u << b);
     return mask;
 }
-EMU_EXPORT uint32_t emu_note_count(uint32_t bus){ return master.buses().note_count((uint8_t)bus); }
-EMU_EXPORT uint32_t emu_note_overflows(uint32_t bus){ return master.buses().note_overflows((uint8_t)bus); }
-// One event of a note bus packed as type<<24 | channel<<16 | d1<<8 | d2.
-EMU_EXPORT uint32_t emu_note_event(uint32_t bus, uint32_t index){
-    const MidiEvent& e = master.buses().note_read((uint8_t)bus, (uint8_t)index);
-    return ((uint32_t)e.type << 24) | ((uint32_t)e.channel << 16) | ((uint32_t)e.data1 << 8) | e.data2;
-}
-EMU_EXPORT int32_t emu_cv(uint32_t bus){ return master.buses().cv_read((uint8_t)bus); }
 
 // Sequencer view (#13, #14) -----------------------------------------------
 //
 // What the page's step grids show: the pattern each loaded sequencer holds,
-// the step each lane is on, and for the note sequencers the pitch every cell
-// resolves to against the node's *current* root and scale, so playing a key
-// into the root inlet visibly re-pitches the grid. Read-only, and resolved
-// from the descriptor id rather than RTTI, which the wasm build does without.
+// and for the note sequencers the pitch every cell resolves to against the
+// node's *current* root and scale, so playing a key into the root inlet
+// visibly re-pitches the grid. Read-only, and resolved from the descriptor
+// id rather than RTTI, which the wasm build does without. Where a sequencer
+// *is* - the step each lane is on - is not here: it moves, and what moves
+// comes in the monitor's frame like every other playhead.
 
 enum SeqKind : uint32_t { SEQ_NONE = 0, SEQ_GATE = 1, SEQ_NOTE = 2, SEQ_DRUM = 3 };
 
@@ -290,16 +297,6 @@ EMU_EXPORT uint32_t emu_seq_length(uint32_t i, uint32_t lane){
         case SEQ_NOTE: return static_cast<NoteSequencerBase*>(n)->length();
         case SEQ_DRUM: return static_cast<DrumSequencer*>(n)->lane_length((uint8_t)lane);
         default: return 0;
-    }
-}
-// The step the lane is on, or 0xFF before its first advance.
-EMU_EXPORT uint32_t emu_seq_position(uint32_t i, uint32_t lane){
-    Node* n;
-    switch (seq_kind(i, n)){
-        case SEQ_GATE: { GateSequencer* g = static_cast<GateSequencer*>(n); return g->steps_taken() ? g->position() : 0xFF; }
-        case SEQ_NOTE: { NoteSequencerBase* s = static_cast<NoteSequencerBase*>(n); return s->steps_taken() ? s->position() : 0xFF; }
-        case SEQ_DRUM: { DrumSequencer* d = static_cast<DrumSequencer*>(n); return d->steps_taken() ? d->lane_position((uint8_t)lane) : 0xFF; }
-        default: return 0xFF;
     }
 }
 // A cell: 1/0 for gate patterns, the stored velocity for note and MIDI drum
@@ -359,12 +356,13 @@ EMU_EXPORT uint32_t emu_seq_lane_channel(uint32_t i, uint32_t lane){
 }
 // Harmony view (#33) ------------------------------------------------------
 //
-// What the page's circle of fifths shows: where the key's chords sit, how
-// strongly the walk wants each move, and the loop it has written down. The
-// weights are the node's own - `Harmony::weigh` is the function the draw
-// reads, not a second opinion about it - so the picture cannot disagree with
-// the music. Read-only, and resolved from the descriptor id like the
-// sequencer view above.
+// What the page's circle of fifths shows: where the key's chords sit and how
+// strongly the walk wants each move. The weights are the node's own -
+// `Harmony::weigh` is the function the draw reads, not a second opinion
+// about it - so the picture cannot disagree with the music. Read-only, and
+// resolved from the descriptor id like the sequencer view above. The chord
+// sounding, the loop's slot and the chords it has written are the monitor's
+// (monitor/monitor.h), as every other playhead is.
 
 static Harmony* harmony_at(uint32_t i){
     const AlgorithmDescriptor* d = master.node_descriptor((uint8_t)i);
@@ -377,11 +375,6 @@ static Harmony* harmony_at(uint32_t i){
 EMU_EXPORT uint32_t emu_harmony_degrees(uint32_t i){
     Harmony* h = harmony_at(i);
     return h ? h->usable_degrees() : 0;
-}
-// The chord sounding now, 0xFF before the first advance.
-EMU_EXPORT uint32_t emu_harmony_degree(uint32_t i){
-    Harmony* h = harmony_at(i);
-    return h ? h->degree() : 0xFF;
 }
 // Where a degree sits: the pitch it plays, and its triad as a set of pitch
 // classes - which is what puts it on the circle and names its quality.
@@ -404,27 +397,10 @@ EMU_EXPORT uint32_t emu_harmony_weight(uint32_t i, uint32_t from, uint32_t to){
     const uint8_t n = h->weigh((uint8_t)from, weight);
     return to < n ? weight[to] : 0;
 }
-// The loop: its length, the slot that is sounding (0xFF when nothing is
-// looping or no chord of it has played), and the degree in a slot (0xFF until
-// the walk has played that far). The slot is the one being *heard*, the same
-// as `emu_seq_position` above, so the page paints one playhead rule.
+// The loop's length: what says whether there is a loop to draw.
 EMU_EXPORT uint32_t emu_harmony_loop_length(uint32_t i){
     Harmony* h = harmony_at(i);
     return h ? h->get_param(Harmony::P_LOOP) : 0;
-}
-EMU_EXPORT uint32_t emu_harmony_loop_position(uint32_t i){
-    Harmony* h = harmony_at(i);
-    return h ? h->loop_position() : 0xFF;
-}
-EMU_EXPORT uint32_t emu_harmony_loop_chord(uint32_t i, uint32_t slot){
-    Harmony* h = harmony_at(i);
-    return h ? h->loop_chord((uint8_t)slot) : 0xFF;
-}
-// Where in the phrase the next chord falls: what says which advance the
-// cadence is due on.
-EMU_EXPORT uint32_t emu_harmony_phrase_position(uint32_t i){
-    Harmony* h = harmony_at(i);
-    return h ? h->phrase_position() : 0;
 }
 
 // The algorithm id of a loaded node, for the page's labels.
@@ -516,7 +492,6 @@ EMU_EXPORT void emu_control_service(uint32_t now_us){
     leds.service(now_us);
 }
 
-EMU_EXPORT uint32_t emu_led(uint32_t which){ return which < LED_COUNT ? led_driver.levels[which] : 0; }
 EMU_EXPORT uint32_t emu_slot_used(uint32_t slot){ return store.used((uint8_t)slot); }
 EMU_EXPORT uint32_t emu_slot_occupied(uint32_t slot){ return store.occupied((uint8_t)slot) ? 1 : 0; }
 EMU_EXPORT uint32_t emu_running_defaults(){ return patches.running_defaults() ? 1 : 0; }

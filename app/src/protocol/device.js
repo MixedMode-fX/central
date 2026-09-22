@@ -46,8 +46,18 @@ export class Device extends EventTarget {
       }));
       return;
     }
-    for (const waiter of this.pending) waiter.offer(bytes);
-    this.pending = this.pending.filter((w) => !w.done);
+    // Replies come back in the order the requests went out: the module
+    // answers each message before it reads the next, and a cable keeps them
+    // in order. So the oldest request still waiting owns whatever arrives,
+    // until it says its exchange is over. Offering a reply to every waiter
+    // read the ACK of an edit as the first reply to the monitor request sent
+    // in the same breath, and with a frame nearly always in flight that was
+    // every other answer.
+    while (this.pending.length && this.pending[0].done) this.pending.shift();
+    const waiter = this.pending[0];
+    if (!waiter) return;
+    waiter.offer(bytes);
+    if (waiter.done) this.pending.shift();
   }
 
   send(bytes) { this.transport.send(bytes); }
@@ -487,6 +497,26 @@ export class Device extends EventTarget {
     return codec.readU14(reply, 9);
   }
 
+  // The monitor ------------------------------------------------------------
+
+  // What the module has been doing since it was last asked
+  // (src/monitor/monitor.h): the frame everything live on the page is
+  // painted from. `noteBuses` is a mask of the buses whose notes are wanted
+  // and `nodes` the ones whose positions are, because a bus nobody draws is
+  // not read and a playhead is drawn for the card that is open. Asked once
+  // per animation frame by the session, and the record starts again each
+  // time, so this is the one request that must not be sent twice at once.
+  async monitorFrame(noteBuses, nodes = []) {
+    const asked = nodes.slice(0, P.MONITOR_MAX_NODES);
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_MONITOR_REQUEST,
+               [...codec.u21(noteBuses & 0xffff), asked.length, ...asked]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_MONITOR) || this.isReply(r, P.SysexCommand.SYSEX_NAK),
+      { what: 'the monitor' });
+    this.throwOnNak(reply, 'the module refused a monitor request');
+    return decodeMonitor(reply);
+  }
+
   // Macros ---------------------------------------------------------------
   // A macro is a *target*: nothing here moves one. It is moved by a source -
   // a knob through the binding table, a CV bus through the matrix - so what
@@ -624,4 +654,51 @@ export class Device extends EventTarget {
       throw new Error(`${context}: ${name}`);
     }
   }
+}
+
+// One SYSEX_MONITOR frame, byte for byte as src/protocol/sysex.h lays it out.
+export function decodeMonitor(reply) {
+  let at = 5;
+  const u8 = () => reply[at++];
+  const u14 = () => { const v = codec.readU14(reply, at); at += 2; return v; };
+  const u32 = () => { const v = codec.readU32(reply, at); at += 5; return v; };
+  const s14 = () => { const v = codec.readS14(reply, at); at += 3; return v; };
+  const frame = { at: u32() };
+  const clockFlags = u8();
+  frame.clock = { running: (clockFlags & 1) !== 0, bpm: u14(), count: u32() };
+  frame.gate = { now: u32(), since: u32() };
+  frame.jackIn = { now: u14(), since: u14() };
+  frame.jackOut = { now: u14(), since: u14() };
+  frame.green = u14();
+  frame.red = u14();
+  frame.cv = [];
+  for (let b = 0; b < P.N_CV_BUS; b++) frame.cv.push(s14());
+  frame.nodes = [];
+  const nodes = u8();
+  for (let i = 0; i < nodes; i++) {
+    const node = u8();
+    const count = u8();
+    const values = [];
+    for (let v = 0; v < count; v++) values.push(u8());
+    frame.nodes.push({ node, values });
+  }
+  frame.lost = u8() !== 0;
+  frame.events = [];
+  const events = u8();
+  for (let i = 0; i < events; i++) {
+    const where = u8();
+    const arg = u8() | ((where & 0x40) ? 0x80 : 0);
+    const flags = u8();
+    const d1 = u8();
+    const d2 = u8();
+    const ageMs = u14();
+    frame.events.push({
+      bus: (where & 0x01) ? null : arg,
+      target: (where & 0x01) ? arg : null,
+      type: (flags & 0x40) ? 0x90 : 0x80,
+      channel: flags & 0x1f,
+      d1, d2, ageMs,
+    });
+  }
+  return frame;
 }

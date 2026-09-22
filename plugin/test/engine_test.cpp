@@ -352,6 +352,35 @@ static void test_state_round_trips_the_patch_and_the_presets(){
     CHECK(other.leds().levels[LED_RED] > 0);
 }
 
+// The window asks what the module has been doing and is answered on its own
+// cable: the frame is the record since the last ask, so a note the track
+// played is in it once, on the bus and on the way out, and gone from the next.
+static void test_the_window_is_told_what_the_module_did(){
+    Engine& e = fresh(engine_a);
+    load_thru(e);
+    const std::vector<uint8_t> ask = framed(SYSEX_MONITOR_REQUEST, {1, 0, 0, 0});   // note bus 0, no nodes
+    e.receive_sysex(MIDI_CONTROL_PORT, ask.data(), (uint32_t)ask.size());
+    e.midi().clear_editor_sysex();
+    InEvent in[2] = {channel_event(0, HOST_IN, MIDI_NOTE_ON, 1, 60, 100),
+                     channel_event(240, HOST_IN, MIDI_NOTE_OFF, 1, 60, 0)};
+    e.process(480, in, 2);
+    e.receive_sysex(MIDI_CONTROL_PORT, ask.data(), (uint32_t)ask.size());
+    const PluginMidiOut& out = e.midi();
+    CHECK(out.editor_sysex_used > 60);
+    CHECK_EQ(out.editor_sysex[3], SYSEX_MONITOR);
+    // Past the fixed part - at, clock, gates, jacks, LEDs, the CV buses, an
+    // empty node list and the lost flag - is the event count.
+    const size_t events_at = 5 + 5 + 1 + 2 + 5 + 5 + 5 + 8 + 4 + 3 * N_CV_BUS + 1 + 1;
+    CHECK_EQ(out.editor_sysex[events_at], 4);           // on and off, on the bus and on the wire
+    CHECK_EQ(out.editor_sysex[events_at + 1], 0);       // the first: on note bus 0
+    CHECK_EQ(out.editor_sysex[events_at + 4], 60);
+    CHECK_EQ(out.host_sysex_used, 0);                   // nothing of this reached the track
+    e.midi().clear_editor_sysex();
+    e.process(480, nullptr, 0);
+    e.receive_sysex(MIDI_CONTROL_PORT, ask.data(), (uint32_t)ask.size());
+    CHECK_EQ(e.midi().editor_sysex[events_at], 0);
+}
+
 static void test_nothing_is_allocated_while_running(){
     Engine& e = fresh(engine_a);
     load_thru(e);
@@ -384,6 +413,7 @@ int main(){
     test_sysex_from_the_editor_is_answered_to_the_editor();
     test_an_edit_over_sysex_changes_what_is_running();
     test_state_round_trips_the_patch_and_the_presets();
+    test_the_window_is_told_what_the_module_did();
     test_nothing_is_allocated_while_running();
     if (g_failures){ fprintf(stderr, "engine_test: %d failure(s)\n", g_failures); return 1; }
     printf("engine_test: ok\n");

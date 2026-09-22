@@ -18,6 +18,19 @@
 
 static constexpr uint16_t HEADER_BYTES = 4;
 
+// The largest frame reply_monitor() can build, byte for byte as sysex.h lays
+// it out, so raising MONITOR_EVENTS or MONITOR_MAX_NODES past the reply
+// buffer fails here rather than as a NAK on the module.
+static constexpr size_t MONITOR_FRAME_MAX =
+    1 + HEADER_BYTES                                   // F0 and the header
+    + 5 + 1 + 2 + 5                                    // at, clock flags, bpm, count
+    + 5 + 5 + 4 * 2 + 2 * 2                            // gates, jacks, LEDs
+    + 3 * N_CV_BUS
+    + 1 + MONITOR_MAX_NODES * (2 + MONITOR_NODE_VALUES)
+    + 1 + 1 + MONITOR_EVENTS * 7
+    + 1;                                               // F7
+static_assert(MONITOR_FRAME_MAX <= SYSEX_TX_MAX, "a monitor frame must fit one reply");
+
 // A port's set of buses, as put_set() wrote it: three seven-bit data bytes,
 // low septet first (bus/domain.h).
 static BusSet read_set(const uint8_t* at){
@@ -29,9 +42,10 @@ static BusSet read_set(const uint8_t* at){
 SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
                            PatchStore& patch_store, StatusLeds& status, IMidiOut& midi_out,
                            CcMapper& mapper, ModMatrix& matrix,
-                           const Macros& macro_table, const ControlSum& control_sum) :
+                           const Macros& macro_table, const ControlSum& control_sum,
+                           Monitor& watch) :
     patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out), cc(mapper),
-    mod(matrix), macros(macro_table), sum(control_sum),
+    mod(matrix), macros(macro_table), sum(control_sum), monitor(watch),
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
     pending_patch(empty_patch()), pending_globals(default_globals()),
@@ -581,6 +595,18 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             ack(source);
             return;
 
+        // The monitor's record (monitor/monitor.h). The request names what
+        // is worth sending, and is what keeps the monitor armed.
+        case SYSEX_MONITOR_REQUEST: {
+            if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            const uint8_t count = args[3];
+            if (count > MONITOR_MAX_NODES){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            if (n < 4u + count){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            monitor.watch(read_set(&args[0]).bits, now_us);
+            reply_monitor(source, &args[4], count);
+            return;
+        }
+
         case SYSEX_RESTORE_DEFAULTS:
             pending_patch = default_patch();
             pending_globals = default_globals_for_patch();
@@ -1045,6 +1071,59 @@ void SysexHandler::reply_pattern(uint8_t source, uint8_t node, uint16_t offset, 
     if (packed == 0){ nak(source, SYSEX_ERR_TOO_LARGE); return; }
     tx_at = (uint16_t)(tx_at + packed);
     send_reply(source);
+}
+
+// The monitor ------------------------------------------------------------
+
+// Everything since the last request, laid out as sysex.h says, and then the
+// record is taken so the next request gets only what is new. The clock is
+// read here rather than kept by the monitor: it is one read, and the
+// position of a node is the same - read now, for the nodes the request
+// named, because a playhead is drawn for the card that is open.
+void SysexHandler::reply_monitor(uint8_t source, const uint8_t* nodes, uint8_t count){
+    const MasterClock& clock = mm.clock();
+    const uint32_t at = monitor.sampled_at();
+    begin_reply(SYSEX_MONITOR);
+    put_u32(at);
+    put(clock.running() ? 1u : 0u);
+    put_u14(clock.bpm());
+    put_u32(clock.count());
+    put_u32(monitor.gate_now());
+    put_u32(monitor.gate_since());
+    put_u14(monitor.jack_in_now());
+    put_u14(monitor.jack_in_since());
+    put_u14(monitor.jack_out_now());
+    put_u14(monitor.jack_out_since());
+    put_u14(monitor.led_peak(LED_GREEN));
+    put_u14(monitor.led_peak(LED_RED));
+    for (uint8_t b = 0; b < N_CV_BUS; b++) put_s14(monitor.cv(b));
+
+    put(count);
+    for (uint8_t i = 0; i < count; i++){
+        uint8_t values[MONITOR_NODE_VALUES];
+        const uint8_t m = monitor.positions(nodes[i], values, MONITOR_NODE_VALUES);
+        put(nodes[i]);
+        put(m);
+        // Monitor::NONE does not fit a data byte; 0x7F is not a step, a
+        // slot or a degree either, so it says the same thing on the wire.
+        for (uint8_t v = 0; v < m; v++) put(values[v] == Monitor::NONE ? (uint8_t)0x7F : values[v]);
+    }
+
+    put(monitor.overflowed() ? 1u : 0u);
+    const uint8_t events = monitor.event_count();
+    put(events);
+    for (uint8_t i = 0; i < events; i++){
+        const Monitor::Event& e = monitor.event(i);
+        put((uint8_t)((e.where & 0x01) | ((e.arg & 0x80) ? 0x40u : 0u)));
+        put((uint8_t)(e.arg & 0x7F));
+        put((uint8_t)((e.type == MIDI_NOTE_ON ? 0x40u : 0u) | (e.channel & 0x1F)));
+        put(e.d1);
+        put(e.d2);
+        const uint32_t age_ms = (uint32_t)(at - e.at_us) / 1000u;
+        put_u14((uint16_t)(age_ms > 0x3FFF ? 0x3FFF : age_ms));
+    }
+    send_reply(source);
+    monitor.take();
 }
 
 // Quantised swap --------------------------------------------------------

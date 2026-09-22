@@ -7,11 +7,12 @@
 // is running is deferred rather than run inside it.
 //
 // The lights, the playheads, the scope and the meters are written straight
-// into the DOM once per animation frame instead: re-rendering the page for a
-// blinking LED would fight every open <select> and every held key. A view
-// that has something live registers a painter while it is built, and the
-// registry is emptied when the page is rebuilt, so a painter never outlives
-// the elements it closed over.
+// into the DOM once per frame the module reports instead
+// (`runtime/monitor.js`): re-rendering the page for a blinking LED would
+// fight every open <select> and every held key. A view that has something
+// live registers a painter while it is built, and the registry is emptied
+// when the page is rebuilt, so a painter never outlives the elements it
+// closed over.
 //
 // A rebuild is the longest thing this page does on its main thread, and the
 // module runs on the same thread: for as long as the rebuild takes, no pass
@@ -36,6 +37,9 @@ export class Live {
     // the patch to, the tempo a tap has changed. Same rule again - a setting
     // nobody is looking at is a round trip nobody needs.
     this.globalNames = new Set();
+    // The nodes with a playhead on screen: what the monitor request asks
+    // the position of. A card that is closed is a node nobody is watching.
+    this.nodeSlots = new Set();
   }
 
   reset() {
@@ -44,6 +48,7 @@ export class Live {
     this.modSlots.clear();
     this.macroSlots.clear();
     this.globalNames.clear();
+    this.nodeSlots.clear();
   }
 
   // Called every animation frame, and once after every render, with what the
@@ -58,6 +63,8 @@ export class Live {
   watchMacro(index) { this.macroSlots.add(index); }
 
   watchGlobal(name) { this.globalNames.add(name); }
+
+  watchNode(index) { this.nodeSlots.add(index); }
 
   tick(frame) {
     for (const painter of this.painters) painter(frame);

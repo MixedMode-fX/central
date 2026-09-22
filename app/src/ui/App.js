@@ -121,19 +121,19 @@ function Tabs(app) {
 function syncNoteBuses(app) {
   const wanted = new Set();
   app.watchedBuses ??= new Set();
-  if (app.module && app.session.usingModule && app.device?.capabilities) {
+  if (app.device?.capabilities) {
     for (let bus = 0; bus < app.device.capabilities.noteBuses; bus++) {
       if (busPeers(app.device, app.state.patch, Domain.Note, bus).writers.length) wanted.add(bus);
     }
   }
   for (const bus of [...app.watchedBuses]) {
     if (wanted.has(bus)) continue;
-    app.module?.unwatchNoteBus(bus);
+    app.monitor.unwatchNoteBus(bus);
     app.watchedBuses.delete(bus);
   }
   for (const bus of wanted) {
     if (app.watchedBuses.has(bus)) continue;
-    app.module.watchNoteBus(bus);
+    app.monitor.watchNoteBus(bus);
     app.watchedBuses.add(bus);
   }
 }

@@ -35,7 +35,7 @@ import { scaleMaskById, scaleName } from '../../protocol/names.js';
 import { inletName } from '../../core/patch.js';
 import { keySpelling, fifthsFrom, degreeOf, scaleTriad, triadQuality, romanNumeral,
          QUALITY_MARK, octaveOf } from '../../core/music.js';
-import { NO_NOTE } from '../../runtime/module.js';
+import { NO_NOTE } from '../../runtime/monitor.js';
 import { keyNow } from '../../core/globals.js';
 import './KeyBadge.css';
 
@@ -70,7 +70,7 @@ export function rootedNote(app, index) {
   const inlet = descriptor ? rootInlet(descriptor) : -1;
   const rooted = (node?.inBuses?.[inlet] ?? [])[0];
   if (inlet < 0 || rooted === undefined) return { inlet: null, note: null };
-  const played = app.session?.usingModule ? app.module?.busNote(rooted) : NO_NOTE;
+  const played = app.monitor?.busNote(rooted) ?? NO_NOTE;
   return { inlet: inletName(descriptor, inlet),
            note: played === undefined || played === NO_NOTE ? null : played };
 }

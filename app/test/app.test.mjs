@@ -82,7 +82,7 @@ import { MidiTab, OutputPanel } from '../src/ui/tabs/MidiTab.js';
 import { CLOCK_CV_SOURCE, CLOCK_MIDI_SOURCE } from '../src/protocol/names.js';
 import {
   instantiate, connected, fakeApp, fakeStorage, fakeAudioContext, fakeAudioThread,
-  fakePage, listening, patched, words, find, findAll, withDom, repoRoot,
+  fakePage, listening, patched, words, find, findAll, withDom, repoRoot, watching,
 } from './harness/index.mjs';
 
 // --- the library ------------------------------------------------------------
@@ -258,10 +258,15 @@ test('the module runs, keeps time and lights the LEDs', async () => {
   const { module } = await instantiate();
   // A freshly booted module runs the default patch, whose clock is internal.
   // Start is pressed the way the app presses it: over the protocol, because
-  // the transport has no other way in from the cable the app holds.
-  await new Device(module).pressTransport(P.CcTransportTarget.CC_TRANSPORT_START);
+  // the transport has no other way in from the cable the app holds - and
+  // what the module is doing is read back the same way, in a monitor frame.
+  const device = new Device(module);
+  const { monitor, frame } = watching(module, device);
+  await device.pressTransport(P.CcTransportTarget.CC_TRANSPORT_START);
+  await frame();
   module.advance(1_000_000);                        // one second of simulated time
-  const clock = module.clock();
+  await frame();
+  const clock = monitor.clock;
   assert.ok(clock.running, 'the clock is running');
   assert.ok(clock.count > 0, 'subticks are advancing');
   // 120 BPM for a second is two beats, at MASTER_PPQN * CLOCK_SUBTICK per beat.
@@ -273,7 +278,8 @@ test('the module runs, keeps time and lights the LEDs', async () => {
   let flashed = false;
   for (let i = 0; i < 200 && !flashed; i++) {
     module.advance(5000);
-    if (module.leds().green > 0) flashed = true;
+    await frame();
+    if (monitor.takeActivity().green > 0) flashed = true;
   }
   assert.ok(flashed, 'the green LED never flashed the beat');
 });
@@ -358,22 +364,28 @@ test('no audio worklet is a heartbeat that says so rather than throwing', async 
 // and not a stand-in for it.
 test('the transport service presses start, stop and continue on the module', async () => {
   const { module } = await instantiate();
-  const transport = new Transport({ session: { device: new Device(module) }, fail: (m) => assert.fail(m) });
+  const device = new Device(module);
+  const { monitor, frame } = watching(module, device);
+  const transport = new Transport({ session: { device }, fail: (m) => assert.fail(m) });
 
+  // The acks are answered on a microtask, as a real port would answer them,
+  // and what the clock is doing is read back in a frame, like everything.
   transport.stop();
-  assert.equal(module.clock().running, false);
+  await frame();
+  assert.equal(monitor.clock.running, false);
   transport.start();
-  assert.equal(module.clock().running, true);
-  assert.equal(module.clock().count, 0, 'start runs from the top');
+  await frame();
+  assert.equal(monitor.clock.running, true);
+  assert.equal(monitor.clock.count, 0, 'start runs from the top');
 
   module.advance(200_000);
-  const at = module.clock().count;
+  await frame();
+  const at = monitor.clock.count;
   transport.stop();
   transport.resume();
-  assert.equal(module.clock().running, true);
-  assert.equal(module.clock().count, at, 'continue resumes on the count the stop kept');
-  // The acks are answered on a microtask, as a real port would answer them.
-  await Promise.resolve();
+  await frame();
+  assert.equal(monitor.clock.running, true);
+  assert.equal(monitor.clock.count, at, 'continue resumes on the count the stop kept');
 });
 
 // A panic has three places to reach and the button is worthless if it misses
@@ -405,13 +417,12 @@ test('a panic sweeps every channel of the module and releases both sides of the 
 });
 
 // The same four buttons in the shell's bar and on the surface's case. The lamp
-// is the one thing the view decides for itself, and only for the module in the
-// page: nothing in the protocol reports a cabled module's clock, and a lamp
-// that guessed would be worse than none.
+// is lit from what the module reports in its frames, so it is the same lamp
+// for a module in the page, in a plugin or on a cable.
 test('the transport draws four buttons and lights while the clock runs', () => {
   const pressed = [];
   const app = {
-    ...fakeApp({ module: { clock: () => ({ running: true }) } }),
+    ...fakeApp({ monitor: { clock: { running: true } } }),
     transport: {
       start: () => pressed.push('start'), stop: () => pressed.push('stop'),
       resume: () => pressed.push('resume'), panic: () => pressed.push('panic'),
@@ -425,7 +436,7 @@ test('the transport draws four buttons and lights while the clock runs', () => {
     assert.deepEqual(pressed, ['start', 'stop', 'resume', 'panic']);
     assert.match(words(group), /panic/, 'the one button whose word is worth its width');
     assert.ok(!group.className.includes('running'), 'nothing is lit until a frame says so');
-    app.live.tick({ module: app.module });
+    app.live.tick({ monitor: app.monitor, activity: {} });
     assert.ok(group.className.includes('running'));
 
     // On the instrument panel it is glyphs only: the case has no room for prose.
@@ -557,67 +568,123 @@ test('a jack tap is an edge, not a level', async () => {
 // The bug this closes: the gate dots and jack lamps were read by a timer at
 // 10 Hz, and a trigger on this machine is high for one or two passes - one or
 // two *milliseconds*. Ninety-eight times in a hundred the poll landed while it
-// was low, so the lights showed a pattern nobody was playing.
+// was low, so the lights showed a pattern nobody was playing. The module folds
+// every pass into the frame it reports (src/monitor/monitor.h), so the frame
+// says what has been high since the last one, and the page never polls.
+//
+// Jack 1 in and jack 2 in, on buses nothing reads: the module's tap only sees
+// a jack a port node reads, so a jack no patch claims is dark.
+async function twoJacksIn(module, device) {
+  const patch = codec.emptyPatch();
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_IN, buses: [0] };
+  patch.gatePorts[1] = { direction: P.GatePortDirection.GATE_PORT_IN, buses: [1] };
+  await device.sendPatch(patch, codec.emptyGlobals());
+  return patch;
+}
+
 test('a pulse too short to paint still reaches the lights', async () => {
   const { module } = await instantiate();
-  module.takeActivity();                            // start from a clean latch
+  const device = await connected(module);
+  const { monitor, frame } = watching(module, device);
+  await twoJacksIn(module, device);
+  await frame();                                    // the first ask arms the module's monitor
+  monitor.takeActivity();                           // start from a clean latch
   module.pulseJack(0, 2);                           // two milliseconds: a trigger
   module.advance(100_000);                          // six animation frames' worth
   assert.equal(module.jackInput(0), 0, 'the pulse is long over');
 
-  const live = module.takeActivity();
+  await frame();
+  const live = monitor.takeActivity();
   assert.ok(live.jackIn & 1, 'the jack was high during that frame and the page never knew');
   // And the latch is a latch, not a memory: the next frame shows it low again.
-  assert.equal(module.takeActivity().jackIn & 1, 0, 'the lamp would stay lit for ever');
+  await frame();
+  assert.equal(monitor.takeActivity().jackIn & 1, 0, 'the lamp would stay lit for ever');
 });
 
-// The same sampling, kept: what the scope draws is every millisecond of it,
-// not what a paint happened to catch.
+// The same sampling, kept: what the scope draws is every frame of it, and a
+// pulse shorter than a frame is one column wide rather than missing.
 test('the scope keeps the pulse the eye missed', async () => {
   const { module } = await instantiate();
+  const device = await connected(module);
+  const { monitor, frame } = watching(module, device);
+  await twoJacksIn(module, device);
+  await frame();
   module.pulseJack(1, 3);
-  module.advance(200_000);
-  const trace = module.trace;
-  assert.ok(trace.filled > 100, `only ${trace.filled} columns recorded`);
+  for (let i = 0; i < 10; i++) { module.advance(20_000); await frame(); }
+  const trace = monitor.trace;
+  assert.ok(trace.filled >= 10, `only ${trace.filled} columns recorded`);
   let seen = 0;
   for (let i = 0; i < trace.filled; i++) if (trace.jackIn[i] & 2) seen++;
-  assert.ok(seen >= 1 && seen <= 10, `the trace holds ${seen} columns of a 3 ms pulse`);
+  assert.equal(seen, 1, `the trace holds ${seen} columns of a 3 ms pulse`);
+  assert.ok(trace.t[9] > trace.t[0], 'the columns are placed by the module\'s own time');
 });
 
 // The other bug this closes, and it is a one-liner with a nasty shape: the log
 // is a ring of two hundred, so once it fills, its *length* never changes
 // again. A view that redraws when the length changes therefore stops for ever
 // at event two hundred - and comes back to life on "clear", which is exactly
-// what it looked like from outside.
+// what it looked like from outside. The log is what the module says left it,
+// off its frames, so the ring is filled a frame at a time.
 test('the MIDI log still reports events once the ring is full', async () => {
   const { module } = await instantiate();
-  for (let i = 0; i < 260; i++) module.emitMidi(P.MidiPort.mmMIDI_USB_0, 0xb0, i & 127, 1, 1);
-  const length = module.midiLog.length;
-  const seq = module.midiSeq;
+  const device = await connected(module);
+  const { monitor, frame } = watching(module, device);
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  await device.sendPatch(patch, codec.emptyGlobals());
+  await frame();
+  const port = P.MidiPort.mmMIDI_USB_0;
+  for (let i = 0; i < 130; i++) {
+    module.deliverMidi(port, 0x90, 1, 40 + (i % 40), 100);
+    module.advance(1000);
+    module.deliverMidi(port, 0x80, 1, 40 + (i % 40), 0);
+    module.advance(1000);
+    if (i % 8 === 7) assert.equal((await frame()).lost, false, 'a frame lost events');
+  }
+  await frame();
+  const length = monitor.midiLog.length;
+  const seq = monitor.midiSeq;
   assert.ok(length < 260, 'the log is meant to be a ring');
-  module.emitMidi(P.MidiPort.mmMIDI_USB_0, 0xb0, 7, 1, 1);
-  assert.equal(module.midiLog.length, length, 'the length cannot say anything new');
-  assert.equal(module.midiSeq, seq + 1, 'the sequence must, or the view freezes');
-  assert.equal(module.midiLog.at(-1).d1, 7, 'and the newest event is the one at the end');
+  module.deliverMidi(port, 0x90, 1, 7, 100);
+  module.advance(1000);
+  await frame();
+  assert.equal(monitor.midiLog.length, length, 'the length cannot say anything new');
+  assert.equal(monitor.midiSeq, seq + 1, 'the sequence must, or the view freezes');
+  assert.equal(monitor.midiLog.at(-1).d1, 7, 'and the newest event is the one at the end');
 });
 
 test('the piano roll opens a note, closes it, and holds an open one', async () => {
   const { module } = await instantiate();
+  const device = await connected(module);
+  const { monitor, frame } = watching(module, device);
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, buses: [0] };
+  await device.sendPatch(patch, codec.emptyGlobals());
+  await frame();
   const port = P.MidiPort.mmMIDI_USB_0;
-  module.deliverMidi(port, 0x90, 1, 60, 100);       // what a key press does
+  // What a key press does: onto the roll as played in, and into the module.
+  monitor.playedIn(port, 0x90, 1, 60, 100, module.now);
+  module.deliverMidi(port, 0x90, 1, 60, 100);
   module.advance(20_000);
-  const held = module.notes.find((n) => n.pitch === 60);
+  await frame();
+  const held = monitor.notes.find((n) => n.pitch === 60 && n.direction === 'in');
   assert.ok(held, 'the note never reached the roll');
   assert.equal(held.end, null, 'a note still down is drawn to the playhead');
-  module.deliverMidi(port, 0x80, 1, 60, 0);
-  assert.ok(held.end > held.start, 'the note off has to close the bar it opened');
-
   // And what the module plays lands on the same time line, marked apart from
-  // what was played into it.
-  module.emitMidi(P.MidiPort.mmMIDI_SERIAL_1, 0x90, 48, 90, 1);
-  const sent = module.notes.find((n) => n.pitch === 48);
-  assert.equal(sent.direction, 'out');
-  assert.equal(held.direction, 'in');
+  // what was played into it, with the cable it left by.
+  const sent = monitor.notes.find((n) => n.pitch === 60 && n.direction === 'out');
+  assert.ok(sent, 'what the module sent never reached the roll');
+  assert.equal(sent.port, P.MidiPort.mmMIDI_SERIAL_1);
+  assert.ok(sent.start >= held.start, 'the module sent it after it was played');
+
+  monitor.playedIn(port, 0x80, 1, 60, 0, module.now);
+  module.deliverMidi(port, 0x80, 1, 60, 0);
+  module.advance(1000);
+  await frame();
+  assert.ok(held.end > held.start, 'the note off has to close the bar it opened');
+  assert.ok(sent.end !== null, 'and the note off the module sent closes its bar');
 });
 
 // Listening to a note bus, which is what makes an unfinished patch audible: a
@@ -626,14 +693,16 @@ test('the piano roll opens a note, closes it, and holds an open one', async () =
 test('a note bus can be listened to, event by event', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
+  const { monitor, frame } = watching(module, device);
   const heard = [];
-  module.onNoteBus((event) => heard.push(event));
+  monitor.onNote((event) => heard.push(event));
 
   // MIDI in on USB 1 onto note bus 0, and *nothing* patched to a MIDI output:
   // the module sends not one byte, and the bus carries everything.
   const patch = codec.emptyPatch();
   patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
   await device.sendPatch(patch, codec.emptyGlobals());
+  await frame();
 
   const sent = [];
   module.onMidi((event) => sent.push(event));
@@ -641,33 +710,41 @@ test('a note bus can be listened to, event by event', async () => {
   // Nobody is watching the bus yet, so nothing is read from it.
   module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 60, 100);
   module.advance(5000);
+  await frame();
   assert.equal(heard.length, 0, 'a bus nobody asked for is not read');
 
-  module.watchNoteBus(0);
+  monitor.watchNoteBus(0);
+  await frame();                                    // the ask that names the bus
   module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 64, 100);
   module.advance(5000);
+  await frame();
   const on = heard.find((e) => e.type === 0x90 && e.d1 === 64);
   assert.ok(on, `nothing came off the bus (${heard.length} events)`);
   assert.equal(on.bus, 0, 'a bus event says which bus it is from');
   assert.equal(on.channel, 1);
-  assert.equal(on.d2, 100, 'velocity survives the unpacking');
+  assert.equal(on.d2, 100, 'velocity survives the wire');
+  assert.ok(on.t <= monitor.now && on.t > monitor.now - 6000, 'stamped with the pass it happened on');
   assert.equal(sent.length, 0, 'nothing is patched to an output, so nothing is sent');
 
-  // Exactly once: the buses are double-buffered and a pass swaps once, so a
-  // sampler that ran twice per pass - or once per frame - would double or drop.
+  // Exactly once: the frame is everything since the last ask, so an event is
+  // in one frame and never in the next.
   const before = heard.length;
   module.advance(20_000);
+  await frame();
   assert.equal(heard.length, before, 'the same event was read again');
 
   module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x80, 1, 64, 0);
   module.advance(5000);
+  await frame();
   assert.ok(heard.some((e) => e.type === 0x80 && e.d1 === 64), 'the note off never arrived');
 
   // And a bus nobody listens to any more stops being read.
-  module.unwatchNoteBus(0);
+  monitor.unwatchNoteBus(0);
+  await frame();
   const quiet = heard.length;
   module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 67, 100);
   module.advance(5000);
+  await frame();
   assert.equal(heard.length, quiet, 'the bus is still being read with nobody listening');
 });
 
@@ -847,6 +924,7 @@ test('the learn button opens a menu that arms and binds', async () => {
 test('what the module plays reaches whoever is listening', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
+  const { monitor, frame } = watching(module, device);
   const heard = [];
   module.onMidi((event) => heard.push(event));
 
@@ -857,11 +935,13 @@ test('what the module plays reaches whoever is listening', async () => {
   patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_SERIAL_1, channel: 0, buses: [0] };
   await device.sendPatch(patch, codec.emptyGlobals());
 
+  await frame();
   module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 60, 100);
   module.advance(5000);
+  await frame();
   assert.ok(heard.some((e) => e.type === 0x90 && e.d1 === 60),
             `no note on came out (${heard.length} events)`);
-  assert.ok(module.midiLog.length > 0, 'the log the play tab shows is empty');
+  assert.ok(monitor.midiLog.length > 0, 'the log the monitor tab shows is empty');
   assert.equal(heard[0].target, P.MidiPort.mmMIDI_SERIAL_1, 'the target port is carried through');
 });
 
@@ -1635,7 +1715,7 @@ test('a modulation route shows what it is doing, and says why when it is doing n
     const card = NodeCard(app, 1);
     document.body.append(card);
     // The meter is painted per frame from what the module last reported.
-    app.live.tick({ module, activity: module.takeActivity() });
+    app.live.tick({ monitor: app.monitor, activity: app.monitor.takeActivity() });
     return { state, said: words(card) };
   };
 
@@ -1710,7 +1790,7 @@ test('the key badge names the key, and names the chord a cable roots a node on',
   // D minor, not C anything: a key rooted on pitch class zero cannot tell a
   // degree from a pitch class.
   const played = { busNote: () => 67 };              // G4 on the root bus
-  const app = fakeApp({ patch, device, module: played, globals });
+  const app = fakeApp({ patch, device, monitor: played, globals });
 
   // A node with no root inlet is in the key and nothing else.
   const plain = withDom(() => KeyBadge(app, { index: 1 }));
@@ -1734,7 +1814,7 @@ test('the key badge names the key, and names the chord a cable roots a node on',
 
   // Nothing has played yet on a patched root: the badge says so rather than
   // falling back to the key, because the key is not what that node is hearing.
-  const silent = fakeApp({ patch, device, module: { busNote: () => 0xff }, globals });
+  const silent = fakeApp({ patch, device, monitor: { busNote: () => 0xff }, globals });
   const waiting = withDom(() => KeyBadge(silent, { index: 0 }));
   assert.match(words(waiting), /D minor/);
   assert.match(waiting.getAttribute('title'), /the root inlet has played nothing yet/);
@@ -1772,13 +1852,15 @@ test('a setting the algorithm is currently ignoring says so', async () => {
 test('a control signal reaches the scope, and the scope lists it', async () => {
   const { module } = await instantiate();
   const device = await connected(module);
+  const { monitor, frame } = watching(module, device);
   const patch = codec.emptyPatch();
   const lfo = device.algorithms.find((d) => d?.name === 'LFO');
   const node = patched(device, patch, lfo);
   await device.sendPatch(patch, codec.emptyGlobals());
-  module.advance(1_500_000);
+  await frame();
+  for (let i = 0; i < 30; i++) { module.advance(50_000); await frame(); }
   const [bus] = node.outBuses[0];
-  const trace = module.trace;
+  const trace = monitor.trace;
   let low = Infinity;
   let high = -Infinity;
   for (let i = 0; i < trace.filled; i++) {
@@ -1787,7 +1869,8 @@ test('a control signal reaches the scope, and the scope lists it', async () => {
   }
   assert.ok(high > low, `the LFO never moved on the trace (${low}..${high})`);
   assert.ok(high <= P.CV_FULL && low >= -P.CV_FULL, 'in the bus\'s own units');
-  assert.equal(module.cv(bus), trace.cv[bus][(trace.head + trace.len - 1) % trace.len],
+  const latest = await frame();
+  assert.equal(latest.cv[bus], trace.cv[bus][(trace.head + trace.len - 1) % trace.len],
                'the newest column is what the bus holds now');
 
   const rows = scopeRows({ patch, device, scopeAll: false });
@@ -1922,8 +2005,12 @@ test('every kind of block lists the signals it carries', async () => {
   assert.ok(order.slice(1).every((c) => c === 'scope'), 'then what it wrote');
   assert.match(words(withDom(() => BlockSignalsPanel(app, { kind: BlockKind.Jack, index: 2 }))), /on no bus/,
                'a block on no bus says so');
-  assert.equal(BlockSignalsPanel(fakeApp({ patch, device }), { kind: BlockKind.Node, index: seqAt }), null,
-               'no module in the page, no signals to draw');
+  // A module in a plugin or on a cable reports its signals the same way, so
+  // the panel is drawn for it too.
+  const cabled = fakeApp({ patch, device });
+  assert.equal(findAll(withDom(() => BlockSignalsPanel(cabled, { kind: BlockKind.Node, index: seqAt })),
+                       (n) => n.tag === 'canvas').length, 2,
+               'no module in the page, and the signals are still drawn');
 });
 
 // --- the note lane -----------------------------------------------------------
@@ -1968,7 +2055,7 @@ test('the note lane resolves degrees against the key, and Enter enters the root'
   // A cable on the root inlet outranks the key and the register both, and the
   // lane says so.
   sequencer.inBuses[rootInlet(seq)] = [3];
-  const rooted = fakeApp({ patch, device, globals: app.state.globals, module: { busNote: () => 67 } });
+  const rooted = fakeApp({ patch, device, globals: app.state.globals, monitor: { busNote: () => 67 } });
   lane = withDom(() => NoteLane(rooted, 0, false));
   assert.match(words(lane), /root G4 \(on the root inlet\)/);
   assert.deepEqual(pitches(lane).slice(0, 3), ['G4', 'A#4', 'F4']);
@@ -2046,7 +2133,9 @@ test('a harmony draws its key on the circle of fifths, and the loop it wrote', a
 
   // The key is on the app as well as in the module: the circle names its
   // chords the way this key spells them, and that is the app's own table.
-  const app = fakeApp({ patch, device, module, globals });
+  // Where the walk is comes in the monitor's frame, like every playhead.
+  const { monitor, frame } = watching(module, device);
+  const app = fakeApp({ patch, device, module, globals, monitor });
   const harmonyAt = patch.nodes.length - 1;
 
   // Before it has played: seven chords of C major on the circle, the walk's
@@ -2071,11 +2160,14 @@ test('a harmony draws its key on the circle of fifths, and the loop it wrote', a
   // Playing: the loop fills, and the circle draws it as a path through the
   // chords. Long enough for more than four bars of the metronome's default.
   module.advance(20_000_000);
+  await frame([harmonyAt]);
   assert.equal(module.harmonyLoopLength(harmonyAt), 4);
-  const written = [0, 1, 2, 3].map((slot) => module.harmonyLoopChord(harmonyAt, slot));
+  const live = monitor.positionsOf(harmonyAt);
+  assert.equal(live.length, 2 + 4, 'the degree, the slot, and a chord per slot of the loop');
+  const written = [0, 1, 2, 3].map((slot) => live[2 + slot]);
   assert.ok(written.every((d) => d !== NO_STEP), `the loop never filled: ${written}`);
   assert.equal(written[0], 0, 'the first advance is the tonic, so the loop starts on it');
-  assert.ok(module.harmonyLoopPosition(harmonyAt) < 4, 'and it is somewhere inside the loop');
+  assert.ok(live[1] < 4, 'and it is somewhere inside the loop');
 
   card = withDom(() => NodeCard(app, harmonyAt));
   assert.doesNotMatch(caption(card), /writing it down/, 'the loop is written, not being written');
@@ -2156,7 +2248,8 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
   globals.scale = P.ScaleId.SCALE_MAJOR;
   await device.sendPatch(patch, globals);
 
-  const app = fakeApp({ patch, device, module, globals });
+  const { monitor, frame } = watching(module, device);
+  const app = fakeApp({ patch, device, module, globals, monitor });
   const at = patch.nodes.length - 1;
   const shift = paramNamed(harmony, 'shift');
   assert.ok(shift, 'Harmony has a start shift');
@@ -2172,31 +2265,38 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
     assert.equal(chips.length, 4, 'a chip per slot of the loop');
     const chip = (slot) => chips[slot];
     const lit = () => slots.filter((slot) => chip(slot).classList.contains('playing'));
-    const paint = () => app.live.tick({ module, activity: module.takeActivity() });
+    // A frame from the module, asked about this node, and the page painted
+    // from it - which is what the app does once an animation frame.
+    const paint = async () => {
+      await frame([at]);
+      app.live.tick({ monitor, activity: monitor.takeActivity() });
+    };
+    const degreeOf = () => monitor.positionsOf(at)[0];
+    const chordIn = (slot) => monitor.positionsOf(at)[2 + slot];
 
     // Twenty seconds of the metronome's default, sampled every quarter of a
     // second: the invariant has to hold between chords as well as on them.
     const seen = new Set();
     for (let i = 0; i < 80; i++) {
       module.advance(250_000);
-      paint();
+      await paint();
       const on = lit();
-      const degree = module.harmonyDegree(at);
-      if (module.harmonyLoopChord(at, 0) === NO_STEP) continue;   // still writing it down
+      const degree = degreeOf();
+      if (chordIn(0) === NO_STEP) continue;   // still writing it down
       assert.equal(on.length, 1, `${on.length} chips lit at sample ${i}`);
-      assert.equal(module.harmonyLoopChord(at, on[0]), degree,
-                   `the chip lit holds chord ${module.harmonyLoopChord(at, on[0])}, the jack is playing ${degree}`);
+      assert.equal(chordIn(on[0]), degree,
+                   `the chip lit holds chord ${chordIn(on[0])}, the jack is playing ${degree}`);
       seen.add(on[0]);
     }
     assert.equal(seen.size, 4, `the playhead only ever lit ${[...seen]}`);
 
     // Turned round: the same four chords, starting two in. The chips are the
     // piece as it will be played, so they move with it.
-    const written = slots.map((slot) => module.harmonyLoopChord(at, slot));
+    const written = slots.map((slot) => chordIn(slot));
     await device.setParam(at, shift.at, 2);
-    paint();
+    await paint();
     for (const slot of slots) {
-      assert.equal(module.harmonyLoopChord(at, slot), written[(slot + 2) % 4],
+      assert.equal(chordIn(slot), written[(slot + 2) % 4],
                    `slot ${slot} did not turn`);
       assert.equal(chip(slot).getAttribute('data-degree'), String(written[(slot + 2) % 4]),
                    `the chip for slot ${slot} was not repainted`);
@@ -2204,11 +2304,10 @@ await test('the chip lit is the chord sounding, and shift turns the loop round',
     // And it is still the chord sounding that is lit.
     for (let i = 0; i < 40; i++) {
       module.advance(250_000);
-      paint();
+      await paint();
       const on = lit();
       assert.equal(on.length, 1, `${on.length} chips lit after the shift`);
-      assert.equal(module.harmonyLoopChord(at, on[0]), module.harmonyDegree(at),
-                   'the shift moved the picture off the music');
+      assert.equal(chordIn(on[0]), degreeOf(), 'the shift moved the picture off the music');
     }
   });
 });
@@ -2331,7 +2430,8 @@ test('the Euclidean ring is the pattern the node derived, with the hand on the s
   node.params[pulses.at] = 3;
   await device.sendPatch(patch, codec.emptyGlobals());
 
-  const app = fakeApp({ patch, device, module });
+  const { monitor, frame } = watching(module, device);
+  const app = fakeApp({ patch, device, module, monitor });
   const at = patch.nodes.length - 1;
 
   await withDom(async () => {
@@ -2339,7 +2439,10 @@ test('the Euclidean ring is the pattern the node derived, with the hand on the s
     const dots = document.body.querySelectorAll('.step-dot');
     const bits = () => [...document.body.querySelectorAll('.step-dot')]
       .map((dot) => (dot.classList.contains('on') ? '1' : '0')).join('');
-    const paint = () => app.live.tick({ module, activity: module.takeActivity() });
+    const paint = async () => {
+      await frame([at]);
+      app.live.tick({ monitor, activity: monitor.takeActivity() });
+    };
 
     assert.equal(dots.length, 8, 'a dot per step of the ring');
     // E(3,8) as Bjorklund published it. A one-line approximation gives a
@@ -2354,13 +2457,13 @@ test('the Euclidean ring is the pattern the node derived, with the hand on the s
     // Rotation turns the necklace under a downbeat that does not move, so the
     // picture is the node's rotated pattern - not the same picture spun round.
     await device.setParam(at, rotation.at, 1);
-    paint();
+    await paint();
     assert.equal(bits(), '00100101', 'the ring followed the rotation');
 
     // Pulses and length are the other two knobs, and neither rebuilds the card.
     await device.setParam(at, pulses.at, 5);
     await device.setParam(at, length.at, 16);
-    paint();
+    await paint();
     assert.equal(document.body.querySelectorAll('.step-dot').length, 16, 'the ring grew with the length');
     assert.equal(bits().split('1').length - 1, 5, 'five pulses over sixteen steps');
 
@@ -2375,9 +2478,9 @@ test('the Euclidean ring is the pattern the node derived, with the hand on the s
     const seen = new Set();
     for (let i = 0; i < 60; i++) {
       module.advance(250_000);
-      paint();
+      await paint();
       const on = lit();
-      const step = module.seqPosition(at, 0);
+      const step = monitor.positionsOf(at)[0] ?? NO_STEP;
       if (step === NO_STEP) continue;
       assert.deepEqual(on, [step], `the ring lit ${on} while the node was on step ${step}`);
       seen.add(step);
@@ -2390,7 +2493,7 @@ test('the Euclidean ring is the pattern the node derived, with the hand on the s
     // zero, so the empty ring is the first one anybody sees and it has to say
     // what is missing rather than count gaps that are not there.
     await device.setParam(at, pulses.at, 0);
-    paint();
+    await paint();
     assert.equal(bits(), '0'.repeat(16), 'no pulses is an empty ring');
     assert.equal(document.body.querySelector('.necklace'), null, 'and no necklace joining nothing');
     assert.match(words(document.body.querySelector('.euclid-caption')), /no pulses over 16 steps/);
@@ -3682,7 +3785,7 @@ test('the drum sequencers of a patch are found, with the buses they speak on', a
 });
 
 test('a drum note is played by its own sequencer, not by the player that carried it', async () => {
-  const { listener, module } = await listening();
+  const { listener, module, monitor } = await listening();
   const kick = { t: 0, bus: 3, type: 0x90, channel: 10, d1: 36, d2: 100 };
 
   // Nothing knows about the sequencer yet, so a drum leaving the module is
@@ -3701,7 +3804,7 @@ test('a drum note is played by its own sequencer, not by the player that carried
   listener.setDrumSources([
     { key: 'node:0', index: 0, label: 'DrumSeqMidi 0', kind: 'note', buses: [3], lanes: [] },
   ]);
-  assert.equal(module.watches.get(3), 1, 'a drum sequencer’s bus is read without a player on it');
+  assert.equal(monitor.watch.get(3), 1, 'a drum sequencer’s bus is read without a player on it');
 
   listener.noteBus(kick);
   assert.equal(listener.drums.get('node:0').hits, 1, 'the sequencer that wrote the bus plays it');
@@ -3753,11 +3856,11 @@ test('a node set to channel 10 is a drum machine, whatever algorithm it runs', a
 });
 
 test('a bus that is drums by its channel is drums only on that channel', async () => {
-  const { listener, module } = await listening();
+  const { listener, module, monitor } = await listening();
   listener.setDrumSources([
     { key: 'node:0', index: 0, label: 'GateToNote 0', kind: 'note', channel: 10, buses: [3], lanes: [] },
   ]);
-  assert.equal(module.watches.get(3), 1, 'its bus is read without a player on it');
+  assert.equal(monitor.watch.get(3), 1, 'its bus is read without a player on it');
 
   // Nobody is listening to bus 3 and it is heard anyway - which is the whole
   // point: an instrument is audible because it is in the patch.
@@ -3802,7 +3905,7 @@ test('a hit already heard on its bus is not heard again off the cable', async ()
 });
 
 test('a gate lane plays its drum on the edge, not while the gate is high', async () => {
-  const { listener, module } = await listening();
+  const { listener, module, monitor } = await listening();
   listener.setDrumSources([
     { key: 'node:1', index: 1, label: 'DrumSeqGate 1', kind: 'gate', buses: [],
       lanes: [{ lane: 0, buses: [4], piece: 'kick' }, { lane: 1, buses: [5], piece: 'snare' }] },

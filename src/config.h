@@ -185,4 +185,25 @@
 // still leaves this an order of magnitude of headroom.
 #define MIDI_INPUT_QUEUE_DEPTH 64
 
+// The monitor (monitor/monitor.h): what an editor is told about the running
+// module, once per request.
+//
+// MONITOR_EVENTS is the note-ons and note-offs kept between two requests,
+// on the watched buses and on the cables together. An editor asks once per
+// animation frame, so this covers a burst of a few passes' worth - a chord
+// and a drum step on one frame - and a burst past it is reported as lost
+// rather than stalling a pass. MONITOR_MAX_NODES is how many nodes one
+// request may ask the position of: a playhead is drawn for an open card, and
+// eight open cards is a tall screen. MONITOR_NODE_VALUES is the widest
+// answer for one of them - a harmony's degree and loop slot, and then a full
+// loop of chords (algorithm/midi/harmony.h, MAX_PHRASE). Together they
+// bound the frame, which is what sizes SYSEX_TX_MAX.
+#define MONITOR_EVENTS 32
+#define MONITOR_MAX_NODES 8
+#define MONITOR_NODE_VALUES 18
+// A request arms the monitor for this long. A module nobody is asking does
+// nothing here, and one whose editor went away is back to that a second
+// later with nothing to tear down.
+#define MONITOR_ARMED_US 1000000u
+
 #endif

@@ -16,6 +16,8 @@
 #include "patch/patch_manager.h"
 #include "console/console.h"
 #include "protocol/sysex_handler.h"
+#include "monitor/hal_tap.h"
+#include "monitor/monitor.h"
 #include "control/macros.h"
 #include "control/cc_mapper.h"
 #include "control/control_sum.h"
@@ -32,9 +34,14 @@ static TeensyEeprom eeprom;
 static TeensyLeds led_driver;
 static TeensyConsoleIo console_io;
 
+// The seam between the module and its back panel, with a tap on it: the
+// port nodes drive the jacks and the cables through this, and it remembers
+// what went through for the monitor (monitor/hal_tap.h).
+static HalTap panel(gpio, midi_out);
+
 // Owns the clock, the buses, the hardware port nodes and the node pool.
 // Everything is allocated statically: no heap use after boot.
-static MixedModeMaster master(gpio, midi_out);
+static MixedModeMaster master(panel, panel);
 
 // The module's entire feedback surface (#7): two LEDs and a text console.
 static StatusLeds leds(led_driver);
@@ -56,11 +63,16 @@ static ModMatrix mod_matrix(patches, cc_map, control_sum);
 static NrpnDecoder nrpn(patches, cc_map);
 static Console console(console_io, patches, master, store, leds, cc_map);
 
+// What an editor is shown of the running module (monitor/monitor.h). Armed
+// by a request over the protocol and inert otherwise, so a module with no
+// editor on the cable does nothing here.
+static Monitor monitor(master, panel, leds);
+
 // The patch protocol (#11). Not a node, not reachable from a bus: with no
 // button to hold at power-on, a patch that could take this down would leave
 // reflashing over USB as the only way to recover.
-static SysexHandler protocol(patches, master, store, leds, midi_out, cc_map, mod_matrix,
-                             macros, control_sum);
+static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_matrix,
+                             macros, control_sum, monitor);
 
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
@@ -159,4 +171,8 @@ void loop(){
     protocol.service(now);
     nrpn.service(now);
     patches.service(now);
+
+    // 6. the record, last: after the pass has published the buses and the
+    //    LEDs have been written, so a frame reads one consistent pass.
+    monitor.sample(now);
 }

@@ -6,9 +6,11 @@
 // logic gate are only readable *over time* - and what is it playing, which a
 // log of note ons cannot say and a pitch-against-time grid can.
 //
-// Both are drawn from the module's own sampling, once per pass of simulated
-// time (`module.trace`, `module.notes`), so what is on the screen is what
-// the firmware did and not what the page happened to catch it doing.
+// Both are drawn from the module's own sampling, folded into the frames it
+// reports (`runtime/monitor.js`: `monitor.trace`, `monitor.notes`), so what
+// is on the screen is what the firmware did and not what the page happened to
+// catch it doing - and it is the same picture for a module in the page, in a
+// plugin or on a cable.
 //
 // **Colour is the domain, everywhere.** Where one view has to tell several
 // signals of one domain apart - eight note buses on one roll - they are
@@ -133,17 +135,13 @@ export function scopeRows({ patch, device, scopeAll = false }) {
 
 // --- the scope --------------------------------------------------------------
 
-export function drawScope(canvas, module, rows) {
+export function drawScope(canvas, monitor, rows) {
   if (!rows.length) return;
   const height = rows.reduce((sum, row) => sum + row.height, 0) + 12;
   const ctx = fit(canvas, height);
   if (!ctx) return;
   const width = canvas.clientWidth;
   const colours = palette();
-
-  const trace = module.trace;
-  const count = trace.filled;
-  const first = (trace.head - count + trace.len) % trace.len;
 
   // The names are measured, not guessed at: a label that overruns its gutter
   // is drawn across the trace it names, so when the long form does not fit,
@@ -163,9 +161,10 @@ export function drawScope(canvas, module, rows) {
   ctx.fillStyle = colours.back;
   ctx.fillRect(0, 0, width, height);
 
-  // A line per second of simulated time, so a tempo can be read off the
+  // A line per second of the module's time, so a tempo can be read off the
   // trace rather than counted.
-  const seconds = (trace.len * trace.us) / 1e6;
+  const trace = monitor.trace;
+  const seconds = trace.us / 1e6;
   ctx.strokeStyle = colours.grid;
   ctx.lineWidth = 1;
   for (let s = 1; s <= seconds; s++) {
@@ -176,18 +175,8 @@ export function drawScope(canvas, module, rows) {
     ctx.stroke();
   }
 
-  // The axis is *time*: a module that has been running for a fifth of a
-  // second draws a fifth of a second at the right-hand edge rather than
-  // stretching it across four.
-  const shown = (count / trace.len) * span;
-  const left = Math.floor(span - shown);
-  const columnsAt = (px) => {
-    const at = (px - (span - shown)) / shown;
-    const from = Math.floor(at * count);
-    const to = Math.max(from + 1, Math.floor((at + trace.len / (span * count)) * count));
-    return [from, Math.min(to, count)];
-  };
-  const geometry = { trace, x0, span, left, count, first, columnsAt, colours };
+  const folded = foldColumns(trace, monitor.now, span, rows);
+  const geometry = { x0, span, colours, ...folded };
 
   let y0 = 4;
   rows.forEach((row, r) => {
@@ -200,7 +189,52 @@ export function drawScope(canvas, module, rows) {
   });
 }
 
-function drawGateRow(ctx, { trace, x0, span, left, count, first, columnsAt, colours }, row, top) {
+// The trace's columns, one per frame the module reported, laid onto the
+// pixels of the axis. The axis is *time*: a column covers the passes between
+// the frame before it and itself, so a one-frame column is a few pixels and
+// a frame that came late is as wide as it was late. One pixel is several
+// columns on a narrow screen, so the gates and jacks behind a pixel are
+// OR-ed rather than sampled: a pulse never disappears because the trace was
+// scaled down. A control signal is a level, so a pixel holds the last one.
+//
+// A module that has been running for a fifth of a second draws a fifth of a
+// second at the right-hand edge rather than stretching it across four:
+// `left` is the first pixel anything was recorded for.
+function foldColumns(trace, now, span, rows) {
+  const jackIn = new Uint8Array(span + 1);
+  const jackOut = new Uint8Array(span + 1);
+  const gate = new Uint32Array(span + 1);
+  const cvRows = rows.filter((row) => row.kind === 'cv');
+  const cv = new Map(cvRows.map((row) => [row.bit, new Int16Array(span + 1)]));
+  const from = now - trace.us;
+  const xOf = (t) => span - ((now - t) / trace.us) * span;
+  let left = span + 1;
+  const count = trace.filled;
+  const first = (trace.head - count + trace.len) % trace.len;
+  let start = from;
+  for (let i = 0; i < count; i++) {
+    const at = (first + i) % trace.len;
+    const end = trace.t[at];
+    if (i === 0) start = end;                    // the first column has no known width
+    if (end >= from) {
+      const a = Math.max(0, Math.floor(xOf(Math.max(start, from))));
+      const b = Math.min(span, Math.max(a, Math.floor(xOf(end))));
+      if (a < left) left = a;
+      for (let px = a; px <= b; px++) {
+        jackIn[px] |= trace.jackIn[at];
+        jackOut[px] |= trace.jackOut[at];
+        gate[px] |= trace.gate[at];
+      }
+      for (const [bit, values] of cv) {
+        for (let px = a; px <= b; px++) values[px] = trace.cv[bit][at];
+      }
+    }
+    start = end;
+  }
+  return { jackIn, jackOut, gate, cv, left, empty: left > span };
+}
+
+function drawGateRow(ctx, { x0, span, left, empty, colours, ...folded }, row, top) {
   const hi = top + 3;
   const lo = top + row.height - 5;
   ctx.strokeStyle = colours.grid;
@@ -208,23 +242,16 @@ function drawGateRow(ctx, { trace, x0, span, left, count, first, columnsAt, colo
   ctx.moveTo(x0, lo + 0.5);
   ctx.lineTo(x0 + span, lo + 0.5);
   ctx.stroke();
-  if (!count) return;
+  if (empty) return;
 
-  // One pixel is several columns on a narrow screen, so the columns behind a
-  // pixel are OR-ed rather than sampled: a pulse never disappears because the
-  // trace was scaled down.
-  const data = trace[row.source];
+  const data = folded[row.source];
   const mask = 1 << row.bit;
   ctx.strokeStyle = row.colour;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   let previous = -1;
   for (let px = left; px <= span; px++) {
-    const [from, to] = columnsAt(px);
-    let value = 0;
-    for (let i = from; i < to; i++) {
-      if (data[(first + i) % trace.len] & mask) { value = 1; break; }
-    }
+    const value = (data[px] & mask) ? 1 : 0;
     const x = x0 + px;
     const y = value ? hi : lo;
     if (previous < 0) ctx.moveTo(x, y);
@@ -238,10 +265,10 @@ function drawGateRow(ctx, { trace, x0, span, left, count, first, columnsAt, colo
 // A control signal, as a curve. Unipolar signals sit on the bottom of the
 // row and bipolar ones on a centre line: which it is comes from the signal
 // itself, since the bus does not say.
-function drawCvRow(ctx, { trace, x0, span, left, count, first, columnsAt, colours }, row, top) {
-  const data = trace.cv[row.bit];
+function drawCvRow(ctx, { x0, span, left, empty, colours, cv }, row, top) {
+  const data = cv.get(row.bit);
   let negative = false;
-  for (let i = 0; i < count; i++) if (data[(first + i) % trace.len] < 0) { negative = true; break; }
+  for (let px = left; px <= span; px++) if (data[px] < 0) { negative = true; break; }
   const hi = top + 4;
   const lo = top + row.height - 4;
   const zero = negative ? (hi + lo) / 2 : lo;
@@ -254,7 +281,7 @@ function drawCvRow(ctx, { trace, x0, span, left, count, first, columnsAt, colour
   ctx.moveTo(x0, Math.round(zero) + 0.5);
   ctx.lineTo(x0 + span, Math.round(zero) + 0.5);
   ctx.stroke();
-  if (!count) return;
+  if (empty) return;
 
   ctx.strokeStyle = row.colour;
   ctx.lineWidth = 1.5;
@@ -262,10 +289,7 @@ function drawCvRow(ctx, { trace, x0, span, left, count, first, columnsAt, colour
   let started = false;
   let last = 0;
   for (let px = left; px <= span; px++) {
-    const [from, to] = columnsAt(px);
-    // The last column behind the pixel: a level, unlike an edge, is what it
-    // was most recently.
-    if (to > from) last = data[(first + Math.max(from, to - 1)) % trace.len];
+    last = data[px];
     const x = x0 + px;
     if (!started) { ctx.moveTo(x, y(last)); started = true; } else ctx.lineTo(x, y(last));
   }
@@ -393,16 +417,16 @@ const onSource = (source, note) =>
 
 // --- the piano roll -----------------------------------------------------------
 
-export function drawRoll(canvas, module, sources, height) {
+export function drawRoll(canvas, monitor, sources, height) {
   const ctx = fit(canvas, height);
   if (!ctx) return;
   const width = canvas.clientWidth;
   const colours = palette();
-  const span = module.rollSpan();
-  const now = module.now;
+  const span = monitor.rollSpan();
+  const now = monitor.now;
   const from = now - span;
   const byKey = new Map(sources.map((source) => [source.key, source]));
-  const notes = module.notes.filter((n) => (n.end ?? now) >= from
+  const notes = monitor.notes.filter((n) => (n.end ?? now) >= from
     && byKey.has(sourceKey(n)) && onSource(byKey.get(sourceKey(n)), n));
 
   ctx.fillStyle = colours.back;

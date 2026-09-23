@@ -77,13 +77,13 @@ uint32_t HostClock::block(bool playing, double ppq, double bpm, double sample_ra
 // Engine ---------------------------------------------------------------------
 
 Engine::Engine() :
-    gpio(), midi_out(), eeprom(), led_driver(),
-    mm(gpio, midi_out), status(led_driver), patch_store(eeprom),
+    gpio(), midi_out(), eeprom(), led_driver(), panel(gpio, midi_out),
+    mm(panel, panel), status(led_driver), monitor(mm, panel, status), patch_store(eeprom),
     patch_manager(mm, patch_store, status), macros(),
     cc_map(patch_manager, mm, macros), control_sum(cc_map),
     mod_matrix(patch_manager, cc_map, control_sum),
     nrpn(patch_manager, cc_map),
-    protocol(patch_manager, mm, patch_store, status, midi_out, cc_map, mod_matrix, macros, control_sum),
+    protocol(patch_manager, mm, patch_store, status, panel, cc_map, mod_matrix, macros, control_sum, monitor),
     queue(),
     now_us(0), subtick_interval(0), subtick_due(0),
     samples_per_pass(48.0), block_start(0.0), next_pass(0.0),
@@ -202,6 +202,7 @@ void Engine::pass(){
     protocol.service(now);
     nrpn.service(now);
     patch_manager.service(now);
+    monitor.sample(now);
     now_us = now + PASS_US;
 }
 

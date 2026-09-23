@@ -282,8 +282,12 @@ export function gateHits(sources, rising) {
 }
 
 export class Listener {
-  constructor(module) {
+  // `module` is the page's own module, whose sound this is: its MIDI out
+  // and its gate edges, read as they happen. `monitor` is where the notes on
+  // its buses come from (runtime/monitor.js), a frame at a time.
+  constructor(module, monitor) {
     this.module = module;
+    this.monitor = monitor;
     this.ctx = null;
     this.master = null;
     this.clickGain = null;
@@ -313,7 +317,7 @@ export class Listener {
     this.lastJackAny = 0;
     this.lastGate = 0;
     module.onMidi((event) => this.midi(event));
-    module.onNoteBus((event) => this.midi(event));
+    monitor.onNote((event) => this.midi(event));
     module.onFrame(() => this.anchor());
     module.onPass(() => this.edges());
     // What it opens with is what it has always played: the MIDI leaving the
@@ -335,7 +339,7 @@ export class Listener {
     if (this.players.length >= MAX_PLAYERS) return null;
     const player = new Player(this, config);
     this.players.push(player);
-    if (player.source === 'bus') this.module.watchNoteBus(player.bus);
+    if (player.source === 'bus') this.monitor.watchNoteBus(player.bus);
     player.attach();
     return player;
   }
@@ -344,7 +348,7 @@ export class Listener {
     const index = this.players.findIndex((p) => p.id === id);
     if (index < 0) return;
     const [player] = this.players.splice(index, 1);
-    if (player.source === 'bus') this.module.unwatchNoteBus(player.bus);
+    if (player.source === 'bus') this.monitor.unwatchNoteBus(player.bus);
     if (this.ctx) player.allOff(this.ctx.currentTime);
     player.gain?.disconnect();
   }
@@ -355,11 +359,11 @@ export class Listener {
   setPlayerSource(id, source, bus = 0) {
     const player = this.players.find((p) => p.id === id);
     if (!player) return;
-    if (player.source === 'bus') this.module.unwatchNoteBus(player.bus);
+    if (player.source === 'bus') this.monitor.unwatchNoteBus(player.bus);
     if (this.ctx) player.allOff(this.ctx.currentTime);
     player.source = source === 'bus' ? 'bus' : 'out';
     player.bus = bus;
-    if (player.source === 'bus') this.module.watchNoteBus(player.bus);
+    if (player.source === 'bus') this.monitor.watchNoteBus(player.bus);
   }
 
   // --- the drum machines ---------------------------------------------------
@@ -394,12 +398,12 @@ export class Listener {
     }
     for (const bus of [...this.watched]) {
       if (wanted.has(bus)) continue;
-      this.module.unwatchNoteBus(bus);
+      this.monitor.unwatchNoteBus(bus);
       this.watched.delete(bus);
     }
     for (const bus of wanted) {
       if (this.watched.has(bus)) continue;
-      this.module.watchNoteBus(bus);
+      this.monitor.watchNoteBus(bus);
       this.watched.add(bus);
     }
   }
@@ -684,7 +688,9 @@ export class Listener {
       if (mode === 2 && module.jackOutput(j)) { jackOut |= 1 << j; jackAny |= 1 << j; }
       else if (mode === 1 && module.jackInput(j)) jackAny |= 1 << j;
     }
-    const gate = module.levels?.gate ?? 0;
+    // The buses off the module itself, per pass: a click on a gate edge is
+    // sound, and sound cannot wait for a frame.
+    const gate = module.gateBuses();
     const rising = {
       jacksOut: jackOut & ~this.lastJackOut,
       jacks: jackAny & ~this.lastJackAny,

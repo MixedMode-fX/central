@@ -174,6 +174,9 @@ export class Play {
   send(type, d1 = 0, d2 = 0, where = null) {
     const { port, channel } = this.cable(where);
     const module = this.moduleOf();
+    // Onto the piano roll, beside what the module makes of it, whichever
+    // machine it is going to (runtime/monitor.js).
+    this.session.monitor?.playedIn(port, type, channel, d1, d2, module?.now);
     if (this.session.usingModule) {
       if (!module) return null;
       const accepted = module.deliverMidi(port, type, channel, d1, d2);

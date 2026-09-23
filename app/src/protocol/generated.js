@@ -23,6 +23,9 @@ export const MAX_IN = 8;
 export const MAX_OUT = 8;
 export const MAX_SEQUENCE_LEN = 32;
 export const MIDI_CONTROL_PORT = 8;
+export const MONITOR_EVENTS = 32;
+export const MONITOR_MAX_NODES = 8;
+export const MONITOR_NODE_VALUES = 18;
 export const N_CC_MAP = 32;
 export const N_CV_BUS = 8;
 export const N_GATE_BUS = 16;
@@ -56,9 +59,9 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 16;
+export const SYSEX_PROTOCOL_VERSION = 17;
 export const SYSEX_RX_MAX = 320;
-export const SYSEX_TX_MAX = 320;
+export const SYSEX_TX_MAX = 512;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
 
 export const SysexCommand = Object.freeze({
@@ -98,6 +101,7 @@ export const SysexCommand = Object.freeze({
   SYSEX_RESTORE_DEFAULTS: 48,
   SYSEX_TRANSPORT: 49,
   SYSEX_PANIC: 50,
+  SYSEX_MONITOR_REQUEST: 51,
   SYSEX_IDENTITY: 65,
   SYSEX_CAPABILITIES: 66,
   SYSEX_ALGORITHM: 67,
@@ -112,6 +116,7 @@ export const SysexCommand = Object.freeze({
   SYSEX_MACRO: 87,
   SYSEX_MACRO_DEST: 88,
   SYSEX_MACRO_STATE: 89,
+  SYSEX_MONITOR: 90,
   SYSEX_SLOTS: 99,
   SYSEX_ACK: 112,
   SYSEX_NAK: 113,

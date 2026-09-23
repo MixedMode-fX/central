@@ -41,6 +41,41 @@ const algo = name => {
 
 let now = 0;
 const passes = (n, step = 1000) => { for (let i = 0; i < n; i++) { E.emu_pass(now); now += step; } };
+
+// One message over the protocol, on the control cable, as the app sends it.
+const sysex = (command, args) => {
+  const bytes = [0xf0, E.emu_const_sysex_manufacturer(), 0x00, command, E.emu_const_protocol_version(), ...args, 0xf7];
+  const mem = new Uint8Array(E.memory.buffer, E.emu_sysex_in_ptr(), E.emu_sysex_in_capacity());
+  mem.set(bytes);
+  E.emu_sysex_out_clear();
+  E.emu_sysex_in(E.emu_const_control_port(), E.emu_sysex_in_ptr(), bytes.length, now);
+  return new Uint8Array(E.memory.buffer, E.emu_sysex_out_ptr(), E.emu_sysex_out_len()).slice();
+};
+
+// What the module has been doing since it was last asked: the monitor's
+// frame (src/monitor/monitor.h, SYSEX_MONITOR), which is how the app watches a
+// module wherever it is. Decoded here only as far as the smoke test reads:
+// the CV buses, and the notes on the buses asked for.
+const MONITOR_REQUEST = 0x33, MONITOR = 0x5a;
+const frame = (noteBuses = 0) => {
+  const reply = sysex(MONITOR_REQUEST, [noteBuses & 0x7f, (noteBuses >> 7) & 0x7f, (noteBuses >> 14) & 0x7f, 0]);
+  assert.equal(reply[3], MONITOR, 'the module answered a monitor request with something else');
+  const u14 = (at) => reply[at] | (reply[at + 1] << 7);
+  // at(5) clock flags(1) bpm(2) count(5) gates(10) jacks(8) leds(4): the CV buses start at 5 + 35.
+  let at = 40;
+  const cv = [];
+  for (let b = 0; b < E.emu_const_n_cv_bus(); b++, at += 3) cv.push(reply[at + 2] ? -u14(at) : u14(at));
+  const nodes = reply[at++];
+  for (let i = 0; i < nodes; i++) { const count = reply[at + 1]; at += 2 + count; }
+  const lost = reply[at++] !== 0;
+  const events = [];
+  const count = reply[at++];
+  for (let i = 0; i < count; i++, at += 7) {
+    events.push({ onBus: (reply[at] & 1) === 0, arg: reply[at + 1], on: (reply[at + 2] & 0x40) !== 0,
+                  d1: reply[at + 3], d2: reply[at + 4], ageMs: u14(at + 5) });
+  }
+  return { cv, lost, events };
+};
 const node = (i, name, in0, out0) => { E.emu_patch_node(i, algo(name)); if (in0 !== undefined) E.emu_patch_node_in(i, 0, B(in0)); if (out0 !== undefined) E.emu_patch_node_out(i, 0, B(out0)); };
 let tests = 0;
 // Jack levels persist across loads as a patched cable would, so every
@@ -215,7 +250,6 @@ test('note sequencer: degrees in C major, re-rooted from a key mid-note', () => 
   const ticks = n => { for (let i = 0; i < n; i++) { E.emu_clock_advance(); E.emu_pass(now); now += 300; } };
   ticks(6 * 24 * 3 + 2);                                   // three steps in
   assert.deepEqual(sent.map(m => `${m.type === NOTE_ON ? '+' : '-'}${m.d1}`), ['+60', '-60', '+62', '-62', '+64']);
-  assert.equal(E.emu_seq_position(1, 0), 2);
   E.emu_deliver_midi(SERIAL_1, NOTE_ON, 1, 67, 100, now);  // G: the root moves under the sounding E
   E.emu_pass(now); E.emu_pass(now);                        // one pass to publish the bus, one to read it
   assert.equal(E.emu_seq_root(1), 67);
@@ -284,13 +318,17 @@ test('an LFO on a control bus moves a parameter, and the divider follows', () =>
   E.emu_patch_mod_route(0, B(0), CC_TARGET_NODE, 1, 1, 255, MOD_ABSOLUTE);
   assert.equal(E.emu_load(), 0);
 
+  // The control signal, off the monitor's frame as the app's scope reads
+  // it: one sample per ask, which here is one per pass.
   const seen = new Set();
   let lowest = 255;
   let highest = 0;
+  frame();
   for (let t = 0; t < 1000000; t += 1000) {
+    now = t;
     E.emu_control_service(t);
     E.emu_pass(t);
-    const cv = E.emu_cv(0);
+    const cv = frame().cv[0];
     assert.ok(cv >= 0 && cv <= 4095, 'a unipolar LFO stays inside twelve bits');
     seen.add(cv);
     const amount = E.emu_get_param(1, 1);
@@ -315,16 +353,17 @@ test('stopping the transport releases what the clock was playing', () => {
   E.emu_patch_midi_out(0, USB_0, 0, B(1));
   assert.equal(E.emu_load(), 0);
 
-  // What the note bus carried, the way the app's piano roll drains it: once
-  // per pass, right after emu_pass().
+  // What the note bus carried, the way the app's piano roll reads it: off
+  // the monitor's frame, asked for note bus 1, once every few passes.
   let onBus = 0;
+  frame(1 << 1);
   const ticks = n => {
     for (let i = 0; i < n; i++) {
       E.emu_clock_advance(); E.emu_pass(now); now += 300;
-      for (let k = 0; k < E.emu_note_count(1); k++) {
-        const packed = E.emu_note_event(1, k);
-        const type = (packed >>> 24) & 0xff, velocity = packed & 0xff;
-        onBus += (type === NOTE_ON && velocity > 0) ? 1 : -1;
+      if (i % 8 === 7 || i === n - 1) {
+        const { events, lost } = frame(1 << 1);
+        assert.equal(lost, false, 'the frame lost events');
+        for (const e of events) if (e.onBus) onBus += (e.on && e.d2 > 0) ? 1 : -1;
       }
     }
   };
@@ -336,14 +375,8 @@ test('stopping the transport releases what the clock was playing', () => {
   assert.equal(onBus, 1, 'and the note bus says so');
 
   E.emu_clock_stop();
-  for (let i = 0; i < 200; i++) {
-    E.emu_pass(now); now += 300;
-    for (let k = 0; k < E.emu_note_count(1); k++) {
-      const packed = E.emu_note_event(1, k);
-      const type = (packed >>> 24) & 0xff, velocity = packed & 0xff;
-      onBus += (type === NOTE_ON && velocity > 0) ? 1 : -1;
-    }
-  }
+  for (let i = 0; i < 200; i++) { E.emu_pass(now); now += 300; }
+  for (const e of frame(1 << 1).events) if (e.onBus) onBus += (e.on && e.d2 > 0) ? 1 : -1;
   assert.equal(held(), 0, 'the stop released it');
   assert.equal(onBus, 0, 'and the note-off reached the bus, inside a pass');
 
@@ -356,14 +389,7 @@ test('stopping the transport releases what the clock was playing', () => {
 // cannot carry, because realtime reaches no bus. Driven over the protocol
 // exactly as the app drives it, so this is the wire the page uses.
 test('the clock is routed out of the cables the protocol names', () => {
-  const MANUFACTURER = E.emu_const_sysex_manufacturer();
   const SET_CLOCK_ROUTE = 0x29, CLOCK = 0xf8, START = 0xfa, STOP = 0xfc;
-  const sysex = (command, args) => {
-    const bytes = [0xf0, MANUFACTURER, 0x00, command, E.emu_const_protocol_version(), ...args, 0xf7];
-    const mem = new Uint8Array(E.memory.buffer, E.emu_sysex_in_ptr(), E.emu_sysex_in_capacity());
-    mem.set(bytes);
-    E.emu_sysex_in(E.emu_const_control_port(), E.emu_sysex_in_ptr(), bytes.length, now);
-  };
   const seen = (type) => sent.filter((m) => m.type === type);
 
   assert.equal(E.emu_load(), 0);

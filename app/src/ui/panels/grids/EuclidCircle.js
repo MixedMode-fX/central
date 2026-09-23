@@ -93,11 +93,11 @@ function drawRing(shape, view) {
 
 // What the module is doing to the ring, per frame: the step sounding, and the
 // pattern itself when a knob has moved under it.
-function paintEuclid(app, index, view) {
+function paintEuclid(app, index, view, monitor) {
   const shape = euclidShape(app, index);
   if (!shape) return;
   if (view.drawn !== shape.bits) drawRing(shape, view);
-  const at = app.module.seqPosition(index, 0);
+  const at = monitor.positionsOf(index)[0] ?? NO_STEP;
   paintPlayhead(view.dots, at);
   // Before the first advance there is no step to point at, and a hand parked
   // on step 1 would be a lie about a sequencer that has not started.
@@ -137,7 +137,8 @@ export function EuclidCircle(app, index) {
     drawn: null,
   };
   drawRing(shape, view);
-  app.live?.paint(() => paintEuclid(app, index, view));
+  app.live?.watchNode(index);
+  app.live?.paint(({ monitor }) => paintEuclid(app, index, view, monitor));
 
   return el('div', { class: 'grid euclid' },
     el('div', { class: 'grid-title' }, 'the beat'),

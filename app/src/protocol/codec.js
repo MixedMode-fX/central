@@ -531,6 +531,11 @@ export const wireBuses = (buses) => u21(busMask(buses));
 export const readBuses = (bytes, at) =>
   busList(bytes[at] | (bytes[at + 1] << 7) | ((bytes[at + 2] & 0x03) << 14));
 export const readU14 = (bytes, at) => bytes[at] | (bytes[at + 1] << 7);
+// Thirty-two bits as five data bytes, low septet first: a time in
+// microseconds, a subtick count, a word of gate buses (SYSEX_MONITOR).
+export const readU32 = (bytes, at) =>
+  (bytes[at] | (bytes[at + 1] << 7) | (bytes[at + 2] << 14) | (bytes[at + 3] << 21)
+   | ((bytes[at + 4] & 0x0f) << 28)) >>> 0;
 
 // A signed value on the wire: magnitude as a u14, then the sign on its own.
 // A data byte has no room for a sign bit, and biasing would halve a range the

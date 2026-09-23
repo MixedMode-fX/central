@@ -44,6 +44,7 @@ struct Rig {
     RecordingMidiOut midi;
     FakeEeprom eeprom;
     FakeLeds led_driver;
+    HalTap panel;
     MixedModeMaster master;
     StatusLeds leds;
     PatchStore store;
@@ -52,16 +53,18 @@ struct Rig {
     CcMapper cc;
     ControlSum sum;
     ModMatrix mod;
+    Monitor monitor;
     SysexHandler sysex;
     // The time every message is delivered at. Zero by default; a test that
     // cares about uptime moves it, the way a module that has been on for a
     // while has.
     uint32_t now;
 
-    Rig() : gpio(), midi(), eeprom(), led_driver(),
-            master(gpio, midi), leds(led_driver), store(eeprom),
+    Rig() : gpio(), midi(), eeprom(), led_driver(), panel(gpio, midi),
+            master(panel, panel), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
-            sysex(patches, master, store, leds, midi, cc, mod, macros, sum), now(0) {}
+            monitor(master, panel, leds),
+            sysex(patches, master, store, leds, panel, cc, mod, macros, sum, monitor), now(0) {}
 
     // One command, framed the way the wire carries it.
     void send(uint8_t command, const std::vector<uint8_t>& args = {}) {

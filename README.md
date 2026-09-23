@@ -609,6 +609,16 @@ than mid-transfer. Binary payloads are 7-in-8 packed.
 - **Program Change recall** is off by default, with a configurable channel and
   port. A recall can be immediate or quantised to the next beat or bar;
   immediate with the clock stopped. The module announces a recall to the host.
+- **The monitor** (`src/monitor/monitor.h`) is how an editor watches the
+  module: `SYSEX_MONITOR_REQUEST` names the note buses and nodes it is
+  drawing and `SYSEX_MONITOR` answers with everything since the last request
+  — the gate buses, jacks and LEDs folded per pass, a sample of every CV bus,
+  each note that crossed a watched bus or left on a cable stamped with its
+  pass, and where each named node is. A request, not a subscription: the
+  module sends nothing unasked, reads no bus nobody watches, and a module
+  nobody has asked in `MONITOR_ARMED_US` keeps no record at all. The module's
+  back panel is tapped on its way out (`src/monitor/hal_tap.h`), so the
+  signal path does not know it is watched.
 
 What survives a change:
 

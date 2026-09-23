@@ -39,6 +39,7 @@ struct Rig {
     RecordingMidiOut midi;
     FakeEeprom eeprom;
     FakeLeds led_driver;
+    HalTap panel;
     MixedModeMaster master;
     StatusLeds leds;
     PatchStore store;
@@ -47,12 +48,14 @@ struct Rig {
     CcMapper cc;
     ControlSum sum;
     ModMatrix mod;
+    Monitor monitor;
     SysexHandler sysex;
 
-    Rig() : gpio(), midi(), eeprom(), led_driver(),
-            master(gpio, midi), leds(led_driver), store(eeprom),
+    Rig() : gpio(), midi(), eeprom(), led_driver(), panel(gpio, midi),
+            master(panel, panel), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
-            sysex(patches, master, store, leds, midi, cc, mod, macros, sum) {}
+            monitor(master, panel, leds),
+            sysex(patches, master, store, leds, panel, cc, mod, macros, sum, monitor) {}
 
     // One CC through the whole input path: offered to the mapping table, and
     // delivered to the graph only if it was not consumed. This is exactly

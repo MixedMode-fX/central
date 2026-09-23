@@ -2,6 +2,12 @@
 // two time axes and its MIDI log - the things a rack shows you on its front
 // panel, plus the ones it cannot.
 //
+// **Wherever the module is.** Everything here but the sound is painted from
+// what the module reports over the protocol (runtime/monitor.js), so a
+// module in a plugin or on the end of a cable is watched exactly as the one
+// in the page is. What is the page's own is what only the page can do: drive
+// the jacks of its own module, and turn its MIDI into sound.
+//
 // **Nothing here plays the module**, which is what the tab is named after. A
 // keyboard and a CC sender both lived here and both exist on the performance
 // surface: the keyboard summoned over it with its own cable, channel and
@@ -46,38 +52,29 @@ const LOG_MS = 60;
 
 const peers = (app, domain, bus) => busPeers(app.device, app.state.patch, domain, bus);
 
+// Whether the module being watched is the one in this page, whose jacks the
+// page drives and whose sound it makes. A module in a plugin or on a cable
+// is watched the same way; it is played the same way too (`services/play.js`).
+const own = (app) => Boolean(app.module && app.session.usingModule);
+
 export function MonitorTab(app) {
-  // The plugin's MIDI is the track's, and the DAW is where it is watched;
-  // the page can still play it (`services/play.js`), so this says so.
-  if (app.hosted) {
-    return el('div', {},
-      Panel('the module in the plugin',
-        Row(MachineBadge(app)),
-        Hint('what it plays leaves by the plugin\'s MIDI output, on the track: '
-             + 'the meters, the scope and the audio here are the page\'s own module\'s')));
-  }
-  if (!app.module) return Hint('the built-in module is not running');
-  // A module on the cable has its own jacks, LEDs and sound, and the page
-  // cannot show any of that. It can still be **played** - that is what
-  // `services/play.js` is for - so this says which machine is being driven
-  // rather than refusing to draw anything.
-  if (!app.session.usingModule) {
-    return el('div', {},
-      Panel('the module on the cable',
-        Row(MachineBadge(app)),
-        Hint('its jacks, LEDs and sound are its own: the meters, the scope and the '
-             + 'audio below need the module in the page'),
-        Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))));
-  }
+  if (!app.device) return Hint(app.hosted ? 'the plugin has not answered' : 'the built-in module is not running');
   return el('div', {},
+    own(app) ? null : Panel(app.hosted ? 'the module in the plugin' : 'the module on the cable',
+      Row(MachineBadge(app)),
+      Hint(app.hosted
+        ? 'what it plays leaves by the plugin\'s MIDI output, on the track; what it is doing is below'
+        : 'what it plays leaves by its own cables and jacks; what it is doing is below'),
+      app.hosted ? null : Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))),
     Meters(app), ScopePanel(app), RollPanel(app),
-    JacksPanel(app), ListenPanel(app), LogPanel(app));
+    JacksPanel(app), own(app) ? ListenPanel(app) : null, LogPanel(app));
 }
 
 // --- jacks ------------------------------------------------------------------
 
 function JacksPanel(app) {
   const module = app.module;
+  const drivable = own(app);
   const cards = [];
   const unused = [];
   const lamps = [];
@@ -90,8 +87,11 @@ function JacksPanel(app) {
     lamps.push({ lamp, j, isIn });
     // A gate is an edge, so a button that only toggled would need two
     // presses to make one trigger. Tap is the common case; hold is there for
-    // a level, and the rate for anything that wants a clock.
-    const controls = isIn ? [
+    // a level, and the rate for anything that wants a clock. Only the page's
+    // own module has jacks the page can drive: a cable's are on its panel,
+    // and a plugin has none.
+    const controls = isIn && !drivable ? [el('span', { class: 'hint' }, app.hosted ? 'no jack in a plugin' : 'on the module')]
+      : isIn ? [
       el('button', { onpointerdown: () => module.pulseJack(j) }, 'tap'),
       el('button', { class: classes(module.jackSources[j].level && 'active'),
                      onclick: () => { module.setJackInput(j, !module.jackSources[j].level); app.render(); } },
@@ -111,7 +111,7 @@ function JacksPanel(app) {
   });
   // The sync jack rides in the same grid as the eight: it is a jack, and a
   // box of its own outside the grid would sit at a different width.
-  const sync = SyncCard(app);
+  const sync = drivable ? SyncCard(app) : null;
   return Panel('jacks',
     cards.length || sync ? el('div', { class: 'jack-cards' }, sync, cards) : null,
     cards.length ? null : Hint('no jack is in this patch'),
@@ -362,7 +362,10 @@ function nextGateSource(app) {
 
 // --- the MIDI log --------------------------------------------------------------
 
-// The log, rebuilt when there is something new in it. "Something new" is the
+// The notes that left the module, off the monitor's frames (runtime/monitor.js):
+// every note-on and note-off on every cable, from the module itself, which
+// is why it is the same list for a plugin's track as for the page. The log
+// is rebuilt when there is something new in it. "Something new" is the
 // sequence number, not the length: the log is a ring, so once it is full its
 // length never changes again. Whether to follow the tail is the reader's
 // choice: scrolling back must not be undone by the next event.
@@ -371,24 +374,23 @@ function LogPanel(app) {
   const scroll = el('div', { class: 'log-scroll' }, log);
   let seq = null;
   let at = 0;
-  app.live.paint(({ module }) => {
-    if (seq === module.midiSeq) return;
-    // A stream of MIDI clock is forty events a second; there is no reading a
-    // list rebuilt under the eye any faster than this.
+  app.live.paint(({ monitor }) => {
+    if (seq === monitor.midiSeq) return;
+    // There is no reading a list rebuilt under the eye any faster than this.
     const now = performance.now();
     if (seq !== null && now - at < LOG_MS) return;
-    seq = module.midiSeq;
+    seq = monitor.midiSeq;
     at = now;
-    if (!module.midiLog.length) { log.replaceChildren(Hint('nothing yet')); return; }
+    if (!monitor.midiLog.length) { log.replaceChildren(Hint('nothing yet')); return; }
     const following = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
-    log.replaceChildren(...module.midiLog.slice(-LOG_SHOWN).map((event) => el('div', { class: 'log-line' },
+    log.replaceChildren(...monitor.midiLog.slice(-LOG_SHOWN).map((event) => el('div', { class: 'log-line' },
       el('span', { class: 'log-time' }, `${(event.t / 1e6).toFixed(2)}s`),
       el('span', { class: 'log-what' }, MIDI_TYPES[event.type] ?? `0x${event.type.toString(16)}`),
-      el('span', { class: 'log-data' }, module.isNote(event.type) ? `${noteName(event.d1)} vel ${event.d2}` : `${event.d1} ${event.d2}`),
+      el('span', { class: 'log-data' }, `${noteName(event.d1)} vel ${event.d2}`),
       el('span', { class: 'log-where' }, `ch ${event.channel} → ${portNames(event.target).join(', ') || event.target}`))));
     if (following) scroll.scrollTop = scroll.scrollHeight;
   });
   return Panel('MIDI log', scroll,
     Row(IconButton({ icon: 'clear', label: 'clear the log', text: 'clear', class: 'ghost',
-                     onclick: () => { app.module.clearMidiLog(); app.refreshLive(); } })));
+                     onclick: () => { app.monitor.clearMidiLog(); app.refreshLive(); } })));
 }

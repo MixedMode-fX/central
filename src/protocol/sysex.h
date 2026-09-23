@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 16
+#define SYSEX_PROTOCOL_VERSION 17
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -124,6 +124,15 @@ enum SysexCommand : uint8_t {
     // Everything sounding, released, on every port and channel. See
     // MixedModeMaster::panic() for the two halves and why both are needed.
     SYSEX_PANIC            = 0x32,
+    // What the module has been doing since the last time it was asked: the
+    // record the monitor keeps (monitor/monitor.h). <note buses: set> <n>
+    // <node>*n - the buses whose notes are worth sending and the nodes whose
+    // positions are, because a bus nobody draws is not read and a playhead
+    // is drawn for an open card. Answered with one SYSEX_MONITOR, and the
+    // record starts again. A request, not a subscription: the module never
+    // sends a frame unasked, and one nobody has asked in MONITOR_ARMED_US
+    // stops keeping the record at all.
+    SYSEX_MONITOR_REQUEST  = 0x33,
 
     // Device -> host
     SYSEX_IDENTITY         = 0x41,
@@ -140,6 +149,27 @@ enum SysexCommand : uint8_t {
     SYSEX_MACRO            = 0x57,
     SYSEX_MACRO_DEST       = 0x58,
     SYSEX_MACRO_STATE      = 0x59,
+    // The monitor's record, since the last request:
+    //   u32 at                the pass the record ends on, in microseconds
+    //   u8  clock flags       bit 0: running
+    //   u14 bpm
+    //   u32 clock count       in subticks (config.h, CLOCK_SUBTICKS_PER_QUARTER)
+    //   u32 gate now          one bit per gate bus, high at `at`
+    //   u32 gate since        high at any pass since the last request
+    //   u14 jacks in now, u14 jacks in since, u14 jacks out now, u14 jacks out since
+    //   u14 green, u14 red    the brightest each LED has been
+    //   s14 x N_CV_BUS        where each CV bus is, at `at`
+    //   u8  n, then n x (u8 node, u8 m, m x u8)   the positions asked for:
+    //                         Monitor::positions, 0x7F where there is nothing
+    //   u8  lost              1 when events happened the record had no room for
+    //   u8  n, then n x event:
+    //     u8 where            bit 0: 0 on a note bus, 1 sent out; bit 6: bit 7 of arg
+    //     u8 arg              the bus, or the cable mask's low seven bits
+    //     u8 note flags       bit 6: note on; bits 0-4: the channel
+    //     u8 d1, u8 d2
+    //     u14 age             passes before `at`, in milliseconds
+    // A u32 is five data bytes, low septet first.
+    SYSEX_MONITOR          = 0x5A,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>
@@ -194,9 +224,10 @@ enum SysexEvent : uint8_t {
 // received message longer than this is dropped rather than truncated, because
 // a truncated command is a command with the wrong arguments.
 #define SYSEX_RX_MAX 320
-// The largest reply. An algorithm descriptor with its parameter names is the
-// biggest thing sent in one message.
-#define SYSEX_TX_MAX 320
+// The largest reply. A monitor frame with every event and position it can
+// carry is the biggest thing sent in one message; the handler checks that it
+// fits at compile time.
+#define SYSEX_TX_MAX 512
 
 namespace sysex {
     // 7-in-8 packing, the standard MIDI scheme: for every group of up to

@@ -341,6 +341,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_CV_ROUTER: 57,
   ALGO_AD: 58,
   ALGO_ADSR: 59,
+  ALGO_NOTE_BUFFER: 60,
 });
 
 export const AlgorithmCategory = Object.freeze({

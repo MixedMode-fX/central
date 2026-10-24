@@ -184,7 +184,7 @@ touched.
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
 | Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
-| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger` |
+| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger`, `NoteBuffer` |
 | Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz`, `Key` |
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
@@ -363,6 +363,11 @@ is only what a parameter list cannot say.
   a note that spoke when it was played would put the player's back into it.
   A note-off is immediate, because a key that has been lifted is not in the
   strike.
+- **`NoteBuffer` keeps everything played.** A note-on is sent at once and its
+  note-off is swallowed, so notes pile up until a rising edge on `reset`
+  releases them all. A note already held is not struck again, a reset and a
+  note in the same pass leave the new note held, and a transport stop releases
+  nothing — the reset says when.
 - **`Voicer`'s ledger is keyed on the note it emitted**, not the note that
   caused it, because it emits a function of the whole held chord rather than of
   one note. Common-tone retention is then the *absence* of code: a shared note

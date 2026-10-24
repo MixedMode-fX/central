@@ -240,14 +240,12 @@ void Launchpad::set_page(uint8_t page, uint32_t now_us){
 // The note page --------------------------------------------------------------
 
 // Chromatic, as a Launchpad's own note mode is: a semitone a column, so a
-// row is a run up a string, and `row_offset` semitones a row, so the rows
-// are the strings of a neck tuned in one interval - fourths by default, the
-// bottom-left pad the tonic. The scale is painted on the pads rather than
+// row is a run up a string, and LP_ROW_OFFSET semitones a row, so the rows
+// are the strings of a neck tuned in fourths, the bottom-left pad the tonic. The scale is painted on the pads rather than
 // built into them, so a note outside it plays as it does on a Launchpad.
 uint8_t Launchpad::pitch_of(uint8_t row, uint8_t col) const {
     const LaunchpadConfig& c = config();
-    const uint8_t offset = c.row_offset ? c.row_offset : LP_ROW_OFFSET_DEFAULT;
-    const int16_t pitch = (int16_t)global_key::tonic(c.octave) + 12 * shift + row * offset + col;
+    const int16_t pitch = (int16_t)global_key::tonic(c.octave) + 12 * shift + row * LP_ROW_OFFSET + col;
     if (pitch < 0 || pitch > 127) return NO_NOTE;
     return (uint8_t)pitch;
 }

@@ -723,9 +723,10 @@ model outright.
   a Launchpad plugged in after boot is found and one unplugged is not sent
   frames. Taking it out of the patch returns it to live mode.
 - **Four pages**, on the top row's right-hand buttons: **note** is a neck, as
-  a Launchpad's own note mode is (a semitone a column, `row_offset` semitones
-  a row, the key painted on it: the roots pink, the scale blue, the notes
-  outside it unlit but playing; the arrows move the register, and a pad owns
+  a Launchpad's own note mode is (a semitone a column, a fourth a row, so a
+  row's sixth pad is the next row's first; the key painted on it: the roots
+  pink, the scale blue, the notes outside it unlit but playing; the arrows
+  move the register, and a pad owns
   the note-off of the pitch it played, so the key may move under a held
   chord); **key** sets the root on a keyboard of twelve,
   the scale and the register; **widgets** is two pages of eight columns, each

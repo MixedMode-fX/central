@@ -604,18 +604,17 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             ack(source);
             return;
 
-        // The Launchpad (surface/launchpad.h). The record is five bytes and
+        // The Launchpad (surface/launchpad.h). The record is four bytes and
         // the widgets are one message each, as a binding is: the whole thing
         // is validated against the running patch and refused whole.
         case SYSEX_SET_LAUNCHPAD: {
-            if (n < 6){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 5){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             patches.begin_edit();
             LaunchpadConfig& lp = patches.staging().launchpad;
-            lp.port = (uint8_t)(args[0] | ((args[5] & 0x01) ? 0x80u : 0u));
+            lp.port = (uint8_t)(args[0] | ((args[4] & 0x01) ? 0x80u : 0u));
             lp.model = args[1];
             lp.channel = args[2];
-            lp.row_offset = args[3];
-            lp.octave = args[4];
+            lp.octave = args[3];
             if (patches.commit_launchpad(now_us) != APPLY_OK){ nak(source, SYSEX_ERR_REJECTED); return; }
             ack(source);
             return;
@@ -1032,7 +1031,6 @@ void SysexHandler::reply_launchpad(uint8_t source){
     put((uint8_t)(lp.port & 0x7F));
     put(lp.model);
     put(lp.channel);
-    put(lp.row_offset);
     put(lp.octave);
     put((lp.port & 0x80) ? 1u : 0u);
     send_reply(source);

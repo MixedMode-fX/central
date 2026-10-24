@@ -169,7 +169,6 @@ export function emptyLaunchpad() {
     port: 0,
     model: P.LaunchpadModel.LP_MODEL_AUTO,
     channel: 1,
-    rowOffset: P.LP_ROW_OFFSET_DEFAULT,
     octave: 0,
     widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
   };
@@ -362,7 +361,6 @@ export function encodePatch(patch, globals = emptyGlobals()) {
   w.u8(lp.port ?? 0);
   w.u8(lp.model ?? 0);
   w.u8(lp.channel ?? 0);
-  w.u8(lp.rowOffset ?? 0);
   w.u8(lp.octave ?? 0);
   const widgets = (lp.widgets ?? []).map((g, slot) => ({ g, slot })).filter(({ g }) => isWidget(g));
   w.u8(widgets.length);
@@ -488,7 +486,7 @@ export function decodePatch(image) {
   }
 
   patch.launchpad = {
-    port: r.u8(), model: r.u8(), channel: r.u8(), rowOffset: r.u8(), octave: r.u8(),
+    port: r.u8(), model: r.u8(), channel: r.u8(), octave: r.u8(),
     widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
   };
   const nWidgets = r.u8();

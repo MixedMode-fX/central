@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 18
+#define SYSEX_PROTOCOL_VERSION 19
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -134,7 +134,7 @@ enum SysexCommand : uint8_t {
     // stops keeping the record at all.
     SYSEX_MONITOR_REQUEST  = 0x33,
     // The Launchpad (surface/launchpad.h, node/patch.h LaunchpadConfig):
-    // <port 6..0> <model> <channel> <row offset> <octave> <high>, the port's
+    // <port 6..0> <model> <channel> <octave> <high>, the port's
     // top bit riding in bit 0 of the last byte as SET_CLOCK_ROUTE carries
     // its masks'. A zero port is no Launchpad.
     SYSEX_SET_LAUNCHPAD    = 0x34,
@@ -184,7 +184,7 @@ enum SysexCommand : uint8_t {
     //     u14 age             passes before `at`, in milliseconds
     // A u32 is five data bytes, low septet first.
     SYSEX_MONITOR          = 0x5A,
-    // <port 6..0> <model> <channel> <row offset> <octave> <high>
+    // <port 6..0> <model> <channel> <octave> <high>
     SYSEX_LAUNCHPAD        = 0x5B,
     // <slot> <kind> <cc> <channel> <colour>
     SYSEX_LP_WIDGET        = 0x5C,

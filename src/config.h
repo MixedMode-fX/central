@@ -187,10 +187,9 @@
 // have not got.
 #define LP_WIDGETS 16
 // Semitones between one row of its note page and the next: the strings of
-// the neck. Fourths where the patch says nothing, as a guitar is tuned; at
-// most an octave, which makes a row a register.
-#define LP_ROW_OFFSET_DEFAULT 5
-#define LP_ROW_OFFSET_MAX 12
+// the neck, tuned in fourths as a guitar and a Launchpad's own note mode
+// are, so a row's sixth pad is the next row's first.
+#define LP_ROW_OFFSET 5
 
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per

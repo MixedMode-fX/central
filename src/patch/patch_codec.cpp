@@ -67,7 +67,7 @@
 //                          depth             2   signed, two's complement
 //                          flags             1
 //                      }
-//   launchpad          port 1, model 1, channel 1, row_offset 1, octave 1
+//   launchpad          port 1, model 1, channel 1, octave 1
 //                      (surface/launchpad.h; a zero port is no Launchpad)
 //   n_widgets          1   (the custom pages' columns; empty ones not stored)
 //   widgets            n_widgets x {
@@ -283,7 +283,7 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
         w.u8(d.flags);
     }
 
-    // The Launchpad, and the columns of its custom pages. The five bytes
+    // The Launchpad, and the columns of its custom pages. The four bytes
     // that say where it is and how it plays are always there - a zero port
     // is "no Launchpad", which is what an empty patch says - and a column
     // doing nothing is not stored, as an unused binding is not.
@@ -291,7 +291,6 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
     w.u8(lp.port);
     w.u8(lp.model);
     w.u8(lp.channel);
-    w.u8(lp.row_offset);
     w.u8(lp.octave);
     uint8_t n_widgets = 0;
     for (uint8_t i = 0; i < LP_WIDGETS; i++) if (lp.widgets[i].kind != LP_WIDGET_NONE) n_widgets++;
@@ -454,7 +453,6 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
     lp.port = r.u8();
     lp.model = r.u8();
     lp.channel = r.u8();
-    lp.row_offset = r.u8();
     lp.octave = r.u8();
     const uint8_t n_widgets = r.u8();
     if (r.underflowed) return CODEC_TRUNCATED;

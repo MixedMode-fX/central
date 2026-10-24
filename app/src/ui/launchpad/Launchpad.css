@@ -1,0 +1,90 @@
+/* A Launchpad, drawn as the thing: a dark case, square pads, round buttons
+   around them, lit from a palette index the module sent. It fits a phone's
+   width - nine cells across a 360px screen is thirty-six pixels a pad - and
+   grows on a desk. */
+.lp-board {
+  display: grid;
+  grid-template-columns: repeat(var(--lp-columns, 9), minmax(0, 1fr));
+  gap: 4%;
+  gap: clamp(3px, 1.2vw, 8px);
+  width: 100%;
+  max-width: 28rem;
+  padding: clamp(.4rem, 2vw, .9rem);
+  box-sizing: border-box;
+  background: #0b0d11;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.lp-pro { background: #0e0f12; }
+
+/* The pads undo the page's button: no tap height (they are square), no
+   accent on hover (a lit pad is the only highlight), a case-dark face so
+   the palette's dim grey reads as lit. */
+.lp-cell {
+  --led: transparent;
+  aspect-ratio: 1;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #1f232b;
+  border-radius: 14%;
+  background: #0f1116;
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow .05s, background-color .05s;
+}
+.lp-cell:hover { border-color: #2b303a; }
+.lp-cell:active { background: #0f1116; }
+.lp-cell.lit, .lp-cell.lit:hover, .lp-cell.lit:active {
+  background: var(--led); box-shadow: 0 0 6px var(--led); border-color: transparent;
+}
+.lp-cell.down { transform: scale(.94); }
+.lp-cell.round, .lp-cell.inert { border-radius: 50%; }
+.lp-cell.inert, .lp-cell.inert:hover { background: #0d0f13; border-color: #1a1d24; cursor: default; }
+.lp-cell.logo, .lp-cell.logo:hover, .lp-cell.logo:active {
+  border-radius: 50%; border-color: transparent; background: none; cursor: default; box-shadow: none;
+}
+.lp-cell.logo::after {
+  content: ''; position: absolute; inset: 30%; border-radius: 50%;
+  background: #262a33;
+}
+.lp-cell.logo.lit::after { background: var(--led); box-shadow: 0 0 6px var(--led); }
+.lp-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lp-gap { display: block; }
+
+/* Not in programmer mode yet: a Launchpad in a factory mode would be
+   playing its own layout, and this one says so by being dark and quiet. */
+.lp-board.lp-live .lp-cell.grid { opacity: .55; }
+
+/* --- the tab --- */
+.lp-stage { display: grid; gap: .8rem; justify-items: center; }
+.lp-stage .segmented { justify-content: center; }
+.lp-status {
+  margin: 0; color: var(--dim); font-size: .85rem; text-align: center;
+}
+.lp-status.linked { color: var(--gate); }
+
+/* The widget columns: two pages of eight, each a row of four controls. */
+.lp-widgets { display: grid; gap: .5rem; }
+.lp-widget {
+  display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) 4.2rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: .4rem; align-items: center;
+}
+.lp-widget .lp-slot {
+  font-family: var(--mono); font-size: .75rem; color: var(--dim); text-align: right;
+}
+.lp-widget select, .lp-widget input { min-width: 0; width: 100%; }
+.lp-widget .lp-swatch {
+  display: inline-block; width: .7rem; height: .7rem; border-radius: 50%;
+  margin-right: .3rem; vertical-align: middle; border: 1px solid var(--line);
+}
+.lp-page-head {
+  display: flex; align-items: baseline; gap: .6rem; margin: .6rem 0 .3rem;
+  color: var(--dim); font-size: .85rem;
+}
+.lp-page-head h3 { margin: 0; font-size: .95rem; color: var(--ink); }

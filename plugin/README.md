@@ -51,6 +51,10 @@ ports, a host port - and eight gate jacks. A plugin has one MIDI output, so:
 - **There are no jacks.** A gate port in the patch is on no wire: an
   output writes into the void, an input reads low. The patch format keeps
   them because it is the module's format.
+- **A Launchpad is whatever the DAW routes to the plugin's MIDI input.** A
+  patch with its Launchpad on `HOST_IN` has the plugin ask that input who is
+  there and light what answers through the plugin's MIDI output, so a
+  Launchpad on a track is the module's panel as one on the module's socket is.
 - **The host's MIDI input arrives on `HOST_IN`** (`mmMIDI_USB_0`). The
   page's keyboard and surface play on whichever cable the page chooses, as
   they do against the module in the page, so the DAW track and the window

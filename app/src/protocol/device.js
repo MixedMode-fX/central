@@ -140,6 +140,8 @@ export class Device extends EventTarget {
     this.capabilities.macroDests = u8();
     this.capabilities.macroDestsPerMacro = u8();
     this.capabilities.macroNameBytes = u8();
+    // The columns a Launchpad's custom pages have between them.
+    this.capabilities.lpWidgets = u8();
     return this.capabilities;
   }
 
@@ -597,6 +599,57 @@ export class Device extends EventTarget {
       engaged: reply[6] !== 0,
       position: codec.readU14(reply, 7),
       dests,
+    };
+  }
+
+  // The Launchpad -----------------------------------------------------------
+  // Where it is and how it plays (src/node/patch.h, LaunchpadConfig), then
+  // one column of its custom pages at a time, as a binding is written. A
+  // port mask reaches 0x80 and a data byte holds seven bits, so the port's
+  // top bit rides in the last byte.
+
+  async setLaunchpad(lp) {
+    return this.command(P.SysexCommand.SYSEX_SET_LAUNCHPAD, [
+      (lp.port ?? 0) & 0x7f, lp.model ?? 0, lp.channel ?? 0, lp.rowOffset ?? 0, lp.octave ?? 0,
+      ((lp.port ?? 0) & 0x80) ? 1 : 0,
+    ]);
+  }
+  async getLaunchpad() {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_LAUNCHPAD),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_LAUNCHPAD) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    this.throwOnNak(reply, 'the module did not say where its Launchpad is');
+    return {
+      port: reply[5] | (reply[10] & 0x01 ? 0x80 : 0),
+      model: reply[6], channel: reply[7], rowOffset: reply[8], octave: reply[9],
+    };
+  }
+  // A kind of LP_WIDGET_NONE clears the column.
+  async setLpWidget(slot, widget) {
+    const g = widget ?? { kind: P.LaunchpadWidgetKind.LP_WIDGET_NONE, cc: 0, channel: 0, colour: 0 };
+    return this.command(P.SysexCommand.SYSEX_SET_LP_WIDGET,
+      [slot, g.kind ?? 0, g.cc ?? 0, g.channel ?? 0, g.colour ?? 0]);
+  }
+  async getLpWidget(slot) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_LP_WIDGET, [slot]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_LP_WIDGET) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    this.throwOnNak(reply, 'no such Launchpad widget');
+    if (!reply[6]) return null;
+    return { kind: reply[6], cc: reply[7], channel: reply[8], colour: reply[9] };
+  }
+  // What the surface is doing, which is not in the patch: whether a
+  // Launchpad has answered on its cable, which model, the page it is on, the
+  // note page's register shift and the widget page. A module with no surface
+  // answers with a NAK, which reads as null.
+  async getLpState() {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_LP_STATE),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_LP_STATE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    if (!reply || this.isReply(reply, P.SysexCommand.SYSEX_NAK)) return null;
+    return {
+      linked: reply[5] !== 0, model: reply[6], page: reply[7],
+      octaveShift: reply[8] - 64, widgetPage: reply[9],
     };
   }
 

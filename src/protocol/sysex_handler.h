@@ -13,6 +13,7 @@
 #include "control/mod_matrix.h"
 #include "led/status_leds.h"
 #include "monitor/monitor.h"
+#include "surface/launchpad.h"
 
 // The patch protocol's device end (#11).
 //
@@ -72,6 +73,15 @@ class SysexHandler : public ISysexIn {
         // meant for a downstream synth is not silently swallowed.
         bool program_change(uint8_t source, uint8_t channel, uint8_t program, uint32_t now_us);
 
+        // The Launchpad, when the module has one (surface/launchpad.h). Two
+        // things come of it: the protocol reports the surface's state, and
+        // SysEx that was not the protocol's own - a device's answer to an
+        // inquiry - is handed on rather than dropped, because the surface
+        // is the one thing on the module that talks SysEx to something that
+        // is not an editor. Without one, SYSEX_GET_LP_STATE is refused and
+        // foreign SysEx is dropped as it always was.
+        void attach(Launchpad& surface){ launchpad = &surface; }
+
         // A patch arrived by a path no message carried - a plugin host
         // restoring its project (plugin/src/engine.cpp) - and is running.
         // Said the way a quantised swap going live is said, so an editor
@@ -110,6 +120,9 @@ class SysexHandler : public ISysexIn {
         void reply_macro_state(uint8_t source, uint8_t index);
         void reply_pattern(uint8_t source, uint8_t node, uint16_t offset, uint16_t length);
         void reply_monitor(uint8_t source, const uint8_t* nodes, uint8_t count);
+        void reply_launchpad(uint8_t source);
+        void reply_lp_widget(uint8_t source, uint8_t slot);
+        void reply_lp_state(uint8_t source);
         void ack(uint8_t source);
         void nak(uint8_t source, SysexError code);
         void notify(uint8_t event, uint8_t detail);
@@ -179,6 +192,7 @@ class SysexHandler : public ISysexIn {
         // Read and taken: a request is what arms the monitor and what
         // empties its record, and both happen here.
         Monitor& monitor;
+        Launchpad* launchpad;
 
         // The staging image a bulk transfer accumulates into. The live graph
         // is untouched until the last chunk has arrived and the whole image

@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 17
+#define SYSEX_PROTOCOL_VERSION 18
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -133,6 +133,20 @@ enum SysexCommand : uint8_t {
     // sends a frame unasked, and one nobody has asked in MONITOR_ARMED_US
     // stops keeping the record at all.
     SYSEX_MONITOR_REQUEST  = 0x33,
+    // The Launchpad (surface/launchpad.h, node/patch.h LaunchpadConfig):
+    // <port 6..0> <model> <channel> <row offset> <octave> <high>, the port's
+    // top bit riding in bit 0 of the last byte as SET_CLOCK_ROUTE carries
+    // its masks'. A zero port is no Launchpad.
+    SYSEX_SET_LAUNCHPAD    = 0x34,
+    SYSEX_GET_LAUNCHPAD    = 0x35,
+    // One column of the custom pages: <slot> <kind> <cc> <channel> <colour>.
+    // A kind of LP_WIDGET_NONE clears the column.
+    SYSEX_SET_LP_WIDGET    = 0x36,
+    SYSEX_GET_LP_WIDGET    = 0x37,
+    // What the surface is doing, which is not in the patch: whether a
+    // Launchpad has answered, which model, the page it is on, the note
+    // page's register shift and the widget page.
+    SYSEX_GET_LP_STATE     = 0x38,
 
     // Device -> host
     SYSEX_IDENTITY         = 0x41,
@@ -170,6 +184,12 @@ enum SysexCommand : uint8_t {
     //     u14 age             passes before `at`, in milliseconds
     // A u32 is five data bytes, low septet first.
     SYSEX_MONITOR          = 0x5A,
+    // <port 6..0> <model> <channel> <row offset> <octave> <high>
+    SYSEX_LAUNCHPAD        = 0x5B,
+    // <slot> <kind> <cc> <channel> <colour>
+    SYSEX_LP_WIDGET        = 0x5C,
+    // <linked> <model> <page> <octave shift + 64> <widget page>
+    SYSEX_LP_STATE         = 0x5D,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>

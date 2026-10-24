@@ -54,6 +54,9 @@ const ICONS = {
   // A trace on a screen: the tab that watches the module rather than playing
   // it.
   monitor: { d: 'M3 5h18v13H3z M6 13c1.4 0 1.4-4 2.8-4s1.4 6 2.8 6 1.4-5 2.8-5 1.4 2.5 2.8 2.5' },
+  // A grid of pads with a button beside it: the controller on a cable.
+  launchpad: { d: 'M3 3h5v5H3z M10 3h5v5h-5z M3 10h5v5H3z M10 10h5v5h-5z M3 17h5v4H3z M10 17h5v4h-5z '
+              + 'M19.5 4.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2z M19.5 11.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2z M19.5 18a1 1 0 1 1 0 2 1 1 0 0 1 0-2z' },
 };
 
 const frame = (...children) => svg('svg', {

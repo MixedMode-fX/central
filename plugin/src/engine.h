@@ -17,6 +17,7 @@
 #include "control/control_sum.h"
 #include "control/mod_matrix.h"
 #include "control/nrpn.h"
+#include "surface/launchpad.h"
 #include "plugin_hal.h"
 
 // The module inside a plugin, with no plugin framework in sight.
@@ -182,6 +183,10 @@ class Engine {
         ControlSum      control_sum;
         ModMatrix       mod_matrix;
         NrpnDecoder     nrpn;
+        // The Launchpad, on whichever cable the patch names: in a plugin
+        // that is the host's MIDI input, so a Launchpad routed to the track
+        // by the DAW plays the module as one on the module's own socket does.
+        Launchpad       launchpad;
         SysexHandler    protocol;
         MidiInputQueue  queue;
 

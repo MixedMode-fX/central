@@ -10,6 +10,7 @@
 #include "../fakes/recording_midi_out.h"
 #include "master.h"
 #include "control/midi_dispatch.h"
+#include "surface/launchpad.h"
 #include "control/macros.h"
 #include "control/cc_mapper.h"
 #include "control/control_sum.h"
@@ -58,12 +59,13 @@ struct Rig {
     ModMatrix mod;
     NrpnDecoder nrpn;
     Monitor monitor;
+    Launchpad surface;
     SysexHandler sysex;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(), panel(gpio, midi),
             master(panel, panel), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum), nrpn(patches, cc),
-            monitor(master, panel, leds),
+            monitor(master, panel, leds), surface(patches, master, cc, panel),
             sysex(patches, master, store, leds, panel, cc, mod, macros, sum, monitor) {}
 
     // The whole input path, as main.cpp runs it.
@@ -740,12 +742,12 @@ static void test_a_note_off_burst_larger_than_the_bus_is_not_dropped() {
     const uint8_t burst = NOTE_QUEUE_DEPTH + 4;
     for (uint8_t i = 0; i < burst; i++) queue.push(KEYBOARD, MidiEvent{MIDI_NOTE_OFF, 1, (uint8_t)(40 + i), 0});
 
-    TEST_ASSERT_EQUAL(NOTE_QUEUE_DEPTH, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 0));
+    TEST_ASSERT_EQUAL(NOTE_QUEUE_DEPTH, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, rig.surface, 0));
     TEST_ASSERT_EQUAL(4, queue.count());
     rig.master.pass(0);
     TEST_ASSERT_EQUAL(NOTE_QUEUE_DEPTH, rig.midi.messages.size());
 
-    TEST_ASSERT_EQUAL(4, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 1000));
+    TEST_ASSERT_EQUAL(4, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, rig.surface, 1000));
     rig.master.pass(1000);
     TEST_ASSERT_EQUAL(burst, rig.midi.messages.size());
     TEST_ASSERT_EQUAL(0, rig.master.buses().note_overflows(0));
@@ -763,7 +765,7 @@ static void test_realtime_is_never_held_behind_a_full_bus() {
     for (uint8_t i = 0; i < NOTE_QUEUE_DEPTH; i++) queue.push(KEYBOARD, MidiEvent{MIDI_NOTE_ON, 1, (uint8_t)(40 + i), 100});
     queue.push(KEYBOARD, MidiEvent{MIDI_START, 0, 0, 0});
     queue.push(KEYBOARD, MidiEvent{MIDI_NOTE_ON, 1, 100, 100});
-    dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 0);
+    dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, rig.surface, 0);
     // The bus is full; the note behind the start waits, the start went through.
     TEST_ASSERT_EQUAL(1, queue.count());
     TEST_ASSERT_TRUE(rig.master.clock().running());
@@ -788,7 +790,7 @@ static void test_the_dispatcher_runs_the_control_plane_before_the_graph() {
     MidiInputQueue queue;
     queue.push(KEYBOARD, MidiEvent{MIDI_CONTROL_CHANGE, 1, 20, 127});   // mapped: consumed
     queue.push(KEYBOARD, MidiEvent{MIDI_CONTROL_CHANGE, 1, 21, 127});   // unmapped: through
-    TEST_ASSERT_EQUAL(2, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, 0));
+    TEST_ASSERT_EQUAL(2, dispatch_midi(queue, rig.sysex, rig.nrpn, rig.cc, rig.master, rig.surface, 0));
     rig.cc.apply(0);
     rig.master.pass(0);
     TEST_ASSERT_EQUAL(1, rig.midi.messages.size());

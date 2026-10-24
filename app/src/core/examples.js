@@ -575,6 +575,32 @@ export const EXAMPLES = {
       ],
     },
   },
+  'Launchpad in hand': {
+    category: 'routing & MIDI',
+    about: 'A patch played from a Launchpad on the module’s USB host socket. Its note page plays the key: Chord voices a triad on every pad and the Arpeggiator spreads it over an eighth-note metronome. The widgets page is two faders and a column of toggles: fader 1 is the chord quality and fader 2 the tempo, each a CC on the Launchpad’s cable bound in the mod matrix, and the toggles reach the arpeggiator unbound, to learn. Go to the Launchpad tab: the drawing there is the device, press its pads, turn its top-row pages, and the key page changes the scale under everything. Plug a real one into this computer and it takes the drawing’s place.',
+    patch: {
+      globals: { scale: 'minor', root: 9, bpm: 112 },
+      midi_in: [{ port: 1, sources: ['USB host'], channel: 0, bus: 0 }],
+      nodes: [
+        { algo: 'Metronome', out: [0], seq: { division: '1/8' } },
+        { algo: 'Chord', in: [0], out: [1] },
+        { algo: 'Arpeggiator', in: [1, 0], out: [2], params: [2, 2, 60, 0] },
+      ],
+      midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 2 }],
+      launchpad: {
+        port: 'USB host', model: 'auto', channel: 1, rowOffset: 3, octave: 0,
+        widgets: [
+          { slot: 0, kind: 'fader', cc: 20, channel: 1, colour: 'orange' },
+          { slot: 1, kind: 'fader', cc: 21, channel: 1, colour: 'yellow' },
+          { slot: 2, kind: 'toggles', cc: 30, channel: 1, colour: 'cyan' },
+        ],
+      },
+      cc_map: [
+        { slot: 0, sources: ['USB host'], channel: 1, cc: 20, targetIndex: 1, param: 0 },
+        { slot: 1, sources: ['USB host'], channel: 1, cc: 21, targetKind: 1, param: 0 },
+      ],
+    },
+  },
   'Ember': {
     category: 'performance',
     about: 'D phrygian at 132: drums, a bass line and a stabbing lead, and the two bottom pads are its mute buttons. Pad 1 and pad 2 each drive a MidiToCV trigger into a GateHold in toggle mode, and the AND under it is what the part is clocked through — so a pad press drops the drums or the bass out and the next one brings them back, on the beat, with no parameter moved. Enable audio under play and try it. Pot 2 “stutter” cuts the drum pattern from sixteen steps to twelve and then to seven, which re-bars the whole kit against a lead that is still counting sixteen; pot 6 “scale” walks the key from phrygian to blues to pentatonic minor. The keyboard is the bass line’s root inlet, so a key you hold re-pitches the sequence without changing a degree of it, and pads 5 to 16 move the key everything else is in.',

@@ -17,6 +17,7 @@ export const ENV_TIME_UNIT_US = 500;
 export const GPIO_N = 8;
 export const KEY_DEFAULT_OCTAVE = 5;
 export const KEY_MAX_OCTAVE = 10;
+export const LP_WIDGETS = 16;
 export const MACRO_NAME_BYTES = 8;
 export const MASTER_PPQN = 24;
 export const MAX_IN = 8;
@@ -44,7 +45,7 @@ export const NRPN_KEY_BASE = 15488;
 export const NRPN_RESERVED_BASE = 15504;
 export const NRPN_TRANSPORT_BASE = 15472;
 export const PARAM_CENTRE = 128;
-export const PATCH_FORMAT_VERSION = 12;
+export const PATCH_FORMAT_VERSION = 13;
 export const PATCH_MAGIC = 1296911683;
 export const PATCH_SLOT_BYTES = 1071;
 export const PATCH_SLOTS = 4;
@@ -59,7 +60,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 17;
+export const SYSEX_PROTOCOL_VERSION = 18;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 512;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -102,6 +103,11 @@ export const SysexCommand = Object.freeze({
   SYSEX_TRANSPORT: 49,
   SYSEX_PANIC: 50,
   SYSEX_MONITOR_REQUEST: 51,
+  SYSEX_SET_LAUNCHPAD: 52,
+  SYSEX_GET_LAUNCHPAD: 53,
+  SYSEX_SET_LP_WIDGET: 54,
+  SYSEX_GET_LP_WIDGET: 55,
+  SYSEX_GET_LP_STATE: 56,
   SYSEX_IDENTITY: 65,
   SYSEX_CAPABILITIES: 66,
   SYSEX_ALGORITHM: 67,
@@ -117,6 +123,9 @@ export const SysexCommand = Object.freeze({
   SYSEX_MACRO_DEST: 88,
   SYSEX_MACRO_STATE: 89,
   SYSEX_MONITOR: 90,
+  SYSEX_LAUNCHPAD: 91,
+  SYSEX_LP_WIDGET: 92,
+  SYSEX_LP_STATE: 93,
   SYSEX_SLOTS: 99,
   SYSEX_ACK: 112,
   SYSEX_NAK: 113,
@@ -228,6 +237,22 @@ export const GatePortDirection = Object.freeze({
   GATE_PORT_UNUSED: 0,
   GATE_PORT_IN: 1,
   GATE_PORT_OUT: 2,
+});
+
+export const LaunchpadModel = Object.freeze({
+  LP_MODEL_AUTO: 0,
+  LP_MODEL_MINI_MK3: 1,
+  LP_MODEL_X: 2,
+  LP_MODEL_PRO_MK3: 3,
+  LP_MODELS: 4,
+});
+
+export const LaunchpadWidgetKind = Object.freeze({
+  LP_WIDGET_NONE: 0,
+  LP_WIDGET_FADER: 1,
+  LP_WIDGET_BUTTONS: 2,
+  LP_WIDGET_TOGGLES: 3,
+  LP_WIDGET_KINDS: 4,
 });
 
 export const ParamKind = Object.freeze({

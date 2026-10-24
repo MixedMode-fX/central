@@ -2,7 +2,7 @@
 #include "hal/midi_types.h"
 
 uint16_t dispatch_midi(MidiInputQueue& queue, SysexHandler& protocol, NrpnDecoder& nrpn,
-                       CcMapper& cc, MixedModeMaster& master, uint32_t now_us){
+                       CcMapper& cc, MixedModeMaster& master, Launchpad& surface, uint32_t now_us){
     uint16_t taken = 0;
     SourcedMidiEvent in;
     while (queue.peek(in)){
@@ -12,6 +12,7 @@ uint16_t dispatch_midi(MidiInputQueue& queue, SysexHandler& protocol, NrpnDecode
         queue.pop(in);
         taken++;
 
+        if (surface.receive(in.source, in.event, now_us)) continue;
         if (in.event.type == MIDI_PROGRAM_CHANGE &&
             protocol.program_change(in.source, in.event.channel, in.event.data1, now_us)) continue;
         if (in.event.type == MIDI_CONTROL_CHANGE &&

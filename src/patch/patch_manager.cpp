@@ -200,6 +200,16 @@ ApplyError PatchManager::commit_macro_dest(uint8_t slot, uint32_t now_us){
     return error = APPLY_OK;
 }
 
+ApplyError PatchManager::commit_launchpad(uint32_t now_us){
+    if (!MixedModeMaster::launchpad_valid(stage.launchpad)){
+        leds.error(now_us);
+        return error = APPLY_INVALID;
+    }
+    live.launchpad = stage.launchpad;
+    store.mark_dirty(now_us);
+    return error = APPLY_OK;
+}
+
 void PatchManager::set_globals(const GlobalSettings& g, uint32_t now_us, bool persist){
     live_globals = g;
     push_globals();

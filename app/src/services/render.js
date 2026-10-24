@@ -40,6 +40,8 @@ export class Live {
     // The nodes with a playhead on screen: what the monitor request asks
     // the position of. A card that is closed is a node nobody is watching.
     this.nodeSlots = new Set();
+    // Whether the Launchpad's state line is on screen (SYSEX_GET_LP_STATE).
+    this.launchpad = false;
   }
 
   reset() {
@@ -49,6 +51,7 @@ export class Live {
     this.macroSlots.clear();
     this.globalNames.clear();
     this.nodeSlots.clear();
+    this.launchpad = false;
   }
 
   // Called every animation frame, and once after every render, with what the
@@ -65,6 +68,8 @@ export class Live {
   watchGlobal(name) { this.globalNames.add(name); }
 
   watchNode(index) { this.nodeSlots.add(index); }
+
+  watchLaunchpad() { this.launchpad = true; }
 
   tick(frame) {
     for (const painter of this.painters) painter(frame);

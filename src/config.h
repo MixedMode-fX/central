@@ -179,6 +179,14 @@
 // is real rather than arbitrary.
 #define MACRO_NAME_BYTES 8
 
+// A Launchpad's custom pages (surface/launchpad.h): what each column of the
+// grid does there. Eight columns a page and two pages, so sixteen widgets -
+// a fader or a column of eight buttons each. The pages are the two the top
+// row's left and right arrows step between; a third would be a column that
+// has to be scrolled to, and a column you have to scroll to is a column you
+// have not got.
+#define LP_WIDGETS 16
+
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per
 // second, so ~350 messages/s; five transports at once and a 1 kHz pass rate

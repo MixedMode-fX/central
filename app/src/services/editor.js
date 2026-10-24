@@ -184,6 +184,26 @@ export class Editor {
     this.render();
   }
 
+  // --- the Launchpad ----------------------------------------------------------
+  // Where it is and how it plays, as one message; a column of its custom
+  // pages as another (src/node/patch.h). Both are patch state: a Launchpad
+  // is the panel a patch is played from, so the patch says what the pads do.
+
+  setLaunchpad(changes) {
+    this.patch.launchpad ??= codec.emptyLaunchpad();
+    Object.assign(this.patch.launchpad, changes);
+    this.edit(() => this.device.setLaunchpad(this.patch.launchpad), 'Launchpad');
+    this.render();
+  }
+
+  // `null` clears the column.
+  setLpWidget(slot, widget) {
+    this.patch.launchpad ??= codec.emptyLaunchpad();
+    this.patch.launchpad.widgets[slot] = widget;
+    this.edit(() => this.device.setLpWidget(slot, widget), 'Launchpad widget');
+    this.render();
+  }
+
   // --- macros ----------------------------------------------------------------
   // A macro is a target, not a source (src/control/macros.h): the app writes
   // its name and its destinations, and whatever moves it - a knob through the

@@ -1,5 +1,6 @@
 #include "master.h"
 #include "hal/midi_types.h"
+#include "midi/global_key.h"
 
 MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
     gpio(gpio_if), midi(midi_if), clk(), clk_out(), bus(), pool(), sched(),
@@ -77,7 +78,33 @@ LoadError MixedModeMaster::validate(const Patch& patch){
             return LOAD_MACRO_DEST_INVALID;
         }
     }
+    if (!launchpad_valid(patch.launchpad)) return LOAD_LAUNCHPAD_INVALID;
     return LOAD_OK;
+}
+
+bool MixedModeMaster::launchpad_valid(const LaunchpadConfig& lp){
+    // One cable or none: the surface is a device on a wire, and a mask of
+    // several would be one Launchpad's LEDs sent down every one of them.
+    // Never the control cable, for the reason nothing musical is on it.
+    if (lp.port != 0){
+        if ((lp.port & (uint8_t)(lp.port - 1u)) != 0) return false;
+        if (lp.port & MIDI_CONTROL_PORT) return false;
+    }
+    if (lp.model >= LP_MODELS) return false;
+    if (lp.channel > MIDI_CHANNELS) return false;
+    if (lp.row_offset > 8) return false;
+    if (lp.octave > KEY_MAX_OCTAVE) return false;
+    for (uint8_t i = 0; i < LP_WIDGETS; i++){
+        const LaunchpadWidget& g = lp.widgets[i];
+        if (g.kind == LP_WIDGET_NONE) continue;
+        if (g.kind >= LP_WIDGET_KINDS) return false;
+        // Eight buttons are eight consecutive CCs, and 120..127 are channel
+        // mode messages (hal/midi_types.h): the top one must stay below them.
+        if (g.cc > 119 - 7) return false;
+        if (g.channel > MIDI_CHANNELS) return false;
+        if (g.colour > 63) return false;
+    }
+    return true;
 }
 
 // Whether a target exists in this patch, shared by a controller binding and a

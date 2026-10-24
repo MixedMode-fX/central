@@ -263,6 +263,51 @@ export const GATE_DIRECTIONS = labelled(P.GatePortDirection, {
   GATE_PORT_OUT: 'out',
 }, 'GatePortDirection').map((d) => ({ ...d, hint: GATE_DIRECTION_HINTS[d.key] }));
 
+// The Launchpads the module can drive (src/node/patch.h). Auto reads the
+// model off the device's answer to a device inquiry; the rest name it for a
+// cable the answer does not come back on.
+export const LAUNCHPAD_MODELS = labelled(P.LaunchpadModel, {
+  LP_MODEL_AUTO: 'ask the device',
+  LP_MODEL_MINI_MK3: 'Launchpad Mini MK3',
+  LP_MODEL_X: 'Launchpad X',
+  LP_MODEL_PRO_MK3: 'Launchpad Pro MK3',
+  LP_MODELS: '',
+}, 'LaunchpadModel').filter((m) => m.label);
+
+export const launchpadModelName = (id) =>
+  LAUNCHPAD_MODELS.find((m) => m.value === id)?.label ?? `model ${id}`;
+
+// What a column of a Launchpad's custom pages is.
+export const LP_WIDGET_KINDS = labelled(P.LaunchpadWidgetKind, {
+  LP_WIDGET_NONE: 'nothing',
+  LP_WIDGET_FADER: 'fader',
+  LP_WIDGET_BUTTONS: 'buttons',
+  LP_WIDGET_TOGGLES: 'toggles',
+  LP_WIDGET_KINDS: '',
+}, 'LaunchpadWidgetKind').filter((k) => k.label);
+
+export const lpWidgetKindName = (kind) => LP_WIDGET_KINDS.find((k) => k.value === kind)?.label ?? String(kind);
+
+// The Launchpad palette entries a widget can be, by the index the device
+// gives each (src/surface/launchpad.h). The firmware draws with the full
+// hue and its dark one, so only the full hues are offered; 0 is the module's
+// default.
+export const LP_COLOURS = [
+  { value: 0, label: 'default' },
+  { value: 5, label: 'red' },
+  { value: 9, label: 'orange' },
+  { value: 13, label: 'yellow' },
+  { value: 21, label: 'green' },
+  { value: 37, label: 'cyan' },
+  { value: 45, label: 'blue' },
+  { value: 49, label: 'violet' },
+  { value: 53, label: 'magenta' },
+  { value: 57, label: 'pink' },
+  { value: 3, label: 'white' },
+];
+
+export const lpColourName = (index) => LP_COLOURS.find((c) => c.value === index)?.label ?? `palette ${index}`;
+
 // A MIDI channel selector's options, with 0 spelled out rather than left as a
 // number a user has to know means omni.
 export function channelLabel(channel) {

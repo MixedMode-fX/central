@@ -96,6 +96,9 @@ export class EmbeddedModule {
     this.handler = () => {};
     this.sysexDropped = 0;
     this.midiListeners = new Set();
+    // SysEx the module sent to a musical cable rather than to the editor:
+    // the Launchpad's LEDs and its inquiry (runtime/launchpad.js).
+    this.portSysexListeners = new Set();
     this.frameListeners = new Set();
     this.passListeners = new Set();
     // Per jack, what the page is driving into it: a held level, a pulse that
@@ -148,12 +151,49 @@ export class EmbeddedModule {
   // goes on to ask the module for a dump, and that must not re-enter `send`
   // from inside it.
   drainEvents() {
+    this.drainPortSysex();
     const E = this.E;
     if (!E.emu_sysex_out_len()) return;
     const out = new Uint8Array(E.memory.buffer, E.emu_sysex_out_ptr(), E.emu_sysex_out_len());
     const messages = splitSysex(out).map((message) => message.slice());
     E.emu_sysex_out_clear();
     queueMicrotask(() => { for (const message of messages) this.handler(message); });
+  }
+
+  // What the module sent down a musical cable, handed to whoever is on the
+  // other end of it (`onPortSysex`): records of a target, a length and the
+  // bytes. Copied out and cleared before anything is told, because a
+  // listener may answer into the module - the virtual Launchpad answers the
+  // inquiry - and the answer must not land in a buffer being read.
+  drainPortSysex() {
+    const E = this.E;
+    const length = E.emu_port_sysex_len();
+    if (!length) return;
+    const buffer = new Uint8Array(E.memory.buffer, E.emu_port_sysex_ptr(), length).slice();
+    E.emu_port_sysex_clear();
+    const records = [];
+    for (let at = 0; at + 3 <= buffer.length;) {
+      const target = buffer[at];
+      const n = buffer[at + 1] | (buffer[at + 2] << 8);
+      records.push({ target, bytes: buffer.subarray(at + 3, at + 3 + n) });
+      at += 3 + n;
+    }
+    for (const record of records) {
+      for (const listener of this.portSysexListeners) listener(record.target, record.bytes);
+    }
+  }
+
+  onPortSysex(fn) { this.portSysexListeners.add(fn); return () => this.portSysexListeners.delete(fn); }
+
+  // One complete SysEx message arriving on a musical cable - a Launchpad
+  // answering the module's inquiry - as the transport would deliver it. The
+  // protocol handler hands what is not its own to the surface.
+  deliverSysex(port, bytes) {
+    const E = this.E;
+    if (bytes.length > E.emu_sysex_in_capacity()) return;
+    const scratch = E.emu_sysex_in_ptr();
+    new Uint8Array(E.memory.buffer).set(bytes, scratch);
+    E.emu_sysex_in(port, scratch, bytes.length, this.now);
   }
 
   send(bytes) {
@@ -380,6 +420,10 @@ export class EmbeddedModule {
   deliverMidi(port, type, channel, d1 = 0, d2 = 0, atMs = undefined) {
     const E = this.E;
     const at = this.arrival(atMs);
+    // The Launchpad's cable is the surface's: everything on it is translated
+    // by the surface, and what the surface emits re-enters below
+    // (src/surface/launchpad.h).
+    if (E.emu_control_surface(port, type, channel, d1, d2, at)) return null;
     if (type === PROGRAM_CHANGE && E.emu_control_program_change(port, channel, d1, at)) return null;
     if (type === CONTROL_CHANGE && E.emu_control_cc(port, channel, d1, d2, at)) return null;
     return E.emu_deliver_midi(port, type, channel, d1, d2, at);

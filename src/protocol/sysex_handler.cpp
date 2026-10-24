@@ -45,7 +45,7 @@ SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
                            const Macros& macro_table, const ControlSum& control_sum,
                            Monitor& watch) :
     patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out), cc(mapper),
-    mod(matrix), macros(macro_table), sum(control_sum), monitor(watch),
+    mod(matrix), macros(macro_table), sum(control_sum), monitor(watch), launchpad(nullptr),
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
     pending_patch(empty_patch()), pending_globals(default_globals()),
@@ -132,10 +132,19 @@ void SysexHandler::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t l
     if (data[end - 1u] == 0xF7) end--;
 
     if (data[1] == SYSEX_UNIVERSAL_NON_REALTIME){
+        // An identity *reply* is another device answering an inquiry, and
+        // the surface is what asks those (surface/launchpad.h).
+        if (end >= 5 && data[3] == SYSEX_GENERAL_INFORMATION && data[4] == SYSEX_IDENTITY_REPLY){
+            if (launchpad != nullptr) launchpad->deliver_sysex(source, data, length, now_us);
+            return;
+        }
         handle_universal(source, data, end, now_us);
         return;
     }
-    if (data[1] != SYSEX_MANUFACTURER) return;      // somebody else's device
+    if (data[1] != SYSEX_MANUFACTURER){             // somebody else's device
+        if (launchpad != nullptr) launchpad->deliver_sysex(source, data, length, now_us);
+        return;
+    }
 
     if (end < 1u + HEADER_BYTES) return;
     const uint8_t addressed = data[2];
@@ -595,6 +604,48 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             ack(source);
             return;
 
+        // The Launchpad (surface/launchpad.h). The record is five bytes and
+        // the widgets are one message each, as a binding is: the whole thing
+        // is validated against the running patch and refused whole.
+        case SYSEX_SET_LAUNCHPAD: {
+            if (n < 6){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            patches.begin_edit();
+            LaunchpadConfig& lp = patches.staging().launchpad;
+            lp.port = (uint8_t)(args[0] | ((args[5] & 0x01) ? 0x80u : 0u));
+            lp.model = args[1];
+            lp.channel = args[2];
+            lp.row_offset = args[3];
+            lp.octave = args[4];
+            if (patches.commit_launchpad(now_us) != APPLY_OK){ nak(source, SYSEX_ERR_REJECTED); return; }
+            ack(source);
+            return;
+        }
+        case SYSEX_GET_LAUNCHPAD: reply_launchpad(source); return;
+
+        case SYSEX_SET_LP_WIDGET: {
+            if (n < 5){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (args[0] >= LP_WIDGETS){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            patches.begin_edit();
+            LaunchpadWidget& g = patches.staging().launchpad.widgets[args[0]];
+            g.kind = args[1];
+            g.cc = args[2];
+            g.channel = args[3];
+            g.colour = args[4];
+            if (patches.commit_launchpad(now_us) != APPLY_OK){ nak(source, SYSEX_ERR_REJECTED); return; }
+            ack(source);
+            return;
+        }
+        case SYSEX_GET_LP_WIDGET:
+            if (n < 1){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (args[0] >= LP_WIDGETS){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_lp_widget(source, args[0]);
+            return;
+
+        case SYSEX_GET_LP_STATE:
+            if (launchpad == nullptr){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_lp_state(source);
+            return;
+
         // The monitor's record (monitor/monitor.h). The request names what
         // is worth sending, and is what keeps the monitor armed.
         case SYSEX_MONITOR_REQUEST: {
@@ -680,6 +731,8 @@ void SysexHandler::reply_capabilities(uint8_t source){
     put(N_MACRO_DEST);
     put(N_MACRO_DEST_PER_MACRO);
     put(MACRO_NAME_BYTES);
+    // The columns a Launchpad's custom pages have between them.
+    put(LP_WIDGETS);
     send_reply(source);
 }
 
@@ -970,6 +1023,39 @@ void SysexHandler::reply_cc_map(uint8_t source, uint8_t slot){
     put_u14(m.min);
     put((uint8_t)(m.flags | ((m.source_mask & 0x80) ? 0x40u : 0u)));
     put_u14(m.max);
+    send_reply(source);
+}
+
+void SysexHandler::reply_launchpad(uint8_t source){
+    const LaunchpadConfig& lp = patches.active().launchpad;
+    begin_reply(SYSEX_LAUNCHPAD);
+    put((uint8_t)(lp.port & 0x7F));
+    put(lp.model);
+    put(lp.channel);
+    put(lp.row_offset);
+    put(lp.octave);
+    put((lp.port & 0x80) ? 1u : 0u);
+    send_reply(source);
+}
+
+void SysexHandler::reply_lp_widget(uint8_t source, uint8_t slot){
+    const LaunchpadWidget& g = patches.active().launchpad.widgets[slot];
+    begin_reply(SYSEX_LP_WIDGET);
+    put(slot);
+    put(g.kind);
+    put(g.cc);
+    put(g.channel);
+    put(g.colour);
+    send_reply(source);
+}
+
+void SysexHandler::reply_lp_state(uint8_t source){
+    begin_reply(SYSEX_LP_STATE);
+    put(launchpad->linked() ? 1u : 0u);
+    put(launchpad->model());
+    put(launchpad->page());
+    put((uint8_t)(launchpad->octave_shift() + 64));
+    put(launchpad->widget_page());
     send_reply(source);
 }
 

@@ -698,6 +698,44 @@ destinations capped at `N_MACRO_DEST_PER_MACRO` each
 - **Fan-out never stores.** Destinations go through `modulate_param`, never
   `set_param`: a macro an LFO can sweep would otherwise rewrite EEPROM every
   pass.
+
+### Launchpad
+
+The module has no panel, and a Novation Launchpad is the panel somebody
+already owns: a patch names the cable one is on (`LaunchpadConfig` in
+`src/node/patch.h`), the USB host socket or a DIN port, and the module drives
+it in **programmer mode** (`src/surface/launchpad.h`). The Mini MK3, the X and
+the Pro MK3 speak the same protocol and differ in one byte, which the module
+reads off the device's answer to a device inquiry; the patch may also name the
+model outright.
+
+- **It is a control surface, not a node.** Everything on its cable is the
+  surface's, and what it emits enters the module by the paths a cable's own
+  messages take: a note from the note page reaches a `MidiInPort` on that
+  cable as a keyboard's would, a widget's CC is offered to the binding table
+  before the graph and so can be learned, and the key and the tempo are
+  written through the same applier every other control-plane write goes
+  through. The protocol hands SysEx that is not its own to the surface, which
+  is how the inquiry's answer reaches it.
+- **The device's own words link it.** The surface asks the cable every
+  `INQUIRY_INTERVAL_US`, linked or not: the first answer puts the device into
+  programmer mode and lights it, silence for `LINK_TIMEOUT_US` unlinks it, so
+  a Launchpad plugged in after boot is found and one unplugged is not sent
+  frames. Taking it out of the patch returns it to live mode.
+- **Four pages**, on the top row's right-hand buttons: **note** plays the key
+  (`row_offset` degrees between rows, the roots lit, the arrows moving the
+  register; a pad owns the note-off of the pitch it played, so the key may
+  move under a held chord); **key** sets the root on a keyboard of twelve,
+  the scale and the register; **widgets** is two pages of eight columns, each
+  a fader, eight buttons or eight toggles sending CCs the patch says
+  (`LaunchpadWidget`), a bound fader following the module's own value of its
+  target; **tempo** is the transport, nudges, a sixteen-step bar across the
+  clock's range and the beat. The right column is start/stop, continue, tap
+  and panic on every page.
+- **LEDs are a frame, diffed and rate-limited.** Only the LEDs that changed
+  go out, at most `LEDS_PER_MESSAGE` a message and one message an interval
+  that is longer on a DIN cable, so a page change never asks a wire for more
+  than it carries.
 - Refused at validate time: a destination targeting a macro, a `transport`
   target, and more than the per-macro cap on one macro.
 

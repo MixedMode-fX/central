@@ -51,23 +51,46 @@ class WebMidiOut : public IMidiOut {
         // is a buffer in a browser rather than anything the module has to
         // find room for - the hardware streams to a MIDI port.
         static constexpr uint32_t SYSEX_BUFFER = 16384;
+        // SysEx to a musical cable - the Launchpad's LEDs and its inquiry
+        // (surface/launchpad.h) - kept apart from the protocol's replies and
+        // with the cable it went to, as records of {target, length lo,
+        // length hi, bytes}: the page's virtual Launchpad is on one cable
+        // and the editor on another, and a reply to the editor must not be
+        // read as a frame of LEDs. A frame is at most LED_MESSAGE_MAX bytes
+        // and a few go out a second, so this is generous.
+        static constexpr uint32_t PORT_SYSEX_BUFFER = 4096;
 
-        WebMidiOut() : sysex_bytes(), sysex_used(0), sysex_dropped(0) {}
+        WebMidiOut() : sysex_bytes(), sysex_used(0), sysex_dropped(0),
+                       port_sysex(), port_sysex_used(0), port_sysex_dropped(0) {}
 
         void send(uint8_t target, uint8_t type, uint8_t d1, uint8_t d2, uint8_t channel) override {
             mmmc_midi_send(target, type, d1, d2, channel);
         }
 
-        void send_sysex(uint8_t, const uint8_t* data, uint16_t length) override {
+        void send_sysex(uint8_t target, const uint8_t* data, uint16_t length) override {
+            if (target & MIDI_MUSICAL_PORTS){
+                if (port_sysex_used + 3u + length > PORT_SYSEX_BUFFER){ port_sysex_dropped++; }
+                else {
+                    port_sysex[port_sysex_used++] = target;
+                    port_sysex[port_sysex_used++] = (uint8_t)(length & 0xFF);
+                    port_sysex[port_sysex_used++] = (uint8_t)(length >> 8);
+                    for (uint16_t i = 0; i < length; i++) port_sysex[port_sysex_used++] = data[i];
+                }
+            }
+            if ((target & MIDI_CONTROL_PORT) == 0) return;
             if (sysex_used + length > SYSEX_BUFFER){ sysex_dropped++; return; }
             for (uint16_t i = 0; i < length; i++) sysex_bytes[sysex_used++] = data[i];
         }
 
         void drain_sysex(){ sysex_used = 0; }
+        void drain_port_sysex(){ port_sysex_used = 0; }
 
         uint8_t sysex_bytes[SYSEX_BUFFER];
         uint32_t sysex_used;
         uint32_t sysex_dropped;
+        uint8_t port_sysex[PORT_SYSEX_BUFFER];
+        uint32_t port_sysex_used;
+        uint32_t port_sysex_dropped;
 };
 
 // IEeprom in RAM. The browser has no flash to emulate, and a page that

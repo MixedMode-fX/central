@@ -34,6 +34,7 @@ enum LoadError : uint8_t {
     LOAD_CC_MAPPING_INVALID,   // see last_mapping_index() (#21)
     LOAD_MOD_ROUTE_INVALID,    // see last_route_index()
     LOAD_MACRO_DEST_INVALID,   // see last_dest_index() - a macro destination
+    LOAD_LAUNCHPAD_INVALID,    // the Launchpad's port, model or a widget
 };
 
 // Owns the master clock, the buses, the reserved hardware port nodes and the
@@ -195,6 +196,10 @@ class MixedModeMaster {
         // windows on one parameter. What stops them racing is that neither
         // writes: they contribute, and ControlSum sums and writes once.
         static bool dest_valid(const Patch& patch, const MacroDest& candidate);
+        // Range-checks the Launchpad (node/patch.h): on one musical cable or
+        // on none, a model the firmware knows, a channel and a layout in
+        // range, and every widget a kind with a CC it can fit eight of.
+        static bool launchpad_valid(const LaunchpadConfig& lp);
         uint8_t node_count() const { return pool.count(); }
         Node* node(uint8_t index) const { return pool.node(index); }
         const AlgorithmDescriptor* node_descriptor(uint8_t index) const { return pool.descriptor(index); }

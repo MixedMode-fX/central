@@ -1,6 +1,6 @@
 // The shell: the header, the tabs, what went wrong, and the tab on screen.
 //
-// Six tabs - patch, globals, MIDI, monitor, library, schema - in the order the
+// Seven tabs - patch, globals, MIDI, Launchpad, monitor, library, schema - in the order the
 // work happens, and **play** as a button at the top beside *connect a module*,
 // because those two answer the same question: which module am I listening
 // to, the one in the page or the one on the cable.
@@ -32,6 +32,7 @@ import { MonitorTab } from './tabs/MonitorTab.js';
 import { Surface } from './surface/Surface.js';
 import { GlobalsTab } from './tabs/GlobalsTab.js';
 import { MidiTab } from './tabs/MidiTab.js';
+import { LaunchpadTab } from './tabs/LaunchpadTab.js';
 import { LibraryTab } from './tabs/LibraryTab.js';
 import { SchemaTab } from './tabs/SchemaTab.js';
 
@@ -39,6 +40,7 @@ const TABS = [
   { key: 'patch', label: 'patch', icon: 'patch', view: PatchTab },
   { key: 'globals', label: 'globals', icon: 'globals', view: GlobalsTab },
   { key: 'midi', label: 'MIDI', icon: 'midi', view: MidiTab },
+  { key: 'launchpad', label: 'Launchpad', icon: 'launchpad', view: LaunchpadTab },
   { key: 'monitor', label: 'monitor', icon: 'monitor', view: MonitorTab },
   { key: 'library', label: 'library', icon: 'library', view: LibraryTab },
   { key: 'schema', label: 'schema', icon: 'schema', view: SchemaTab },
@@ -51,6 +53,8 @@ export function App(app) {
   closeMenu();
   syncNoteBuses(app);
   syncDrums(app);
+  // The page's Launchpad is on whichever cable the patch names for one.
+  app.launchpad?.follow(state.patch.launchpad?.port ?? 0);
 
   // The surface is not a tab: it is a second shell, with no header and no
   // tab bar, because a stage view that carried the editor's furniture would

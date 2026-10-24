@@ -920,7 +920,7 @@ test('the Launchpad is written, dumped and read back', async () => {
   assert.equal(caps.lpWidgets, E.emu_const_lp_widgets());
   await device.sendPatch(samplePatch(), codec.emptyGlobals());
   await device.setLaunchpad({
-    port: P.MidiPort.mmMIDI_HOST_1, model: P.LaunchpadModel.LP_MODEL_PRO_MK3, channel: 3, rowOffset: 5, octave: 4,
+    port: P.MidiPort.mmMIDI_HOST_1, model: P.LaunchpadModel.LP_MODEL_PRO_MK3, channel: 3, octave: 4,
   });
   await device.setLpWidget(1, { kind: P.LaunchpadWidgetKind.LP_WIDGET_FADER, cc: 21, channel: 2, colour: 9 });
   await device.setLpWidget(9, { kind: P.LaunchpadWidgetKind.LP_WIDGET_TOGGLES, cc: 60, channel: 1, colour: 21 });
@@ -934,7 +934,6 @@ test('the Launchpad is written, dumped and read back', async () => {
   const lp = dumped.patch.launchpad;
   assert.equal(lp.port, P.MidiPort.mmMIDI_HOST_1);
   assert.equal(lp.channel, 3);
-  assert.equal(lp.rowOffset, 5);
   assert.equal(lp.octave, 4);
   assert.deepEqual(lp.widgets[9], { kind: P.LaunchpadWidgetKind.LP_WIDGET_TOGGLES, cc: 60, channel: 1, colour: 21 });
   assert.equal(lp.widgets.filter(Boolean).length, 2);
@@ -958,7 +957,7 @@ test('the Launchpad is written, dumped and read back', async () => {
 test('the Launchpad survives the JSON dialect', async () => {
   const patch = samplePatch();
   patch.launchpad = {
-    port: P.MidiPort.mmMIDI_SERIAL_1, model: P.LaunchpadModel.LP_MODEL_X, channel: 2, rowOffset: 4, octave: 0,
+    port: P.MidiPort.mmMIDI_SERIAL_1, model: P.LaunchpadModel.LP_MODEL_X, channel: 2, octave: 0,
     widgets: codec.emptyLaunchpad().widgets,
   };
   patch.launchpad.widgets[0] = { kind: P.LaunchpadWidgetKind.LP_WIDGET_BUTTONS, cc: 30, channel: 1, colour: 57 };

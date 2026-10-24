@@ -39,8 +39,7 @@
 //
 // Four pages, on the top row's four right-hand buttons:
 //
-//   note     the grid is a neck: a semitone a column, `row_offset`
-//            semitones a row, the key painted on it - the roots pink, the
+//   note     the grid is a neck: a semitone a column, a fourth a row, the key painted on it - the roots pink, the
 //            scale blue, the notes outside it unlit but playing - and the
 //            register moved with the arrows. A pad owns the note-off of the
 //            pitch it played, so the key may move under a held chord.

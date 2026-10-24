@@ -315,7 +315,6 @@ struct LaunchpadConfig {
     uint8_t port;        // one MidiPort bit the surface is on; 0 = no Launchpad
     uint8_t model;       // LaunchpadModel
     uint8_t channel;     // the channel the note page plays on, 1..16; 0 reads as 1
-    uint8_t row_offset;  // semitones between one row of the note page and the next, 1..LP_ROW_OFFSET_MAX; 0 reads as LP_ROW_OFFSET_DEFAULT
     uint8_t octave;      // the note page's register, 1..KEY_MAX_OCTAVE; 0 is the key's own
     LaunchpadWidget widgets[LP_WIDGETS];
 };

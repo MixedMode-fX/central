@@ -63,11 +63,6 @@ export function ConfigPanel(app) {
         'aria-label': 'the channel the note page plays on',
         onChange: (channel) => set({ channel }),
       })),
-      Field({ label: 'rows', hint: 'semitones from one row to the next: the neck’s tuning' }, NumberField({
-        value: lp.rowOffset || P.LP_ROW_OFFSET_DEFAULT, min: 1, max: P.LP_ROW_OFFSET_MAX, fallback: P.LP_ROW_OFFSET_DEFAULT,
-        'aria-label': 'semitones between rows of the note page',
-        onChange: (rowOffset) => set({ rowOffset }),
-      })),
       Field({ label: 'register', hint: 'where the bottom-left pad plays' }, Select({
         options: [{ value: 0, label: `the key’s (${DEFAULT_KEY_OCTAVE})` },
                   ...range(MAX_KEY_OCTAVE + 1, (o) => `register ${o}`, 1)],

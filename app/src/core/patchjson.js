@@ -324,7 +324,7 @@ export function toPatchJson(patch, globals, device) {
     json.launchpad = {
       port: portNames(lp.port)[0] ?? lp.port,
       model: LAUNCHPAD_MODELS.find((m) => m.value === lp.model)?.key.replace(/^LP_MODEL_/, '').toLowerCase() ?? lp.model,
-      channel: lp.channel, rowOffset: lp.rowOffset, octave: lp.octave,
+      channel: lp.channel, octave: lp.octave,
     };
     if (widgets.length) json.launchpad.widgets = widgets;
   }
@@ -477,7 +477,6 @@ export function fromPatchJson(json, device) {
       port,
       model: launchpadModelOf(l.model),
       channel: l.channel ?? 1,
-      rowOffset: l.rowOffset ?? P.LP_ROW_OFFSET_DEFAULT,
       octave: l.octave ?? 0,
       widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
     };

@@ -610,7 +610,7 @@ export class Device extends EventTarget {
 
   async setLaunchpad(lp) {
     return this.command(P.SysexCommand.SYSEX_SET_LAUNCHPAD, [
-      (lp.port ?? 0) & 0x7f, lp.model ?? 0, lp.channel ?? 0, lp.rowOffset ?? 0, lp.octave ?? 0,
+      (lp.port ?? 0) & 0x7f, lp.model ?? 0, lp.channel ?? 0, lp.octave ?? 0,
       ((lp.port ?? 0) & 0x80) ? 1 : 0,
     ]);
   }
@@ -620,8 +620,8 @@ export class Device extends EventTarget {
       (r) => this.isReply(r, P.SysexCommand.SYSEX_LAUNCHPAD) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
     this.throwOnNak(reply, 'the module did not say where its Launchpad is');
     return {
-      port: reply[5] | (reply[10] & 0x01 ? 0x80 : 0),
-      model: reply[6], channel: reply[7], rowOffset: reply[8], octave: reply[9],
+      port: reply[5] | (reply[9] & 0x01 ? 0x80 : 0),
+      model: reply[6], channel: reply[7], octave: reply[8],
     };
   }
   // A kind of LP_WIDGET_NONE clears the column.

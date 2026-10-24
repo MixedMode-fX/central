@@ -298,17 +298,15 @@ static void test_a_pad_releases_the_pitch_it_played_whatever_the_key_does() {
 
 static void test_two_pads_on_one_pitch_release_it_once() {
     Rig rig;
-    LaunchpadConfig lp = on_host();
-    lp.row_offset = 2;                   // (1, 0) and (0, 2) are the same pitch
-    rig.link(lp);
+    rig.link(on_host());                 // (1, 0) and (0, 5) are the same pitch
     rig.pad(1, 0, true);
-    rig.pad(0, 2, true);
+    rig.pad(0, 5, true);
     rig.loop();
     TEST_ASSERT_EQUAL(2, rig.notes_out().size());
     rig.pad(1, 0, false);
     rig.loop();
     TEST_ASSERT_EQUAL(2, rig.notes_out().size());        // still held by the other pad
-    rig.pad(0, 2, false);
+    rig.pad(0, 5, false);
     rig.loop();
     TEST_ASSERT_EQUAL(3, rig.notes_out().size());
     TEST_ASSERT_EQUAL(MIDI_NOTE_OFF, rig.notes_out()[2].type);
@@ -329,17 +327,17 @@ static void test_the_arrows_move_the_register() {
 
 static void test_the_note_page_is_a_neck_in_fourths() {
     Rig rig;
-    rig.link(on_host());                 // row_offset 0: fourths
+    rig.link(on_host());
     rig.pad(0, 0, true);                 // the tonic
     rig.pad(0, 1, true);                 // a semitone along
-    rig.pad(1, 0, true);                 // a fourth up the neck
+    rig.pad(1, 0, true);                 // a fourth up the neck: the bottom row's sixth pad
     rig.pad(7, 7, true);                 // the top corner
     rig.loop();
     std::vector<RecordingMidiOut::Message> out = rig.notes_out();
     TEST_ASSERT_EQUAL(4, out.size());
     TEST_ASSERT_EQUAL(60, out[0].d1);
     TEST_ASSERT_EQUAL(61, out[1].d1);
-    TEST_ASSERT_EQUAL(65, out[2].d1);
+    TEST_ASSERT_EQUAL(60 + 5, out[2].d1);
     TEST_ASSERT_EQUAL(60 + 7 * 5 + 7, out[3].d1);
 }
 
@@ -682,7 +680,6 @@ static void test_the_launchpad_round_trips_through_the_codec() {
     p.launchpad = with_widgets();
     p.launchpad.model = LP_MODEL_PRO_MK3;
     p.launchpad.channel = 3;
-    p.launchpad.row_offset = 5;
     p.launchpad.octave = 4;
     uint8_t image[2048];
     size_t written = 0;
@@ -693,7 +690,6 @@ static void test_the_launchpad_round_trips_through_the_codec() {
     TEST_ASSERT_EQUAL(LP, back.launchpad.port);
     TEST_ASSERT_EQUAL(LP_MODEL_PRO_MK3, back.launchpad.model);
     TEST_ASSERT_EQUAL(3, back.launchpad.channel);
-    TEST_ASSERT_EQUAL(5, back.launchpad.row_offset);
     TEST_ASSERT_EQUAL(4, back.launchpad.octave);
     for (uint8_t i = 0; i < LP_WIDGETS; i++){
         TEST_ASSERT_EQUAL(p.launchpad.widgets[i].kind, back.launchpad.widgets[i].kind);
@@ -735,7 +731,7 @@ static void test_the_launchpad_is_set_and_read_over_the_wire() {
     rig.patches.apply(empty_patch(), default_globals(), 0);
     // The host port's bit does not fit a data byte, so it rides in the
     // last one.
-    send(rig, SYSEX_SET_LAUNCHPAD, {0x00, LP_MODEL_X, 2, 4, 6, 0x01});
+    send(rig, SYSEX_SET_LAUNCHPAD, {0x00, LP_MODEL_X, 2, 6, 0x01});
     TEST_ASSERT_NOT_NULL(rig.midi.last_reply(SYSEX_ACK));
     TEST_ASSERT_EQUAL(LP, rig.patches.active().launchpad.port);
     TEST_ASSERT_EQUAL(LP_MODEL_X, rig.patches.active().launchpad.model);
@@ -745,9 +741,8 @@ static void test_the_launchpad_is_set_and_read_over_the_wire() {
     TEST_ASSERT_EQUAL(0x00, r->bytes[5]);
     TEST_ASSERT_EQUAL(LP_MODEL_X, r->bytes[6]);
     TEST_ASSERT_EQUAL(2, r->bytes[7]);
-    TEST_ASSERT_EQUAL(4, r->bytes[8]);
-    TEST_ASSERT_EQUAL(6, r->bytes[9]);
-    TEST_ASSERT_EQUAL(1, r->bytes[10]);
+    TEST_ASSERT_EQUAL(6, r->bytes[8]);
+    TEST_ASSERT_EQUAL(1, r->bytes[9]);
 
     send(rig, SYSEX_SET_LP_WIDGET, {9, LP_WIDGET_TOGGLES, 70, 3, Launchpad::CYAN});
     TEST_ASSERT_NOT_NULL(rig.midi.last_reply(SYSEX_ACK));

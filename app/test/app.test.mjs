@@ -4442,12 +4442,16 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   await device.sendPatch(patch, globals);
   launchpad.follow(P.MidiPort.mmMIDI_HOST_1);
 
-  // A few passes: the inquiry goes out, the page answers on the next drain,
-  // and the module's answer to that - programmer mode, then a frame - comes
-  // out on the one after, as it does a frame later in the page.
+  // A few passes: the inquiry goes out, the page answers on the next drain;
+  // the module asks each model's layout and the page answers as a Mini; and
+  // the module's answer to that - programmer mode, then a frame - comes out
+  // on the one after, as it does a frame later in the page.
   module.advance(20_000);
   module.drainEvents();
   assert.ok(launchpad.inquiries >= 1, 'the module asked who was on the cable');
+  module.advance(20_000);
+  module.drainEvents();
+  assert.equal(launchpad.programmer, false, 'the inquiry alone does not say which model');
   module.advance(20_000);
   module.drainEvents();
   assert.equal(launchpad.programmer, true, 'what answered was put into programmer mode');
@@ -4473,11 +4477,11 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   // The raw pad number never reached the graph.
   assert.ok(played.every((e) => e.d1 !== gridId(0, 2)));
 
-  // Another model is another answer, and the module relinks it.
+  // Another model does not answer the Mini's readback: the link lapses, and
+  // the next round of readbacks finds the Pro.
   launchpad.setModel('pro');
   assert.equal(launchpad.programmer, false);
-  module.advance(7_000_000);
-  module.drainEvents();
+  for (let i = 0; i < 6; i++) { module.advance(2_000_000); module.drainEvents(); }
   module.advance(100_000);
   module.drainEvents();
   assert.equal(launchpad.programmer, true);

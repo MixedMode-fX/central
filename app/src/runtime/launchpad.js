@@ -23,15 +23,17 @@ import { access } from './webmidi.js';
 const NOTE_ON = 0x90, NOTE_OFF = 0x80, CONTROL_CHANGE = 0xb0;
 const SYSEX_START = 0xf0, REALTIME_FIRST = 0xf8;
 
-// The three MK3 models, as the firmware tells them apart (src/surface/launchpad.h):
-// the device byte in every message, the family in the answer to an inquiry,
-// and the buttons each has around the grid.
+// The three MK3 models, as their programmer's references give them: the
+// device byte in every message, the family in the answer to an inquiry - the
+// same for a Mini and a Pro, which is why the firmware tells them apart by
+// the device byte (src/surface/launchpad.h) - and the buttons each has
+// around the grid.
 export const MODELS = {
   mini: { label: 'Launchpad Mini MK3', device: 0x0d, family: 0x13, firmwareModel: P.LaunchpadModel.LP_MODEL_MINI_MK3,
           left: false, bottom: false },
   x: { label: 'Launchpad X', device: 0x0c, family: 0x03, firmwareModel: P.LaunchpadModel.LP_MODEL_X,
        left: false, bottom: false },
-  pro: { label: 'Launchpad Pro MK3', device: 0x0e, family: 0x23, firmwareModel: P.LaunchpadModel.LP_MODEL_PRO_MK3,
+  pro: { label: 'Launchpad Pro MK3', device: 0x0e, family: 0x13, firmwareModel: P.LaunchpadModel.LP_MODEL_PRO_MK3,
          left: true, bottom: true },
 };
 
@@ -168,8 +170,14 @@ export class VirtualLaunchpad {
       if (!this.hardware) this.answer();
       return;
     }
-    if (bytes.length < 8 || bytes[1] !== 0x00 || bytes[2] !== 0x20 || bytes[3] !== 0x29 || bytes[4] !== 0x02) return;
+    // A Launchpad hears only what carries its own device byte.
+    if (bytes.length < 8 || bytes[1] !== 0x00 || bytes[2] !== 0x20 || bytes[3] !== 0x29 || bytes[4] !== 0x02
+        || bytes[5] !== this.spec.device) return;
     const command = bytes[6];
+    if (command === 0x00 && bytes.length === 8) {
+      if (!this.hardware) this.answerLayout();
+      return;
+    }
     if (command === 0x0e) {
       const programmer = bytes[7] === 1;
       if (programmer !== this.programmer) this.reset();
@@ -208,6 +216,12 @@ export class VirtualLaunchpad {
       0x00, 0x20, 0x29, this.spec.family, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0xf7,
     ]);
     this.module.deliverSysex(this.port, reply);
+  }
+
+  // The layout readback's answer, which is what says which model this is.
+  answerLayout() {
+    const { device } = this.spec;
+    this.module.deliverSysex(this.port, Uint8Array.from([0xf0, 0x00, 0x20, 0x29, 0x02, device, 0x00, 0x00, 0xf7]));
   }
 
   // --- what the device sends ------------------------------------------------------

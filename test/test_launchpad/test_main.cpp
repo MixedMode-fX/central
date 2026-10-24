@@ -96,25 +96,37 @@ struct Rig {
     void top(uint8_t index, bool down = true){ in(LP, MIDI_CONTROL_CHANGE, 1, Launchpad::top_id(index), down ? 127 : 0); }
     void side(uint8_t row, bool down = true){ in(LP, MIDI_CONTROL_CHANGE, 1, Launchpad::side_id(row), down ? 127 : 0); }
 
-    // What a Launchpad answers the module's inquiry with.
-    void answer(uint8_t family = Launchpad::FAMILY_MINI_MK3){
+    // A Launchpad answering what the module asked, as the real ones do: the
+    // inquiry with a family that does not tell a Mini from a Pro, and the
+    // layout readback only where it carries the device's own id.
+    void answer(uint8_t device = Launchpad::DEVICE_MINI_MK3, uint8_t source = LP){
+        const uint8_t family = device == Launchpad::DEVICE_X ? 0x03 : 0x13;
         const uint8_t reply[] = {0xF0, 0x7E, 0x00, 0x06, 0x02, 0x00, 0x20, 0x29, family, 0x01, 0x00, 0x00,
                                  0x00, 0x01, 0x00, 0x00, 0xF7};
         // Through the protocol handler, which is where a transport delivers
         // every SysEx and which hands on what is not its own.
-        sysex.deliver_sysex(LP, reply, (uint16_t)sizeof reply, now);
+        const size_t asked = midi.sysex.size();
+        sysex.deliver_sysex(source, reply, (uint16_t)sizeof reply, now);
+        for (size_t i = asked; i < midi.sysex.size(); i++){
+            const std::vector<uint8_t>& b = midi.sysex[i].bytes;
+            if (midi.sysex[i].target != source || b.size() != 8 || b[1] != 0x00 || b[5] != device
+                || b[6] != Launchpad::COMMAND_LAYOUT) continue;
+            const uint8_t layout[] = {0xF0, 0x00, 0x20, 0x29, 0x02, device, Launchpad::COMMAND_LAYOUT, 0x05, 0xF7};
+            sysex.deliver_sysex(source, layout, (uint16_t)sizeof layout, now);
+            return;
+        }
     }
 
     // Loads a patch with a Launchpad on LP, a MIDI in reading it onto note
     // bus 0 and a MIDI out playing that bus to SYNTH, then links it.
-    void link(const LaunchpadConfig& lp, uint8_t family = Launchpad::FAMILY_MINI_MK3){
+    void link(const LaunchpadConfig& lp, uint8_t device = Launchpad::DEVICE_MINI_MK3){
         Patch p = empty_patch();
         p.midi_in[0] = MidiInConfig{LP, 0, one_bus(0)};
         p.midi_out[0] = MidiOutConfig{SYNTH, 0, one_bus(0)};
         p.launchpad = lp;
         TEST_ASSERT_EQUAL(APPLY_OK, patches.apply(p, default_globals(), now));
         loop();                       // the surface sees its cable and asks
-        answer(family);
+        answer(device);
         loop();                       // linked: programmer mode, then the first frame
         midi.clear();
     }
@@ -172,7 +184,7 @@ static void test_the_surface_asks_who_is_on_its_cable_and_links_on_the_answer() 
     for (int i = 0; i < 100; i++) rig.loop();
     TEST_ASSERT_EQUAL(0, rig.led_messages().size());
 
-    rig.answer(Launchpad::FAMILY_MINI_MK3);
+    rig.answer(Launchpad::DEVICE_MINI_MK3);
     TEST_ASSERT_TRUE(rig.surface.linked());
     TEST_ASSERT_EQUAL(LP_MODEL_MINI_MK3, rig.surface.model());
     // Programmer mode, with the Mini's device byte.
@@ -187,20 +199,50 @@ static void test_the_surface_asks_who_is_on_its_cable_and_links_on_the_answer() 
     TEST_ASSERT_EQUAL(Launchpad::WHITE, rig.sent_colour(Launchpad::top_id(5)));
 }
 
-static void test_the_model_is_read_off_the_answer() {
+// A Pro answers the inquiry as a Mini does, so the inquiry alone links
+// nothing: each model's layout readback goes out, and only the Pro's comes
+// back. Its programmer-mode switch is the Pro's - the Mini's would leave it
+// in its own modes.
+static void test_a_pro_is_told_from_a_mini_by_its_own_answer() {
     Rig rig;
-    rig.link(on_host(), Launchpad::FAMILY_PRO_MK3);
+    Patch p = empty_patch();
+    p.launchpad = on_host();
+    TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(p, default_globals(), 0));
+    rig.loop();
+    const uint8_t inquiry_reply[] = {0xF0, 0x7E, 0x00, 0x06, 0x02, 0x00, 0x20, 0x29, 0x13, 0x01, 0x00, 0x00,
+                                     0x00, 0x01, 0x00, 0x00, 0xF7};
+    rig.midi.clear();
+    rig.sysex.deliver_sysex(LP, inquiry_reply, (uint16_t)sizeof inquiry_reply, rig.now);
+    TEST_ASSERT_FALSE(rig.surface.linked());
+    TEST_ASSERT_EQUAL(3, rig.midi.sysex.size());
+    for (const RecordingMidiOut::Sysex& s : rig.midi.sysex){
+        TEST_ASSERT_EQUAL(LP, s.target);
+        TEST_ASSERT_EQUAL(8, s.bytes.size());
+        TEST_ASSERT_EQUAL(Launchpad::COMMAND_LAYOUT, s.bytes[6]);
+    }
+    for (int i = 0; i < 100; i++) rig.loop();
+    TEST_ASSERT_EQUAL(0, rig.led_messages().size());
+
+    const uint8_t layout[] = {0xF0, 0x00, 0x20, 0x29, 0x02, 0x0E, 0x00, 0x03, 0x00, 0x00, 0xF7};
+    rig.sysex.deliver_sysex(LP, layout, (uint16_t)sizeof layout, rig.now);
+    TEST_ASSERT_TRUE(rig.surface.linked());
     TEST_ASSERT_EQUAL(LP_MODEL_PRO_MK3, rig.surface.model());
+    const uint8_t expected[] = {0xF0, 0x00, 0x20, 0x29, 0x02, 0x0E, 0x0E, 0x01, 0xF7};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, rig.midi.sysex.back().bytes.data(), sizeof expected);
     rig.settle();
     TEST_ASSERT_TRUE(rig.led_messages().size() >= 1);
-    TEST_ASSERT_EQUAL(Launchpad::DEVICE_PRO_MK3, rig.led_messages()[0]->bytes[5]);
+    for (const RecordingMidiOut::Sysex* s : rig.led_messages()) TEST_ASSERT_EQUAL(Launchpad::DEVICE_PRO_MK3, s->bytes[5]);
+    // Its heartbeat is its own readback's answer, and that keeps it the Pro.
+    for (int i = 0; i < 3000; i++) rig.loop();
+    rig.answer(Launchpad::DEVICE_PRO_MK3);
+    TEST_ASSERT_EQUAL(LP_MODEL_PRO_MK3, rig.surface.model());
 }
 
 static void test_a_named_model_is_used_when_the_answer_names_none() {
     Rig rig;
     LaunchpadConfig lp = on_host();
     lp.model = LP_MODEL_X;
-    rig.link(lp, 0x77);                  // a family the firmware does not know
+    rig.link(lp, 0x77);                  // a device that answers nothing but the inquiry
     TEST_ASSERT_TRUE(rig.surface.linked());
     TEST_ASSERT_EQUAL(LP_MODEL_X, rig.surface.model());
 }
@@ -679,8 +721,7 @@ static void test_a_din_cable_is_asked_for_less() {
     p.launchpad = lp;
     TEST_ASSERT_EQUAL(APPLY_OK, rig.patches.apply(p, default_globals(), 0));
     rig.loop();
-    const uint8_t reply[] = {0xF0, 0x7E, 0x00, 0x06, 0x02, 0x00, 0x20, 0x29, 0x13, 0x01, 0x00, 0x00, 0, 0, 0, 0, 0xF7};
-    rig.sysex.deliver_sysex(mmMIDI_SERIAL_1, reply, (uint16_t)sizeof reply, rig.now);
+    rig.answer(Launchpad::DEVICE_MINI_MK3, mmMIDI_SERIAL_1);
     rig.midi.clear();
     for (int i = 0; i < 100; i++) rig.loop();          // a tenth of a second
     size_t frames = 0;
@@ -787,7 +828,7 @@ static void test_the_launchpad_is_set_and_read_over_the_wire() {
     TEST_ASSERT_NOT_NULL(r);
     TEST_ASSERT_EQUAL(0, r->bytes[5]);
     TEST_ASSERT_EQUAL(LP_MODEL_X, r->bytes[6]);
-    rig.loop(); rig.answer(Launchpad::FAMILY_X); rig.loop();
+    rig.loop(); rig.answer(Launchpad::DEVICE_X); rig.loop();
     rig.top(7); rig.top(0); rig.loop();
     send(rig, SYSEX_GET_LP_STATE, {});
     r = rig.midi.last_reply(SYSEX_LP_STATE);
@@ -813,7 +854,7 @@ static void test_the_surface_never_allocates() {
 int main(int, char**){
     UNITY_BEGIN();
     RUN_TEST(test_the_surface_asks_who_is_on_its_cable_and_links_on_the_answer);
-    RUN_TEST(test_the_model_is_read_off_the_answer);
+    RUN_TEST(test_a_pro_is_told_from_a_mini_by_its_own_answer);
     RUN_TEST(test_a_named_model_is_used_when_the_answer_names_none);
     RUN_TEST(test_silence_unlinks_and_an_answer_relinks);
     RUN_TEST(test_taking_the_launchpad_off_its_cable_returns_it_to_live_mode);

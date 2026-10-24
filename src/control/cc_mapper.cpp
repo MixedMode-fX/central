@@ -399,7 +399,12 @@ bool CcMapper::write_control(uint8_t kind, uint8_t index, uint16_t param,
                 case CC_TRANSPORT_START:    mm.clock().start(); break;
                 case CC_TRANSPORT_STOP:     mm.clock().stop(); break;
                 case CC_TRANSPORT_CONTINUE: mm.clock().resume(); break;
-                case CC_TRANSPORT_TAP:      mm.clock().tap(now_us); break;
+                case CC_TRANSPORT_TAP: {
+                    // The tapped tempo is the patch's tempo, as a nudge is.
+                    const uint16_t bpm = mm.clock().tap(now_us);
+                    if (bpm) return write_control(CC_TARGET_CLOCK, 0, CC_CLOCK_TEMPO, bpm, now_us, transient);
+                    break;
+                }
                 default: refuse_count++; return false;
             }
             write_count++;

@@ -53,8 +53,11 @@ class MasterClock {
         // averaging across a pause, and a tap implying a tempo outside the
         // limits is ignored rather than clamped - a stray tap should not
         // silently pin the tempo to 20 BPM. Averaged over the last few taps,
-        // because two taps by hand are not an accurate beat.
-        void tap(uint32_t now_us);
+        // because two taps by hand are not an accurate beat. Returns the
+        // tempo it set, 0 if this tap set none, so the caller can make it the
+        // patch's tempo: a tempo only the clock knows is undone by the next
+        // write to the globals.
+        uint16_t tap(uint32_t now_us);
         static constexpr uint32_t TAP_TIMEOUT_US = 3000000;
         static constexpr uint8_t TAP_AVERAGE = 4;
         uint16_t bpm() const { return tempo; }

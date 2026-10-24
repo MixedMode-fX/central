@@ -491,6 +491,23 @@ static void test_the_transport_is_on_the_tempo_page_and_the_right_column() {
     TEST_ASSERT_EQUAL(Launchpad::GREEN, rig.surface.led(Launchpad::led_id(7, 0)));
 }
 
+static void test_the_tap_button_taps_the_tempo() {
+    Rig rig;
+    rig.link(on_host());
+    for (int i = 0; i < 4; i++){
+        rig.side(5);                     // tap
+        rig.loop();
+        rig.side(5, false);
+        for (int t = 0; t < 599; t++) rig.loop();   // a beat at 100
+    }
+    TEST_ASSERT_EQUAL(100, rig.master.clock().bpm());
+    // It is the patch's tempo, so the next write to the globals - a new
+    // root from the key page - keeps it rather than undoing it.
+    TEST_ASSERT_EQUAL(100, rig.patches.globals().bpm);
+    rig.cc.write_control(CC_TARGET_KEY, 0, CC_KEY_ROOT, 7, rig.now);
+    TEST_ASSERT_EQUAL(100, rig.master.clock().bpm());
+}
+
 static void test_panic_releases_the_grid_and_sweeps_the_ports() {
     Rig rig;
     rig.link(on_host());
@@ -810,6 +827,7 @@ int main(int, char**){
     RUN_TEST(test_leaving_the_note_page_releases_what_it_holds);
     RUN_TEST(test_the_tempo_page_nudges_and_sets_the_tempo);
     RUN_TEST(test_the_transport_is_on_the_tempo_page_and_the_right_column);
+    RUN_TEST(test_the_tap_button_taps_the_tempo);
     RUN_TEST(test_panic_releases_the_grid_and_sweeps_the_ports);
     RUN_TEST(test_widgets_send_their_ccs_into_the_patch);
     RUN_TEST(test_a_widget_cc_is_the_binding_tables_before_it_is_the_graphs);

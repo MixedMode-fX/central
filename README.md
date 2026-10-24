@@ -698,6 +698,16 @@ destinations capped at `N_MACRO_DEST_PER_MACRO` each
 - **Fan-out never stores.** Destinations go through `modulate_param`, never
   `set_param`: a macro an LFO can sweep would otherwise rewrite EEPROM every
   pass.
+- Refused at validate time: a destination targeting a macro, a `transport`
+  target, and more than the per-macro cap on one macro.
+
+The name is what makes a macro a macro rather than several bindings that
+happen to share a CC number: with nothing plugged in, the module can still say
+which gesture this is. Names are fixed-width `MACRO_NAME_BYTES`. Macros travel
+in the patch image and over SysEx as `SET_MACRO` / `GET_MACRO`,
+`SET_MACRO_DEST` / `GET_MACRO_DEST`, with `GET_MACRO_STATE` reporting the one
+thing that is not in the patch: where a macro is, and what each of its
+destinations is doing about it.
 
 ### Launchpad
 
@@ -722,33 +732,91 @@ model outright.
   programmer mode and lights it, silence for `LINK_TIMEOUT_US` unlinks it, so
   a Launchpad plugged in after boot is found and one unplugged is not sent
   frames. Taking it out of the patch returns it to live mode.
-- **Four pages**, on the top row's right-hand buttons: **note** is a neck, as
-  a Launchpad's own note mode is (a semitone a column, a fourth a row, so a
-  row's sixth pad is the next row's first; the key painted on it: the roots
-  pink, the scale blue, the notes outside it unlit but playing; the arrows
-  move the register, and a pad owns
-  the note-off of the pitch it played, so the key may move under a held
-  chord); **key** sets the root on a keyboard of twelve,
-  the scale and the register; **widgets** is two pages of eight columns, each
-  a fader, eight buttons or eight toggles sending CCs the patch says
-  (`LaunchpadWidget`), a bound fader following the module's own value of its
-  target; **tempo** is the transport, nudges, a sixteen-step bar across the
-  clock's range and the beat. The right column is start/stop, continue, tap
-  and panic on every page.
+- **Four pages and a column**, laid out in the guide below. A pad owns the
+  note-off of the pitch it played, so the key may move under a held chord.
 - **LEDs are a frame, diffed and rate-limited.** Only the LEDs that changed
   go out, at most `LEDS_PER_MESSAGE` a message and one message an interval
   that is longer on a DIN cable, so a page change never asks a wire for more
   than it carries.
-- Refused at validate time: a destination targeting a macro, a `transport`
-  target, and more than the per-macro cap on one macro.
 
-The name is what makes a macro a macro rather than several bindings that
-happen to share a CC number: with nothing plugged in, the module can still say
-which gesture this is. Names are fixed-width `MACRO_NAME_BYTES`. Macros travel
-in the patch image and over SysEx as `SET_MACRO` / `GET_MACRO`,
-`SET_MACRO_DEST` / `GET_MACRO_DEST`, with `GET_MACRO_STATE` reporting the one
-thing that is not in the patch: where a macro is, and what each of its
-destinations is doing about it.
+#### Playing it
+
+Name the cable on the app's **Launchpad** tab - the USB host socket for a
+Launchpad plugged into the module, a DIN port for a Pro on a MIDI lead - and
+leave the model on *ask the device*. The logo lights white once the module has
+it. The tab draws the same lights and its pads press, so everything here can be
+tried without one.
+
+Buttons are named here by position, because the models print different labels
+on them. The grid's rows count from the top.
+
+| | Mini MK3 and X | Pro MK3 |
+| --- | --- | --- |
+| up, down, left, right: top row, buttons 1-4 | ▲ ▼ ◀ ▶ | ◀ ▶ Session Note |
+| the pages key, note, widgets, tempo: top row, buttons 5-8 | the four right of the arrows | Chord Custom Sequencer Projects |
+| play/stop, continue, tap, panic: right column, top four | the top four ▶ | Patterns Steps Pattern Settings Velocity |
+
+The lit page button is the page you are on.
+
+**The right column** works on every page:
+
+- **play/stop** - green while the clock runs, dim red while stopped.
+- **continue** - starts again from where it stopped rather than from the top.
+- **tap** - flashes white on the beat. Tap it in time with the music: the
+  second tap sets the tempo and the next few refine it. A pause longer than
+  `TAP_TIMEOUT_US` starts a new count. The tempo goes into the patch as one
+  set anywhere else would. It only drives the clock while the clock is
+  internal; following MIDI or CV clock, the tempo is the source's.
+- **panic** - lets go of every held note and sends all-notes-off on every
+  port.
+
+**Note** - a guitar neck, as a Launchpad's own note mode is. Each pad is a
+semitone above the one to its left and each row a fourth above the row below,
+so a row's sixth pad is the next row's first. The bottom-left pad is the key's
+root in the register the tab sets.
+
+- Pink pads are the root, blue ones the rest of the scale, unlit ones outside
+  it - they still play. A held pad is green.
+- Up and down move the whole neck an octave, as far as `OCTAVE_SHIFT_MAX`
+  either way.
+- Notes go out on the channel the tab sets and enter the patch as a keyboard
+  on that cable would: a **MIDI in** node listening to the cable hears them.
+  Pressure is aftertouch.
+- Leaving the page lets go of what it holds.
+
+**Key** - the module's key, which the neck and every algorithm following the
+key use.
+
+- Rows 1 and 2 are a keyboard, black keys above white, starting at C. Press
+  one for the root. The root is blue and the notes of the scale brighter than
+  the rest.
+- Rows 4 and 5 are the scales, major first; the current one is bright
+  orange.
+- Rows 7 and 8 are the register, rising left to right along row 7 and on
+  along row 8; the current one is bright magenta. Up and down step it too.
+
+**Widgets** - eight columns a page and two pages, left and right turning
+between them. What each column is comes from the tab: a fader, eight buttons
+or eight toggles, sending CCs on the cable, bottom pad first. A column set to
+nothing is dark.
+
+- A **fader** sends one CC, from 0 at the bottom pad to 127 at the top.
+- **Buttons** send `cc` to `cc + 7`, 127 while held and 0 on release.
+  **Toggles** send the same CCs, latching on and off.
+- A CC moves nothing until something listens: bind it in the mod matrix, or
+  arm learn beside a parameter and press the column. A bound fader shows the
+  parameter's own value, so it follows an LFO sweeping it.
+
+**Tempo**
+
+- Row 1 is the transport: start, stop, continue, tap, and panic on the last
+  pad.
+- Row 3 nudges the tempo: -10, -5, -1 BPM in blue on the left, +1, +5, +10 in
+  orange on the right. Up and down nudge by one, left and right by ten.
+- Rows 5 and 6 are a bar across `CLOCK_MIN_BPM`..`CLOCK_MAX_BPM`, slowest at
+  the left of row 6 and fastest at the right of row 5, lit up to the tempo.
+  Press a pad to jump there.
+- Row 8 counts the beats of the bar.
 
 ### NRPN
 

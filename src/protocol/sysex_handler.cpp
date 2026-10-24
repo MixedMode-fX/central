@@ -593,7 +593,15 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
                 case CC_TRANSPORT_START:    mm.clock().start(); break;
                 case CC_TRANSPORT_STOP:     mm.clock().stop(); break;
                 case CC_TRANSPORT_CONTINUE: mm.clock().resume(); break;
-                case CC_TRANSPORT_TAP:      mm.clock().tap(now_us); break;
+                case CC_TRANSPORT_TAP: {
+                    const uint16_t bpm = mm.clock().tap(now_us);
+                    if (bpm){
+                        GlobalSettings g = patches.globals();
+                        g.bpm = bpm;
+                        patches.set_globals(g, now_us);
+                    }
+                    break;
+                }
                 default: nak(source, SYSEX_ERR_BAD_ARGUMENT); return;
             }
             ack(source);

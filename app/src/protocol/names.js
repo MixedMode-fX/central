@@ -33,7 +33,7 @@ export const MIDI_PORTS = labelled(P.MidiPort, {
   mmMIDI_USB_3: 'USB 4',
   mmMIDI_SERIAL_1: 'DIN 1',
   mmMIDI_SERIAL_2: 'DIN 2',
-  mmMIDI_SERIAL_3: 'DIN 3',
+  mmMIDI_HOST_LAUNCHPAD: 'USB host Launchpad',
   mmMIDI_HOST_1: 'USB host',
 }, 'MidiPort');
 

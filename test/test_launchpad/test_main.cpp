@@ -39,7 +39,7 @@ void tearDown() {}
 // answer to a device inquiry, playing the key, setting it, moving the clock,
 // and sending CCs the binding table can learn.
 
-static constexpr uint8_t LP = mmMIDI_HOST_1;         // the cable the Launchpad is on
+static constexpr uint8_t LP = mmMIDI_HOST_LAUNCHPAD; // the cable the Launchpad is on
 static constexpr uint8_t SYNTH = mmMIDI_USB_0;       // where what it plays leaves
 static constexpr uint8_t CONTROL = MIDI_CONTROL_PORT;
 
@@ -365,6 +365,35 @@ static void test_the_arrows_move_the_register() {
     TEST_ASSERT_EQUAL(72, rig.notes_out()[0].d1);
     for (int i = 0; i < 10; i++){ rig.top(1); rig.loop(); }   // down, past the floor
     TEST_ASSERT_EQUAL(-Launchpad::OCTAVE_SHIFT_MAX, rig.surface.octave_shift());
+}
+
+// A Pro's buttons are its printed ones: the note page on Note, the other
+// pages on Session, Chord and Custom, up and down at the top of its left
+// column and left and right on its own arrows.
+static void test_a_pro_plays_its_printed_buttons() {
+    Rig rig;
+    rig.link(on_host(), Launchpad::DEVICE_PRO_MK3);
+    TEST_ASSERT_EQUAL(LP_MODEL_PRO_MK3, rig.surface.model());
+    auto cc = [&](uint8_t id){ rig.in(LP, MIDI_CONTROL_CHANGE, 1, id, 127); rig.loop(); };
+    cc(93);                                  // Session
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_KEY, rig.surface.page());
+    cc(95);                                  // Chord
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_WIDGETS, rig.surface.page());
+    cc(92);                                  // right
+    TEST_ASSERT_EQUAL(1, rig.surface.widget_page());
+    cc(96);                                  // Custom
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_TEMPO, rig.surface.page());
+    cc(94);                                  // Note
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_NOTE, rig.surface.page());
+    cc(80);                                  // up
+    TEST_ASSERT_EQUAL(1, rig.surface.octave_shift());
+    cc(70); cc(70);                          // down
+    TEST_ASSERT_EQUAL(-1, rig.surface.octave_shift());
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::WHITE, rig.surface.led(94));
+    TEST_ASSERT_EQUAL(Launchpad::DIM, rig.surface.led(93));
+    TEST_ASSERT_EQUAL(Launchpad::DIM, rig.surface.led(80));
+    TEST_ASSERT_EQUAL(Launchpad::OFF, rig.surface.led(98));
 }
 
 static void test_the_note_page_is_a_neck_in_fourths() {
@@ -787,20 +816,20 @@ static void send(Rig& rig, uint8_t command, const std::vector<uint8_t>& args){
 static void test_the_launchpad_is_set_and_read_over_the_wire() {
     Rig rig;
     rig.patches.apply(empty_patch(), default_globals(), 0);
-    // The host port's bit does not fit a data byte, so it rides in the
-    // last one.
-    send(rig, SYSEX_SET_LAUNCHPAD, {0x00, LP_MODEL_X, 2, 6, 0x01});
+    // The USB host Launchpad's bit fits a data byte, so the last one, which
+    // carries the bit that does not, is clear.
+    send(rig, SYSEX_SET_LAUNCHPAD, {0x40, LP_MODEL_X, 2, 6, 0x00});
     TEST_ASSERT_NOT_NULL(rig.midi.last_reply(SYSEX_ACK));
     TEST_ASSERT_EQUAL(LP, rig.patches.active().launchpad.port);
     TEST_ASSERT_EQUAL(LP_MODEL_X, rig.patches.active().launchpad.model);
     send(rig, SYSEX_GET_LAUNCHPAD, {});
     const RecordingMidiOut::Sysex* r = rig.midi.last_reply(SYSEX_LAUNCHPAD);
     TEST_ASSERT_NOT_NULL(r);
-    TEST_ASSERT_EQUAL(0x00, r->bytes[5]);
+    TEST_ASSERT_EQUAL(0x40, r->bytes[5]);
     TEST_ASSERT_EQUAL(LP_MODEL_X, r->bytes[6]);
     TEST_ASSERT_EQUAL(2, r->bytes[7]);
     TEST_ASSERT_EQUAL(6, r->bytes[8]);
-    TEST_ASSERT_EQUAL(1, r->bytes[9]);
+    TEST_ASSERT_EQUAL(0, r->bytes[9]);
 
     send(rig, SYSEX_SET_LP_WIDGET, {9, LP_WIDGET_TOGGLES, 70, 3, Launchpad::CYAN});
     TEST_ASSERT_NOT_NULL(rig.midi.last_reply(SYSEX_ACK));
@@ -862,6 +891,7 @@ int main(int, char**){
     RUN_TEST(test_a_pad_releases_the_pitch_it_played_whatever_the_key_does);
     RUN_TEST(test_two_pads_on_one_pitch_release_it_once);
     RUN_TEST(test_the_arrows_move_the_register);
+    RUN_TEST(test_a_pro_plays_its_printed_buttons);
     RUN_TEST(test_the_note_page_is_a_neck_in_fourths);
     RUN_TEST(test_the_note_page_paints_the_key_on_the_neck);
     RUN_TEST(test_the_key_page_sets_root_scale_and_register_through_the_globals);

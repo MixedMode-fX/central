@@ -6,18 +6,44 @@ MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_1, midi1, MidiSettings);
 #ifdef SERIAL_MIDI_2
 MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_2, midi2, MidiSettings);
 #endif
-#ifdef SERIAL_MIDI_3
-MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_3, midi3, MidiSettings);
-#endif
 
 
 // USB Host MIDI
+//
+// Three hubs deep or wide, and one MIDIDevice per MIDI interface plugged in
+// anywhere below them: USBHost_t36 hands each new interface to the first
+// driver that is free.
 #ifdef MMMC_USB_HOST
 USBHost mm_usb;
 USBHub hub1(mm_usb);
 USBHub hub2(mm_usb);
 USBHub hub3(mm_usb);
-MIDIDevice midi_hosted(mm_usb);
+MIDIDevice host_midi_0(mm_usb);
+MIDIDevice host_midi_1(mm_usb);
+MIDIDevice host_midi_2(mm_usb);
+MIDIDevice host_midi_3(mm_usb);
+MIDIDevice host_midi_4(mm_usb);
+MIDIDevice host_midi_5(mm_usb);
+static MIDIDevice* const host_midi[] = {&host_midi_0, &host_midi_1, &host_midi_2,
+                                        &host_midi_3, &host_midi_4, &host_midi_5};
+static_assert(sizeof host_midi / sizeof host_midi[0] == N_HOST_MIDI_DEVICES,
+              "one MIDIDevice per N_HOST_MIDI_DEVICES");
+
+// Focusrite-Novation's vendor id, and the product ids of the three models
+// the surface drives (surface/launchpad.h).
+static const uint16_t NOVATION_VID = 0x1235;
+static const uint16_t LAUNCHPAD_PIDS[] = {0x0103 /* X */, 0x0113 /* Mini MK3 */, 0x0123 /* Pro MK3 */};
+
+// Which of the socket's two cables a hosted device is (hal/midi_types.h):
+// a Launchpad is the surface's and nothing else's.
+static uint8_t host_cable(MIDIDevice& device){
+    if (device.idVendor() == NOVATION_VID){
+        for (uint16_t pid : LAUNCHPAD_PIDS){
+            if (device.idProduct() == pid) return mmMIDI_HOST_LAUNCHPAD;
+        }
+    }
+    return mmMIDI_HOST_1;
+}
 #endif
 
 void mm_midi_setup(){
@@ -33,12 +59,6 @@ void mm_midi_setup(){
     midi2.turnThruOff();
     #endif
 
-    #ifdef SERIAL_MIDI_3
-    midi3.begin(MIDI_CHANNEL_OMNI);
-    SERIAL_MIDI_3.begin(MidiSettings::BaudRate, MIDI_SERIAL_FORMAT);
-    midi3.turnThruOff();
-    #endif
-
     #ifdef MMMC_USB_HOST
     mm_usb.begin();
     #endif
@@ -49,7 +69,7 @@ void mm_midi_setup(){
 // enqueue, repeat until the parser has nothing left. The three libraries
 // (Teensy usbMIDI, the Arduino MIDI Library and USBHost_t36) expose the same
 // read()/getType()/getChannel()/getData1()/getData2() shape, so one loop
-// serves all five endpoints. Per-message callbacks would be five sets of
+// serves every endpoint. Per-message callbacks would be five sets of
 // seven handlers doing exactly this and no less work.
 //
 // Bounded per pass: a transport that receives faster than the loop runs must
@@ -75,7 +95,11 @@ static const uint8_t MAX_MESSAGES_PER_TRANSPORT = 16;
 void mm_midi_read(MidiInputQueue& queue, ISysexIn& sysex, uint32_t now_us){
     #ifdef MMMC_USB_HOST
     mm_usb.Task();
-    MM_DRAIN(midi_hosted, mmMIDI_HOST_1)
+    for (MIDIDevice* device : host_midi){
+        if (!*device) continue;
+        const uint8_t cable = host_cable(*device);
+        MM_DRAIN((*device), cable)
+    }
     #endif
 
     #ifdef MIDI_INTERFACE
@@ -126,12 +150,12 @@ void mm_send(uint8_t target, uint8_t type, uint8_t data1, uint8_t data2, uint8_t
     if ((target & mmMIDI_SERIAL_2) == mmMIDI_SERIAL_2) midi2.send((midi::MidiType)type, data1, data2, channel);
     #endif 
 
-    #ifdef SERIAL_MIDI_3
-    if ((target & mmMIDI_SERIAL_3) == mmMIDI_SERIAL_3) midi3.send((midi::MidiType)type, data1, data2, channel);
-    #endif
-
     #ifdef MMMC_USB_HOST
-    if ((target & mmMIDI_HOST_1) == mmMIDI_HOST_1) midi_hosted.send(type, data1, data2, channel);
+    if (target & (mmMIDI_HOST_LAUNCHPAD | mmMIDI_HOST_1)){
+        for (MIDIDevice* device : host_midi){
+            if (*device && (target & host_cable(*device))) device->send(type, data1, data2, channel);
+        }
+    }
     #endif
 
 }
@@ -156,11 +180,11 @@ void mm_send_sysex(uint8_t target, const uint8_t* data, uint16_t length){
     if (target & mmMIDI_SERIAL_2) midi2.sendSysEx(length, data, true);
     #endif
 
-    #ifdef SERIAL_MIDI_3
-    if (target & mmMIDI_SERIAL_3) midi3.sendSysEx(length, data, true);
-    #endif
-
     #ifdef MMMC_USB_HOST
-    if (target & mmMIDI_HOST_1) midi_hosted.sendSysEx(length, data, true);
+    if (target & (mmMIDI_HOST_LAUNCHPAD | mmMIDI_HOST_1)){
+        for (MIDIDevice* device : host_midi){
+            if (*device && (target & host_cable(*device))) device->sendSysEx(length, data, true);
+        }
+    }
     #endif
 }

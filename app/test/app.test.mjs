@@ -4434,13 +4434,13 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   module.onMidi((e) => { if (e.type === 0x90 || e.type === 0x80) played.push(e); });
 
   const patch = codec.emptyPatch();
-  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_HOST_1, channel: 0, buses: [0] };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_HOST_LAUNCHPAD, channel: 0, buses: [0] };
   patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
-  patch.launchpad = { ...codec.emptyLaunchpad(), port: P.MidiPort.mmMIDI_HOST_1 };
+  patch.launchpad = { ...codec.emptyLaunchpad(), port: P.MidiPort.mmMIDI_HOST_LAUNCHPAD };
   const globals = codec.emptyGlobals();
   globals.scale = P.ScaleId.SCALE_MAJOR;
   await device.sendPatch(patch, globals);
-  launchpad.follow(P.MidiPort.mmMIDI_HOST_1);
+  launchpad.follow(P.MidiPort.mmMIDI_HOST_LAUNCHPAD);
 
   // A few passes: the inquiry goes out, the page answers on the next drain;
   // the module asks each model's layout and the page answers as a Mini; and
@@ -4525,9 +4525,9 @@ test('the Launchpad tab draws the patch\'s half and the page\'s', async () => {
     assert.match(words(tab), /Choose a cable/);
     assert.equal(findAll(tab, (n) => n.className.includes('lp-cell')).length, 0);
 
-    patch.launchpad = { ...codec.emptyLaunchpad(), port: P.MidiPort.mmMIDI_HOST_1 };
+    patch.launchpad = { ...codec.emptyLaunchpad(), port: P.MidiPort.mmMIDI_HOST_LAUNCHPAD };
     patch.launchpad.widgets[2] = { kind: P.LaunchpadWidgetKind.LP_WIDGET_FADER, cc: 22, channel: 1, colour: 9 };
-    app.launchpad.follow(P.MidiPort.mmMIDI_HOST_1);
+    app.launchpad.follow(P.MidiPort.mmMIDI_HOST_LAUNCHPAD);
     tab = LaunchpadTab(app);
     // A Mini: 64 pads, 8 buttons on top, 8 on the right, a logo.
     const of = (name) => findAll(tab, (n) => n.classList.contains(name)).length;

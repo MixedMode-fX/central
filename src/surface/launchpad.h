@@ -43,7 +43,10 @@
 // programmer mode - a Pro sent the Mini's switch ignores it and stays in its
 // own modes. A patch that names the model links on the inquiry's answer.
 //
-// Four pages, on the top row's four right-hand buttons:
+// Four pages, on four buttons of the top row: the four right-hand ones on a
+// Mini or an X, Session to Custom on a Pro, whose Note button is the note
+// page's and whose own arrows - left and right on the top row, up and down
+// at the top of the left column - are the arrows:
 //
 //   note     the grid is a neck: a semitone a column, a fourth a row, the
 //            key painted on it - the roots pink, the scale blue, the notes
@@ -164,9 +167,10 @@ class Launchpad : public ISysexIn {
         static uint16_t bar_tempo(uint8_t step);
 
     private:
-        // The top row, left to right: arrows, then the pages.
+        // The arrows and the page buttons, in the Mini's and the X's top row
+        // left to right; button_id() says where each is on the model linked.
         enum TopButton : uint8_t { TOP_UP = 0, TOP_DOWN, TOP_LEFT, TOP_RIGHT,
-                                   TOP_KEY, TOP_NOTE, TOP_WIDGETS, TOP_TEMPO };
+                                   TOP_KEY, TOP_NOTE, TOP_WIDGETS, TOP_TEMPO, TOP_BUTTONS };
         // The right column, top to bottom.
         enum SideButton : uint8_t { SIDE_PLAY = 7, SIDE_CONTINUE = 6, SIDE_TAP = 5, SIDE_PANIC = 4 };
 
@@ -175,6 +179,8 @@ class Launchpad : public ISysexIn {
 
         const LaunchpadConfig& config() const { return patches.active().launchpad; }
         uint8_t device_byte() const;
+        // The LED and CC id of a TopButton on the model the surface talks to.
+        uint8_t button_id(uint8_t button) const;
         bool is_din() const;
         uint32_t led_interval() const;
 

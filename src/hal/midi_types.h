@@ -31,15 +31,21 @@ constexpr uint8_t MIDI_CHANNELS = 16;
 // Logical MIDI endpoints, one bit each. A target mask is any OR of these.
 // Which of them are actually compiled in is the transport's business
 // (see hal/teensy/teensy_midi.h).
+//
+// The USB host socket is two cables. A Launchpad plugged into it, directly
+// or through a hub, is a controller and nothing else: it is
+// mmMIDI_HOST_LAUNCHPAD, the cable a patch names for its surface, and
+// mmMIDI_HOST_1 is every other device on the socket, so what a patch sends
+// the USB host's instruments never lands on the surface's LEDs.
 enum MidiPort : uint8_t {
-    mmMIDI_USB_0    = 0x01,
-    mmMIDI_USB_1    = 0x02,
-    mmMIDI_USB_2    = 0x04,
-    mmMIDI_USB_3    = 0x08,
-    mmMIDI_SERIAL_1 = 0x10,
-    mmMIDI_SERIAL_2 = 0x20,
-    mmMIDI_SERIAL_3 = 0x40,
-    mmMIDI_HOST_1   = 0x80,
+    mmMIDI_USB_0          = 0x01,
+    mmMIDI_USB_1          = 0x02,
+    mmMIDI_USB_2          = 0x04,
+    mmMIDI_USB_3          = 0x08,
+    mmMIDI_SERIAL_1       = 0x10,
+    mmMIDI_SERIAL_2       = 0x20,
+    mmMIDI_HOST_LAUNCHPAD = 0x40,
+    mmMIDI_HOST_1         = 0x80,
 };
 
 // Cable 3 of the USB device port is reserved for control traffic (#11), so a

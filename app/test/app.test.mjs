@@ -4457,8 +4457,9 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   const { gridId, topId, LOGO_ID } = await import('../src/runtime/launchpad.js');
   assert.equal(launchpad.leds[LOGO_ID], 3, 'the logo is white while linked');
   assert.equal(launchpad.leds[topId(5)], 3, 'the note page is the page');
-  assert.equal(launchpad.leds[gridId(0, 0)], 45, 'the tonic is blue');
-  assert.equal(launchpad.leds[gridId(0, 1)], 1, 'a degree is dim');
+  assert.equal(launchpad.leds[gridId(0, 0)], 57, 'the tonic is pink');
+  assert.equal(launchpad.leds[gridId(0, 1)], 0, 'a note outside the key is off');
+  assert.equal(launchpad.leds[gridId(0, 2)], 45, 'a note in the key is blue');
   assert.equal((await device.getLpState()).linked, true);
   assert.equal((await device.getLpState()).model, P.LaunchpadModel.LP_MODEL_MINI_MK3);
 
@@ -4467,7 +4468,7 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   module.advance(2_000);
   launchpad.release(gridId(0, 2));
   module.advance(2_000);
-  assert.deepEqual(played.map((e) => [e.type, e.d1]), [[0x90, 64], [0x80, 64]], 'the third of C major, then off');
+  assert.deepEqual(played.map((e) => [e.type, e.d1]), [[0x90, 62], [0x80, 62]], 'two semitones up the string: D, then off');
   module.drainEvents();
   // The raw pad number never reached the graph.
   assert.ok(played.every((e) => e.d1 !== gridId(0, 2)));

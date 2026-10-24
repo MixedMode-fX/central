@@ -477,7 +477,7 @@ export function fromPatchJson(json, device) {
       port,
       model: launchpadModelOf(l.model),
       channel: l.channel ?? 1,
-      rowOffset: l.rowOffset ?? 3,
+      rowOffset: l.rowOffset ?? P.LP_ROW_OFFSET_DEFAULT,
       octave: l.octave ?? 0,
       widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
     };

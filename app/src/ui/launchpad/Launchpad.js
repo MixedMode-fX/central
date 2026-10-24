@@ -3,8 +3,8 @@
 //
 // **It is a picture of the wire.** Every colour here is a palette index the
 // module sent in a SysEx frame (runtime/launchpad.js), never a guess at what
-// a page should look like: the note page's roots are blue because the
-// firmware painted them blue, and a fader follows a parameter because the
+// a page should look like: the note page's roots are pink because the
+// firmware painted them pink, and a fader follows a parameter because the
 // module redrew it. A press sends what a pad sends in programmer mode, and
 // what the module makes of it comes back as LEDs. So the drawing on this tab
 // and a Launchpad on the module's socket show the same thing, and when a

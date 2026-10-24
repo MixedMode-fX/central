@@ -186,6 +186,11 @@
 // has to be scrolled to, and a column you have to scroll to is a column you
 // have not got.
 #define LP_WIDGETS 16
+// Semitones between one row of its note page and the next: the strings of
+// the neck. Fourths where the patch says nothing, as a guitar is tuned; at
+// most an octave, which makes a row a register.
+#define LP_ROW_OFFSET_DEFAULT 5
+#define LP_ROW_OFFSET_MAX 12
 
 // Incoming MIDI events buffered between transport reads and the pass that
 // consumes them (#5). A busy DIN port carries ~1000 status+data bytes per

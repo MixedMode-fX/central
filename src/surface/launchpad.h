@@ -39,10 +39,11 @@
 //
 // Four pages, on the top row's four right-hand buttons:
 //
-//   note     the grid plays the key: `row_offset` degrees between rows, the
-//            roots lit, the register moved with the arrows. A pad owns the
-//            note-off of the pitch it played, so the key may move under a
-//            held chord.
+//   note     the grid is a neck: a semitone a column, `row_offset`
+//            semitones a row, the key painted on it - the roots pink, the
+//            scale blue, the notes outside it unlit but playing - and the
+//            register moved with the arrows. A pad owns the note-off of the
+//            pitch it played, so the key may move under a held chord.
 //   key      the root on a keyboard of twelve, the scales, the register.
 //   widgets  eight columns of what the patch says they are
 //            (LaunchpadWidget), two pages of them on the left and right

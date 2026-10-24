@@ -92,7 +92,7 @@ bool MixedModeMaster::launchpad_valid(const LaunchpadConfig& lp){
     }
     if (lp.model >= LP_MODELS) return false;
     if (lp.channel > MIDI_CHANNELS) return false;
-    if (lp.row_offset > 8) return false;
+    if (lp.row_offset > LP_ROW_OFFSET_MAX) return false;
     if (lp.octave > KEY_MAX_OCTAVE) return false;
     for (uint8_t i = 0; i < LP_WIDGETS; i++){
         const LaunchpadWidget& g = lp.widgets[i];

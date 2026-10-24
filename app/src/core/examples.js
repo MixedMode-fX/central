@@ -50,11 +50,11 @@ export const EXAMPLES = {
   },
   'RPS-10 pitch shift': {
     category: 'routing & MIDI',
-    about: 'A keyboard plays the pitch shift of a BOSS RPS-10. Jack 4 is a tone jack: patch it to the RPS-10\u2019s rear keyboard control input, set its mode to pitch shift, and the note you hold is the interval \u2014 C4 is unison, E4 a major third up, C3 an octave down, and the wheel bends between them. The jack plays C6 for unison and C5 to C7 for the RPS-10\u2019s whole octave either way. A jack is at gate level, hotter than the synth output that input was made for, so a divider in the cable (10 k\u03a9 over 1 k\u03a9) is kind to it.',
+    about: 'A keyboard plays the pitch shift of a BOSS RPS-10. Jack 4 is a tone jack: patch it to the RPS-10\u2019s rear keyboard control input, set its mode to pitch shift, and the note you hold on channel 1 is the interval from the root \u2014 the root itself is unison, a third above it a third up, an octave below it an octave down, and the wheel bends between them. A note on channel 2 sets the root; take that cable off the root inlet and the root is the key\u2019s tonic, middle C in C. The jack plays C6 for unison and C5 to C7 for the RPS-10\u2019s whole octave either way. A jack is at gate level, hotter than the synth output that input was made for, so a divider in the cable (10 k\u03a9 over 1 k\u03a9) is kind to it.',
     patch: {
-      midi_in: [{ port: 1, sources: ['ALL'], channel: 0, bus: 0 }],
+      midi_in: [{ port: 1, sources: ['ALL'], channel: 1, bus: 0 }, { port: 2, sources: ['ALL'], channel: 2, bus: 1 }],
       gate_ports: [{ port: 4, dir: 'tone', bus: 0 }],
-      nodes: [{ algo: 'RPS10', in: [0], out: [0] }],
+      nodes: [{ algo: 'RPS10', in: [0, 1], out: [0] }],
     },
   },
   'Two sources, one output': {

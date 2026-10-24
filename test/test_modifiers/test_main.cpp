@@ -2163,7 +2163,7 @@ static void test_tone_frequencies_are_the_keyboard_controls_span() {
     TEST_ASSERT_TRUE(tone_millihertz(CV_MAX) > 12000000u);
 }
 
-static void test_rps10_plays_the_interval_from_the_centre() {
+static void test_rps10_plays_the_interval_from_the_root() {
     BusManager bus;
     NodeConfig c = rps_config();
     Rps10 node(c);
@@ -2188,10 +2188,51 @@ static void test_rps10_plays_the_interval_from_the_centre() {
     TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node));
     bus.note_write(0, off(100));
 
-    // Moving the centre moves what unison is.
-    TEST_ASSERT_TRUE(node.set_param(1, 72));
-    bus.note_write(0, on(72));
+    // The root is the key's: in A, A4 is unison and C5 a minor third up.
+    global_key::set(SCALE_MAJOR, 9);
+    bus.note_write(0, on(69));
     TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, node));
+    bus.note_write(0, off(69));
+    bus.note_write(0, on(72));
+    TEST_ASSERT_EQUAL_INT16(unison + 3 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    // A key moving under a held note moves the shift.
+    global_key::set_root(7);                                             // G4: C5 is a fourth up
+    TEST_ASSERT_EQUAL_INT16(unison + 5 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    // `octave` puts the root in a register of its own: G3, so C5 is past the span.
+    TEST_ASSERT_TRUE(node.set_param(1, 3));
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node));
+    TEST_ASSERT_FALSE(node.set_param(1, KEY_MAX_OCTAVE + 1));
+}
+
+static void test_rps10_root_inlet_outranks_the_key() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    c.in_buses[1] = one_bus(1);
+    Rps10 node(c);
+    const int16_t unison = tone_of_note(Rps10::UNISON_NOTE);
+
+    TEST_ASSERT_EQUAL_UINT8(60, node.root());                            // nothing played: the key's tonic
+    bus.note_write(1, on(50));                                           // D3 is the root now
+    bus.note_write(0, on(57));                                           // and A3, same pass, a fifth up
+    TEST_ASSERT_EQUAL_INT16(unison + 7 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    TEST_ASSERT_EQUAL_UINT8(50, node.root());
+
+    // The root latches: its note-off changes nothing.
+    bus.note_write(1, off(50));
+    TEST_ASSERT_EQUAL_INT16(unison + 7 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    // The key does not reach a node whose root is played.
+    global_key::set_root(5);
+    TEST_ASSERT_EQUAL_INT16(unison + 7 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+
+    // A new root under the held note: E3 makes A3 a fourth.
+    bus.note_write(1, on(52));
+    TEST_ASSERT_EQUAL_INT16(unison + 5 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    // `octave` re-registers the played root: 4 leaves E3 where it was, and
+    // 5 puts it at E4, so A3 is a fifth down.
+    TEST_ASSERT_TRUE(node.set_param(1, 4));
+    TEST_ASSERT_EQUAL_UINT8(52, node.root());
+    TEST_ASSERT_TRUE(node.set_param(1, 5));
+    TEST_ASSERT_EQUAL_INT16(unison - 7 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
 }
 
 static void test_rps10_bend_sweeps_between_the_notes() {
@@ -2346,7 +2387,8 @@ int main() {
     RUN_TEST(test_arpeggiator_hangs_nothing_in_any_mode);
     RUN_TEST(test_arpeggiator_on_hold_hangs_nothing);
     RUN_TEST(test_tone_frequencies_are_the_keyboard_controls_span);
-    RUN_TEST(test_rps10_plays_the_interval_from_the_centre);
+    RUN_TEST(test_rps10_plays_the_interval_from_the_root);
+    RUN_TEST(test_rps10_root_inlet_outranks_the_key);
     RUN_TEST(test_rps10_bend_sweeps_between_the_notes);
     RUN_TEST(test_rps10_release_holds_returns_or_stops);
     RUN_TEST(test_rps10_priority_picks_one_interval);

@@ -312,9 +312,9 @@ is only what a parameter list cannot say.
   too slow for a 2 kHz square, so the port only tells the timer when the
   frequency moves. Pins that share a PWM submodule share its frequency
   (`src/hardware.h`). `RPS10` writes the pitch a BOSS RPS-10's keyboard control
-  listens for: C6 is unison and C5..C7 its −1..+1 octave, clamped there, with
-  the interval played from `centre` so a keyboard does not have to sit two
-  octaves up.
+  listens for: C6 is unison and C5..C7 its −1..+1 octave, clamped there. The
+  shift is a note's interval from the root — the key's tonic, or the last
+  note on its root inlet — so a keyboard does not have to sit two octaves up.
 - **`Turing` is the random source with memory.** `length` bits in a ring, the
   top bit fed back inverted with probability `chaos` — 0 is a fixed loop, 50 is
   noise, 100 is a loop of twice the length, and between 0 and 50 the loop

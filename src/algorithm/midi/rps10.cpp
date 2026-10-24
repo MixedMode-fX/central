@@ -3,8 +3,9 @@
 #include "midi/note_event.h"
 #include "hal/midi_types.h"
 #include "util/tone.h"
+#include "midi/global_key.h"
 
-static const Domain IN[1] = {Domain::Note};
+static const Domain IN[2] = {Domain::Note, Domain::Note};
 static const Domain OUT[1] = {Domain::CV};
 
 static const char* const RELEASE_NAMES[3] = {"hold", "unison", "off"};
@@ -12,20 +13,20 @@ static const char* const RELEASE_NAMES[3] = {"hold", "unison", "off"};
 static const ParamDescriptor PARAMS[4] = {
     {"priority", Rps10::PRIORITY_LOWEST, Rps10::PRIORITIES, Rps10::PRIORITY_LATEST,
      PARAM_ENUM, PARAM_PRIORITY_NAMES},
-    {"centre",   0, 127, Rps10::DEFAULT_CENTRE, PARAM_PITCH, nullptr},
+    {"octave",   0, KEY_MAX_OCTAVE, 0, PARAM_ENUM, PARAM_OCTAVE_NAMES},
     {"bend",     0, Rps10::MAX_BEND, Rps10::DEFAULT_BEND, PARAM_NUMBER, nullptr},
     {"release",  Rps10::RELEASE_HOLD, Rps10::RELEASES, Rps10::RELEASE_HOLD,
      PARAM_ENUM, RELEASE_NAMES},
 };
 static const ParamGroup GROUPS[1] = {{0, 1, 4, PARAMS}};
 
-static const char* const IN_NAMES[1] = {"notes in"};
+static const char* const IN_NAMES[2] = {"notes in", "root"};
 static const char* const OUT_NAMES[1] = {"tone"};
 
 const AlgorithmDescriptor Rps10::descriptor = {
-    ALGO_RPS10, "RPS10", 1, 1, 1, 4, IN, OUT, sizeof(Rps10), false, construct_node<Rps10>,
+    ALGO_RPS10, "RPS10", 2, 1, 1, 4, IN, OUT, sizeof(Rps10), false, construct_node<Rps10>,
     GROUPS, 1, IN_NAMES, OUT_NAMES,
-    "Notes set a BOSS RPS-10's pitch shift, through a tone jack on its keyboard control.",
+    "Notes set a BOSS RPS-10's pitch shift by their interval from the root, through a tone jack.",
     CATEGORY_MIDI };
 
 static uint8_t clamp_priority(uint8_t stored){
@@ -40,11 +41,13 @@ static uint8_t clamp_bend(uint8_t stored){
 
 Rps10::Rps10(const NodeConfig& config) :
     in(config.in_buses[0]),
+    root_in(config.in_buses[1]),
     tone_out(config.out_buses[0]),
     priority(clamp_priority(config.params[0])),
-    centre(config.params[1] ? (uint8_t)(config.params[1] & 0x7F) : (uint8_t)DEFAULT_CENTRE),
+    octave(config.params[1] > KEY_MAX_OCTAVE ? (uint8_t)0 : config.params[1]),
     bend_semis(clamp_bend(config.params[2])),
     release(config.params[3] > RELEASES ? (uint8_t)RELEASE_HOLD : config.params[3]),
+    played_root(NO_ROOT),
     bend_value(BEND_CENTRE),
     shift_semis(0),
     has_shift(false),
@@ -52,7 +55,19 @@ Rps10::Rps10(const NodeConfig& config) :
     held()
 {}
 
+uint8_t Rps10::root() const {
+    return played_root != NO_ROOT ? global_key::placed(played_root, octave)
+                                  : global_key::tonic(octave);
+}
+
 void Rps10::process(BusManager& bus, uint32_t){
+    // The root first, so a root and a note arriving in the same pass agree.
+    const uint8_t rn = bus.note_count(root_in);
+    for (uint8_t i = 0; i < rn; i++){
+        const MidiEvent e = bus.note_read(root_in, i);
+        if (is_note_on(e)) played_root = e.data1;
+    }
+
     const uint8_t n = bus.note_count(in);
     for (uint8_t i = 0; i < n; i++){
         const MidiEvent e = bus.note_read(in, i);
@@ -70,7 +85,7 @@ void Rps10::process(BusManager& bus, uint32_t){
 
     const uint8_t want = held.winner(rule());
     if (want != HeldNotes::NONE){
-        int16_t semis = (int16_t)((int16_t)want - (int16_t)centre);
+        int16_t semis = (int16_t)((int16_t)want - (int16_t)root());
         if (semis > MAX_SHIFT) semis = MAX_SHIFT;
         if (semis < -(int16_t)MAX_SHIFT) semis = -(int16_t)MAX_SHIFT;
         shift_semis = (int8_t)semis;
@@ -108,8 +123,10 @@ bool Rps10::set_param(uint16_t index, uint8_t value){
             return true;
         case 1:
             // A held shift is re-read from the held note next pass, so moving
-            // the centre under a held key moves the pitch.
-            centre = value & 0x7F;
+            // the root's register - or the key - under a held key moves the
+            // pitch.
+            if (value > KEY_MAX_OCTAVE) return false;
+            octave = value;
             return true;
         case 2:
             if (value > MAX_BEND) return false;
@@ -127,7 +144,7 @@ bool Rps10::set_param(uint16_t index, uint8_t value){
 uint8_t Rps10::get_param(uint16_t index) const {
     switch (index){
         case 0: return priority;
-        case 1: return centre;
+        case 1: return octave;
         case 2: return bend_semis;
         case 3: return release;
         default: return 0;

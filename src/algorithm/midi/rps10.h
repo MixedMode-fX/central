@@ -14,10 +14,15 @@
 // plus the interval and clamps there: a note further out has no shift to
 // give, and the nearest one is a flat note rather than a wrapped one.
 //
-// **The interval is from `centre`, not from C6.** A keyboard plays the shift
-// from wherever it sits - C4 by default, so middle C is unison and the octave
-// either side of it is the whole range - and no one has to play two octaves
-// up to hear the pedal do nothing.
+// **The interval is from the root, not from C6.** A note is a shift by how
+// far it is from the root: the root itself is unison, a third above it a
+// third up, the root an octave down an octave down. The root is the key's
+// tonic (midi/global_key.h), in the key's register unless `octave` names
+// one - middle C by default, so the octave either side of it is the whole
+// range and no one has to play two octaves up to hear the pedal do nothing.
+// A patched root inlet outranks the key, as it does on every node that has
+// one: its last note-on is the root, in its own register unless `octave`
+// names one (global_key::placed), and it holds until the next.
 //
 // **Bend is part of the shift**, `bend` semitones at full travel, so a wheel
 // sweeps the pitch between the notes the keyboard picks.
@@ -33,10 +38,11 @@
 // One voice, chosen by `priority`: the RPS-10 shifts by one interval.
 //
 // Inlet 0 (note, required): the notes that pick the shift.
+// Inlet 1 (note, optional): the root. Note-ons set it; nothing else is read.
 // Outlet 0 (CV): the tone pitch (util/tone.h), for a tone jack.
 //
 // params[0] priority  lowest / highest / latest
-// params[1] centre    the note that plays unison
+// params[1] octave    the root's register: 0 the key's (or the played root's), 1..10 one of its own
 // params[2] bend      pitch bend range in semitones (0 = ignore bend)
 // params[3] release   hold / unison / off
 class Rps10 : public Node{
@@ -61,7 +67,7 @@ class Rps10 : public Node{
         // The keyboard control's span, as MIDI notes (C4 = 60).
         static constexpr uint8_t UNISON_NOTE = 84;     // C6, 1046.5 Hz
         static constexpr uint8_t MAX_SHIFT = 12;       // semitones either way
-        static constexpr uint8_t DEFAULT_CENTRE = 60;
+        static constexpr uint8_t NO_ROOT = 0xFF;
         static constexpr uint8_t MAX_BEND = 12;
         static constexpr uint8_t DEFAULT_BEND = 2;
         static constexpr uint16_t BEND_CENTRE = 8192;
@@ -76,6 +82,8 @@ class Rps10 : public Node{
         // means in semitones (bend aside).
         int16_t tone() const { return tone_cv; }
         int8_t shift() const { return shift_semis; }
+        // The pitch a note is measured from this pass.
+        uint8_t root() const;
         bool sounding() const { return tone_cv > 0; }
 
     private:
@@ -84,13 +92,15 @@ class Rps10 : public Node{
         }
 
         BusSet in;
+        BusSet root_in;
         BusSet tone_out;
 
         uint8_t priority;
-        uint8_t centre;
+        uint8_t octave;         // 0 is the key's register, or the played root's
         uint8_t bend_semis;
         uint8_t release;
 
+        uint8_t played_root;    // the root inlet's last note-on, NO_ROOT until one
         uint16_t bend_value;    // 14 bits, centred on BEND_CENTRE
         int8_t shift_semis;     // the held or last shift
         bool has_shift;         // a note has set shift_semis since the patch loaded

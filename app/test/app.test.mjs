@@ -4487,6 +4487,24 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   assert.equal(launchpad.programmer, false);
 });
 
+// A Pro is three interfaces and only its MIDI one takes programmer mode: the
+// DIN one is its jacks, and bridged there the module talks past the device.
+test('a real Launchpad is offered on its MIDI interface alone', async () => {
+  const { launchpadPorts } = await import('../src/runtime/launchpad.js');
+  const ports = (names, prefix) => names.map((name, i) => ({ id: `${prefix}${i}`, name }));
+  const mac = ['Launchpad Pro MK3 LPProMK3 DIN', 'Launchpad Pro MK3 LPProMK3 MIDI', 'Launchpad Pro MK3 LPProMK3 DAW', 'Arturia KeyStep'];
+  assert.deepEqual(launchpadPorts(ports(mac, 'in'), ports([...mac].reverse(), 'out'))
+    .map((d) => [d.name, d.output.name]),
+  [['Launchpad Pro MK3 LPProMK3 MIDI', 'Launchpad Pro MK3 LPProMK3 MIDI']]);
+
+  // Windows: no "Launchpad" in the name, and each interface's input and
+  // output paired by its number, never with another interface's.
+  const found = launchpadPorts(ports(['LPMiniMK3 DAW', 'MIDIIN2 (LPMiniMK3 MIDI)'], 'in'),
+    ports(['LPMiniMK3 DAW', 'MIDIOUT2 (LPMiniMK3 MIDI)'], 'out'));
+  assert.deepEqual(found.map((d) => [d.name, d.output.name]), [['MIDIIN2 (LPMiniMK3 MIDI)', 'MIDIOUT2 (LPMiniMK3 MIDI)']]);
+  assert.deepEqual(launchpadPorts(ports(['MIDIIN2 (LPX MIDI)'], 'in'), ports(['LPX DAW'], 'out')), []);
+});
+
 test('the Launchpad tab draws the patch\'s half and the page\'s', async () => {
   const { module } = await instantiate();
   const device = await connected(module);

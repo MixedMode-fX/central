@@ -74,6 +74,34 @@ export const LOGO_ID = 99;
 // a button (a CC).
 export const isGridId = (id) => id >= 11 && id <= 88 && id % 10 >= 1 && id % 10 <= 8;
 
+// The ports a computer shows for its Launchpads, cut down to the one each
+// device takes programmer mode on.
+//
+// An MK3 is several USB MIDI interfaces: a Mini or an X has a DAW one and a
+// MIDI one, a Pro adds a DIN one that is its MIDI jacks. Only the MIDI
+// interface is the device itself - programmer mode, the pads as coordinates
+// and the inquiry's answer are all on it - so a Pro bridged on its DIN
+// interface stays in its own modes and plays nothing back, and the module
+// talks to whatever hangs off its jacks. Every interface is named for its
+// role ("LPProMK3 MIDI", "LPProMK3 DIN"), so the others are dropped by name.
+// Windows wraps all but the first in "MIDIIN2 (...)" and "MIDIOUT2 (...)",
+// which is also what pairs an input with its output there: the wrapper is
+// read as the same name with its number, and an input is only ever paired
+// with the output of the same interface, never just another Launchpad's.
+const LAUNCHPAD_PORT = /launchpad|\bLP(?:X|MiniMK3|ProMK3)\b/i;
+const OTHER_INTERFACE = /\b(?:DAW|DIN)\b/i;
+const portKey = (name = '') => name.replace(/^MIDI(?:IN|OUT)(\d+)\s*\((.*)\)$/i, '$2 #$1').trim();
+
+export function launchpadPorts(inputs, outputs) {
+  return inputs
+    .filter((input) => LAUNCHPAD_PORT.test(input.name ?? '') && !OTHER_INTERFACE.test(input.name ?? ''))
+    .map((input) => ({
+      id: input.id, name: input.name,
+      output: outputs.find((o) => portKey(o.name) === portKey(input.name)) ?? null,
+    }))
+    .filter((d) => d.output);
+}
+
 export class VirtualLaunchpad {
   constructor(module) {
     this.module = module;
@@ -206,18 +234,10 @@ export class VirtualLaunchpad {
     return this.access;
   }
 
-  // The MIDI ports on this computer that look like Launchpads, paired by name.
+  // The Launchpads plugged into this computer, one port pair each.
   devices() {
     if (!this.access) return [];
-    const inputs = [...this.access.inputs.values()];
-    const outputs = [...this.access.outputs.values()];
-    return inputs
-      .filter((input) => /launchpad/i.test(input.name ?? ''))
-      .map((input) => ({
-        id: input.id, name: input.name,
-        output: outputs.find((o) => o.name === input.name) ?? outputs.find((o) => /launchpad/i.test(o.name ?? '')) ?? null,
-      }))
-      .filter((d) => d.output);
+    return launchpadPorts([...this.access.inputs.values()], [...this.access.outputs.values()]);
   }
 
   get bridged() { return this.hardware?.name ?? ''; }

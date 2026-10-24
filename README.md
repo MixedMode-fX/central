@@ -4,7 +4,10 @@ An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
 
 - `GPIO_N` configurable gate jacks, each an input or an output.
 - MIDI over two DIN ports (3.5 mm TRS), a class-compliant USB device with four
-  cables, and a USB host port.
+  cables, and a USB host port that takes hubs. The host port is two cables: a
+  Launchpad on it is *USB host Launchpad*, a controller and nothing else, and
+  every other device on it is *USB host*, so what goes to the instruments on
+  the hub never reaches the Launchpad (`MidiPort` in `src/hal/midi_types.h`).
 - No encoder, no switches, no display. The module is configured from a host:
   the serial console, the SysEx protocol, or the browser app.
 
@@ -718,7 +721,7 @@ destinations is doing about it.
 
 The module has no panel, and a Novation Launchpad is the panel somebody
 already owns: a patch names the cable one is on (`LaunchpadConfig` in
-`src/node/patch.h`), the USB host socket or a DIN port, and the module drives
+`src/node/patch.h`), the USB host's Launchpad cable or a DIN port, and the module drives
 it in **programmer mode** (`src/surface/launchpad.h`). The Mini MK3, the X and
 the Pro MK3 speak the same protocol and differ in one byte, the device id.
 The answer to a device inquiry does not carry it - a Mini and a Pro give the
@@ -747,8 +750,8 @@ that answers; the patch may also name the model outright.
 
 #### Playing it
 
-Name the cable on the app's **Launchpad** tab - the USB host socket for a
-Launchpad plugged into the module, a DIN port for a Pro on a MIDI lead - and
+Name the cable on the app's **Launchpad** tab - *USB host Launchpad* for a
+Launchpad plugged into the module or a hub on it, a DIN port for a Pro on a MIDI lead - and
 leave the model on *ask the device*. The logo lights white once the module has
 it. The tab draws the same lights and its pads press, so everything here can be
 tried without one.
@@ -758,8 +761,8 @@ on them. The grid's rows count from the top.
 
 | | Mini MK3 and X | Pro MK3 |
 | --- | --- | --- |
-| up, down, left, right: top row, buttons 1-4 | ▲ ▼ ◀ ▶ | ◀ ▶ Session Note |
-| the pages key, note, widgets, tempo: top row, buttons 5-8 | the four right of the arrows | Chord Custom Sequencer Projects |
+| up, down, left, right | ▲ ▼ ◀ ▶, top row buttons 1-4 | ▲ ▼ at the top of the left column, ◀ ▶ top row buttons 1-2 |
+| the pages key, note, widgets, tempo | top row buttons 5-8 | Session Note Chord Custom, top row buttons 3-6 |
 | play/stop, continue, tap, panic: right column, top four | the top four ▶ | Patterns Steps Pattern Settings Velocity |
 
 The lit page button is the page you are on.

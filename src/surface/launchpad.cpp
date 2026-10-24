@@ -43,8 +43,19 @@ uint8_t Launchpad::device_byte() const {
     }
 }
 
+// A Mini's or an X's top row is four arrows and four buttons nothing else
+// claims. A Pro's starts left, right, Session, Note, Chord, Custom, and its up
+// and down head the left column, so it gets a layout of its own: its printed
+// arrows are the arrows, and the pages sit on Session to Custom - the note
+// page on Note.
+uint8_t Launchpad::button_id(uint8_t button) const {
+    static const uint8_t PRO[TOP_BUTTONS] = {80, 70, 91, 92, 93, 94, 95, 96};
+    if (button >= TOP_BUTTONS) return 0;
+    return model() == LP_MODEL_PRO_MK3 ? PRO[button] : top_id(button);
+}
+
 bool Launchpad::is_din() const {
-    return (active_port & (mmMIDI_SERIAL_1 | mmMIDI_SERIAL_2 | mmMIDI_SERIAL_3)) != 0;
+    return (active_port & (mmMIDI_SERIAL_1 | mmMIDI_SERIAL_2)) != 0;
 }
 
 uint32_t Launchpad::led_interval() const {
@@ -170,7 +181,9 @@ bool Launchpad::receive(uint8_t source, const MidiEvent& e, uint32_t now_us){
     }
     if (type == MIDI_CONTROL_CHANGE){
         const bool down = e.data2 >= 64;
-        if (e.data1 >= 91 && e.data1 <= 98){ top((uint8_t)(e.data1 - 91u), down, now_us); return true; }
+        for (uint8_t b = 0; b < TOP_BUTTONS; b++){
+            if (e.data1 == button_id(b)){ top(b, down, now_us); return true; }
+        }
         if (e.data1 % 10u == 9 && e.data1 >= 19 && e.data1 <= 89){
             side((uint8_t)(e.data1 / 10u - 1u), down, now_us);
             return true;
@@ -504,17 +517,17 @@ void Launchpad::draw(uint32_t now_us){
 void Launchpad::draw_frame(uint32_t now_us){
     (void)now_us;
     static const uint8_t PAGE_BUTTON[PAGES] = {TOP_NOTE, TOP_KEY, TOP_WIDGETS, TOP_TEMPO};
-    for (uint8_t p = 0; p < PAGES; p++) set(top_id(PAGE_BUTTON[p]), p == current_page ? WHITE : DIM);
+    for (uint8_t p = 0; p < PAGES; p++) set(button_id(PAGE_BUTTON[p]), p == current_page ? WHITE : DIM);
     // The arrows light where they do something.
     const bool vertical = current_page != PAGE_WIDGETS;
-    set(top_id(TOP_UP), vertical ? DIM : OFF);
-    set(top_id(TOP_DOWN), vertical ? DIM : OFF);
+    set(button_id(TOP_UP), vertical ? DIM : OFF);
+    set(button_id(TOP_DOWN), vertical ? DIM : OFF);
     const bool horizontal = current_page == PAGE_WIDGETS || current_page == PAGE_TEMPO;
-    set(top_id(TOP_LEFT), horizontal ? DIM : OFF);
-    set(top_id(TOP_RIGHT), horizontal ? DIM : OFF);
+    set(button_id(TOP_LEFT), horizontal ? DIM : OFF);
+    set(button_id(TOP_RIGHT), horizontal ? DIM : OFF);
     if (current_page == PAGE_WIDGETS){
-        set(top_id(TOP_LEFT), widgets_page > 0 ? WHITE : DIM);
-        set(top_id(TOP_RIGHT), widgets_page + 1 < WIDGET_PAGES ? WHITE : DIM);
+        set(button_id(TOP_LEFT), widgets_page > 0 ? WHITE : DIM);
+        set(button_id(TOP_RIGHT), widgets_page + 1 < WIDGET_PAGES ? WHITE : DIM);
     }
 
     const bool running = mm.clock().running();

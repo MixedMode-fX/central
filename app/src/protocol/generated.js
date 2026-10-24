@@ -162,7 +162,7 @@ export const MidiPort = Object.freeze({
   mmMIDI_USB_3: 8,
   mmMIDI_SERIAL_1: 16,
   mmMIDI_SERIAL_2: 32,
-  mmMIDI_SERIAL_3: 64,
+  mmMIDI_HOST_LAUNCHPAD: 64,
   mmMIDI_HOST_1: 128,
 });
 

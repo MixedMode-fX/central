@@ -48,7 +48,7 @@ export function ConfigPanel(app) {
   const set = (changes) => app.editor.setLaunchpad(changes);
   return Panel('Launchpad',
     Fields(
-      Field({ label: 'on cable', hint: 'the module’s USB host socket, or a DIN port for a Pro' }, Select({
+      Field({ label: 'on cable', hint: 'USB host Launchpad for one on the module’s USB host socket, or a DIN port for a Pro' }, Select({
         options: [{ value: 0, label: 'none' }, ...MUSICAL_PORTS],
         value: lp.port, 'aria-label': 'the cable the Launchpad is on',
         onChange: (port) => set({ port }),
@@ -71,7 +71,7 @@ export function ConfigPanel(app) {
       }))) : null,
     StateLine(app, lp),
     Hint(lp.port
-      ? 'The top row’s four right-hand buttons are the pages: key, note, widgets, tempo. '
+      ? 'The top row’s four right-hand buttons - Session to Custom on a Pro - are the pages: key, note, widgets, tempo. '
         + 'The right column is start/stop, continue, tap and panic on every page. '
         + 'A note-page pad plays the key; a widget’s CC arrives on this cable, so bind it in the mod matrix or learn it.'
       : 'Choose a cable and the module asks it who is there. What answers is put into programmer mode and lit.'));

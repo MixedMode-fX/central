@@ -31,7 +31,7 @@ implementation of the hardware seam, next to the Teensy one:
 | the control plane | `main.cpp`'s loop tail | `emu_control_service()`, the same calls in the same order |
 | entropy at boot | cycle counter, floating ADC | `Math.random()` |
 | the editor's picture of it | `SYSEX_MONITOR` over the control cable | the same message, over the same handler |
-| a Launchpad's cable | a device on the USB host or a DIN port | `app/src/runtime/launchpad.js`: answers the inquiry, keeps the LEDs, sends the pads |
+| a Launchpad's cable | a Launchpad on the USB host or a DIN port | `app/src/runtime/launchpad.js`: answers the inquiry, keeps the LEDs, sends the pads |
 
 **Why it needs no rewrite.** The firmware reaches hardware only through `IGpio`
 and `IMidiOut` (`src/hal/`); `main.cpp` and `src/hal/teensy/` are the only

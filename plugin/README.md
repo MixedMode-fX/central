@@ -40,7 +40,7 @@ whatever C++ compiler is on the desk. `src/processor.cpp` and
 ## Output routing is just MIDI
 
 The module routes by an eight-bit mask of cables - four USB cables, DIN
-ports, a host port - and eight gate jacks. A plugin has one MIDI output, so:
+ports, the USB host's two - and eight gate jacks. A plugin has one MIDI output, so:
 
 - **A `MidiOutPort` on any musical cable reaches the host.** The mask is
   the module's; where the events go afterwards is the DAW's routing. The

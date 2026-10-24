@@ -37,11 +37,8 @@ constexpr uint8_t ALL_MIDI_PORTS = 0
 #ifdef SERIAL_MIDI_2
     | mmMIDI_SERIAL_2
 #endif
-#ifdef SERIAL_MIDI_3
-    | mmMIDI_SERIAL_3
-#endif
 #ifdef MMMC_USB_HOST
-    | mmMIDI_HOST_1
+    | mmMIDI_HOST_LAUNCHPAD | mmMIDI_HOST_1
 #endif
     ;
 

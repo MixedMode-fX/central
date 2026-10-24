@@ -76,6 +76,10 @@
 #define MAX_OUT 8
 #define N_PARAM 336
 
+// MIDI devices the USB host socket talks to at once, through its hubs: a
+// device with several MIDI interfaces takes one of these for each.
+#define N_HOST_MIDI_DEVICES 6
+
 // Reserved hardware nodes outside the pool.
 #define N_MIDI_IN_NODES 4
 #define N_MIDI_OUT_NODES 4

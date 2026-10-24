@@ -11,7 +11,19 @@
 # installed. It exists so that a session at a desk and a run in CI reach those
 # same scripts by the same name you do.
 
-PIO := .venv/bin/pio
+ifeq ($(OS),Windows_NT)
+# Every recipe here is POSIX. Make on Windows runs them through cmd.exe unless
+# told otherwise, and runs a command with no shell syntax in it directly, so
+# Git for Windows' coreutils go on PATH as well as its bash becoming SHELL.
+# That is what makes it work from PowerShell. For a non-default install:
+# `make GIT_ROOT=D:/Git`.
+GIT_ROOT ?= C:/Program Files/Git
+export PATH := $(GIT_ROOT)/usr/bin;$(PATH)
+SHELL := $(GIT_ROOT)/usr/bin/bash.exe
+EXE := .exe
+endif
+
+PIO := .venv/bin/pio$(EXE)
 FIRMWARE_ENV := teensy41
 VERSION := $(shell cat VERSION)
 

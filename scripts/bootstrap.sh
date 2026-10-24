@@ -15,6 +15,12 @@ if [ ! -x .venv/bin/python ]; then
     python3 -m venv .venv
 fi
 
+# Python on Windows puts the venv's executables in Scripts/, not bin/. A
+# junction gives every caller the one path, and needs no privilege to make.
+if [ -d .venv/Scripts ] && [ ! -e .venv/bin ]; then
+    cmd //c mklink //J "$(cygpath -w .venv/bin)" "$(cygpath -w .venv/Scripts)" >/dev/null
+fi
+
 # A venv can exist with no pip in it: a container image that ships a
 # half-built one, or `python3 -m venv` on a system whose ensurepip is a
 # separate package. The interpreter is there, so the guard above is happy, and

@@ -32,7 +32,7 @@
 // `.syx` file from one, is refused rather than decoded into the wrong bytes.
 // Bump it whenever anything below moves - including a parameter number or an
 // algorithm id, which change no field here but change what the bytes mean.
-#define PATCH_FORMAT_VERSION 12
+#define PATCH_FORMAT_VERSION 13
 
 // "MMMC", big-endian, at the head of every stored or transmitted image.
 #define PATCH_MAGIC 0x4D4D4D43u
@@ -50,6 +50,7 @@ enum CodecError : uint8_t {
     CODEC_TOO_MANY_ROUTES,    // more modulation routes than N_MOD_ROUTE
     CODEC_TOO_MANY_MACROS,    // more macros than N_MACRO
     CODEC_TOO_MANY_MACRO_DEST,// more macro destinations than N_MACRO_DEST
+    CODEC_TOO_MANY_WIDGETS,   // more Launchpad widgets than LP_WIDGETS
 };
 
 // Global settings that travel with a patch: everything the module needs to

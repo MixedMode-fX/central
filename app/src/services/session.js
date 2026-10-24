@@ -38,6 +38,10 @@ export class Session extends EventTarget {
     // these are two different numbers and an indicator showing only the
     // first is showing the wrong one.
     this.globalsLive = new Map();
+    // What the module's Launchpad surface is doing, as last reported
+    // (src/surface/launchpad.h): linked or not, which model, which page.
+    // Live state, like the rest here.
+    this.lpLive = null;
     // The running module, as it reports itself (runtime/monitor.js): what
     // everything live on the page is painted from, whichever transport the
     // module is on the end of.
@@ -158,10 +162,12 @@ export class Session extends EventTarget {
     const slots = [...this.live.modSlots];
     const macros = [...this.live.macroSlots];
     const globals = [...this.live.globalNames];
+    const launchpad = this.live.launchpad;
     if (!slots.length) this.modLive.clear();
     if (!macros.length) this.macroLive.clear();
     if (!globals.length) this.globalsLive.clear();
-    if (!slots.length && !macros.length && !globals.length) return;
+    if (!launchpad) this.lpLive = null;
+    if (!slots.length && !macros.length && !globals.length && !launchpad) return;
     this.modPolling = true;
     try {
       for (const slot of slots) {
@@ -178,12 +184,14 @@ export class Session extends EventTarget {
         const value = await this.device.getControl(target.kind, 0, target.param);
         if (value === null) this.globalsLive.delete(name); else this.globalsLive.set(name, value);
       }
+      if (launchpad) this.lpLive = await this.device.getLpState();
     } catch {
       // A module that has gone away is the connection's problem, not this
       // view's: the meters go quiet and every other panel is unaffected.
       this.modLive.clear();
       this.macroLive.clear();
       this.globalsLive.clear();
+      this.lpLive = null;
     } finally {
       this.modPolling = false;
     }

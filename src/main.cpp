@@ -24,6 +24,7 @@
 #include "control/mod_matrix.h"
 #include "control/nrpn.h"
 #include "control/midi_dispatch.h"
+#include "surface/launchpad.h"
 #include "hal/midi_types.h"
 #include "version.h"
 
@@ -74,6 +75,12 @@ static Monitor monitor(master, panel, leds);
 static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_matrix,
                              macros, control_sum, monitor);
 
+// The Launchpad, when the patch names a cable for one (surface/launchpad.h):
+// the panel the module has not got, on a cable it has. In front of the
+// graph like a transport, and writing through the same applier a mapped CC
+// does.
+static Launchpad launchpad(patches, master, cc_map, panel);
+
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
 
@@ -105,6 +112,7 @@ void setup(){
     // LED says which (#7). A freshly flashed module with an empty EEPROM
     // still comes up doing something observable.
     patches.boot(micros());
+    protocol.attach(launchpad);
     console.greet();
 
     // Last: the timer only starts once there is a patch for it to drive.
@@ -122,7 +130,7 @@ void loop(){
     //    (control/midi_dispatch.h). Realtime messages go to the clock instead
     //    of onto a bus (#4, #5). A message the graph has no room for this
     //    pass stays queued for the next one rather than being dropped.
-    dispatch_midi(midi_in_queue, protocol, nrpn, cc_map, master, now);
+    dispatch_midi(midi_in_queue, protocol, nrpn, cc_map, master, launchpad, now);
 
     // 3. apply whatever the controllers moved, then one evaluation pass.
     //    Parameter writes happen here, before process(), and never in an
@@ -151,6 +159,9 @@ void loop(){
     macros.expand(patches.active(), control_sum);
     control_sum.commit(now);
     master.pass(now);
+    //    The surface after the pass, so its lights show the pass that just
+    //    ran: the key, the clock, where a fader's target is.
+    launchpad.service(now);
 
     // 4. reprogram the subtick timer if the tempo or the external period moved.
     mm_clock_service();

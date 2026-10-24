@@ -67,6 +67,16 @@
 //                          depth             2   signed, two's complement
 //                          flags             1
 //                      }
+//   launchpad          port 1, model 1, channel 1, row_offset 1, octave 1
+//                      (surface/launchpad.h; a zero port is no Launchpad)
+//   n_widgets          1   (the custom pages' columns; empty ones not stored)
+//   widgets            n_widgets x {
+//                          slot              1   which widgets[] entry it is
+//                          kind              1
+//                          cc                1
+//                          channel           1
+//                          colour            1
+//                      }
 
 static constexpr size_t HEADER_BYTES = 8;
 static constexpr size_t CRC_BYTES = 2;
@@ -77,6 +87,8 @@ static constexpr size_t MAPPING_BYTES = 13u;
 static constexpr size_t ROUTE_BYTES = 13u;
 static constexpr size_t MACRO_BYTES = 1u + MACRO_NAME_BYTES;
 static constexpr size_t MACRO_DEST_BYTES = 11u;
+static constexpr size_t LAUNCHPAD_BYTES = 5u;
+static constexpr size_t WIDGET_BYTES = 5u;
 
 uint16_t patch_codec::crc16(const uint8_t* data, size_t length){
     uint16_t crc = 0xFFFF;
@@ -95,7 +107,8 @@ size_t patch_codec::max_encoded_size(){
          + 1u + (size_t)N_CC_MAP * MAPPING_BYTES
          + 1u + (size_t)N_MOD_ROUTE * ROUTE_BYTES
          + 1u + (size_t)N_MACRO * MACRO_BYTES
-         + 1u + (size_t)N_MACRO_DEST * MACRO_DEST_BYTES + CRC_BYTES;
+         + 1u + (size_t)N_MACRO_DEST * MACRO_DEST_BYTES
+         + LAUNCHPAD_BYTES + 1u + (size_t)LP_WIDGETS * WIDGET_BYTES + CRC_BYTES;
 }
 
 // A small append-only writer, so every put is bounds-checked in one place.
@@ -270,6 +283,29 @@ CodecError patch_codec::encode(const Patch& patch, const GlobalSettings& globals
         w.u8(d.flags);
     }
 
+    // The Launchpad, and the columns of its custom pages. The five bytes
+    // that say where it is and how it plays are always there - a zero port
+    // is "no Launchpad", which is what an empty patch says - and a column
+    // doing nothing is not stored, as an unused binding is not.
+    const LaunchpadConfig& lp = patch.launchpad;
+    w.u8(lp.port);
+    w.u8(lp.model);
+    w.u8(lp.channel);
+    w.u8(lp.row_offset);
+    w.u8(lp.octave);
+    uint8_t n_widgets = 0;
+    for (uint8_t i = 0; i < LP_WIDGETS; i++) if (lp.widgets[i].kind != LP_WIDGET_NONE) n_widgets++;
+    w.u8(n_widgets);
+    for (uint8_t i = 0; i < LP_WIDGETS; i++){
+        const LaunchpadWidget& g = lp.widgets[i];
+        if (g.kind == LP_WIDGET_NONE) continue;
+        w.u8(i);
+        w.u8(g.kind);
+        w.u8(g.cc);
+        w.u8(g.channel);
+        w.u8(g.colour);
+    }
+
     if (w.overflowed) return CODEC_NO_ROOM;
 
     const size_t payload = w.at - payload_start;
@@ -412,6 +448,27 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
         if (r.underflowed) return CODEC_TRUNCATED;
         if (slot >= N_MACRO_DEST) return CODEC_TOO_MANY_MACRO_DEST;
         patch.macro_dest[slot] = d;
+    }
+
+    LaunchpadConfig& lp = patch.launchpad;
+    lp.port = r.u8();
+    lp.model = r.u8();
+    lp.channel = r.u8();
+    lp.row_offset = r.u8();
+    lp.octave = r.u8();
+    const uint8_t n_widgets = r.u8();
+    if (r.underflowed) return CODEC_TRUNCATED;
+    if (n_widgets > LP_WIDGETS) return CODEC_TOO_MANY_WIDGETS;
+    for (uint8_t i = 0; i < n_widgets; i++){
+        const uint8_t slot = r.u8();
+        LaunchpadWidget g = {};
+        g.kind = r.u8();
+        g.cc = r.u8();
+        g.channel = r.u8();
+        g.colour = r.u8();
+        if (r.underflowed) return CODEC_TRUNCATED;
+        if (slot >= LP_WIDGETS) return CODEC_TOO_MANY_WIDGETS;
+        lp.widgets[slot] = g;
     }
     return r.underflowed ? CODEC_TRUNCATED : CODEC_OK;
 }

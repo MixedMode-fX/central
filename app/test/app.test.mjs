@@ -4419,3 +4419,117 @@ test('a note played in the plugin goes to its MIDI input on the page’s cable',
   play.noteOn(61, 100, { port: P.MIDI_CONTROL_PORT });
   assert.equal(backend.emitted.length, 2);
 });
+
+// --- the Launchpad ---------------------------------------------------------------
+
+// The device's half of the module's conversation with its Launchpad
+// (runtime/launchpad.js), against the real surface in the real firmware: the
+// module asks the cable, the page answers as a Mini, the module puts it into
+// programmer mode and lights it, and a pad pressed on screen plays the key.
+test('the virtual Launchpad links the module and plays its key', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const launchpad = new (await import('../src/runtime/launchpad.js')).VirtualLaunchpad(module);
+  const played = [];
+  module.onMidi((e) => { if (e.type === 0x90 || e.type === 0x80) played.push(e); });
+
+  const patch = codec.emptyPatch();
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_HOST_1, channel: 0, buses: [0] };
+  patch.midiOut[0] = { targetMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  patch.launchpad = { ...codec.emptyLaunchpad(), port: P.MidiPort.mmMIDI_HOST_1 };
+  const globals = codec.emptyGlobals();
+  globals.scale = P.ScaleId.SCALE_MAJOR;
+  await device.sendPatch(patch, globals);
+  launchpad.follow(P.MidiPort.mmMIDI_HOST_1);
+
+  // A few passes: the inquiry goes out, the page answers on the next drain,
+  // and the module's answer to that - programmer mode, then a frame - comes
+  // out on the one after, as it does a frame later in the page.
+  module.advance(20_000);
+  module.drainEvents();
+  assert.ok(launchpad.inquiries >= 1, 'the module asked who was on the cable');
+  module.advance(20_000);
+  module.drainEvents();
+  assert.equal(launchpad.programmer, true, 'what answered was put into programmer mode');
+  assert.ok(launchpad.frames >= 1, 'and lit');
+  module.advance(50_000);
+  module.drainEvents();
+  const { gridId, topId, LOGO_ID } = await import('../src/runtime/launchpad.js');
+  assert.equal(launchpad.leds[LOGO_ID], 3, 'the logo is white while linked');
+  assert.equal(launchpad.leds[topId(5)], 3, 'the note page is the page');
+  assert.equal(launchpad.leds[gridId(0, 0)], 45, 'the tonic is blue');
+  assert.equal(launchpad.leds[gridId(0, 1)], 1, 'a degree is dim');
+  assert.equal((await device.getLpState()).linked, true);
+  assert.equal((await device.getLpState()).model, P.LaunchpadModel.LP_MODEL_MINI_MK3);
+
+  // A pad on screen is a note in the key, on the cable, into the patch.
+  launchpad.press(gridId(0, 2));
+  module.advance(2_000);
+  launchpad.release(gridId(0, 2));
+  module.advance(2_000);
+  assert.deepEqual(played.map((e) => [e.type, e.d1]), [[0x90, 64], [0x80, 64]], 'the third of C major, then off');
+  module.drainEvents();
+  // The raw pad number never reached the graph.
+  assert.ok(played.every((e) => e.d1 !== gridId(0, 2)));
+
+  // Another model is another answer, and the module relinks it.
+  launchpad.setModel('pro');
+  assert.equal(launchpad.programmer, false);
+  module.advance(7_000_000);
+  module.drainEvents();
+  module.advance(100_000);
+  module.drainEvents();
+  assert.equal(launchpad.programmer, true);
+  assert.equal((await device.getLpState()).model, P.LaunchpadModel.LP_MODEL_PRO_MK3);
+  // Leaving the cable turns the device back to a Launchpad.
+  launchpad.follow(0);
+  assert.equal(launchpad.programmer, false);
+});
+
+test('the Launchpad tab draws the patch\'s half and the page\'s', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const { LaunchpadTab } = await import('../src/ui/tabs/LaunchpadTab.js');
+  const { VirtualLaunchpad } = await import('../src/runtime/launchpad.js');
+  const patch = codec.emptyPatch();
+  const app = fakeApp({ patch, device, module });
+  app.launchpad = new VirtualLaunchpad(module);
+  app.session.lpLive = null;
+  app.hosted = false;
+  await withDom(() => {
+    // No Launchpad: a cable to choose, no pads to draw.
+    let tab = LaunchpadTab(app);
+    assert.match(words(tab), /Choose a cable/);
+    assert.equal(findAll(tab, (n) => n.className.includes('lp-cell')).length, 0);
+
+    patch.launchpad = { ...codec.emptyLaunchpad(), port: P.MidiPort.mmMIDI_HOST_1 };
+    patch.launchpad.widgets[2] = { kind: P.LaunchpadWidgetKind.LP_WIDGET_FADER, cc: 22, channel: 1, colour: 9 };
+    app.launchpad.follow(P.MidiPort.mmMIDI_HOST_1);
+    tab = LaunchpadTab(app);
+    // A Mini: 64 pads, 8 buttons on top, 8 on the right, a logo.
+    const of = (name) => findAll(tab, (n) => n.classList.contains(name)).length;
+    assert.equal(of('grid'), 64);
+    assert.equal(of('round'), 16);
+    assert.equal(of('logo'), 1);
+    // Sixteen widget rows, two pages.
+    assert.equal(of('lp-widget'), 16);
+    assert.match(words(tab), /page 1/);
+    assert.match(words(tab), /page 2/);
+    // A press on a pad is a note into the module on the surface's cable.
+    const pad = find(tab, (n) => n.attrs['data-id'] === '11');
+    pad.fire('pointerdown', { preventDefault() {} });
+    pad.fire('pointerup', {});
+    // The Pro has its extra column and row, inert.
+    app.launchpad.setModel('pro');
+    tab = LaunchpadTab(app);
+    assert.equal(findAll(tab, (n) => n.classList.contains('inert')).length, 16);
+  });
+});
+
+test('the virtual Launchpad answers a palette index with a colour', async () => {
+  const { paletteColour, PALETTE } = await import('../src/runtime/launchpad.js');
+  assert.equal(PALETTE.length, 128);
+  assert.equal(paletteColour(0), '#000000');
+  assert.equal(paletteColour(45), '#0000ff');
+  assert.equal(paletteColour(3), '#ffffff');
+});

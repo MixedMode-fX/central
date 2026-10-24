@@ -7,11 +7,14 @@
 #include "protocol/sysex_handler.h"
 #include "control/cc_mapper.h"
 #include "control/nrpn.h"
+#include "surface/launchpad.h"
 
 // The path every queued MIDI message takes into the module, written once so
 // the Teensy's main loop and the tests run the same code (#5, #21, #22).
 //
-// In order: a Program Change the module is listening for recalls a preset
+// In order: a message on the Launchpad's cable is the surface's and is
+// translated by it (surface/launchpad.h) - what it emits re-enters below; a
+// Program Change the module is listening for recalls a preset
 // and is consumed; an NRPN controller, where NRPN is enabled for that port
 // and channel, is consumed by the decoder; a mapped CC is consumed by the
 // binding table (unless flagged pass-through); everything left is offered
@@ -28,6 +31,6 @@
 //
 // Returns how many messages left the queue.
 uint16_t dispatch_midi(MidiInputQueue& queue, SysexHandler& protocol, NrpnDecoder& nrpn,
-                       CcMapper& cc, MixedModeMaster& master, uint32_t now_us);
+                       CcMapper& cc, MixedModeMaster& master, Launchpad& surface, uint32_t now_us);
 
 #endif

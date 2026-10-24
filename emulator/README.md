@@ -31,6 +31,7 @@ implementation of the hardware seam, next to the Teensy one:
 | the control plane | `main.cpp`'s loop tail | `emu_control_service()`, the same calls in the same order |
 | entropy at boot | cycle counter, floating ADC | `Math.random()` |
 | the editor's picture of it | `SYSEX_MONITOR` over the control cable | the same message, over the same handler |
+| a Launchpad's cable | a device on the USB host or a DIN port | `app/src/runtime/launchpad.js`: answers the inquiry, keeps the LEDs, sends the pads |
 
 **Why it needs no rewrite.** The firmware reaches hardware only through `IGpio`
 and `IMidiOut` (`src/hal/`); `main.cpp` and `src/hal/teensy/` are the only
@@ -53,8 +54,11 @@ rather than the page.
 - **The page decides nothing the firmware decides.** It calls
   `emu_control_service()` once per pass, which is `main.cpp`'s tail calls in
   `main.cpp`'s order, the beat flash and the LED vocabulary included.
-- **An incoming MIDI event takes the loop's path**: Program Change to preset
-  recall, then NRPN, then the binding table, then `deliver_midi()`.
+- **An incoming MIDI event takes the loop's path**: the Launchpad's cable
+  first, then Program Change to preset recall, then NRPN, then the binding
+  table, then `deliver_midi()`. SysEx the module sends to a musical cable
+  comes back to the page with the cable it went to, which is how the page's
+  Launchpad is lit.
 
 The page never sees a struct. It builds a patch through `emu_patch_*`, reads
 the registry through `emu_algo_*` and the sizing constants through

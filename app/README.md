@@ -27,7 +27,7 @@ nothing serving it. The build from `main` is live at
 
 ## The shape of it
 
-Six tabs — **patch**, **globals**, **MIDI**, **monitor**, **library**, **schema** — and
+Seven tabs — **patch**, **globals**, **MIDI**, **Launchpad**, **monitor**, **library**, **schema** — and
 **play** as a button at the top beside *connect a module*, because those two
 answer the same question: which module am I listening to, the one in the page
 or the one on the cable. Play does not open a tab: it opens the performance
@@ -173,6 +173,19 @@ the module is in, none of which a patch travels with. What a controller *moves*
 is in the patch, so it is in the mod matrix; what it counts time by, and what a
 Program Change does to it, belong to the module rather than to a cable, so they
 are on the globals tab.
+
+**Launchpad** — the panel the module has not got, on a cable it has
+(`src/surface/launchpad.h`). The first panel is the patch's: which cable the
+Launchpad is on, which model, how its note page plays, and what the module
+says its surface is doing. The second is the device itself, drawn: every LED
+is a palette index the module sent down that cable, and a press sends what a
+pad sends in programmer mode, so the picture is the wire and never a guess at
+what a page should look like. It stands in for a Mini, an X or a Pro, and a
+real Launchpad plugged into this computer takes its place on the same cable,
+the drawing then mirroring the hardware. The third is the widgets: what each
+column of the two custom pages sends, written into the patch like a binding.
+Only the page's own module has a cable the page can be on the other end of; a
+module in a plugin or on a cable has its Launchpad on its own socket.
 
 **library** — where a patch lives: this browser, a file, or the module's preset
 slots.
@@ -420,8 +433,9 @@ app/
                       firmware in the page), wasm.js, webmidi.js, host.js
                       (the plugin around the page), controller.js (a
                       controller playing it), midiout.js (what it plays,
-                      out of this computer), audio/ (the listener and the
-                      drum kits)
+                      out of this computer), launchpad.js (the Launchpad on
+                      the other end of the module's cable, or a real one
+                      bridged in), audio/ (the listener and the drum kits)
     services/         the app's state and every command on it: state.js,
                       render.js (the coalesced re-render and the per-frame
                       painters), session.js (the device), editor.js (every
@@ -442,6 +456,7 @@ app/
       canvas/         the patch as blocks and arrows
       surface/        the performance surface: the pads, the pots, and the
                       sheet that says what a control does
+      launchpad/      the Launchpad, drawn from the LEDs the module lit
       scope/          the scope and the piano rolls
       tabs/           one file per tab
       App.js          the shell

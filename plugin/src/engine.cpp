@@ -83,6 +83,7 @@ Engine::Engine() :
     cc_map(patch_manager, mm, macros), control_sum(cc_map),
     mod_matrix(patch_manager, cc_map, control_sum),
     nrpn(patch_manager, cc_map),
+    launchpad(patch_manager, mm, cc_map, panel),
     protocol(patch_manager, mm, patch_store, status, panel, cc_map, mod_matrix, macros, control_sum, monitor),
     queue(),
     now_us(0), subtick_interval(0), subtick_due(0),
@@ -95,6 +96,7 @@ void Engine::boot(uint32_t seed_a, uint32_t seed_b){
     entropy::stir(seed_a);
     entropy::stir(seed_b);
     entropy::stir(seed_a ^ (seed_b << 7));
+    protocol.attach(launchpad);
     run_boot();
     booted = true;
 }
@@ -183,13 +185,14 @@ void Engine::pass(){
     if (!booted) return;
     const uint32_t now = now_us;
     drive_clock();
-    dispatch_midi(queue, protocol, nrpn, cc_map, mm, now);
+    dispatch_midi(queue, protocol, nrpn, cc_map, mm, launchpad, now);
     cc_map.apply(now);
     control_sum.begin();
     mod_matrix.apply(mm.buses(), now);
     macros.expand(patch_manager.active(), control_sum);
     control_sum.commit(now);
     mm.pass(now);
+    launchpad.service(now);
 
     const uint32_t beat = mm.clock().count() / CLOCK_SUBTICKS_PER_QUARTER;
     if (!have_beat || beat != last_beat){

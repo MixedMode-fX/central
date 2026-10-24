@@ -31,6 +31,7 @@
 #include "led/status_leds.h"
 #include "monitor/hal_tap.h"
 #include "monitor/monitor.h"
+#include "surface/launchpad.h"
 #include "web_hal.h"
 
 #define EMU_EXPORT extern "C" __attribute__((visibility("default")))
@@ -58,6 +59,11 @@ static NrpnDecoder nrpn(patches, cc_map);
 static Monitor monitor(master, panel, leds);
 static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_matrix,
                              macros, control_sum, monitor);
+// The Launchpad, as main.cpp has it (surface/launchpad.h). The page's
+// virtual Launchpad is on the other end of whichever cable the patch names:
+// its pads come in through emu_control_surface and its LEDs leave in the
+// port SysEx buffer.
+static Launchpad launchpad(patches, master, cc_map, panel);
 
 // The patch under construction. Separate from what is running: the page fills
 // this through the emu_patch_* setters and calls emu_load() to make it live.
@@ -201,6 +207,7 @@ EMU_EXPORT uint32_t emu_node_count(){ return master.node_count(); }
 // same place main.cpp samples, after the buses have published.
 EMU_EXPORT void emu_pass(uint32_t now_us){
     master.pass(now_us);
+    launchpad.service(now_us);
     monitor.sample(now_us);
 }
 // Offers a message to every MidiInPort, as main.cpp does when it drains the
@@ -418,6 +425,7 @@ EMU_EXPORT uint32_t emu_node_algo(uint32_t i){
 
 // Boot as the module does: slot 0 if it checks out, the flash default if not.
 EMU_EXPORT uint32_t emu_boot(uint32_t now_us){
+    protocol.attach(launchpad);
     patches.boot(now_us);
     cc_map.reset();
     patch = patches.active();
@@ -443,6 +451,22 @@ EMU_EXPORT const uint8_t* emu_sysex_out_ptr(){ return midi.sysex_bytes; }
 EMU_EXPORT uint32_t emu_sysex_out_len(){ return midi.sysex_used; }
 EMU_EXPORT uint32_t emu_sysex_out_dropped(){ return midi.sysex_dropped; }
 EMU_EXPORT void emu_sysex_out_clear(){ midi.drain_sysex(); }
+
+// One incoming channel-voice message offered to the Launchpad first, as
+// main.cpp's loop offers it (control/midi_dispatch.h): 1 when the message
+// arrived on the surface's cable and was the surface's to translate.
+EMU_EXPORT uint32_t emu_control_surface(uint32_t source, uint32_t type, uint32_t channel,
+                                       uint32_t d1, uint32_t d2, uint32_t now_us){
+    const MidiEvent e = {(uint8_t)type, (uint8_t)channel, (uint8_t)d1, (uint8_t)d2};
+    return launchpad.receive((uint8_t)source, e, now_us) ? 1 : 0;
+}
+// SysEx the module sent to a musical cable rather than to the editor - the
+// Launchpad's LEDs and its inquiry - as records of {target, length lo,
+// length hi, bytes}. The page reads them out and clears the buffer.
+EMU_EXPORT const uint8_t* emu_port_sysex_ptr(){ return midi.port_sysex; }
+EMU_EXPORT uint32_t emu_port_sysex_len(){ return midi.port_sysex_used; }
+EMU_EXPORT void emu_port_sysex_clear(){ midi.drain_port_sysex(); }
+EMU_EXPORT uint32_t emu_const_lp_widgets(){ return LP_WIDGETS; }
 
 // One incoming CC through the control path, as main.cpp's loop offers it:
 // NRPN first where it is enabled, then the mapping table. Returns 1 when the

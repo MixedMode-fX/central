@@ -157,8 +157,26 @@ export function emptyPatch() {
     // macro, so one sweeping control with six destinations and three with one
     // each all fit. Null is an unused slot, exactly as ccMap.
     macroDest: Array.from({ length: P.N_MACRO_DEST }, () => null),
+    // A Launchpad on one of the module's cables, and the columns of its
+    // custom pages (src/node/patch.h, LaunchpadConfig). A port of 0 is no
+    // Launchpad; a null widget is an empty column.
+    launchpad: emptyLaunchpad(),
   };
 }
+
+export function emptyLaunchpad() {
+  return {
+    port: 0,
+    model: P.LaunchpadModel.LP_MODEL_AUTO,
+    channel: 1,
+    rowOffset: 3,
+    octave: 0,
+    widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
+  };
+}
+
+// A column is one while it has a kind (src/node/patch.h, LP_WIDGET_NONE).
+export const isWidget = (w) => Boolean(w) && Boolean(w.kind);
 
 export function emptyNode(algorithmId) {
   return {
@@ -340,6 +358,22 @@ export function encodePatch(patch, globals = emptyGlobals()) {
     w.u8(d.flags ?? 0);
   }
 
+  const lp = patch.launchpad ?? emptyLaunchpad();
+  w.u8(lp.port ?? 0);
+  w.u8(lp.model ?? 0);
+  w.u8(lp.channel ?? 0);
+  w.u8(lp.rowOffset ?? 0);
+  w.u8(lp.octave ?? 0);
+  const widgets = (lp.widgets ?? []).map((g, slot) => ({ g, slot })).filter(({ g }) => isWidget(g));
+  w.u8(widgets.length);
+  for (const { g, slot } of widgets) {
+    w.u8(slot);
+    w.u8(g.kind);
+    w.u8(g.cc);
+    w.u8(g.channel);
+    w.u8(g.colour);
+  }
+
   const payload = w.bytes.length - payloadStart;
   w.bytes[6] = payload & 0xff;
   w.bytes[7] = (payload >> 8) & 0xff;
@@ -451,6 +485,18 @@ export function decodePatch(image) {
       flags: r.u8(),
     };
     if (slot < P.N_MACRO_DEST) patch.macroDest[slot] = dest;
+  }
+
+  patch.launchpad = {
+    port: r.u8(), model: r.u8(), channel: r.u8(), rowOffset: r.u8(), octave: r.u8(),
+    widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
+  };
+  const nWidgets = r.u8();
+  if (nWidgets > P.LP_WIDGETS) throw new Error('more Launchpad widgets than the module holds');
+  for (let i = 0; i < nWidgets; i++) {
+    const slot = r.u8();
+    const widget = { kind: r.u8(), cc: r.u8(), channel: r.u8(), colour: r.u8() };
+    if (slot < P.LP_WIDGETS) patch.launchpad.widgets[slot] = widget;
   }
 
   return { patch, globals };

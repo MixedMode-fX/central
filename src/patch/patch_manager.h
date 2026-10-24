@@ -105,6 +105,10 @@ class PatchManager {
         // would make the whole image refuse to load is refused here instead -
         // where the host asked for it, one record at a time.
         ApplyError commit_macro_dest(uint8_t slot, uint32_t now_us);
+        // The Launchpad and its widgets, as one record (node/patch.h). Not a
+        // node and not a port, so nothing is reconstructed: the surface
+        // reads the active patch and follows it (surface/launchpad.h).
+        ApplyError commit_launchpad(uint32_t now_us);
         // Globals only: no node is reconstructed, so a tempo change cannot
         // restart a sequencer. `persist` is false for a write that will be
         // made again next pass - see modulate_param below for why that

@@ -11,6 +11,7 @@ import { Listener } from '../runtime/audio/listener.js';
 import { Heartbeat } from '../runtime/heartbeat.js';
 import { Controller } from '../runtime/controller.js';
 import { MidiOutputs } from '../runtime/midiout.js';
+import { VirtualLaunchpad } from '../runtime/launchpad.js';
 import { describeSupport, access, discover, WebMidiTransport } from '../runtime/webmidi.js';
 import { hosted, HostTransport } from '../runtime/host.js';
 import { Library } from './storage.js';
@@ -34,6 +35,7 @@ export function createApp({ root, view, wasmUrl }) {
     listener: null,         // the audio standing in for what is downstream
     controller: null,       // a MIDI controller plugged into this computer
     outputs: null,          // where what the module plays leaves this computer
+    launchpad: null,        // the Launchpad on the other end of the module's cable, drawn
     heartbeat: null,        // what keeps the module running while the page is hidden
     // Whether this page is the plugin's window (runtime/host.js). Then the
     // module is the plugin, there is nothing in the page to run, and no
@@ -111,6 +113,9 @@ export function createApp({ root, view, wasmUrl }) {
       patches.listener = app.listener;
       app.controller = new Controller(app.module);
       app.outputs = new MidiOutputs(app.module, library);
+      // The device on the other end of the surface's cable: answers the
+      // module's inquiry, keeps its LEDs, sends its pads (runtime/launchpad.js).
+      app.launchpad = new VirtualLaunchpad(app.module);
       // What runs the module while the page is hidden. It arms itself on the
       // first press anywhere and asks the user for nothing: a machine that
       // stops when you look at something else is not running

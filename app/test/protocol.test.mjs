@@ -909,3 +909,65 @@ test('a macro says where it is, and an untouched one says it is silent', async (
   assert.equal(state.dests[0].slot, 0);
   assert.equal(state.dests[0].status, P.ModStatus.MOD_STATUS_SILENT);
 });
+
+// --- The Launchpad -----------------------------------------------------------
+
+// Where the Launchpad is and what its columns send are patch state
+// (src/node/patch.h, LaunchpadConfig): written over the wire one record at a
+// time, dumped back whole, and in the image byte for byte.
+test('the Launchpad is written, dumped and read back', async () => {
+  const caps = await device.readCapabilities();
+  assert.equal(caps.lpWidgets, E.emu_const_lp_widgets());
+  await device.sendPatch(samplePatch(), codec.emptyGlobals());
+  await device.setLaunchpad({
+    port: P.MidiPort.mmMIDI_HOST_1, model: P.LaunchpadModel.LP_MODEL_PRO_MK3, channel: 3, rowOffset: 5, octave: 4,
+  });
+  await device.setLpWidget(1, { kind: P.LaunchpadWidgetKind.LP_WIDGET_FADER, cc: 21, channel: 2, colour: 9 });
+  await device.setLpWidget(9, { kind: P.LaunchpadWidgetKind.LP_WIDGET_TOGGLES, cc: 60, channel: 1, colour: 21 });
+  const read = await device.getLaunchpad();
+  assert.equal(read.port, P.MidiPort.mmMIDI_HOST_1, 'the host port is bit 7 and has to survive the wire');
+  assert.equal(read.model, P.LaunchpadModel.LP_MODEL_PRO_MK3);
+  assert.deepEqual(await device.getLpWidget(1), { kind: P.LaunchpadWidgetKind.LP_WIDGET_FADER, cc: 21, channel: 2, colour: 9 });
+  assert.equal(await device.getLpWidget(0), null);
+
+  const dumped = await device.dump();
+  const lp = dumped.patch.launchpad;
+  assert.equal(lp.port, P.MidiPort.mmMIDI_HOST_1);
+  assert.equal(lp.channel, 3);
+  assert.equal(lp.rowOffset, 5);
+  assert.equal(lp.octave, 4);
+  assert.deepEqual(lp.widgets[9], { kind: P.LaunchpadWidgetKind.LP_WIDGET_TOGGLES, cc: 60, channel: 1, colour: 21 });
+  assert.equal(lp.widgets.filter(Boolean).length, 2);
+  // The image the app writes offline is the one the module wrote.
+  const image = codec.encodePatch(dumped.patch, dumped.globals);
+  assert.deepEqual(codec.decodePatch(image).patch.launchpad, lp);
+
+  // Nothing has answered on that cable in this test, and the module says so.
+  const state = await device.getLpState();
+  assert.equal(state.linked, false);
+  assert.equal(state.model, P.LaunchpadModel.LP_MODEL_PRO_MK3);
+
+  // A column the module cannot hold is refused, and a clear is a kind of none.
+  await assert.rejects(device.setLpWidget(2, { kind: 9, cc: 0, channel: 1, colour: 0 }), /REJECTED/);
+  await device.setLpWidget(1, null);
+  assert.equal((await device.dump()).patch.launchpad.widgets[1], null);
+  // Two cables is not a Launchpad.
+  await assert.rejects(device.setLaunchpad({ port: P.MidiPort.mmMIDI_SERIAL_1 | P.MidiPort.mmMIDI_SERIAL_2 }), /REJECTED/);
+});
+
+test('the Launchpad survives the JSON dialect', async () => {
+  const patch = samplePatch();
+  patch.launchpad = {
+    port: P.MidiPort.mmMIDI_SERIAL_1, model: P.LaunchpadModel.LP_MODEL_X, channel: 2, rowOffset: 4, octave: 0,
+    widgets: codec.emptyLaunchpad().widgets,
+  };
+  patch.launchpad.widgets[0] = { kind: P.LaunchpadWidgetKind.LP_WIDGET_BUTTONS, cc: 30, channel: 1, colour: 57 };
+  const json = toPatchJson(patch, codec.emptyGlobals(), device);
+  assert.equal(json.launchpad.port, 'DIN 1');
+  assert.equal(json.launchpad.model, 'x');
+  assert.deepEqual(json.launchpad.widgets, [{ slot: 0, kind: 'buttons', cc: 30, channel: 1, colour: 'pink' }]);
+  const back = fromPatchJson(JSON.parse(JSON.stringify(json)), device);
+  assert.deepEqual(back.patch.launchpad, patch.launchpad);
+  // A patch with no Launchpad says nothing about one.
+  assert.equal(toPatchJson(samplePatch(), codec.emptyGlobals(), device).launchpad, undefined);
+});

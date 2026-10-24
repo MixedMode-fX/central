@@ -36,7 +36,7 @@ import { EXAMPLES } from './examples.js';
 import {
   MIDI_PORTS, SCALES, STEP_DIRECTIONS, METRONOME_DIVISIONS, METRONOME_FEELS,
   CLOCK_SOURCES, SWAP_TIMINGS, CC_TARGET_KINDS, CLOCK_TARGETS, TRANSPORT_TARGETS, KEY_TARGETS,
-  TAKEOVER, RELATIVE, FOURTEEN_BIT, PASS_THROUGH,
+  TAKEOVER, RELATIVE, FOURTEEN_BIT, PASS_THROUGH, LAUNCHPAD_MODELS, LP_WIDGET_KINDS, LP_COLOURS,
 } from '../protocol/names.js';
 import { PITCH_CLASSES } from './music.js';
 
@@ -548,6 +548,48 @@ function modMapSchema(caps) {
   };
 }
 
+// A Launchpad as the module's panel (src/surface/launchpad.h): which cable
+// it is on, how its note page plays the key, and what the columns of its
+// custom pages send.
+function launchpadSchema(caps) {
+  if (!caps.lpWidgets) return false;
+  return {
+    type: 'object', additionalProperties: false, required: ['port'],
+    description: 'a Novation Launchpad (Mini MK3, X or Pro MK3) on one of the module’s cables, driven in '
+               + 'programmer mode: a note page that plays the key, a key page that sets it, a tempo page, and '
+               + 'two pages of widgets sending CCs into the patch - which a "cc_map" binding on the same cable '
+               + 'can move a parameter with. Leave the whole object out for no Launchpad.',
+    properties: {
+      port: { type: 'string', enum: MIDI_PORTS.filter((p) => p.value !== P.MIDI_CONTROL_PORT).map((p) => p.label),
+              description: 'the one cable the Launchpad is on; "USB host" on the module itself, a DIN port for a Pro' },
+      model: { type: 'string', enum: LAUNCHPAD_MODELS.map((m) => m.key.replace(/^LP_MODEL_/, '').toLowerCase()),
+               description: '"auto" reads the model off the device’s own answer; name it for a cable the answer does not come back on' },
+      channel: { type: 'integer', minimum: 1, maximum: 16, description: 'the channel the note page plays on' },
+      rowOffset: { type: 'integer', minimum: 1, maximum: 8,
+                   description: 'scale degrees between one row of the note page and the next; 3 is the usual "fourths" layout' },
+      octave: { type: 'integer', minimum: 0, maximum: P.KEY_MAX_OCTAVE,
+                description: 'the register the note page’s bottom-left pad plays in; 0 is the key’s own' },
+      widgets: {
+        type: 'array', maxItems: caps.lpWidgets,
+        description: `up to ${caps.lpWidgets} columns, eight to a page: a fader (eight levels of one CC), `
+                   + 'eight momentary buttons on cc..cc+7, or eight latching toggles on the same',
+        items: {
+          type: 'object', additionalProperties: false, required: ['slot', 'kind', 'cc'],
+          properties: {
+            slot: { type: 'integer', minimum: 0, maximum: caps.lpWidgets - 1,
+                    description: 'the column: 0..7 on the first page, 8..15 on the second' },
+            kind: { type: 'string', enum: LP_WIDGET_KINDS.filter((k) => k.value).map((k) => k.label) },
+            cc: { type: 'integer', minimum: 0, maximum: 112,
+                  description: 'the controller number; buttons and toggles take the next seven as well' },
+            channel: { type: 'integer', minimum: 1, maximum: 16 },
+            colour: { type: 'string', enum: LP_COLOURS.map((c) => c.label), description: 'how the column is lit' },
+          },
+        },
+      },
+    },
+  };
+}
+
 // The macro table, and the pool of destinations every macro shares. Split in
 // two exactly as the patch is (src/node/patch.h): a macro is a name, and what
 // it moves is a list of windows that name it back.
@@ -751,6 +793,7 @@ export function patchSchema(device) {
       mod_map: modMapSchema(caps),
       macros: macroSchema(caps),
       macro_dest: macroDestSchema(caps),
+      launchpad: launchpadSchema(caps),
     },
     $defs,
   };

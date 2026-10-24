@@ -88,7 +88,7 @@ const constants = {
   ...defines(configH, [
     'GPIO_N', 'N_GATE_BUS', 'N_NOTE_BUS', 'N_CV_BUS', 'N_NODE',
     'MAX_IN', 'MAX_OUT', 'N_PARAM', 'N_MIDI_IN_NODES', 'N_MIDI_OUT_NODES',
-    'N_CC_MAP', 'N_MOD_ROUTE', 'N_MACRO', 'N_MACRO_DEST', 'N_MACRO_DEST_PER_MACRO', 'MACRO_NAME_BYTES', 'MASTER_PPQN', 'CLOCK_SUBTICK', 'CLOCK_MIN_BPM', 'CLOCK_MAX_BPM',
+    'N_CC_MAP', 'N_MOD_ROUTE', 'N_MACRO', 'N_MACRO_DEST', 'N_MACRO_DEST_PER_MACRO', 'MACRO_NAME_BYTES', 'LP_WIDGETS', 'MASTER_PPQN', 'CLOCK_SUBTICK', 'CLOCK_MIN_BPM', 'CLOCK_MAX_BPM',
     'CLOCK_DEFAULT_BPM', 'MAX_SEQUENCE_LEN', 'NOTE_SEQ_VOICES', 'DRUM_SEQ_LANES',
     'MONITOR_EVENTS', 'MONITOR_MAX_NODES', 'MONITOR_NODE_VALUES',
   ]),
@@ -143,6 +143,8 @@ const enums = {
   ModStatus: enumeration(read('src/control/mod_matrix.h'), 'ModStatus'),
   ModFlags: enumeration(read('src/node/patch.h'), 'ModFlags'),
   GatePortDirection: enumeration(read('src/node/patch.h'), 'GatePortDirection'),
+  LaunchpadModel: enumeration(read('src/node/patch.h'), 'LaunchpadModel'),
+  LaunchpadWidgetKind: enumeration(read('src/node/patch.h'), 'LaunchpadWidgetKind'),
   ParamKind: enumeration(read('src/node/param.h'), 'ParamKind'),
   ConfigError: enumeration(read('src/node/registry.h'), 'ConfigError'),
   AlgorithmId: enumeration(read('src/node/registry.h'), 'AlgorithmId'),

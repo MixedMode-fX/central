@@ -25,7 +25,8 @@
 import * as P from '../protocol/generated.js';
 import * as codec from '../protocol/codec.js';
 import { MIDI_PORTS, portNames, scaleIdOf, scaleName, STEP_DIRECTIONS,
-         METRONOME_DIVISIONS, METRONOME_FEELS } from '../protocol/names.js';
+         METRONOME_DIVISIONS, METRONOME_FEELS, LAUNCHPAD_MODELS, LP_WIDGET_KINDS,
+         LP_COLOURS } from '../protocol/names.js';
 import { DEFAULT_KEY_OCTAVE } from './music.js';
 import { isRoute, isBinding, isMacro, isDest, targetParamName } from './patch.js';
 
@@ -307,7 +308,55 @@ export function toPatchJson(patch, globals, device) {
     dests.push(entry);
   });
   if (dests.length) json.macro_dest = dests;
+
+  // The Launchpad, when the patch has one: its cable and model by name, and
+  // the columns of its custom pages with their kinds and colours in words.
+  const lp = patch.launchpad;
+  if (lp?.port) {
+    const widgets = [];
+    (lp.widgets ?? []).forEach((g, slot) => {
+      if (!codec.isWidget(g)) return;
+      widgets.push({
+        slot, kind: lpKindName(g.kind), cc: g.cc, channel: g.channel,
+        colour: LP_COLOURS.find((c) => c.value === g.colour)?.label ?? g.colour,
+      });
+    });
+    json.launchpad = {
+      port: portNames(lp.port)[0] ?? lp.port,
+      model: LAUNCHPAD_MODELS.find((m) => m.value === lp.model)?.key.replace(/^LP_MODEL_/, '').toLowerCase() ?? lp.model,
+      channel: lp.channel, rowOffset: lp.rowOffset, octave: lp.octave,
+    };
+    if (widgets.length) json.launchpad.widgets = widgets;
+  }
   return json;
+}
+
+const lpKindName = (kind) => LP_WIDGET_KINDS.find((k) => k.value === kind)?.label ?? kind;
+
+// A Launchpad model by its short name ("mini_mk3", "x", "pro_mk3", "auto"),
+// its label, or its number.
+function launchpadModelOf(v) {
+  if (v === undefined || v === null) return P.LaunchpadModel.LP_MODEL_AUTO;
+  if (typeof v === 'number') return v;
+  const key = (x) => String(x).toLowerCase().replace(/[\s_-]+/g, '');
+  const found = LAUNCHPAD_MODELS.find((m) => key(m.key.replace(/^LP_MODEL_/, '')) === key(v) || key(m.label) === key(v));
+  if (!found) throw new Error(`unknown Launchpad model "${v}" (one of ${LAUNCHPAD_MODELS.map((m) => m.key.replace(/^LP_MODEL_/, '').toLowerCase()).join(', ')})`);
+  return found.value;
+}
+
+function lpKindOf(v) {
+  if (typeof v === 'number') return v;
+  const found = LP_WIDGET_KINDS.find((k) => k.label === String(v).toLowerCase().trim());
+  if (!found) throw new Error(`unknown Launchpad widget "${v}" (one of ${LP_WIDGET_KINDS.map((k) => k.label).join(', ')})`);
+  return found.value;
+}
+
+function lpColourOf(v) {
+  if (v === undefined || v === null) return 0;
+  if (typeof v === 'number') return v;
+  const found = LP_COLOURS.find((c) => c.label === String(v).toLowerCase().trim());
+  if (!found) throw new Error(`unknown Launchpad colour "${v}" (one of ${LP_COLOURS.map((c) => c.label).join(', ')})`);
+  return found.value;
 }
 
 export const toPatchJsonText = (patch, globals, device) =>
@@ -420,6 +469,28 @@ export function fromPatchJson(json, device) {
       throw new Error(`macro ${index}: "${name}" is longer than the ${P.MACRO_NAME_BYTES} characters a patch holds`);
     }
     patch.macros[index] = name ? { name } : null;
+  }
+  if (json.launchpad) {
+    const l = json.launchpad;
+    const port = typeof l.port === 'number' ? l.port : maskOf([l.port]);
+    patch.launchpad = {
+      port,
+      model: launchpadModelOf(l.model),
+      channel: l.channel ?? 1,
+      rowOffset: l.rowOffset ?? 3,
+      octave: l.octave ?? 0,
+      widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
+    };
+    for (const g of l.widgets ?? []) {
+      const slot = Number(g.slot ?? 0);
+      if (!(slot >= 0 && slot < P.LP_WIDGETS)) {
+        throw new Error(`Launchpad widget ${g.slot} does not exist (0..${P.LP_WIDGETS - 1})`);
+      }
+      const kind = lpKindOf(g.kind ?? 'fader');
+      patch.launchpad.widgets[slot] = kind
+        ? { kind, cc: g.cc ?? 0, channel: g.channel ?? 1, colour: lpColourOf(g.colour) }
+        : null;
+    }
   }
   for (const d of json.macro_dest ?? []) {
     const slot = Number(d.slot ?? 0);

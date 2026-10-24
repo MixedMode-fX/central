@@ -266,6 +266,65 @@ inline MacroDef unused_macro(){
 // True when this macro slot carries a name, and so exists.
 inline bool macro_used(const MacroDef& m){ return m.name[0] != 0; }
 
+// A Novation Launchpad on one of the module's cables (surface/launchpad.h).
+//
+// The module has no panel, and a Launchpad is the panel somebody already
+// owns: sixty-four pads and sixteen buttons that light up, on a cable the
+// module already has a socket for. In programmer mode the pads are raw
+// coordinates and the LEDs are the module's to light, so what the surface
+// *does* is decided here, in the patch, rather than by a factory layout on
+// the device: a note page that plays the key, a key page that sets it, a
+// tempo page, and two pages of widgets that send CCs into the patch.
+//
+// The three MK3 models speak the same programmer protocol and differ in one
+// byte, the device id in every SysEx message. `LP_MODEL_AUTO` reads it off
+// the device's answer to a device inquiry; the others name it outright for a
+// cable the inquiry does not come back on.
+enum LaunchpadModel : uint8_t {
+    LP_MODEL_AUTO     = 0,
+    LP_MODEL_MINI_MK3 = 1,
+    LP_MODEL_X        = 2,
+    LP_MODEL_PRO_MK3  = 3,
+    LP_MODELS,
+};
+
+// What a column of a custom page is.
+//
+//   fader    eight pads are eight levels of one CC, lit up to the level; a
+//            fader whose CC is bound follows the module's own value of the
+//            target, so an LFO sweeping it is seen on the pads.
+//   buttons  eight momentary buttons, CC `cc` on the bottom pad to `cc + 7`
+//            on the top, 127 while held and 0 on release.
+//   toggles  the same eight CCs, latching.
+enum LaunchpadWidgetKind : uint8_t {
+    LP_WIDGET_NONE    = 0,
+    LP_WIDGET_FADER   = 1,
+    LP_WIDGET_BUTTONS = 2,
+    LP_WIDGET_TOGGLES = 3,
+    LP_WIDGET_KINDS,
+};
+
+struct LaunchpadWidget {
+    uint8_t kind;      // LaunchpadWidgetKind; LP_WIDGET_NONE is an empty column
+    uint8_t cc;        // 0..119, the first of eight for buttons and toggles
+    uint8_t channel;   // 1..16; 0 reads as 1
+    uint8_t colour;    // a Launchpad palette index, 0..63; 0 reads as the default
+};
+
+struct LaunchpadConfig {
+    uint8_t port;        // one MidiPort bit the surface is on; 0 = no Launchpad
+    uint8_t model;       // LaunchpadModel
+    uint8_t channel;     // the channel the note page plays on, 1..16; 0 reads as 1
+    uint8_t row_offset;  // scale degrees between one row and the next, 1..8; 0 reads as 3
+    uint8_t octave;      // the note page's register, 1..KEY_MAX_OCTAVE; 0 is the key's own
+    LaunchpadWidget widgets[LP_WIDGETS];
+};
+
+inline LaunchpadConfig no_launchpad(){
+    LaunchpadConfig c = {};
+    return c;
+}
+
 struct Patch {
     GatePortConfig gate_ports[GPIO_N];
     MidiInConfig   midi_in[N_MIDI_IN_NODES];
@@ -275,6 +334,7 @@ struct Patch {
     ModRoute       mod_map[N_MOD_ROUTE];
     MacroDef       macros[N_MACRO];
     MacroDest      macro_dest[N_MACRO_DEST];
+    LaunchpadConfig launchpad;
     uint8_t        n_nodes;
 };
 
@@ -295,6 +355,7 @@ inline Patch empty_patch(){
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++) p.mod_map[i] = unused_route();
     for (uint8_t i = 0; i < N_MACRO; i++) p.macros[i] = unused_macro();
     for (uint8_t i = 0; i < N_MACRO_DEST; i++) p.macro_dest[i] = unused_dest();
+    p.launchpad = no_launchpad();
     p.n_nodes = 0;
     return p;
 }

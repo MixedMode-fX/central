@@ -126,11 +126,22 @@ export function PadsPanel(app) {
         onChange: (model) => { if (!bridged) { virtual.setModel(model); app.render(); } },
       }),
       LaunchpadView(app, virtual),
-      el('p', { class: 'lp-status' },
-        bridged ? `${virtual.bridged} is on ${portNames(lp.port).join(', ')}; the drawing follows it`
-          : virtual.programmer ? 'programmer mode: every light here is one the module lit'
-          : 'the module has not put this Launchpad into programmer mode yet')),
+      DrawingLine(app, virtual, lp)),
     HardwareRow(app, virtual));
+}
+
+// What the drawing is showing. Painted rather than rendered: the module puts
+// the device into programmer mode passes after the tab was drawn.
+function DrawingLine(app, virtual, lp) {
+  const line = el('p', { class: 'lp-status' });
+  const paint = () => {
+    line.textContent = virtual.bridged ? `${virtual.bridged} is on ${portNames(lp.port).join(', ')}; the drawing follows it`
+      : virtual.programmer ? 'programmer mode: every light here is one the module lit'
+      : 'the module has not put this Launchpad into programmer mode yet';
+  };
+  paint();
+  app.live.paint(paint);
+  return line;
 }
 
 // A real Launchpad plugged into this computer, on the module's cable in the

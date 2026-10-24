@@ -278,8 +278,8 @@ inline bool macro_used(const MacroDef& m){ return m.name[0] != 0; }
 //
 // The three MK3 models speak the same programmer protocol and differ in one
 // byte, the device id in every SysEx message. `LP_MODEL_AUTO` reads it off
-// the device's answer to a device inquiry; the others name it outright for a
-// cable the inquiry does not come back on.
+// the device's answer to its own model's layout readback; the others name it
+// outright for a cable that answers nothing back.
 enum LaunchpadModel : uint8_t {
     LP_MODEL_AUTO     = 0,
     LP_MODEL_MINI_MK3 = 1,

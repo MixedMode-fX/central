@@ -29,13 +29,19 @@
 // every pad is a coordinate, every button is a CC and every LED is the
 // host's, so the layout is this file's rather than Novation's. The three MK3
 // models - Mini, X and Pro - share that protocol and differ in the device id
-// in every SysEx message, which `LP_MODEL_AUTO` reads off the device's answer
-// to a device inquiry. The surface asks every INQUIRY_INTERVAL_US whether it
-// is linked or not: the answer is also what says a Launchpad has been plugged
-// in since boot, and silence for LINK_TIMEOUT_US is what says it has gone.
-// Both are the device's own words, so the module never sends a frame of LEDs
-// into a cable with nothing on it, and a Launchpad put back after being
+// in every SysEx message. The surface asks every INQUIRY_INTERVAL_US whether
+// it is linked or not: the answer is also what says a Launchpad has been
+// plugged in since boot, and silence for LINK_TIMEOUT_US is what says it has
+// gone. Both are the device's own words, so the module never sends a frame of
+// LEDs into a cable with nothing on it, and a Launchpad put back after being
 // unplugged is put back into programmer mode without a reboot.
+//
+// **The answer does not say which model.** Novation gives the Mini and the
+// Pro the same family in it, so `LP_MODEL_AUTO` asks each model's own
+// layout readback in turn, and the one that answers names itself: every
+// message a Launchpad sends carries its device id. Only then is it put into
+// programmer mode - a Pro sent the Mini's switch ignores it and stays in its
+// own modes. A patch that names the model links on the inquiry's answer.
 //
 // Four pages, on the top row's four right-hand buttons:
 //
@@ -100,11 +106,9 @@ class Launchpad : public ISysexIn {
         static constexpr uint8_t DEVICE_MINI_MK3 = 0x0D;
         static constexpr uint8_t DEVICE_X = 0x0C;
         static constexpr uint8_t DEVICE_PRO_MK3 = 0x0E;
-        // The family each model answers a device inquiry with, low byte first.
-        static constexpr uint8_t FAMILY_MINI_MK3 = 0x13;
-        static constexpr uint8_t FAMILY_X = 0x03;
-        static constexpr uint8_t FAMILY_PRO_MK3 = 0x23;
-        static constexpr uint8_t FAMILY_HIGH = 0x01;
+        // The command that selects a layout, and with no argument asks for
+        // the current one: every model answers it, with its own device id.
+        static constexpr uint8_t COMMAND_LAYOUT = 0x00;
 
         // The palette indices the surface paints with (0..63 of the
         // Launchpad's 128). The hues come in fours - light, full, dark,
@@ -127,7 +131,8 @@ class Launchpad : public ISysexIn {
         bool receive(uint8_t source, const MidiEvent& event, uint32_t now_us);
 
         // SysEx that was not the protocol's, forwarded by the protocol
-        // handler: the device's answer to the inquiry is what links it.
+        // handler: the device's answer to the inquiry, and the answer to the
+        // layout readback that says which model it is, are what link it.
         void deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us) override;
 
         // Once per pass, after the pass: follows the patch's configuration,
@@ -178,6 +183,9 @@ class Launchpad : public ISysexIn {
         void enter_programmer_mode();
         void leave_programmer_mode();
         void send_inquiry(uint32_t now_us);
+        void ask_model(uint8_t device);
+        void link(uint32_t now_us);
+        static uint8_t model_of(uint8_t device);
         void invalidate();
 
         // Input.
@@ -217,7 +225,7 @@ class Launchpad : public ISysexIn {
 
         uint8_t active_port;
         uint8_t active_model;       // the configured model the link was made for
-        uint8_t seen_model;         // LaunchpadModel from the inquiry's answer, or LP_MODEL_AUTO
+        uint8_t seen_model;         // LaunchpadModel from the device id it sent, or LP_MODEL_AUTO
         bool is_linked;
         uint32_t last_inquiry_us;
         uint32_t last_seen_us;

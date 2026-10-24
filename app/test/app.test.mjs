@@ -4442,12 +4442,16 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   await device.sendPatch(patch, globals);
   launchpad.follow(P.MidiPort.mmMIDI_HOST_1);
 
-  // A few passes: the inquiry goes out, the page answers on the next drain,
-  // and the module's answer to that - programmer mode, then a frame - comes
-  // out on the one after, as it does a frame later in the page.
+  // A few passes: the inquiry goes out, the page answers on the next drain;
+  // the module asks each model's layout and the page answers as a Mini; and
+  // the module's answer to that - programmer mode, then a frame - comes out
+  // on the one after, as it does a frame later in the page.
   module.advance(20_000);
   module.drainEvents();
   assert.ok(launchpad.inquiries >= 1, 'the module asked who was on the cable');
+  module.advance(20_000);
+  module.drainEvents();
+  assert.equal(launchpad.programmer, false, 'the inquiry alone does not say which model');
   module.advance(20_000);
   module.drainEvents();
   assert.equal(launchpad.programmer, true, 'what answered was put into programmer mode');
@@ -4473,11 +4477,11 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   // The raw pad number never reached the graph.
   assert.ok(played.every((e) => e.d1 !== gridId(0, 2)));
 
-  // Another model is another answer, and the module relinks it.
+  // Another model does not answer the Mini's readback: the link lapses, and
+  // the next round of readbacks finds the Pro.
   launchpad.setModel('pro');
   assert.equal(launchpad.programmer, false);
-  module.advance(7_000_000);
-  module.drainEvents();
+  for (let i = 0; i < 6; i++) { module.advance(2_000_000); module.drainEvents(); }
   module.advance(100_000);
   module.drainEvents();
   assert.equal(launchpad.programmer, true);
@@ -4485,6 +4489,24 @@ test('the virtual Launchpad links the module and plays its key', async () => {
   // Leaving the cable turns the device back to a Launchpad.
   launchpad.follow(0);
   assert.equal(launchpad.programmer, false);
+});
+
+// A Pro is three interfaces and only its MIDI one takes programmer mode: the
+// DIN one is its jacks, and bridged there the module talks past the device.
+test('a real Launchpad is offered on its MIDI interface alone', async () => {
+  const { launchpadPorts } = await import('../src/runtime/launchpad.js');
+  const ports = (names, prefix) => names.map((name, i) => ({ id: `${prefix}${i}`, name }));
+  const mac = ['Launchpad Pro MK3 LPProMK3 DIN', 'Launchpad Pro MK3 LPProMK3 MIDI', 'Launchpad Pro MK3 LPProMK3 DAW', 'Arturia KeyStep'];
+  assert.deepEqual(launchpadPorts(ports(mac, 'in'), ports([...mac].reverse(), 'out'))
+    .map((d) => [d.name, d.output.name]),
+  [['Launchpad Pro MK3 LPProMK3 MIDI', 'Launchpad Pro MK3 LPProMK3 MIDI']]);
+
+  // Windows: no "Launchpad" in the name, and each interface's input and
+  // output paired by its number, never with another interface's.
+  const found = launchpadPorts(ports(['LPMiniMK3 DAW', 'MIDIIN2 (LPMiniMK3 MIDI)'], 'in'),
+    ports(['LPMiniMK3 DAW', 'MIDIOUT2 (LPMiniMK3 MIDI)'], 'out'));
+  assert.deepEqual(found.map((d) => [d.name, d.output.name]), [['MIDIIN2 (LPMiniMK3 MIDI)', 'MIDIOUT2 (LPMiniMK3 MIDI)']]);
+  assert.deepEqual(launchpadPorts(ports(['MIDIIN2 (LPX MIDI)'], 'in'), ports(['LPX DAW'], 'out')), []);
 });
 
 test('the Launchpad tab draws the patch\'s half and the page\'s', async () => {

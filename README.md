@@ -715,9 +715,10 @@ The module has no panel, and a Novation Launchpad is the panel somebody
 already owns: a patch names the cable one is on (`LaunchpadConfig` in
 `src/node/patch.h`), the USB host socket or a DIN port, and the module drives
 it in **programmer mode** (`src/surface/launchpad.h`). The Mini MK3, the X and
-the Pro MK3 speak the same protocol and differ in one byte, which the module
-reads off the device's answer to a device inquiry; the patch may also name the
-model outright.
+the Pro MK3 speak the same protocol and differ in one byte, the device id.
+The answer to a device inquiry does not carry it - a Mini and a Pro give the
+same one - so the module asks each model's layout readback and goes by the one
+that answers; the patch may also name the model outright.
 
 - **It is a control surface, not a node.** Everything on its cable is the
   surface's, and what it emits enters the module by the paths a cable's own
@@ -728,10 +729,10 @@ model outright.
   through. The protocol hands SysEx that is not its own to the surface, which
   is how the inquiry's answer reaches it.
 - **The device's own words link it.** The surface asks the cable every
-  `INQUIRY_INTERVAL_US`, linked or not: the first answer puts the device into
-  programmer mode and lights it, silence for `LINK_TIMEOUT_US` unlinks it, so
-  a Launchpad plugged in after boot is found and one unplugged is not sent
-  frames. Taking it out of the patch returns it to live mode.
+  `INQUIRY_INTERVAL_US`, linked or not: once an answer names the model the
+  device is put into programmer mode and lit, and silence for
+  `LINK_TIMEOUT_US` unlinks it, so a Launchpad plugged in after boot is found
+  and one unplugged is not sent frames. Taking it out of the patch returns it to live mode.
 - **Four pages and a column**, laid out in the guide below. A pad owns the
   note-off of the pitch it played, so the key may move under a held chord.
 - **LEDs are a frame, diffed and rate-limited.** Only the LEDs that changed

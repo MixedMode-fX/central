@@ -95,28 +95,61 @@ void Launchpad::send_inquiry(uint32_t now_us){
     midi.send_sysex(active_port, INQUIRY, (uint16_t)sizeof INQUIRY);
 }
 
+// A model's layout readback: F0 00 20 29 02 <dev> 00 F7. Only the model
+// whose id it carries answers, and its answer carries that id back.
+void Launchpad::ask_model(uint8_t device){
+    const uint8_t m[] = {0xF0, NOVATION_0, NOVATION_1, NOVATION_2, 0x02, device, COMMAND_LAYOUT, 0xF7};
+    midi.send_sysex(active_port, m, (uint16_t)sizeof m);
+}
+
+uint8_t Launchpad::model_of(uint8_t device){
+    switch (device){
+        case DEVICE_MINI_MK3: return LP_MODEL_MINI_MK3;
+        case DEVICE_X:        return LP_MODEL_X;
+        case DEVICE_PRO_MK3:  return LP_MODEL_PRO_MK3;
+        default:              return LP_MODEL_AUTO;
+    }
+}
+
+void Launchpad::link(uint32_t now_us){
+    is_linked = true;
+    enter_programmer_mode();
+    invalidate();
+    last_led_us = now_us - led_interval();   // the first frame goes at once
+}
+
 void Launchpad::deliver_sysex(uint8_t source, const uint8_t* data, uint16_t length, uint32_t now_us){
     if (active_port == 0 || source != active_port) return;
+    if (data == nullptr || length < 7 || data[0] != 0xF0) return;
+
+    // The device's own message: F0 00 20 29 02 <dev> ... names the model.
+    if (data[1] == NOVATION_0 && data[2] == NOVATION_1 && data[3] == NOVATION_2 && data[4] == 0x02){
+        const uint8_t heard = model_of(data[5]);
+        if (heard == LP_MODEL_AUTO) return;
+        last_seen_us = now_us;
+        if (heard == seen_model && is_linked) return;
+        seen_model = heard;
+        link(now_us);                         // again, if it was linked as another model
+        return;
+    }
+
     // F0 7E <dev> 06 02 00 20 29 <family lo hi> <member lo hi> <version x4> F7
-    if (data == nullptr || length < 12) return;
-    if (data[0] != 0xF0 || data[1] != SYSEX_UNIVERSAL_NON_REALTIME) return;
+    if (length < 12 || data[1] != SYSEX_UNIVERSAL_NON_REALTIME) return;
     if (data[3] != SYSEX_GENERAL_INFORMATION || data[4] != SYSEX_IDENTITY_REPLY) return;
     if (data[5] != NOVATION_0 || data[6] != NOVATION_1 || data[7] != NOVATION_2) return;
-    if (data[9] == FAMILY_HIGH){
-        switch (data[8]){
-            case FAMILY_MINI_MK3: seen_model = LP_MODEL_MINI_MK3; break;
-            case FAMILY_X:        seen_model = LP_MODEL_X; break;
-            case FAMILY_PRO_MK3:  seen_model = LP_MODEL_PRO_MK3; break;
-            default: break;
-        }
+    if (config().model != LP_MODEL_AUTO){
+        last_seen_us = now_us;
+        if (!is_linked) link(now_us);
+        return;
     }
-    last_seen_us = now_us;
-    if (!is_linked){
-        is_linked = true;
-        enter_programmer_mode();
-        invalidate();
-        last_led_us = now_us - led_interval();   // the first frame goes at once
-    }
+    // Detected, the heartbeat is the model's own answer rather than this
+    // one, which another model gives too: a Pro put on the cable in a Mini's
+    // place answers the inquiry but not the Mini's readback, so the link
+    // lapses and the next answer finds the Pro.
+    if (seen_model != LP_MODEL_AUTO){ ask_model(device_byte()); return; }
+    ask_model(DEVICE_MINI_MK3);
+    ask_model(DEVICE_X);
+    ask_model(DEVICE_PRO_MK3);
 }
 
 // Input ----------------------------------------------------------------------
@@ -445,6 +478,7 @@ void Launchpad::service(uint32_t now_us){
     if (is_linked && (uint32_t)(now_us - last_seen_us) >= LINK_TIMEOUT_US){
         release_all(now_us);
         is_linked = false;
+        seen_model = LP_MODEL_AUTO;           // what comes back may be another model
         invalidate();
     }
     if (!is_linked) return;

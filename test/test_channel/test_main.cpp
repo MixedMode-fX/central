@@ -37,14 +37,15 @@ static const uint8_t B_NOTES = 0, B_OUT = 3, B_DROPPED = 4, B_GATE = 1;
 static const uint8_t SOURCE_CHANNEL = 7;
 static const uint8_t WANTED_CHANNEL = 5;
 
-// What a modifier needs to be made to play. Only two of them need an edge -
-// an arpeggiator steps and a retrigger strikes - and the flag says which
-// inlet carries it rather than leaving the driver to guess from the domains:
+// What a modifier needs to be made to play. Three of them need an edge -
+// an arpeggiator steps, a retrigger strikes and a note buffer lets go, since
+// its note-offs come from nothing else - and the flag says which inlet
+// carries it rather than leaving the driver to guess from the domains:
 // NoteDelay's gate inlet is `clear`, and pulsing that would empty the node
 // under the test rather than drive it.
 struct Driven {
     uint8_t id;
-    bool    clocked;        // inlet 1 is the edge that makes it emit
+    bool    clocked;        // inlet 1 is the edge that makes it emit or release
 };
 
 static const Driven DRIVEN[] = {
@@ -58,6 +59,7 @@ static const Driven DRIVEN[] = {
     {ALGO_PROBABILITY,    false},
     {ALGO_ARPEGGIATOR,    true},
     {ALGO_RETRIGGER,      true},
+    {ALGO_NOTE_BUFFER,    true},
     {ALGO_NOTE_SWITCH,    false},
     {ALGO_NOTE_ROUTER,    false},
 };

@@ -67,6 +67,7 @@ enum AlgorithmId : uint8_t {
     ALGO_CV_ROUTER    = 57,
     ALGO_AD           = 58,
     ALGO_ADSR         = 59,
+    ALGO_NOTE_BUFFER  = 60,
 };
 
 enum ConfigError : uint8_t {

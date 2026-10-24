@@ -262,14 +262,14 @@ static void test_the_grid_plays_the_key() {
     TEST_ASSERT_EQUAL(60, out[0].d1);
     TEST_ASSERT_EQUAL(90, out[0].d2);
     TEST_ASSERT_EQUAL(1, out[0].channel);
-    // Three degrees up a row: the fourth. Two columns along: the third.
+    // A row up the neck is a fourth; two columns along, two semitones.
     rig.pad(1, 0, true);
     rig.pad(0, 2, true);
     rig.loop();
     out = rig.notes_out();
     TEST_ASSERT_EQUAL(3, out.size());
     TEST_ASSERT_EQUAL(65, out[1].d1);
-    TEST_ASSERT_EQUAL(64, out[2].d1);
+    TEST_ASSERT_EQUAL(62, out[2].d1);
     // The raw pad notes never reach the graph.
     for (const RecordingMidiOut::Message& m : out) TEST_ASSERT_NOT_EQUAL(11, m.d1);
 }
@@ -299,7 +299,7 @@ static void test_a_pad_releases_the_pitch_it_played_whatever_the_key_does() {
 static void test_two_pads_on_one_pitch_release_it_once() {
     Rig rig;
     LaunchpadConfig lp = on_host();
-    lp.row_offset = 2;                   // (1, 0) and (0, 2) are the same degree
+    lp.row_offset = 2;                   // (1, 0) and (0, 2) are the same pitch
     rig.link(lp);
     rig.pad(1, 0, true);
     rig.pad(0, 2, true);
@@ -327,21 +327,54 @@ static void test_the_arrows_move_the_register() {
     TEST_ASSERT_EQUAL(-Launchpad::OCTAVE_SHIFT_MAX, rig.surface.octave_shift());
 }
 
-static void test_the_note_page_lights_the_roots_and_the_held_pads() {
+static void test_the_note_page_is_a_neck_in_fourths() {
+    Rig rig;
+    rig.link(on_host());                 // row_offset 0: fourths
+    rig.pad(0, 0, true);                 // the tonic
+    rig.pad(0, 1, true);                 // a semitone along
+    rig.pad(1, 0, true);                 // a fourth up the neck
+    rig.pad(7, 7, true);                 // the top corner
+    rig.loop();
+    std::vector<RecordingMidiOut::Message> out = rig.notes_out();
+    TEST_ASSERT_EQUAL(4, out.size());
+    TEST_ASSERT_EQUAL(60, out[0].d1);
+    TEST_ASSERT_EQUAL(61, out[1].d1);
+    TEST_ASSERT_EQUAL(65, out[2].d1);
+    TEST_ASSERT_EQUAL(60 + 7 * 5 + 7, out[3].d1);
+}
+
+static void test_the_note_page_paints_the_key_on_the_neck() {
     Rig rig;
     rig.link(on_host());
     GlobalSettings g = rig.patches.globals();
-    g.scale = SCALE_MAJOR;
+    g.scale = SCALE_MAJOR;               // C major, the tonic C4 bottom left
     rig.patches.set_globals(g, rig.now);
-    rig.pad(0, 1, true);
+    rig.pad(0, 2, true);
     rig.settle();
-    // The tonic, blue; a degree, dim; the held pad, green; the seventh
-    // degree along the bottom row is the next octave's root.
-    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.surface.led(Launchpad::led_id(0, 0)));
-    TEST_ASSERT_EQUAL(Launchpad::GREEN, rig.surface.led(Launchpad::led_id(0, 1)));
-    TEST_ASSERT_EQUAL(Launchpad::DIM, rig.surface.led(Launchpad::led_id(0, 2)));
-    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.surface.led(Launchpad::led_id(0, 7)));
-    TEST_ASSERT_EQUAL(Launchpad::GREEN, rig.sent_colour(Launchpad::led_id(0, 1)));
+    // The root pink, a scale note blue, a note outside the scale off, the
+    // held pad green; up the neck the colours follow the pitches.
+    TEST_ASSERT_EQUAL(Launchpad::PINK, rig.surface.led(Launchpad::led_id(0, 0)));   // C
+    TEST_ASSERT_EQUAL(Launchpad::OFF, rig.surface.led(Launchpad::led_id(0, 1)));    // C#
+    TEST_ASSERT_EQUAL(Launchpad::GREEN, rig.surface.led(Launchpad::led_id(0, 2)));  // D, held
+    TEST_ASSERT_EQUAL(Launchpad::OFF, rig.surface.led(Launchpad::led_id(0, 3)));    // D#
+    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.surface.led(Launchpad::led_id(0, 4)));   // E
+    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.surface.led(Launchpad::led_id(0, 5)));   // F
+    TEST_ASSERT_EQUAL(Launchpad::OFF, rig.surface.led(Launchpad::led_id(0, 6)));    // F#
+    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.surface.led(Launchpad::led_id(0, 7)));   // G
+    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.surface.led(Launchpad::led_id(1, 0)));   // F
+    TEST_ASSERT_EQUAL(Launchpad::PINK, rig.surface.led(Launchpad::led_id(1, 7)));   // C5
+    TEST_ASSERT_EQUAL(Launchpad::GREEN, rig.sent_colour(Launchpad::led_id(0, 2)));
+    // The note outside the scale plays all the same, as it does on a
+    // Launchpad.
+    rig.pad(0, 1, true);
+    rig.loop();
+    TEST_ASSERT_EQUAL(61, rig.notes_out()[1].d1);
+    // A key change repaints it: in C minor the E goes dark and the D# lights.
+    g.scale = SCALE_NATURAL_MINOR;
+    rig.patches.set_globals(g, rig.now);
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::OFF, rig.surface.led(Launchpad::led_id(0, 4)));
+    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.surface.led(Launchpad::led_id(0, 3)));
 }
 
 // ---------------------------------------------------------------------------
@@ -776,7 +809,8 @@ int main(int, char**){
     RUN_TEST(test_a_pad_releases_the_pitch_it_played_whatever_the_key_does);
     RUN_TEST(test_two_pads_on_one_pitch_release_it_once);
     RUN_TEST(test_the_arrows_move_the_register);
-    RUN_TEST(test_the_note_page_lights_the_roots_and_the_held_pads);
+    RUN_TEST(test_the_note_page_is_a_neck_in_fourths);
+    RUN_TEST(test_the_note_page_paints_the_key_on_the_neck);
     RUN_TEST(test_the_key_page_sets_root_scale_and_register_through_the_globals);
     RUN_TEST(test_leaving_the_note_page_releases_what_it_holds);
     RUN_TEST(test_the_tempo_page_nudges_and_sets_the_tempo);

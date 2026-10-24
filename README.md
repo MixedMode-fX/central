@@ -722,10 +722,12 @@ model outright.
   programmer mode and lights it, silence for `LINK_TIMEOUT_US` unlinks it, so
   a Launchpad plugged in after boot is found and one unplugged is not sent
   frames. Taking it out of the patch returns it to live mode.
-- **Four pages**, on the top row's right-hand buttons: **note** plays the key
-  (`row_offset` degrees between rows, the roots lit, the arrows moving the
-  register; a pad owns the note-off of the pitch it played, so the key may
-  move under a held chord); **key** sets the root on a keyboard of twelve,
+- **Four pages**, on the top row's right-hand buttons: **note** is a neck, as
+  a Launchpad's own note mode is (a semitone a column, `row_offset` semitones
+  a row, the key painted on it: the roots pink, the scale blue, the notes
+  outside it unlit but playing; the arrows move the register, and a pad owns
+  the note-off of the pitch it played, so the key may move under a held
+  chord); **key** sets the root on a keyboard of twelve,
   the scale and the register; **widgets** is two pages of eight columns, each
   a fader, eight buttons or eight toggles sending CCs the patch says
   (`LaunchpadWidget`), a bound fader following the module's own value of its

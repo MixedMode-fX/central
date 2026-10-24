@@ -169,7 +169,7 @@ export function emptyLaunchpad() {
     port: 0,
     model: P.LaunchpadModel.LP_MODEL_AUTO,
     channel: 1,
-    rowOffset: 3,
+    rowOffset: P.LP_ROW_OFFSET_DEFAULT,
     octave: 0,
     widgets: Array.from({ length: P.LP_WIDGETS }, () => null),
   };

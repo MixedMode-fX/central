@@ -565,8 +565,8 @@ function launchpadSchema(caps) {
       model: { type: 'string', enum: LAUNCHPAD_MODELS.map((m) => m.key.replace(/^LP_MODEL_/, '').toLowerCase()),
                description: '"auto" reads the model off the device’s own answer; name it for a cable the answer does not come back on' },
       channel: { type: 'integer', minimum: 1, maximum: 16, description: 'the channel the note page plays on' },
-      rowOffset: { type: 'integer', minimum: 1, maximum: 8,
-                   description: 'scale degrees between one row of the note page and the next; 3 is the usual "fourths" layout' },
+      rowOffset: { type: 'integer', minimum: 1, maximum: P.LP_ROW_OFFSET_MAX,
+                   description: `semitones between one row of the note page and the next, the neck’s tuning; ${P.LP_ROW_OFFSET_DEFAULT} is a guitar’s fourths` },
       octave: { type: 'integer', minimum: 0, maximum: P.KEY_MAX_OCTAVE,
                 description: 'the register the note page’s bottom-left pad plays in; 0 is the key’s own' },
       widgets: {

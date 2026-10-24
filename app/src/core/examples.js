@@ -588,7 +588,7 @@ export const EXAMPLES = {
       ],
       midi_out: [{ port: 1, targets: ['USB 1'], channel: 0, bus: 2 }],
       launchpad: {
-        port: 'USB host', model: 'auto', channel: 1, rowOffset: 3, octave: 0,
+        port: 'USB host', model: 'auto', channel: 1, rowOffset: 5, octave: 0,
         widgets: [
           { slot: 0, kind: 'fader', cc: 20, channel: 1, colour: 'orange' },
           { slot: 1, kind: 'fader', cc: 21, channel: 1, colour: 'yellow' },

@@ -239,12 +239,15 @@ void Launchpad::set_page(uint8_t page, uint32_t now_us){
 
 // The note page --------------------------------------------------------------
 
+// Chromatic, as a Launchpad's own note mode is: a semitone a column, so a
+// row is a run up a string, and `row_offset` semitones a row, so the rows
+// are the strings of a neck tuned in one interval - fourths by default, the
+// bottom-left pad the tonic. The scale is painted on the pads rather than
+// built into them, so a note outside it plays as it does on a Launchpad.
 uint8_t Launchpad::pitch_of(uint8_t row, uint8_t col) const {
     const LaunchpadConfig& c = config();
-    const uint8_t offset = c.row_offset ? c.row_offset : 3;
-    const int16_t degree = (int16_t)(row * offset + col);
-    const int16_t pitch = (int16_t)global_key::tonic(c.octave) + 12 * shift
-                        + scale_degree_to_semitone(degree, global_key::mask());
+    const uint8_t offset = c.row_offset ? c.row_offset : LP_ROW_OFFSET_DEFAULT;
+    const int16_t pitch = (int16_t)global_key::tonic(c.octave) + 12 * shift + row * offset + col;
     if (pitch < 0 || pitch > 127) return NO_NOTE;
     return (uint8_t)pitch;
 }
@@ -492,19 +495,24 @@ void Launchpad::draw_frame(uint32_t now_us){
     set(LOGO_ID, WHITE);
 }
 
+// The key painted on the neck: the roots pink, the rest of the scale blue,
+// a note outside the scale unlit, a held pad green. An empty mask is
+// chromatic, as it is everywhere (midi/scale.h), so every pad is in it.
 void Launchpad::draw_note(){
-    const uint16_t mask = global_key::mask();
-    const uint8_t n = scale_size(mask);
-    const LaunchpadConfig& c = config();
-    const uint8_t offset = c.row_offset ? c.row_offset : 3;
+    uint16_t mask = global_key::mask() & 0x0FFF;
+    if (mask == 0) mask = 0x0FFF;
+    const uint8_t root = global_key::root();
     for (uint8_t row = 0; row < GRID; row++){
         for (uint8_t col = 0; col < GRID; col++){
             const uint8_t i = (uint8_t)(row * GRID + col);
             const uint8_t id = led_id(row, col);
             if (held_note[i] != NO_NOTE){ set(id, GREEN); continue; }
-            if (pitch_of(row, col) == NO_NOTE){ set(id, OFF); continue; }
-            const uint8_t degree = (uint8_t)((row * offset + col) % n);
-            set(id, degree == 0 ? BLUE : DIM);
+            const uint8_t pitch = pitch_of(row, col);
+            if (pitch == NO_NOTE){ set(id, OFF); continue; }
+            const uint8_t interval = (uint8_t)((pitch + 12u - root) % 12u);
+            if (interval == 0) set(id, PINK);
+            else if (mask & (uint16_t)(1u << interval)) set(id, BLUE);
+            else set(id, OFF);
         }
     }
 }

@@ -2,7 +2,8 @@
 
 An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
 
-- `GPIO_N` configurable gate jacks, each an input or an output.
+- `GPIO_N` configurable gate jacks, each an input, an output, or a tone: a
+  square wave whose pitch is a CV bus (`src/util/tone.h`).
 - MIDI over two DIN ports (3.5 mm TRS), a class-compliant USB device with four
   cables, and a USB host port that takes hubs. The host port is two cables: a
   Launchpad on it is *USB host Launchpad*, a controller and nothing else, and
@@ -190,7 +191,7 @@ touched.
 | MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger`, `NoteBuffer` |
 | Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz`, `Key` |
 | Routing | `NoteFilter`, `Channel` |
-| Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate` |
+| Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate`, `RPS10` |
 | Utility | `GateHold`, `GateProbability` |
 | Modulators | `LFO`, `AD`, `ADSR`, `StepMod`, `SampleHold`, `Slew`, `Turing`, `GateToCV` |
 | Rhythm | `Automaton` |
@@ -307,6 +308,13 @@ is only what a parameter list cannot say.
   because a DAC has one input per jack. The gate follows the key; the trigger
   is a fixed-width pulse on every attack. Sustain is deliberately not handled
   here — it is an operation on the note stream, so it belongs upstream.
+- **A tone jack's wave is the pin's own PWM timer, not the pass.** A pass is
+  too slow for a 2 kHz square, so the port only tells the timer when the
+  frequency moves. Pins that share a PWM submodule share its frequency
+  (`src/hardware.h`). `RPS10` writes the pitch a BOSS RPS-10's keyboard control
+  listens for: C6 is unison and C5..C7 its −1..+1 octave, clamped there, with
+  the interval played from `centre` so a keyboard does not have to sit two
+  octaves up.
 - **`Turing` is the random source with memory.** `length` bits in a ring, the
   top bit fed back inverted with probability `chaos` — 0 is a fixed loop, 50 is
   noise, 100 is a loop of twice the length, and between 0 and 50 the loop

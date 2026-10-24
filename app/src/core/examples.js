@@ -48,6 +48,15 @@ export const EXAMPLES = {
       midi_out: [{ port: 1, targets: ['ALL'], channel: 0, bus: 0 }],
     },
   },
+  'RPS-10 pitch shift': {
+    category: 'routing & MIDI',
+    about: 'A keyboard plays the pitch shift of a BOSS RPS-10. Jack 4 is a tone jack: patch it to the RPS-10\u2019s rear keyboard control input, set its mode to pitch shift, and the note you hold is the interval \u2014 C4 is unison, E4 a major third up, C3 an octave down, and the wheel bends between them. The jack plays C6 for unison and C5 to C7 for the RPS-10\u2019s whole octave either way. A jack is at gate level, hotter than the synth output that input was made for, so a divider in the cable (10 k\u03a9 over 1 k\u03a9) is kind to it.',
+    patch: {
+      midi_in: [{ port: 1, sources: ['ALL'], channel: 0, bus: 0 }],
+      gate_ports: [{ port: 4, dir: 'tone', bus: 0 }],
+      nodes: [{ algo: 'RPS10', in: [0], out: [0] }],
+    },
+  },
   'Two sources, one output': {
     category: 'routing & MIDI',
     about: 'A merge. Two arpeggios run on their own note buses \u2014 one from the keyboard, one a chord built on the key \u2014 and MIDI out 1 reads both of them at once (`bus: [0, 1]`). Neither source has to give up its own bus to be summed, which is why a port names a set of buses rather than one: jack 1 still pulses from bus 1 alone.',

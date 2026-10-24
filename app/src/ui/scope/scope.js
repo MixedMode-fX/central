@@ -17,7 +17,7 @@
 // shades of that domain's colour, never a borrowed one.
 
 import * as P from '../../protocol/generated.js';
-import { Domain } from '../../core/validate.js';
+import { Domain, jackDomain } from '../../core/validate.js';
 import { usedBuses, inletName, outletName } from '../../core/patch.js';
 import { noteName } from '../../core/music.js';
 import { BlockKind } from '../../core/graph.js';
@@ -108,8 +108,9 @@ export function scopeRows({ patch, device, scopeAll = false }) {
   for (let j = 0; j < P.GPIO_N; j++) {
     const direction = patch.gatePorts[j]?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
     if (direction === P.GatePortDirection.GATE_PORT_UNUSED && !scopeAll) continue;
-    const out = direction === P.GatePortDirection.GATE_PORT_OUT;
-    const way = direction === P.GatePortDirection.GATE_PORT_UNUSED ? '–' : (out ? 'out' : 'in');
+    const out = direction === P.GatePortDirection.GATE_PORT_OUT || direction === P.GatePortDirection.GATE_PORT_TONE;
+    const way = direction === P.GatePortDirection.GATE_PORT_UNUSED ? '–'
+      : direction === P.GatePortDirection.GATE_PORT_TONE ? 'tone' : (out ? 'out' : 'in');
     // A jack is a gate whichever way it faces: green, with the direction in
     // its name and a lighter shade for an output.
     rows.push({
@@ -373,14 +374,14 @@ export function blockSignals({ patch, device }, { kind, index }) {
     const port = patch.gatePorts[index];
     const direction = port?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
     if (direction === P.GatePortDirection.GATE_PORT_UNUSED) return { rows, sources };
-    const out = direction === P.GatePortDirection.GATE_PORT_OUT;
+    const out = direction !== P.GatePortDirection.GATE_PORT_IN;
     // The jack itself, which is a gate whichever way it faces, and then the
     // buses behind it: an input writes them, an output reads them.
     rows.push({ key: `jack${index}`, kind: 'gate', bit: index, source: out ? 'jackOut' : 'jackIn',
                 role: out ? 'out' : 'in', height: ROW_H,
                 label: `jack ${index + 1} ${out ? 'out' : 'in'}`, short: `J${index + 1}${out ? 'o' : 'i'}`,
                 colour: out ? shade(colours.gate, 1) : colours.gate });
-    for (const bus of port.buses ?? []) add(Domain.Gate, bus, out ? 'in' : 'out', '');
+    for (const bus of port.buses ?? []) add(jackDomain(direction), bus, out ? 'in' : 'out', '');
   } else if (kind === BlockKind.MidiIn) {
     const port = patch.midiIn[index];
     if (!port?.sourceMask) return { rows, sources };

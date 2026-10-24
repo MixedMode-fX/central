@@ -227,6 +227,7 @@ class MixedModeMaster {
         Schedule sched;
         GateInPort gate_in[GPIO_N];
         GateOutPort gate_out[GPIO_N];
+        ToneOutPort tone_out[GPIO_N];
         MidiInPort midi_in[N_MIDI_IN_NODES];
         MidiOutPort midi_out[N_MIDI_OUT_NODES];
         bool tick_pending;

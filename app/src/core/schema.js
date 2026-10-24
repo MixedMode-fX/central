@@ -724,10 +724,14 @@ export function patchSchema(device) {
           properties: {
             port: { type: 'integer', minimum: 1, maximum: caps.jacks,
                     description: 'the jack, numbered from 1 as on the panel' },
-            dir: { type: 'string', enum: ['in', 'out', 'unused'],
-                   description: '"in" drives a gate bus from the jack; "out" drives the jack from a gate bus' },
+            dir: { type: 'string', enum: ['in', 'out', 'tone', 'unused'],
+                   description: '"in" drives a gate bus from the jack; "out" drives the jack from a gate bus; '
+                     + '"tone" plays a square wave at the jack whose pitch is a CV bus (an RPS10 writes one)' },
             bus: { $ref: '#/$defs/gate_bus_or_null' },
           },
+          // A tone jack's bus is a CV bus, which is a narrower range.
+          if: { properties: { dir: { const: 'tone' } } },
+          then: { properties: { bus: { $ref: '#/$defs/cv_bus_or_null' } } },
         },
       },
       midi_in: {

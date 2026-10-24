@@ -83,8 +83,11 @@ function JacksPanel(app) {
     const mode = app.state.patch.gatePorts[j]?.direction ?? P.GatePortDirection.GATE_PORT_UNUSED;
     if (mode === P.GatePortDirection.GATE_PORT_UNUSED) { unused.push(j + 1); continue; }
     const isIn = mode === P.GatePortDirection.GATE_PORT_IN;
+    const isTone = mode === P.GatePortDirection.GATE_PORT_TONE;
     const lamp = el('span', { class: 'led jack-lamp' });
-    lamps.push({ lamp, j, isIn });
+    // A tone is a frequency, not an edge: the page's own module says which.
+    const hz = isTone && drivable ? el('span', { class: 'hint jack-tone' }, 'silent') : null;
+    lamps.push({ lamp, j, isIn, hz });
     // A gate is an edge, so a button that only toggled would need two
     // presses to make one trigger. Tap is the common case; hold is there for
     // a level, and the rate for anything that wants a clock. Only the page's
@@ -99,14 +102,18 @@ function JacksPanel(app) {
       NumberField({ value: module.jackRate(j), min: 0, max: 100, step: 0.5, 'aria-label': `jack ${j + 1} rate`,
                     onChange: (hz) => { module.setJackRate(j, hz); app.render(); } }),
       el('span', { class: 'hint' }, 'Hz'),
-    ] : [el('span', { class: 'hint' }, 'from the patch')];
+    ] : hz ? [hz] : [el('span', { class: 'hint' }, 'from the patch')];
     cards.push(el('div', { class: 'jack-card' },
-      el('div', { class: 'jack-head' }, lamp, el('span', {}, `jack ${j + 1}`), el('span', { class: 'hint' }, isIn ? 'in' : 'out')),
+      el('div', { class: 'jack-head' }, lamp, el('span', {}, `jack ${j + 1}`), el('span', { class: 'hint' }, isIn ? 'in' : isTone ? 'tone' : 'out')),
       Row(controls)));
   }
   app.live.paint(({ activity }) => {
-    for (const { lamp, j, isIn } of lamps) {
+    for (const { lamp, j, isIn, hz } of lamps) {
       lamp.classList.toggle('lit', Boolean((isIn ? activity.jackIn : activity.jackOut) & (1 << j)));
+      if (hz) {
+        const mhz = module.jackTone(j);
+        hz.textContent = mhz ? `${(mhz / 1000).toFixed(1)} Hz` : 'silent';
+      }
     }
   });
   // The sync jack rides in the same grid as the eight: it is a jack, and a
@@ -319,7 +326,8 @@ function gateOptions(app, current) {
     const direction = app.state.patch.gatePorts[j]?.direction ?? D.GATE_PORT_UNUSED;
     const mine = current.kind === 'jack' && current.index === j;
     if (direction === D.GATE_PORT_UNUSED && !mine) continue;
-    const side = direction === D.GATE_PORT_IN ? 'in' : direction === D.GATE_PORT_OUT ? 'out' : 'unused';
+    const side = direction === D.GATE_PORT_IN ? 'in' : direction === D.GATE_PORT_OUT ? 'out'
+      : direction === D.GATE_PORT_TONE ? 'tone' : 'unused';
     options.push({ value: `jack:${j}`, label: `jack ${j + 1} (${side})` });
   }
   const buses = app.device?.capabilities?.gateBuses ?? P.N_GATE_BUS;

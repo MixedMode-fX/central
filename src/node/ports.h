@@ -6,7 +6,7 @@
 #include "hal/igpio.h"
 #include "hal/imidi_out.h"
 
-// The four hardware port node types. They live in reserved slots owned by
+// The five hardware port node types. They live in reserved slots owned by
 // MixedModeMaster, outside the pool, and are the only nodes that hold an
 // IGpio or an IMidiOut. Each is configured (not constructed) on patch load.
 
@@ -54,6 +54,35 @@ class GateOutPort : public Node {
         IGpio* gpio;
         uint8_t port;
         BusSet buses;
+};
+
+// Reads its CV buses after the swap - their sum - as a tone pitch
+// (util/tone.h) and plays it at one jack as a square wave. The jack's own
+// timer runs the wave, so it can be faster than the pass; the port only
+// tells it when the frequency moves.
+class ToneOutPort : public Node {
+    public:
+        ToneOutPort() : gpio(nullptr), port(0), buses(), playing(0) {}
+        ToneOutPort(const ToneOutPort&) = delete;
+        ToneOutPort& operator=(const ToneOutPort&) = delete;
+
+        void configure(IGpio* gpio_if, uint8_t port_index, BusSet cv_buses){
+            gpio = gpio_if; port = port_index; buses = cv_buses;
+        }
+        void release();
+        bool enabled() const { return gpio != nullptr; }
+
+        void setup() override;
+        void process(BusManager& bus, uint32_t) override;
+
+        // The frequency the jack is playing, in millihertz; 0 when silent.
+        uint32_t millihertz() const { return playing; }
+
+    private:
+        IGpio* gpio;
+        uint8_t port;
+        BusSet buses;
+        uint32_t playing;
 };
 
 // Receives MIDI from the transports whose bit is in `source_mask`, filtered

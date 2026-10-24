@@ -23,6 +23,11 @@ export function busCount(capabilities, domain) {
 
 export const domainName = (d) => ['gate', 'note', 'CV'][d] ?? '?';
 
+// The domain of the buses a jack facing this way names (`gate_port_domain`,
+// src/node/patch.h): a tone jack reads a CV bus as its pitch.
+export const jackDomain = (direction) =>
+  (direction === P.GatePortDirection.GATE_PORT_TONE ? Domain.CV : Domain.Gate);
+
 // One problem, with enough context to fix it.
 const problem = (where, message) => ({ where, message });
 
@@ -210,7 +215,8 @@ export function validate(device, patch) {
   };
   patch.gatePorts.forEach((port, i) => {
     if (port.direction === P.GatePortDirection.GATE_PORT_UNUSED) return;
-    portBuses(`jack ${i + 1}`, port.buses, caps.gateBuses, Domain.Gate);
+    const domain = jackDomain(port.direction);
+    portBuses(`jack ${i + 1}`, port.buses, busCount(caps, domain), domain);
   });
   patch.midiIn.forEach((port, i) => {
     if (port.sourceMask) portBuses(`midi in ${i}`, port.buses, caps.noteBuses, Domain.Note);

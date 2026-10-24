@@ -12,6 +12,7 @@ class TeensyGpio : public IGpio {
         void mode(uint8_t port, uint8_t mode) override;
         void write(uint8_t port, uint8_t state) override;
         uint8_t read(uint8_t port) override;
+        void tone(uint8_t port, uint32_t millihertz) override;
 
     private:
         uint8_t pins_[GPIO_N];

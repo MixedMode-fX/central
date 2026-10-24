@@ -18,6 +18,8 @@
 #include "algorithm/midi/probability.h"
 #include "algorithm/midi/arpeggiator.h"
 #include "algorithm/midi/midi_to_cv.h"
+#include "algorithm/midi/rps10.h"
+#include "util/tone.h"
 
 void setUp() {}
 // The module's key is process-wide state (midi/global_key.h), so every test
@@ -2130,6 +2132,134 @@ static void test_arpeggiator_hangs_nothing_in_any_mode() {
     }
 }
 
+// --- RPS10 -------------------------------------------------------------------
+
+static int16_t run_rps_pass(BusManager& bus, Rps10& node) {
+    bus.swap();
+    node.process(bus, 0);
+    bus.swap();
+    return bus.cv_read((uint8_t)0);
+}
+
+static NodeConfig rps_config() {
+    NodeConfig c = node_config(ALGO_RPS10);
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(0);
+    return c;
+}
+
+static void test_tone_frequencies_are_the_keyboard_controls_span() {
+    // The RPS-10's keyboard control: C5 to C7, unison at C6.
+    TEST_ASSERT_UINT32_WITHIN(1, 523251, tone_millihertz(tone_of_note(72)));
+    TEST_ASSERT_UINT32_WITHIN(1, 1046502, tone_millihertz(tone_of_note(84)));
+    TEST_ASSERT_UINT32_WITHIN(1, 2093005, tone_millihertz(tone_of_note(96)));
+    TEST_ASSERT_UINT32_WITHIN(1, 440000, tone_millihertz(tone_of_note(69)));
+    // A quarter-semitone step is a quarter of the way up the ratio.
+    TEST_ASSERT_UINT32_WITHIN(20, 446400, tone_millihertz((int16_t)(tone_of_note(69) + TONE_PER_SEMITONE / 4)));
+    // Zero and below are silence.
+    TEST_ASSERT_EQUAL_UINT32(0, tone_millihertz(0));
+    TEST_ASSERT_EQUAL_UINT32(0, tone_millihertz(-5));
+    // The top of the bus is still a frequency.
+    TEST_ASSERT_TRUE(tone_millihertz(CV_MAX) > 12000000u);
+}
+
+static void test_rps10_plays_the_interval_from_the_centre() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    Rps10 node(c);
+    const int16_t unison = tone_of_note(Rps10::UNISON_NOTE);
+
+    TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, node));            // before any note
+
+    bus.note_write(0, on(64));                                           // E4: a major third up
+    TEST_ASSERT_EQUAL_INT16(unison + 4 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    TEST_ASSERT_EQUAL_INT8(4, node.shift());
+
+    bus.note_write(0, off(64));                                          // hold: the shift stays
+    TEST_ASSERT_EQUAL_INT16(unison + 4 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+
+    bus.note_write(0, on(48));                                           // C3: an octave down
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(72), run_rps_pass(bus, node));
+    bus.note_write(0, off(48));
+    bus.note_write(0, on(30));                                           // beyond the span: clamped
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(72), run_rps_pass(bus, node));
+    bus.note_write(0, off(30));
+    bus.note_write(0, on(100));
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node));
+    bus.note_write(0, off(100));
+
+    // Moving the centre moves what unison is.
+    TEST_ASSERT_TRUE(node.set_param(1, 72));
+    bus.note_write(0, on(72));
+    TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, node));
+}
+
+static void test_rps10_bend_sweeps_between_the_notes() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    Rps10 node(c);
+    const int16_t unison = tone_of_note(Rps10::UNISON_NOTE);
+
+    bus.note_write(0, on(60));
+    bus.note_write(0, bend_to(16383));                                   // full up: +2 semitones
+    TEST_ASSERT_INT16_WITHIN(1, unison + 2 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    bus.note_write(0, bend_to(4096));                                    // half down: -1
+    TEST_ASSERT_EQUAL_INT16(unison - TONE_PER_SEMITONE, run_rps_pass(bus, node));
+
+    // Bend past the span stops at its edge.
+    bus.note_write(0, off(60));
+    bus.note_write(0, on(72));
+    bus.note_write(0, bend_to(16383));
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node));
+
+    TEST_ASSERT_TRUE(node.set_param(2, 0));                              // bend ignored
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node));
+    bus.note_write(0, bend_to(0));
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node));
+}
+
+static void test_rps10_release_holds_returns_or_stops() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    c.params[3] = Rps10::RELEASE_UNISON;
+    Rps10 unison_node(c);
+    const int16_t unison = tone_of_note(Rps10::UNISON_NOTE);
+
+    bus.note_write(0, on(67));
+    TEST_ASSERT_EQUAL_INT16(unison + 7 * TONE_PER_SEMITONE, run_rps_pass(bus, unison_node));
+    bus.note_write(0, off(67));
+    TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, unison_node));
+
+    c.params[3] = Rps10::RELEASE_OFF;
+    Rps10 off_node(c);
+    TEST_ASSERT_EQUAL_INT16(0, run_rps_pass(bus, off_node));             // silent until a note
+    TEST_ASSERT_FALSE(off_node.sounding());
+    bus.note_write(0, on(55));
+    TEST_ASSERT_EQUAL_INT16(unison - 5 * TONE_PER_SEMITONE, run_rps_pass(bus, off_node));
+    bus.note_write(0, off(55));
+    TEST_ASSERT_EQUAL_INT16(0, run_rps_pass(bus, off_node));
+    TEST_ASSERT_FALSE(off_node.set_param(3, Rps10::RELEASES + 1));
+}
+
+static void test_rps10_priority_picks_one_interval() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    c.params[0] = Rps10::PRIORITY_LOWEST;
+    Rps10 node(c);
+    const int16_t unison = tone_of_note(Rps10::UNISON_NOTE);
+
+    bus.note_write(0, on(64));
+    bus.note_write(0, on(60));
+    bus.note_write(0, on(67));
+    TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, node));            // the lowest, C4
+    TEST_ASSERT_TRUE(node.set_param(0, Rps10::PRIORITY_HIGHEST));
+    TEST_ASSERT_EQUAL_INT16(unison + 7 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    TEST_ASSERT_TRUE(node.set_param(0, Rps10::PRIORITY_LATEST));
+    TEST_ASSERT_EQUAL_INT16(unison + 7 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    bus.note_write(0, off(67));                                          // back to the one before
+    TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, node));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_held_notes_arrival_order_survives_out_of_order_offs);
@@ -2215,5 +2345,10 @@ int main() {
     RUN_TEST(test_probability_hangs_nothing);
     RUN_TEST(test_arpeggiator_hangs_nothing_in_any_mode);
     RUN_TEST(test_arpeggiator_on_hold_hangs_nothing);
+    RUN_TEST(test_tone_frequencies_are_the_keyboard_controls_span);
+    RUN_TEST(test_rps10_plays_the_interval_from_the_centre);
+    RUN_TEST(test_rps10_bend_sweeps_between_the_notes);
+    RUN_TEST(test_rps10_release_holds_returns_or_stops);
+    RUN_TEST(test_rps10_priority_picks_one_interval);
     return UNITY_END();
 }

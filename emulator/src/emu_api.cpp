@@ -244,6 +244,7 @@ EMU_EXPORT uint32_t emu_clock_rejected_edges(){ return master.clock().rejected_e
 EMU_EXPORT void emu_jack_set_input(uint32_t port, uint32_t level){ if (port < GPIO_N) gpio.inputs[port] = level ? GPIO_HIGH : GPIO_LOW; }
 EMU_EXPORT uint32_t emu_jack_input(uint32_t port){ return port < GPIO_N ? gpio.inputs[port] : 0; }
 EMU_EXPORT uint32_t emu_jack_output(uint32_t port){ return port < GPIO_N ? gpio.outputs[port] : 0; }
+EMU_EXPORT uint32_t emu_jack_tone(uint32_t port){ return port < GPIO_N ? gpio.tones[port] : 0; }
 EMU_EXPORT uint32_t emu_jack_mode(uint32_t port){ return port < GPIO_N ? gpio.modes[port] : 0; }
 
 // The gate buses, high this pass -------------------------------------------

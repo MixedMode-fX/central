@@ -17,17 +17,19 @@
 // nodes set modes and output levels; the page reads them back.
 class WebGpio : public IGpio {
     public:
-        WebGpio() : modes(), inputs(), outputs() {}
+        WebGpio() : modes(), inputs(), outputs(), tones() {}
 
         void mode(uint8_t port, uint8_t m) override { if (port < GPIO_N) modes[port] = m; }
         void write(uint8_t port, uint8_t state) override { if (port < GPIO_N) outputs[port] = state; }
         // Levels are already normalised: the page supplies "gate present"
         // directly, the way TeensyGpio::read() returns it after polarity.
         uint8_t read(uint8_t port) override { return port < GPIO_N ? inputs[port] : GPIO_LOW; }
+        void tone(uint8_t port, uint32_t millihertz) override { if (port < GPIO_N) tones[port] = millihertz; }
 
         uint8_t modes[GPIO_N];
         uint8_t inputs[GPIO_N];
         uint8_t outputs[GPIO_N];
+        uint32_t tones[GPIO_N];     // millihertz; 0 is silent
 };
 
 // Supplied by the page (see index.html: the "env" import object).

@@ -468,6 +468,7 @@ export class EmbeddedModule {
 
   jackMode(jack) { return this.E.emu_jack_mode(jack); }          // 0 unused, 1 in, 2 out
   jackOutput(jack) { return this.E.emu_jack_output(jack); }
+  jackTone(jack) { return this.E.emu_jack_tone(jack); }           // millihertz, 0 when silent
   jackInput(jack) { return this.E.emu_jack_input(jack); }
 
   setJackInput(jack, level) {

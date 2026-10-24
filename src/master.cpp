@@ -4,7 +4,7 @@
 
 MixedModeMaster::MixedModeMaster(IGpio& gpio_if, IMidiOut& midi_if) :
     gpio(gpio_if), midi(midi_if), clk(), clk_out(), bus(), pool(), sched(),
-    gate_in(), gate_out(), midi_in(), midi_out(),
+    gate_in(), gate_out(), tone_out(), midi_in(), midi_out(),
     tick_pending(false), was_running(clk.running()), stop_settle(0), tick_count(0),
     error(LOAD_OK), node_error(CONFIG_OK), node_error_index(0), mapping_error_index(0),
     route_error_index(0), dest_error_index(0)
@@ -17,7 +17,8 @@ LoadError MixedModeMaster::validate(const Patch& patch){
     for (uint8_t i = 0; i < GPIO_N; i++){
         const GatePortConfig& c = patch.gate_ports[i];
         if (c.direction == GATE_PORT_UNUSED) continue;
-        if (!buses_in_range(Domain::Gate, c.buses)) return LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
+        if (c.direction >= GATE_PORT_DIRECTIONS) return LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
+        if (!buses_in_range(gate_port_domain(c.direction), c.buses)) return LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         const MidiInConfig& c = patch.midi_in[i];
@@ -183,6 +184,7 @@ LoadError MixedModeMaster::load(const Patch& patch){
         const GatePortConfig& c = patch.gate_ports[i];
         if (c.direction == GATE_PORT_IN)  gate_in[i].configure(&gpio, i, c.buses);
         if (c.direction == GATE_PORT_OUT) gate_out[i].configure(&gpio, i, c.buses);
+        if (c.direction == GATE_PORT_TONE) tone_out[i].configure(&gpio, i, c.buses);
     }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++){
         const MidiInConfig& c = patch.midi_in[i];
@@ -213,7 +215,7 @@ void MixedModeMaster::unload(){
     }
     pool.unload_all();
     sched.clear();
-    for (uint8_t i = 0; i < GPIO_N; i++){ gate_in[i].release(); gate_out[i].release(); }
+    for (uint8_t i = 0; i < GPIO_N; i++){ gate_in[i].release(); gate_out[i].release(); tone_out[i].release(); }
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) midi_in[i].release();
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].release();
     bus.reset();
@@ -248,7 +250,7 @@ void MixedModeMaster::panic(){
 }
 
 void MixedModeMaster::setup(){
-    for (uint8_t i = 0; i < GPIO_N; i++){ gate_in[i].setup(); gate_out[i].setup(); }
+    for (uint8_t i = 0; i < GPIO_N; i++){ gate_in[i].setup(); gate_out[i].setup(); tone_out[i].setup(); }
     for (uint8_t i = 0; i < pool.count(); i++) pool.node(i)->setup();
 }
 
@@ -312,7 +314,7 @@ void MixedModeMaster::pass(uint32_t now_us){
     //    know about is published too.
     bus.swap();
     // 4. hardware outputs
-    for (uint8_t i = 0; i < GPIO_N; i++) gate_out[i].process(bus, now_us);
+    for (uint8_t i = 0; i < GPIO_N; i++){ gate_out[i].process(bus, now_us); tone_out[i].process(bus, now_us); }
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) midi_out[i].process(bus, now_us);
 }
 
@@ -360,19 +362,25 @@ LoadError MixedModeMaster::replace_node(uint8_t index, const NodeConfig& config)
 
 LoadError MixedModeMaster::set_gate_port(uint8_t jack, const GatePortConfig& config){
     if (jack >= GPIO_N) return error = LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
-    if (config.direction != GATE_PORT_UNUSED && !buses_in_range(Domain::Gate, config.buses)){
+    if (config.direction >= GATE_PORT_DIRECTIONS) return error = LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
+    if (config.direction != GATE_PORT_UNUSED &&
+        !buses_in_range(gate_port_domain(config.direction), config.buses)){
         return error = LOAD_GATE_PORT_BUS_OUT_OF_RANGE;
     }
     // A jack changing direction must stop driving before it starts reading,
     // or a moment of contention is possible on the pin.
     gate_in[jack].release();
     gate_out[jack].release();
+    tone_out[jack].release();
     if (config.direction == GATE_PORT_IN){
         gate_in[jack].configure(&gpio, jack, config.buses);
         gate_in[jack].setup();
     } else if (config.direction == GATE_PORT_OUT){
         gate_out[jack].configure(&gpio, jack, config.buses);
         gate_out[jack].setup();
+    } else if (config.direction == GATE_PORT_TONE){
+        tone_out[jack].configure(&gpio, jack, config.buses);
+        tone_out[jack].setup();
     }
     return error = LOAD_OK;
 }

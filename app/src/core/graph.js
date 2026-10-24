@@ -7,7 +7,7 @@
 // shows up as a rejected patch rather than as a layout that looks odd.
 
 import * as P from '../protocol/generated.js';
-import { Domain, busCount, domainName } from './validate.js';
+import { Domain, busCount, domainName, jackDomain } from './validate.js';
 import { emptyNode } from '../protocol/codec.js';
 import { MUSICAL_PORTS, ALL_MUSICAL } from '../protocol/names.js';
 import {
@@ -199,11 +199,14 @@ export function patchBlocks(device, patch) {
   });
 
   patch.gatePorts.forEach((port, i) => {
-    if (port.direction !== P.GatePortDirection.GATE_PORT_OUT) return;
+    const tone = port.direction === P.GatePortDirection.GATE_PORT_TONE;
+    if (port.direction !== P.GatePortDirection.GATE_PORT_OUT && !tone) return;
     blocks.push({
       id: blockId(BlockKind.Jack, i), kind: BlockKind.Jack, index: i,
-      title: `jack ${i + 1}`, subtitle: 'out — a gate bus drives it',
-      inlets: [{ at: 0, name: 'gate', domain: Domain.Gate, buses: port.buses, required: false }],
+      title: `jack ${i + 1}`,
+      subtitle: tone ? 'tone — a CV bus sets its pitch' : 'out — a gate bus drives it',
+      inlets: [{ at: 0, name: tone ? 'pitch' : 'gate', domain: jackDomain(port.direction),
+                 buses: port.buses, required: false }],
       outlets: [],
     });
   });
@@ -277,14 +280,16 @@ export function connectionsOf(blocks) {
 // Which way a jack faces. The buses travel with the turn - a jack in on gate
 // bus 3 turned round is a jack out *of* gate bus 3, which is the monitoring
 // you were reaching for - and a jack taken out of use lets go of them, so
-// putting it back does not silently reconnect it.
+// putting it back does not silently reconnect it. A turn to or from a tone
+// lets go of them too: a tone jack's buses are CV buses, and gate bus 3 is
+// not CV bus 3.
 export function planJackDirection(patch, caps, index, direction) {
   const port = patch.gatePorts?.[index];
   if (!port) return null;
-  const limit = caps?.gateBuses ?? P.N_GATE_BUS;
-  const buses = direction === P.GatePortDirection.GATE_PORT_UNUSED
-    ? []
-    : (port.buses ?? []).filter((b) => b < limit);
+  const domain = jackDomain(direction);
+  const limit = caps ? busCount(caps, domain) : (domain === Domain.CV ? P.N_CV_BUS : P.N_GATE_BUS);
+  const keep = direction !== P.GatePortDirection.GATE_PORT_UNUSED && domain === jackDomain(port.direction);
+  const buses = keep ? (port.buses ?? []).filter((b) => b < limit) : [];
   return { index, direction, buses };
 }
 

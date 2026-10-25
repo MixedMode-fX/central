@@ -39,7 +39,7 @@ const SECTION_WORDS = {
           'base', 'bend', 'pitch'],
   time: ['length', 'division', 'feel', 'rate', 'gate', 'width', 'delay', 'time', 'phase', 'steps',
          'pulses', 'rotation', 'repeats', 'phrase', 'decay', 'rise', 'fall', 'stall', 'swing', 'tempo',
-         'bars', 'beat', 'attack', 'release', 'sustain'],
+         'bars', 'beat', 'attack', 'release', 'sustain', 'glide'],
   level: ['velocity', 'vel ', 'accent', 'curve', 'amount', 'depth', 'offset', 'dry', 'threshold',
           'hysteresis', 'level', 'smooth', 'slew', 'scale'],
   chance: ['probability', 'chance', 'density', 'deviation', 'cadence', 'gravity', 'drift', 'chaos',

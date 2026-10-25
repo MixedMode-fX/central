@@ -10,9 +10,20 @@
 // **What the RPS-10 hears.** The keyboard control tracks the pitch of a
 // monophonic signal between C5 (523 Hz) and C7 (2093 Hz), and the interval
 // from C6 (1046.5 Hz) is the shift: C6 is unison, E6 a major third up, C5 an
-// octave down. That is its whole -1..+1 octave range, so the node writes C6
-// plus the interval and clamps there: a note further out has no shift to
-// give, and the nearest one is a flat note rather than a wrapped one.
+// octave down. The node writes C6 plus the interval.
+//
+// **`range` is where the interval stops, and it may go past the spec.** The
+// manual promises -1..+1 octave, so that is the default; up to MAX_RANGE
+// either way is there because what a tracker does outside its stated span
+// is something to try on the unit rather than something to rule out here. A
+// note further out than `range` has no shift to give, and the nearest one
+// is a flat note rather than a wrapped one.
+//
+// **`glide` smooths the tone between shifts**, at a rate rather than in a
+// time, as `Slew` does: tens of milliseconds per octave, so a third and an
+// octave glide at the same speed. The RPS-10 tracks the sweep, so the shift
+// slides instead of stepping. A tone starting from silence starts where it
+// is going - there is nothing to glide from.
 //
 // **The interval is from the root, not from C6.** A note is a shift by how
 // far it is from the root: the root itself is unison, a third above it a
@@ -45,6 +56,8 @@
 // params[1] octave    the root's register: 0 the key's (or the played root's), 1..10 one of its own
 // params[2] bend      pitch bend range in semitones (0 = ignore bend)
 // params[3] release   hold / unison / off
+// params[4] range     the widest shift, in semitones either way (0 = DEFAULT_RANGE)
+// params[5] glide     tens of milliseconds per octave (0 = instant)
 class Rps10 : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -66,7 +79,8 @@ class Rps10 : public Node{
 
         // The keyboard control's span, as MIDI notes (C4 = 60).
         static constexpr uint8_t UNISON_NOTE = 84;     // C6, 1046.5 Hz
-        static constexpr uint8_t MAX_SHIFT = 12;       // semitones either way
+        static constexpr uint8_t DEFAULT_RANGE = 12;   // the spec: an octave either way
+        static constexpr uint8_t MAX_RANGE = 36;       // C3 .. C9 at the jack
         static constexpr uint8_t NO_ROOT = 0xFF;
         static constexpr uint8_t MAX_BEND = 12;
         static constexpr uint8_t DEFAULT_BEND = 2;
@@ -81,12 +95,18 @@ class Rps10 : public Node{
         // Diagnostics / tests: what the node last wrote, and the shift it
         // means in semitones (bend aside).
         int16_t tone() const { return tone_cv; }
+        // Where the glide is heading: the tone with no glide.
+        int16_t target() const { return target_cv; }
         int8_t shift() const { return shift_semis; }
         // The pitch a note is measured from this pass.
         uint8_t root() const;
         bool sounding() const { return tone_cv > 0; }
 
     private:
+        // The glide is carried with sub-bits so a slow one moves at all, as
+        // in Slew: a 2.55 s octave is 0.15 tone units a millisecond.
+        static constexpr uint8_t SUB_BITS = 8;
+
         NotePriorityRule rule() const {
             return (NotePriorityRule)(priority - PRIORITY_LOWEST);
         }
@@ -99,12 +119,18 @@ class Rps10 : public Node{
         uint8_t octave;         // 0 is the key's register, or the played root's
         uint8_t bend_semis;
         uint8_t release;
+        uint8_t range;
+        uint8_t glide;
 
         uint8_t played_root;    // the root inlet's last note-on, NO_ROOT until one
         uint16_t bend_value;    // 14 bits, centred on BEND_CENTRE
         int8_t shift_semis;     // the held or last shift
         bool has_shift;         // a note has set shift_semis since the patch loaded
+        int16_t target_cv;
         int16_t tone_cv;
+        int32_t level;          // the gliding tone, in sub-units; 0 while silent
+        uint32_t last_us;
+        bool have_time;
         HeldNotes held;
 };
 

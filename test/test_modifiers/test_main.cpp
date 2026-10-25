@@ -2134,9 +2134,9 @@ static void test_arpeggiator_hangs_nothing_in_any_mode() {
 
 // --- RPS10 -------------------------------------------------------------------
 
-static int16_t run_rps_pass(BusManager& bus, Rps10& node) {
+static int16_t run_rps_pass(BusManager& bus, Rps10& node, uint32_t now_us = 0) {
     bus.swap();
-    node.process(bus, 0);
+    node.process(bus, now_us);
     bus.swap();
     return bus.cv_read((uint8_t)0);
 }
@@ -2282,6 +2282,79 @@ static void test_rps10_release_holds_returns_or_stops() {
     TEST_ASSERT_FALSE(off_node.set_param(3, Rps10::RELEASES + 1));
 }
 
+static void test_rps10_range_goes_past_the_spec() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    c.params[4] = 24;                                                    // two octaves either way
+    Rps10 node(c);
+
+    bus.note_write(0, on(84));                                           // C6 from C4: two octaves up
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(108), run_rps_pass(bus, node));
+    bus.note_write(0, off(84));
+    bus.note_write(0, on(20));                                           // far below: stops at -24
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(60), run_rps_pass(bus, node));
+    TEST_ASSERT_EQUAL_INT8(-24, node.shift());
+
+    // The widest range, and nothing wider.
+    TEST_ASSERT_TRUE(node.set_param(4, Rps10::MAX_RANGE));
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(Rps10::UNISON_NOTE - Rps10::MAX_RANGE), run_rps_pass(bus, node));
+    TEST_ASSERT_TRUE(tone_millihertz(tone_of_note(Rps10::UNISON_NOTE + Rps10::MAX_RANGE)) > 8000000u);
+    TEST_ASSERT_FALSE(node.set_param(4, Rps10::MAX_RANGE + 1));
+    TEST_ASSERT_FALSE(node.set_param(4, 0));
+
+    // Narrower than the spec: a fifth either way.
+    TEST_ASSERT_TRUE(node.set_param(4, 7));
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(Rps10::UNISON_NOTE - 7), run_rps_pass(bus, node));
+}
+
+static void test_rps10_glides_at_a_rate() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    c.params[5] = 10;                                                    // 100 ms an octave
+    Rps10 node(c);
+    const int16_t unison = tone_of_note(Rps10::UNISON_NOTE);
+    uint32_t now = 0;
+
+    TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, node, now));       // the first pass is where it is
+
+    bus.note_write(0, on(72));                                           // an octave up
+    now += 50000;                                                        // half the glide later
+    run_rps_pass(bus, node, now);
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), node.target());
+    TEST_ASSERT_INT16_WITHIN(1, unison + 6 * TONE_PER_SEMITONE, node.tone());
+    now += 50000;
+    TEST_ASSERT_INT16_WITHIN(1, tone_of_note(96), run_rps_pass(bus, node, now));
+    now += 1000;
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node, now));   // and stays
+
+    // A fifth down takes five twelfths of the octave's time: a rate, not a time.
+    bus.note_write(0, off(72));
+    bus.note_write(0, on(65));
+    now += 25000;
+    run_rps_pass(bus, node, now);
+    TEST_ASSERT_INT16_WITHIN(1, tone_of_note(93), node.tone());
+    now += 20000;                                                        // 2.4 semitones more
+    TEST_ASSERT_INT16_WITHIN(1, tone_of_note(93) - 12 * TONE_PER_SEMITONE / 5, run_rps_pass(bus, node, now));
+    now += 20000;                                                        // arrived, 41.7 ms after it left
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(89), run_rps_pass(bus, node, now));
+
+    // From silence the tone starts where it is going.
+    TEST_ASSERT_TRUE(node.set_param(3, Rps10::RELEASE_OFF));
+    bus.note_write(0, off(65));
+    now += 1000;
+    TEST_ASSERT_EQUAL_INT16(0, run_rps_pass(bus, node, now));
+    bus.note_write(0, on(48));
+    now += 1000;
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(72), run_rps_pass(bus, node, now));
+
+    // Glide 0 is a step.
+    TEST_ASSERT_TRUE(node.set_param(5, 0));
+    bus.note_write(0, off(48));
+    bus.note_write(0, on(72));
+    now += 1000;
+    TEST_ASSERT_EQUAL_INT16(tone_of_note(96), run_rps_pass(bus, node, now));
+}
+
 static void test_rps10_priority_picks_one_interval() {
     BusManager bus;
     NodeConfig c = rps_config();
@@ -2392,5 +2465,7 @@ int main() {
     RUN_TEST(test_rps10_bend_sweeps_between_the_notes);
     RUN_TEST(test_rps10_release_holds_returns_or_stops);
     RUN_TEST(test_rps10_priority_picks_one_interval);
+    RUN_TEST(test_rps10_range_goes_past_the_spec);
+    RUN_TEST(test_rps10_glides_at_a_rate);
     return UNITY_END();
 }

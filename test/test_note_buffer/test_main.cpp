@@ -188,6 +188,93 @@ static void test_a_full_buffer_drops_the_new_note() {
     TEST_ASSERT_EQUAL_UINT8(MAX_SOUNDING_NOTES, count(out, false));
 }
 
+static NodeConfig sustain_config() {
+    NodeConfig c = buffer_config();
+    c.params[NoteBuffer::P_MODE] = NoteBuffer::MODE_SUSTAIN;
+    return c;
+}
+
+// Pedal up, the buffer is a through: the note-off follows its note-on.
+static void test_sustain_with_the_pedal_up_is_a_through() {
+    BusManager bus;
+    NodeConfig c = sustain_config();
+    NoteBuffer node(c);
+
+    std::vector<MidiEvent> out = pass(bus, node, {on(60)});
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, true));
+    out = pass(bus, node, {off(60)});
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, false));
+    TEST_ASSERT_EQUAL_UINT8(0, node.held_count());
+
+    out = pass(bus, node, {on(62), off(62)});
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, true));
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, false));
+}
+
+static void test_sustain_without_a_gate_is_a_through() {
+    BusManager bus;
+    NodeConfig c = buffer_config(0, false);
+    c.params[NoteBuffer::P_MODE] = NoteBuffer::MODE_SUSTAIN;
+    NoteBuffer node(c);
+
+    pass(bus, node, {on(60)});
+    std::vector<MidiEvent> out = pass(bus, node, {off(60)});
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, false));
+}
+
+// Pedal down holds what is let go; pedal up releases it, but not a key
+// still down - that one waits for its own note-off.
+static void test_sustain_holds_while_the_pedal_is_down() {
+    BusManager bus;
+    NodeConfig c = sustain_config();
+    NoteBuffer node(c);
+
+    pass(bus, node, {on(60)}, true);
+    pass(bus, node, {on(64)}, true);
+    std::vector<MidiEvent> out = pass(bus, node, {off(60), off(64), on(67)}, true);
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, true));
+    TEST_ASSERT_EQUAL_UINT8(0, count(out, false));
+    TEST_ASSERT_EQUAL_UINT8(3, node.held_count());
+
+    out = pass(bus, node, {}, false);
+    TEST_ASSERT_EQUAL_UINT8(2, count(out, false));
+    TEST_ASSERT_EQUAL_UINT8(1, node.held_count());
+
+    out = pass(bus, node, {off(67)});
+    TEST_ASSERT_EQUAL_UINT32(1, out.size());
+    TEST_ASSERT_TRUE(is_note_off(out[0]));
+    TEST_ASSERT_EQUAL_UINT8(67, out[0].data1);
+}
+
+// A key held through the pedal going down is caught by it.
+static void test_sustain_catches_a_key_already_down() {
+    BusManager bus;
+    NodeConfig c = sustain_config();
+    NoteBuffer node(c);
+
+    pass(bus, node, {on(60)});
+    std::vector<MidiEvent> out = pass(bus, node, {off(60)}, true);
+    TEST_ASSERT_EQUAL_UINT32(0, out.size());
+    out = pass(bus, node, {}, false);
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, false));
+}
+
+// Switching from latch to sustain with the pedal up lets go of the latch.
+static void test_switching_to_sustain_strands_nothing() {
+    BusManager bus;
+    NodeConfig c = buffer_config();
+    NoteBuffer node(c);
+
+    pass(bus, node, {on(60), off(60), on(64)});
+    TEST_ASSERT_TRUE(node.set_param(NoteBuffer::P_MODE, NoteBuffer::MODE_SUSTAIN));
+    std::vector<MidiEvent> out = pass(bus, node);
+    TEST_ASSERT_EQUAL_UINT32(1, out.size());
+    TEST_ASSERT_EQUAL_UINT8(60, out[0].data1);
+    out = pass(bus, node, {off(64)});
+    TEST_ASSERT_EQUAL_UINT8(1, count(out, false));
+    TEST_ASSERT_FALSE(node.set_param(NoteBuffer::P_MODE, 2));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_the_descriptor_is_registered);
@@ -199,5 +286,10 @@ int main(int, char**) {
     RUN_TEST(test_the_channel_override_strands_nothing);
     RUN_TEST(test_what_is_not_a_note_passes_through);
     RUN_TEST(test_a_full_buffer_drops_the_new_note);
+    RUN_TEST(test_sustain_with_the_pedal_up_is_a_through);
+    RUN_TEST(test_sustain_without_a_gate_is_a_through);
+    RUN_TEST(test_sustain_holds_while_the_pedal_is_down);
+    RUN_TEST(test_sustain_catches_a_key_already_down);
+    RUN_TEST(test_switching_to_sustain_strands_nothing);
     return UNITY_END();
 }

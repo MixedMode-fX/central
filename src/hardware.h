@@ -36,6 +36,10 @@
 #define GPIO_PIN_7 22
 #define GPIO_PIN_8 33
 
+/* A tone jack (GATE_PORT_TONE) runs on the pin's PWM channel. Jacks 1 and 2
+ * (pins 2, 3) are one FlexPWM4 submodule and jacks 3 and 8 (pins 4, 33) one
+ * FlexPWM2 submodule, so two tones on either pair play one frequency. */
+
 #define GPIO_PINS GPIO_PIN_1,GPIO_PIN_2,GPIO_PIN_3,GPIO_PIN_4,GPIO_PIN_5,GPIO_PIN_6,GPIO_PIN_7,GPIO_PIN_8
 
 /*

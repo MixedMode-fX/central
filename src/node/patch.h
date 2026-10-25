@@ -12,7 +12,15 @@ enum GatePortDirection : uint8_t {
     GATE_PORT_UNUSED = 0,
     GATE_PORT_IN     = 1,   // jack -> gate bus
     GATE_PORT_OUT    = 2,   // gate bus -> jack
+    GATE_PORT_TONE   = 3,   // CV bus -> a square wave at the jack (util/tone.h)
+    GATE_PORT_DIRECTIONS,
 };
+
+// The domain of the buses a jack facing this way names. A tone jack reads a
+// CV bus, because a frequency is a level that moves, not a gate.
+inline Domain gate_port_domain(uint8_t direction){
+    return direction == GATE_PORT_TONE ? Domain::CV : Domain::Gate;
+}
 
 // A hardware port is a port like any other: it names the set of buses it is
 // on (bus/domain.h), and the empty set is "in use, but wired to nothing".
@@ -21,7 +29,7 @@ enum GatePortDirection : uint8_t {
 
 struct GatePortConfig {
     uint8_t direction;   // GatePortDirection
-    BusSet  buses;       // gate buses: driven when IN, read when OUT
+    BusSet  buses;       // driven when IN, read otherwise; gate_port_domain() says which kind
 };
 
 struct MidiInConfig {

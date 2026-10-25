@@ -7,7 +7,7 @@
 // card - and the copies were the same until the day one of them was not.
 
 import * as P from '../protocol/generated.js';
-import { Domain } from './validate.js';
+import { Domain, jackDomain } from './validate.js';
 import { KEY_TARGETS } from '../protocol/names.js';
 import { MACRO_NONE } from '../protocol/codec.js';
 
@@ -207,7 +207,7 @@ function* everyPeer(device, patch) {
   for (const [i, port] of patch.gatePorts.entries()) {
     if (port.direction === P.GatePortDirection.GATE_PORT_UNUSED) continue;
     if (!(port.buses ?? []).length) continue;
-    yield { id: `jack:${i}`, label: `jack ${i + 1}`, domain: Domain.Gate, buses: port.buses,
+    yield { id: `jack:${i}`, label: `jack ${i + 1}`, domain: jackDomain(port.direction), buses: port.buses,
             writes: port.direction === P.GatePortDirection.GATE_PORT_IN };
   }
   for (const [i, port] of patch.midiIn.entries()) {

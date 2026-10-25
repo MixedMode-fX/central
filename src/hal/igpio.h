@@ -23,6 +23,11 @@ struct IGpio {
     virtual void mode(uint8_t port, uint8_t mode) = 0;
     virtual void write(uint8_t port, uint8_t state) = 0;
     virtual uint8_t read(uint8_t port) = 0;
+    // A square wave at `millihertz`, half duty, held until the next call; 0
+    // stops it and leaves the port a low output. Only a tone jack calls this
+    // (node/ports.h), and only when the frequency moves: a port's own timer
+    // runs the wave, so no pass is fast enough to have to.
+    virtual void tone(uint8_t port, uint32_t millihertz) = 0;
 };
 
 #endif

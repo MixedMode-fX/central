@@ -50,6 +50,14 @@ class HalTap : public IGpio, public IMidiOut {
             }
             gpio.write(port, state);
         }
+        // A sounding tone is drawn as a jack held high: what the monitor
+        // shows is whether something is leaving it, not its waveform.
+        void tone(uint8_t port, uint32_t millihertz) override {
+            if (port < GPIO_N){
+                if (millihertz) out_bits |= (uint16_t)(1u << port); else out_bits &= (uint16_t)~(1u << port);
+            }
+            gpio.tone(port, millihertz);
+        }
         uint8_t read(uint8_t port) override {
             const uint8_t level = gpio.read(port);
             if (port < GPIO_N){

@@ -10,7 +10,7 @@ import { el, classes } from '../dom.js';
 import { Segmented } from '../components/Segmented.js';
 import { BusNeighbours } from '../controls/BusNeighbours.js';
 import { GATE_DIRECTIONS } from '../../protocol/names.js';
-import { Domain } from '../../core/validate.js';
+import { Domain, jackDomain } from '../../core/validate.js';
 import { BlockKind } from '../../core/graph.js';
 import { BlockSignalsPanel } from '../scope/ScopePanels.js';
 import './cards.css';
@@ -29,10 +29,10 @@ export function JackCard(app, index) {
       options: GATE_DIRECTIONS, value: port.direction, label: `${title} direction`,
       onChange: (direction) => app.editor.setJack(index, direction),
     }),
-    used ? el('div', { class: 'port dom-gate' },
+    used ? el('div', { class: classes('port', jackDomain(port.direction) === Domain.CV ? 'dom-cv' : 'dom-gate') },
       el('div', { class: 'port-head' },
         el('span', { class: 'port-name' }, writes ? 'writes' : 'reads')),
-      BusNeighbours(app, { domain: Domain.Gate, buses: port.buses, self: `jack:${index}`, writes,
+      BusNeighbours(app, { domain: jackDomain(port.direction), buses: port.buses, self: `jack:${index}`, writes,
                            unused: 'not connected — patch it on the canvas' })) : null,
     used ? BlockSignalsPanel(app, { kind: BlockKind.Jack, index }) : null);
 }

@@ -25,6 +25,7 @@ class PluginGpio : public IGpio {
         void mode(uint8_t, uint8_t) override {}
         void write(uint8_t, uint8_t) override {}
         uint8_t read(uint8_t) override { return GPIO_LOW; }
+        void tone(uint8_t, uint32_t) override {}
 };
 
 // One message on its way out of the plugin, stamped with the sample of the

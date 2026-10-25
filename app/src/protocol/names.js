@@ -248,20 +248,23 @@ export const ALGORITHM_CATEGORIES = labelled(P.AlgorithmCategory, {
   CATEGORY_NONE: 'other',
 }, 'AlgorithmCategory');
 
-// Which way a jack faces, as the three states the firmware has. The label is
+// Which way a jack faces, as the four states the firmware has. The label is
 // what fits on a toggle; the hint is the sentence that says which way the
 // signal actually runs, which is the part nobody should have to remember.
 const GATE_DIRECTION_HINTS = {
   GATE_PORT_UNUSED: 'nothing is patched here',
   GATE_PORT_IN: 'the jack drives a gate bus',
   GATE_PORT_OUT: 'a gate bus drives the jack',
+  GATE_PORT_TONE: 'a CV bus plays a square wave at the jack',
 };
 
 export const GATE_DIRECTIONS = labelled(P.GatePortDirection, {
   GATE_PORT_UNUSED: 'unused',
   GATE_PORT_IN: 'in',
   GATE_PORT_OUT: 'out',
-}, 'GatePortDirection').map((d) => ({ ...d, hint: GATE_DIRECTION_HINTS[d.key] }));
+  GATE_PORT_TONE: 'tone',
+  GATE_PORT_DIRECTIONS: '',
+}, 'GatePortDirection').filter((d) => d.label).map((d) => ({ ...d, hint: GATE_DIRECTION_HINTS[d.key] }));
 
 // The Launchpads the module can drive (src/node/patch.h). Auto reads the
 // model off the device's answer to a device inquiry; the rest name it for a

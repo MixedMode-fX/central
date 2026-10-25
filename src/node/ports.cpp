@@ -1,4 +1,5 @@
 #include "node/ports.h"
+#include "util/tone.h"
 
 // GateInPort ----------------------------------------------------------------
 
@@ -37,6 +38,33 @@ void GateOutPort::release(){
 void GateOutPort::process(BusManager& bus, uint32_t){
     if (!enabled()) return;
     gpio->write(port, bus.gate_read(buses) ? GPIO_HIGH : GPIO_LOW);
+}
+
+// ToneOutPort ---------------------------------------------------------------
+
+void ToneOutPort::setup(){
+    if (!enabled()) return;
+    gpio->mode(port, GPIO_MODE_OUTPUT);
+    gpio->write(port, GPIO_LOW);
+    playing = 0;
+}
+
+void ToneOutPort::release(){
+    if (enabled()){
+        gpio->tone(port, 0);
+        gpio->mode(port, GPIO_MODE_INPUT_PULLUP);
+    }
+    gpio = nullptr;
+    buses = BusSet{};
+    playing = 0;
+}
+
+void ToneOutPort::process(BusManager& bus, uint32_t){
+    if (!enabled()) return;
+    const uint32_t want = tone_millihertz(bus.cv_read(buses));
+    if (want == playing) return;
+    playing = want;
+    gpio->tone(port, want);
 }
 
 // MidiInPort ----------------------------------------------------------------

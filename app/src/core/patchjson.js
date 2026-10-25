@@ -32,7 +32,8 @@ import { isRoute, isBinding, isMacro, isDest, targetParamName } from './patch.js
 
 const DIRECTIONS = { [P.GatePortDirection.GATE_PORT_UNUSED]: 'unused',
                      [P.GatePortDirection.GATE_PORT_IN]: 'in',
-                     [P.GatePortDirection.GATE_PORT_OUT]: 'out' };
+                     [P.GatePortDirection.GATE_PORT_OUT]: 'out',
+                     [P.GatePortDirection.GATE_PORT_TONE]: 'tone' };
 
 // A port is on a *set* of buses (src/bus/domain.h). In this file that is
 // written as the bus itself when there is one, a list when there are several
@@ -386,7 +387,7 @@ export function fromPatchJson(json, device) {
       throw new Error(`jack ${g.port} does not exist (1..${patch.gatePorts.length})`);
     }
     const direction = Object.entries(DIRECTIONS).find(([, name]) => name === g.dir)?.[0];
-    if (direction === undefined) throw new Error(`jack ${g.port}: dir must be in, out or unused`);
+    if (direction === undefined) throw new Error(`jack ${g.port}: dir must be in, out, tone or unused`);
     patch.gatePorts[jack] = { direction: Number(direction), buses: busesFromJson(g.bus) };
   }
 

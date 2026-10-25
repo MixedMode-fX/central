@@ -1060,6 +1060,47 @@ static void test_the_arpeggio_plays_the_chord_the_same_pulse_chose() {
     TEST_ASSERT_GREATER_THAN_UINT32(2, steps_on_a_change);
 }
 
+// ---------------------------------------------------------------------------
+// MIDI in -> RPS10 -> a tone jack: the note becomes a frequency at the jack,
+// told to the jack's timer only when it moves, and a tone jack's buses are
+// CV buses.
+// ---------------------------------------------------------------------------
+static void test_a_tone_jack_plays_the_rps10_shift() {
+    FakeGpio gpio; RecordingMidiOut midi;
+    MixedModeMaster master(gpio, midi);
+    Patch p = empty_patch();
+    p.midi_in[0] = MidiInConfig{mmMIDI_SERIAL_1, 0, one_bus(0)};
+    p.nodes[0] = node(ALGO_RPS10, 0, 2);                                  // note 0 -> CV 2
+    p.n_nodes = 1;
+    p.gate_ports[4] = GatePortConfig{GATE_PORT_TONE, one_bus(2)};         // CV 2 -> jack 5
+    TEST_ASSERT_EQUAL(LOAD_OK, master.load(p));
+    master.setup();
+
+    uint32_t now = 0;
+    run_passes(master, 2, now);
+    TEST_ASSERT_UINT32_WITHIN(1, 1046502, gpio.tones[4]);                 // unison before any note: C6
+    const uint32_t calls = gpio.tone_calls;
+    run_passes(master, 5, now);
+    TEST_ASSERT_EQUAL_UINT32(calls, gpio.tone_calls);                     // a steady pitch is not re-sent
+
+    master.deliver_midi(mmMIDI_SERIAL_1, MidiEvent{MIDI_NOTE_ON, 1, 67, 100});   // a fifth above C4
+    run_passes(master, 2, now);
+    TEST_ASSERT_UINT32_WITHIN(1, 1567982, gpio.tones[4]);                 // G6
+
+    // A tone jack names CV buses, and there are fewer of those than gate buses.
+    Patch bad = p;
+    bad.gate_ports[4] = GatePortConfig{GATE_PORT_TONE, one_bus(N_CV_BUS)};
+    TEST_ASSERT_EQUAL(LOAD_GATE_PORT_BUS_OUT_OF_RANGE, master.load(bad));
+    Patch nonsense = p;
+    nonsense.gate_ports[4] = GatePortConfig{GATE_PORT_DIRECTIONS, one_bus(0)};
+    TEST_ASSERT_EQUAL(LOAD_GATE_PORT_BUS_OUT_OF_RANGE, master.load(nonsense));
+
+    // Turned into a gate jack, the tone stops and the pin is a plain output.
+    TEST_ASSERT_EQUAL(LOAD_OK, master.set_gate_port(4, GatePortConfig{GATE_PORT_OUT, one_bus(0)}));
+    TEST_ASSERT_EQUAL_UINT32(0, gpio.tones[4]);
+    TEST_ASSERT_EQUAL(GPIO_MODE_OUTPUT, gpio.modes[4]);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_gate_in_through_algorithms_to_midi_out);
@@ -1086,6 +1127,7 @@ int main() {
     RUN_TEST(test_a_panic_releases_what_is_sounding_and_sweeps_every_channel);
     RUN_TEST(test_a_panic_cuts_a_held_note_that_a_stop_leaves_alone);
     RUN_TEST(test_a_jack_clocked_patch_plays_with_the_transport_stopped);
+    RUN_TEST(test_a_tone_jack_plays_the_rps10_shift);
     RUN_TEST(test_zero_heap_allocation_after_setup);
     RUN_TEST(test_thousand_load_unload_cycles_leave_identical_state);
     return UNITY_END();

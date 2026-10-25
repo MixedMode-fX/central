@@ -12,7 +12,7 @@ class FakeGpio : public IGpio {
         struct Write { uint8_t port; uint8_t state; };
         static constexpr size_t RESERVE = 65536;
 
-        FakeGpio() : modes(), inputs(), outputs(), writes() {
+        FakeGpio() : modes(), inputs(), outputs(), tones(), tone_calls(0), writes() {
             writes.reserve(RESERVE);   // so recording never allocates mid-test
             for (uint8_t i = 0; i < GPIO_N; i++) {
                 modes[i] = GPIO_MODE_INPUT;
@@ -27,6 +27,10 @@ class FakeGpio : public IGpio {
             if (port < GPIO_N) outputs[port] = state;
         }
         uint8_t read(uint8_t port) override { return port < GPIO_N ? inputs[port] : 0xFF; }
+        void tone(uint8_t port, uint32_t millihertz) override {
+            tone_calls++;
+            if (port < GPIO_N) tones[port] = millihertz;
+        }
 
         // Test-side controls
         void set_input(uint8_t port, uint8_t level) { inputs[port] = level; }
@@ -35,6 +39,8 @@ class FakeGpio : public IGpio {
         uint8_t modes[GPIO_N];
         uint8_t inputs[GPIO_N];
         uint8_t outputs[GPIO_N];
+        uint32_t tones[GPIO_N];     // the millihertz each port was last told; 0 is silent
+        uint32_t tone_calls;
         std::vector<Write> writes;
 };
 

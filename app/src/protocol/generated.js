@@ -60,7 +60,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 19;
+export const SYSEX_PROTOCOL_VERSION = 20;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 512;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -237,6 +237,8 @@ export const GatePortDirection = Object.freeze({
   GATE_PORT_UNUSED: 0,
   GATE_PORT_IN: 1,
   GATE_PORT_OUT: 2,
+  GATE_PORT_TONE: 3,
+  GATE_PORT_DIRECTIONS: 4,
 });
 
 export const LaunchpadModel = Object.freeze({
@@ -342,6 +344,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_AD: 58,
   ALGO_ADSR: 59,
   ALGO_NOTE_BUFFER: 60,
+  ALGO_RPS10: 61,
 });
 
 export const AlgorithmCategory = Object.freeze({

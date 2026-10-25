@@ -292,7 +292,11 @@ void Console::cmd_patch(){
     for (uint8_t i = 0; i < GPIO_N; i++){
         if (p.gate_ports[i].direction == GATE_PORT_UNUSED) continue;
         put("  jack "); put_uint(i + 1u);
-        put(p.gate_ports[i].direction == GATE_PORT_IN ? " in  -> gate " : " out <- gate ");
+        switch (p.gate_ports[i].direction){
+            case GATE_PORT_IN:   put(" in   -> gate "); break;
+            case GATE_PORT_TONE: put(" tone <- cv "); break;
+            default:             put(" out  <- gate "); break;
+        }
         put_buses(p.gate_ports[i].buses);
         put_line("");
     }

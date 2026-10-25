@@ -3364,6 +3364,41 @@ test('a jack turned round keeps its bus, and an unused one lands on a real one',
   assert.deepEqual(validate(device, patch), [], 'the module takes what the toggle wrote');
 });
 
+// A tone jack reads a CV bus, so turning a gate jack into one lets go of its
+// gate bus rather than reading CV bus 3 because it was on gate bus 3 - and
+// the patch the toggle leaves, with an RPS10 on that CV bus, is one the
+// module plays: the note's shift is a frequency at the jack.
+test('a tone jack takes a CV bus and plays the RPS10 shift', async () => {
+  const { module } = await instantiate();
+  const device = await connected(module);
+  const caps = device.capabilities;
+  const patch = codec.emptyPatch();
+  patch.gatePorts[0] = { direction: P.GatePortDirection.GATE_PORT_OUT, buses: [3] };
+
+  const tone = planJackDirection(patch, caps, 0, P.GatePortDirection.GATE_PORT_TONE);
+  assert.deepEqual(tone.buses, [], 'gate bus 3 is not CV bus 3');
+  patch.gatePorts[0] = { direction: tone.direction, buses: [2] };
+  patch.midiIn[0] = { sourceMask: P.MidiPort.mmMIDI_USB_0, channel: 0, buses: [0] };
+  const rps = codec.emptyNode(P.AlgorithmId.ALGO_RPS10);
+  rps.inBuses[0] = [0];
+  rps.outBuses[0] = [2];
+  patch.nodes.push(rps);
+  assert.deepEqual(validate(device, patch), []);
+  patch.gatePorts[0] = { direction: tone.direction, buses: [caps.cvBuses] };
+  assert.equal(validate(device, patch).length, 1, 'a CV bus the module has not got');
+  patch.gatePorts[0] = { direction: tone.direction, buses: [2] };
+
+  await device.sendPatch(patch, codec.emptyGlobals());
+  module.advance(5000);
+  assert.ok(Math.abs(module.jackTone(0) - 1046502) <= 1, 'unison is C6');
+  module.deliverMidi(P.MidiPort.mmMIDI_USB_0, 0x90, 1, 72, 100);       // C5: an octave up
+  module.advance(5000);
+  assert.ok(Math.abs(module.jackTone(0) - 2093005) <= 1, 'an octave up is C7');
+
+  const json = toPatchJson(patch, codec.emptyGlobals(), device);
+  assert.equal(json.gate_ports[0].dir, 'tone');
+});
+
 // A MIDI port's direction is the same setting to the eye and a different thing
 // underneath: the module has four inputs and four outputs, so the toggle moves
 // the port. What it carries has to travel with it, or "turn it round" quietly

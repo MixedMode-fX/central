@@ -381,7 +381,10 @@ is only what a parameter list cannot say.
   note-off is swallowed, so notes pile up until a rising edge on `reset`
   releases them all. A note already held is not struck again, a reset and a
   note in the same pass leave the new note held, and a transport stop releases
-  nothing — the reset says when.
+  nothing — the reset says when. In `sustain` the same inlet is a pedal that
+  sends notes: low, the buffer is a through; high, note-offs are swallowed;
+  falling, it releases every note whose key is up, and a key still down sounds
+  until its own note-off.
 - **`NoteWrap` folds notes into a range by whole octaves**, so each keeps its
   pitch class. The range hangs off the root — the key's tonic, or the last
   note-on at the `root` inlet — from `low` semitones away, `range` semitones

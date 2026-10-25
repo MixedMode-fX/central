@@ -60,6 +60,7 @@ static const Driven DRIVEN[] = {
     {ALGO_ARPEGGIATOR,    true},
     {ALGO_RETRIGGER,      true},
     {ALGO_NOTE_BUFFER,    true},
+    {ALGO_NOTE_WRAP,      false},
     {ALGO_NOTE_SWITCH,    false},
     {ALGO_NOTE_ROUTER,    false},
 };

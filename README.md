@@ -386,7 +386,7 @@ is only what a parameter list cannot say.
   pitch class. The range hangs off the root — the key's tonic, or the last
   note-on at the `root` inlet — from `low` semitones away, `range` semitones
   wide; by default one octave up from the root. Under an octave some pitch
-  classes have no place, and land on the nearest edge.
+  classes have no place, and those notes are dropped.
 - **`Voicer`'s ledger is keyed on the note it emitted**, not the note that
   caused it, because it emits a function of the whole held chord rather than of
   one note. Common-tone retention is then the *absence* of code: a shared note

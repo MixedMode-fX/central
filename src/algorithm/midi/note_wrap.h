@@ -19,12 +19,13 @@
 // last note-on is the root, in its own register unless `octave` names one
 // (global_key::placed), and it holds until the next.
 //
-// **A range under an octave has pitch classes with no place.** No octave
-// brings them inside, so they land on the nearest edge after the fold, as
-// `RPS10`'s wrap does: a note always comes out, and it is always in range.
+// **A range under an octave has pitch classes with no place**, and a note
+// no octave brings inside is dropped, its note-off with it: moving it to an
+// edge would play a pitch class nobody played.
 //
 // The range is clipped to the keyboard, so a root near the top or bottom
-// shortens it rather than folding notes off the end.
+// shortens it rather than folding notes off the end - and a range shortened
+// under an octave drops what it has no place for.
 //
 // Every note-off releases what its note-on actually sent (midi/sounding_notes.h),
 // so the root, the key and the range may all move under a held note.
@@ -45,6 +46,9 @@ class NoteWrap : public Node{
         static constexpr uint8_t DEFAULT_RANGE = 11;   // one octave, each pitch class once
         static constexpr uint8_t MAX_RANGE = 96;
         static constexpr uint8_t NO_ROOT = 0xFF;
+        // What wrap() answers for a note the range has no place for. Not a
+        // pitch: 0xFF is not a MIDI note.
+        static constexpr uint8_t DROPPED = 0xFF;
 
         static const AlgorithmDescriptor descriptor;
 
@@ -61,7 +65,7 @@ class NoteWrap : public Node{
         // The range's edges, inclusive, on the keyboard.
         uint8_t bottom() const;
         uint8_t top() const;
-        // Where one note lands.
+        // Where one note lands, or DROPPED.
         uint8_t wrap(uint8_t note) const;
         uint8_t sounding_count() const { return sounding.count(); }
 

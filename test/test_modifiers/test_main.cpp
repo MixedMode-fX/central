@@ -2481,16 +2481,29 @@ static void test_note_wrap_low_and_range_place_it() {
     TEST_ASSERT_EQUAL_UINT8(75, node.top());
 }
 
-// Under an octave some pitch classes have no place: the fold leaves them
-// past an edge, and they land on it.
-static void test_note_wrap_a_narrow_range_clips_what_no_octave_brings_inside() {
+// Under an octave some pitch classes have no place, and those notes are
+// dropped with their note-offs.
+static void test_note_wrap_a_narrow_range_drops_what_no_octave_brings_inside() {
     NodeConfig c = wrap_config();
     c.params[NoteWrap::P_RANGE] = 4;                          // C4 .. E4
     NoteWrap node(c);
     TEST_ASSERT_EQUAL_UINT8(62, node.wrap(74));              // D5 fits: D4
-    TEST_ASSERT_EQUAL_UINT8(64, node.wrap(66));              // F sharp: the top
-    TEST_ASSERT_EQUAL_UINT8(60, node.wrap(58));              // B flat has no place: the bottom
-    TEST_ASSERT_EQUAL_UINT8(64, node.wrap(67));              // G4 has no place: the top
+    TEST_ASSERT_EQUAL_UINT8(NoteWrap::DROPPED, node.wrap(66));   // F sharp has no place
+    TEST_ASSERT_EQUAL_UINT8(NoteWrap::DROPPED, node.wrap(58));   // nor B flat
+    TEST_ASSERT_EQUAL_UINT8(64, node.wrap(76));              // the edges are inside
+
+    BusManager bus;
+    bus.note_write(0, on(67));                               // G4: dropped
+    bus.note_write(0, on(74));                               // D5: D4
+    std::vector<MidiEvent> out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL_UINT8(62, out[0].data1);
+    bus.note_write(0, off(67));
+    bus.note_write(0, off(74));
+    out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(1, out.size());                        // no off for the dropped note
+    TEST_ASSERT_EQUAL_UINT8(62, out[0].data1);
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
 }
 
 // The range is clipped to the keyboard rather than folding notes off it.
@@ -2501,7 +2514,7 @@ static void test_note_wrap_keeps_the_range_on_the_keyboard() {
     TEST_ASSERT_EQUAL_UINT8(120, node.bottom());
     TEST_ASSERT_EQUAL_UINT8(127, node.top());
     TEST_ASSERT_EQUAL_UINT8(124, node.wrap(64));
-    TEST_ASSERT_EQUAL_UINT8(120, node.wrap(59));             // B has no place up there
+    TEST_ASSERT_EQUAL_UINT8(NoteWrap::DROPPED, node.wrap(59));   // B has no place up there
 }
 
 // The root is the key's tonic in the key's register, `octave` names one of
@@ -2671,7 +2684,7 @@ int main() {
     RUN_TEST(test_rps10_wraps_by_octaves_past_the_range);
     RUN_TEST(test_note_wrap_folds_into_the_octave_above_the_root);
     RUN_TEST(test_note_wrap_low_and_range_place_it);
-    RUN_TEST(test_note_wrap_a_narrow_range_clips_what_no_octave_brings_inside);
+    RUN_TEST(test_note_wrap_a_narrow_range_drops_what_no_octave_brings_inside);
     RUN_TEST(test_note_wrap_keeps_the_range_on_the_keyboard);
     RUN_TEST(test_note_wrap_takes_its_root_from_the_key_or_a_cable);
     RUN_TEST(test_note_wrap_releases_what_it_sent_after_the_root_moves);

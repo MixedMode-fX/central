@@ -72,9 +72,8 @@ uint8_t NoteWrap::wrap(uint8_t note) const {
     int16_t pitch = note;
     while (pitch > hi && pitch - 12 >= lo) pitch = (int16_t)(pitch - 12);
     while (pitch < lo && pitch + 12 <= hi) pitch = (int16_t)(pitch + 12);
-    // A pitch class the range has no place for: the nearest edge.
-    if (pitch > hi) pitch = hi;
-    if (pitch < lo) pitch = lo;
+    // A pitch class the range has no place for.
+    if (pitch > hi || pitch < lo) return DROPPED;
     return (uint8_t)pitch;
 }
 
@@ -97,9 +96,11 @@ void NoteWrap::process(BusManager& bus, uint32_t){
             bus.note_write(out, readdressed(e, channel));
             continue;
         }
+        const uint8_t note = wrap(e.data1);
+        if (note == DROPPED) continue;                 // and its note-off with it
         // Two incoming pitches an octave apart wrap to the same note. The
         // ledger keys on the source note, so each still gets its own release.
-        sounding.emit(bus, out, e.data1, wrap(e.data1), e.data2, out_channel(channel, e.channel));
+        sounding.emit(bus, out, e.data1, note, e.data2, out_channel(channel, e.channel));
     }
 }
 

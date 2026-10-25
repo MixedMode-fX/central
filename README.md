@@ -313,7 +313,8 @@ is only what a parameter list cannot say.
   frequency moves. Pins that share a PWM submodule share its frequency
   (`src/hardware.h`). `RPS10` writes the pitch a BOSS RPS-10's keyboard control
   listens for: C6 is unison and C5..C7 its −1..+1 octave. `range` defaults
-  to that span and may go past it, for trying the tracker outside its spec;
+  to that span and may go past it, for trying the tracker outside its spec,
+  and a note beyond it is clipped to the edge or wrapped by octaves into it;
   `glide` slides between shifts at a rate per octave, as `Slew` does. The
   shift is a note's interval from the root — the key's tonic, or the last
   note on its root inlet — so a keyboard does not have to sit two octaves up.

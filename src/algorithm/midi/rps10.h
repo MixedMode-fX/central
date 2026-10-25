@@ -15,9 +15,16 @@
 // **`range` is where the interval stops, and it may go past the spec.** The
 // manual promises -1..+1 octave, so that is the default; up to MAX_RANGE
 // either way is there because what a tracker does outside its stated span
-// is something to try on the unit rather than something to rule out here. A
-// note further out than `range` has no shift to give, and the nearest one
-// is a flat note rather than a wrapped one.
+// is something to try on the unit rather than something to rule out here.
+//
+// **What a note further out than `range` gets is `out of range`.** `clip` gives it
+// the nearest shift the range has, so everything past the top is the top.
+// `wrap` moves it by as few octaves as bring it inside, so it keeps its
+// pitch class: at an octave's range a ninth is a second and two octaves up
+// is one, which is how a keyboard wider than the pedal still plays the
+// intervals it means. A range under a tritone has intervals no octave can
+// bring inside; those are clipped after the fold. Bend is a sweep rather
+// than a note, so it always stops at the edge.
 //
 // **`glide` smooths the tone between shifts**, at a rate rather than in a
 // time, as `Slew` does: tens of milliseconds per octave, so a third and an
@@ -58,6 +65,7 @@
 // params[3] release   hold / unison / off
 // params[4] range     the widest shift, in semitones either way (0 = DEFAULT_RANGE)
 // params[5] glide     tens of milliseconds per octave (0 = instant)
+// params[6] out of range  clip / wrap
 class Rps10 : public Node{
     public:
         static const AlgorithmDescriptor descriptor;
@@ -79,6 +87,12 @@ class Rps10 : public Node{
 
         // The keyboard control's span, as MIDI notes (C4 = 60).
         static constexpr uint8_t UNISON_NOTE = 84;     // C6, 1046.5 Hz
+        enum Edge : uint8_t {
+            EDGE_CLIP = 0,
+            EDGE_WRAP = 1,
+            EDGES     = 1,
+        };
+
         static constexpr uint8_t DEFAULT_RANGE = 12;   // the spec: an octave either way
         static constexpr uint8_t MAX_RANGE = 36;       // C3 .. C9 at the jack
         static constexpr uint8_t NO_ROOT = 0xFF;
@@ -121,6 +135,7 @@ class Rps10 : public Node{
         uint8_t release;
         uint8_t range;
         uint8_t glide;
+        uint8_t edge;
 
         uint8_t played_root;    // the root inlet's last note-on, NO_ROOT until one
         uint16_t bend_value;    // 14 bits, centred on BEND_CENTRE

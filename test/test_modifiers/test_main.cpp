@@ -2307,6 +2307,49 @@ static void test_rps10_range_goes_past_the_spec() {
     TEST_ASSERT_EQUAL_INT16(tone_of_note(Rps10::UNISON_NOTE - 7), run_rps_pass(bus, node));
 }
 
+static void test_rps10_wraps_by_octaves_past_the_range() {
+    BusManager bus;
+    NodeConfig c = rps_config();
+    c.params[6] = Rps10::EDGE_WRAP;
+    Rps10 node(c);
+    const int16_t unison = tone_of_note(Rps10::UNISON_NOTE);
+
+    bus.note_write(0, on(74));                                           // a ninth: a second
+    run_rps_pass(bus, node);
+    TEST_ASSERT_EQUAL_INT8(2, node.shift());
+    bus.note_write(0, off(74));
+    bus.note_write(0, on(84));                                           // two octaves: folded once, to one
+    run_rps_pass(bus, node);
+    TEST_ASSERT_EQUAL_INT8(12, node.shift());
+    bus.note_write(0, off(84));
+    bus.note_write(0, on(72));                                           // the octave itself is inside
+    run_rps_pass(bus, node);
+    TEST_ASSERT_EQUAL_INT8(12, node.shift());
+    bus.note_write(0, off(72));
+    bus.note_write(0, on(29));                                           // F three octaves down: a fifth down
+    TEST_ASSERT_EQUAL_INT16(unison - 7 * TONE_PER_SEMITONE, run_rps_pass(bus, node));
+    bus.note_write(0, off(29));
+
+    // A range narrower than a tritone: what no octave brings inside is clipped.
+    TEST_ASSERT_TRUE(node.set_param(4, 4));
+    bus.note_write(0, on(70));                                           // +10 folds to -2
+    run_rps_pass(bus, node);
+    TEST_ASSERT_EQUAL_INT8(-2, node.shift());
+    bus.note_write(0, off(70));
+    bus.note_write(0, on(66));                                           // +6 or -6: neither fits
+    run_rps_pass(bus, node);
+    TEST_ASSERT_EQUAL_INT8(4, node.shift());
+
+    // Clip is the default, and back to it the ninth is the octave.
+    TEST_ASSERT_TRUE(node.set_param(6, Rps10::EDGE_CLIP));
+    TEST_ASSERT_TRUE(node.set_param(4, 12));
+    bus.note_write(0, off(66));
+    bus.note_write(0, on(74));
+    run_rps_pass(bus, node);
+    TEST_ASSERT_EQUAL_INT8(12, node.shift());
+    TEST_ASSERT_FALSE(node.set_param(6, Rps10::EDGES + 1));
+}
+
 static void test_rps10_glides_at_a_rate() {
     BusManager bus;
     NodeConfig c = rps_config();
@@ -2467,5 +2510,6 @@ int main() {
     RUN_TEST(test_rps10_priority_picks_one_interval);
     RUN_TEST(test_rps10_range_goes_past_the_spec);
     RUN_TEST(test_rps10_glides_at_a_rate);
+    RUN_TEST(test_rps10_wraps_by_octaves_past_the_range);
     return UNITY_END();
 }

@@ -188,7 +188,7 @@ touched.
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
 | Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
-| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger`, `NoteBuffer` |
+| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger`, `NoteBuffer`, `NoteWrap` |
 | Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz`, `Key` |
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate`, `RPS10` |
@@ -382,6 +382,11 @@ is only what a parameter list cannot say.
   releases them all. A note already held is not struck again, a reset and a
   note in the same pass leave the new note held, and a transport stop releases
   nothing — the reset says when.
+- **`NoteWrap` folds notes into a range by whole octaves**, so each keeps its
+  pitch class. The range hangs off the root — the key's tonic, or the last
+  note-on at the `root` inlet — from `low` semitones away, `range` semitones
+  wide; by default one octave up from the root. Under an octave some pitch
+  classes have no place, and land on the nearest edge.
 - **`Voicer`'s ledger is keyed on the note it emitted**, not the note that
   caused it, because it emits a function of the whole held chord rather than of
   one note. Common-tone retention is then the *absence* of code: a shared note

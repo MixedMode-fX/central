@@ -11,6 +11,7 @@
 #include "algorithm/midi/probability.h"
 #include "algorithm/midi/midi_to_cv.h"
 #include "algorithm/midi/rps10.h"
+#include "algorithm/midi/note_wrap.h"
 #include "algorithm/clock/clock_div.h"
 #include "algorithm/clock/metronome.h"
 #include "algorithm/sequencer/sequencers.h"
@@ -111,6 +112,7 @@ static const AlgorithmDescriptor* const TABLE[] = {
     &AdsrEnvelope::descriptor,
     &NoteBuffer::descriptor,
     &Rps10::descriptor,
+    &NoteWrap::descriptor,
 };
 
 static const uint8_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);

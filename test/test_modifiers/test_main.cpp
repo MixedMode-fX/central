@@ -19,6 +19,7 @@
 #include "algorithm/midi/arpeggiator.h"
 #include "algorithm/midi/midi_to_cv.h"
 #include "algorithm/midi/rps10.h"
+#include "algorithm/midi/note_wrap.h"
 #include "util/tone.h"
 
 void setUp() {}
@@ -2417,6 +2418,163 @@ static void test_rps10_priority_picks_one_interval() {
     TEST_ASSERT_EQUAL_INT16(unison, run_rps_pass(bus, node));
 }
 
+// ---------------------------------------------------------------------------
+// NoteWrap: notes folded by octaves into a range hung off the root
+// ---------------------------------------------------------------------------
+
+static NodeConfig wrap_config() {
+    NodeConfig c = node_config(ALGO_NOTE_WRAP);
+    c.in_buses[0] = one_bus(0);
+    c.out_buses[0] = one_bus(2);
+    return c;
+}
+
+// Left alone: the root (middle C in C) up to its major seventh, so every
+// pitch class has one place.
+static void test_note_wrap_folds_into_the_octave_above_the_root() {
+    BusManager bus;
+    NoteWrap node(wrap_config());
+    TEST_ASSERT_EQUAL_UINT8(60, node.bottom());
+    TEST_ASSERT_EQUAL_UINT8(71, node.top());
+
+    struct Case { uint8_t in; uint8_t out; };
+    const Case cases[] = {
+        {60, 60}, {71, 71}, {64, 64},       // inside: untouched
+        {72, 60}, {76, 64}, {100, 64},      // above: down as few octaves as it takes
+        {59, 71}, {48, 60}, {0, 60},        // below: up
+        {127, 67},
+    };
+    for (const Case& k : cases) TEST_ASSERT_EQUAL_UINT8(k.out, node.wrap(k.in));
+
+    bus.note_write(0, on(88, 90, 3));
+    std::vector<MidiEvent> out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(MIDI_NOTE_ON, out[0].type);
+    TEST_ASSERT_EQUAL_UINT8(64, out[0].data1);
+    TEST_ASSERT_EQUAL_UINT8(90, out[0].data2);
+    TEST_ASSERT_EQUAL_UINT8(3, out[0].channel);
+}
+
+// `low` places the range against the root and `range` sizes it; a range wider
+// than an octave leaves notes already inside it where they are.
+static void test_note_wrap_low_and_range_place_it() {
+    NodeConfig c = wrap_config();
+    c.params[NoteWrap::P_LOW] = param_centred_byte(-5);      // G3
+    c.params[NoteWrap::P_RANGE] = 19;                         // .. D5
+    NoteWrap node(c);
+    TEST_ASSERT_EQUAL_UINT8(55, node.bottom());
+    TEST_ASSERT_EQUAL_UINT8(74, node.top());
+    TEST_ASSERT_EQUAL_UINT8(55, node.wrap(55));
+    TEST_ASSERT_EQUAL_UINT8(74, node.wrap(74));
+    TEST_ASSERT_EQUAL_UINT8(63, node.wrap(75));              // E flat 5 -> E flat 4
+    TEST_ASSERT_EQUAL_UINT8(66, node.wrap(54));              // F sharp 3 -> F sharp 4
+    TEST_ASSERT_EQUAL_UINT8(62, node.wrap(38));
+
+    // Writes inside the bounds land, outside them are refused.
+    TEST_ASSERT_TRUE(node.set_param(NoteWrap::P_LOW, param_centred_byte(12)));
+    TEST_ASSERT_EQUAL_UINT8(72, node.bottom());
+    TEST_ASSERT_EQUAL_UINT8(param_centred_byte(12), node.get_param(NoteWrap::P_LOW));
+    TEST_ASSERT_FALSE(node.set_param(NoteWrap::P_LOW, param_centred_byte(NoteWrap::MAX_LOW + 1)));
+    TEST_ASSERT_FALSE(node.set_param(NoteWrap::P_RANGE, 0));
+    TEST_ASSERT_FALSE(node.set_param(NoteWrap::P_RANGE, NoteWrap::MAX_RANGE + 1));
+    TEST_ASSERT_TRUE(node.set_param(NoteWrap::P_RANGE, 3));
+    TEST_ASSERT_EQUAL_UINT8(75, node.top());
+}
+
+// Under an octave some pitch classes have no place: the fold leaves them
+// past an edge, and they land on it.
+static void test_note_wrap_a_narrow_range_clips_what_no_octave_brings_inside() {
+    NodeConfig c = wrap_config();
+    c.params[NoteWrap::P_RANGE] = 4;                          // C4 .. E4
+    NoteWrap node(c);
+    TEST_ASSERT_EQUAL_UINT8(62, node.wrap(74));              // D5 fits: D4
+    TEST_ASSERT_EQUAL_UINT8(64, node.wrap(66));              // F sharp: the top
+    TEST_ASSERT_EQUAL_UINT8(60, node.wrap(58));              // B flat has no place: the bottom
+    TEST_ASSERT_EQUAL_UINT8(64, node.wrap(67));              // G4 has no place: the top
+}
+
+// The range is clipped to the keyboard rather than folding notes off it.
+static void test_note_wrap_keeps_the_range_on_the_keyboard() {
+    NodeConfig c = wrap_config();
+    c.params[NoteWrap::P_OCTAVE] = KEY_MAX_OCTAVE;           // C10, 120
+    NoteWrap node(c);
+    TEST_ASSERT_EQUAL_UINT8(120, node.bottom());
+    TEST_ASSERT_EQUAL_UINT8(127, node.top());
+    TEST_ASSERT_EQUAL_UINT8(124, node.wrap(64));
+    TEST_ASSERT_EQUAL_UINT8(120, node.wrap(59));             // B has no place up there
+}
+
+// The root is the key's tonic in the key's register, `octave` names one of
+// its own, and a played root outranks both until the next one.
+static void test_note_wrap_takes_its_root_from_the_key_or_a_cable() {
+    BusManager bus;
+    NodeConfig c = wrap_config();
+    c.in_buses[1] = one_bus(1);
+    NoteWrap node(c);
+
+    global_key::set(SCALE_MAJOR, 9);                         // A: A4 .. G sharp 5
+    TEST_ASSERT_EQUAL_UINT8(69, node.root());
+    TEST_ASSERT_EQUAL_UINT8(72, node.wrap(60));
+    TEST_ASSERT_TRUE(node.set_param(NoteWrap::P_OCTAVE, 3)); // A3
+    TEST_ASSERT_EQUAL_UINT8(45, node.root());
+    TEST_ASSERT_FALSE(node.set_param(NoteWrap::P_OCTAVE, KEY_MAX_OCTAVE + 1));
+    TEST_ASSERT_TRUE(node.set_param(NoteWrap::P_OCTAVE, 0));
+
+    // A root and a note in the same pass agree: D3 is the root, so F sharp 4
+    // folds down to F sharp 3.
+    bus.note_write(1, on(50));
+    bus.note_write(0, on(66));
+    std::vector<MidiEvent> out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL_UINT8(54, out[0].data1);
+    TEST_ASSERT_EQUAL_UINT8(50, node.root());
+
+    // Its note-off changes nothing, and neither does the key.
+    bus.note_write(1, off(50));
+    run_pass(bus, node, 2);
+    global_key::set_root(2);
+    TEST_ASSERT_EQUAL_UINT8(50, node.root());
+    // `octave` re-registers the played root.
+    TEST_ASSERT_TRUE(node.set_param(NoteWrap::P_OCTAVE, 5));
+    TEST_ASSERT_EQUAL_UINT8(62, node.root());
+}
+
+// The release is what was sent, whatever the root has done since, and two
+// notes wrapped onto one pitch each get their own.
+static void test_note_wrap_releases_what_it_sent_after_the_root_moves() {
+    BusManager bus;
+    NodeConfig c = wrap_config();
+    c.in_buses[1] = one_bus(1);
+    NoteWrap node(c);
+
+    bus.note_write(0, on(76));                               // E5 -> E4
+    bus.note_write(0, on(88));                               // E6 -> E4 as well
+    std::vector<MidiEvent> out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(2, out.size());
+    TEST_ASSERT_EQUAL_UINT8(64, out[0].data1);
+    TEST_ASSERT_EQUAL_UINT8(64, out[1].data1);
+
+    bus.note_write(1, on(67));                               // G4: E5 would be E5 now
+    bus.note_write(0, off(76));
+    out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL(MIDI_NOTE_OFF, out[0].type);
+    TEST_ASSERT_EQUAL_UINT8(64, out[0].data1);               // as sent
+    TEST_ASSERT_EQUAL(1, node.sounding_count());
+
+    bus.note_write(0, off(88));
+    out = run_pass(bus, node, 2);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL_UINT8(64, out[0].data1);
+    TEST_ASSERT_EQUAL(0, node.sounding_count());
+}
+
+static void test_note_wrap_hangs_nothing() {
+    NodeConfig c = modifier_config(ALGO_NOTE_WRAP);
+    c.params[NoteWrap::P_RANGE] = 7;
+    assert_no_hanging_notes<NoteWrap>(c, 0, 3, 7, false);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_held_notes_arrival_order_survives_out_of_order_offs);
@@ -2511,5 +2669,12 @@ int main() {
     RUN_TEST(test_rps10_range_goes_past_the_spec);
     RUN_TEST(test_rps10_glides_at_a_rate);
     RUN_TEST(test_rps10_wraps_by_octaves_past_the_range);
+    RUN_TEST(test_note_wrap_folds_into_the_octave_above_the_root);
+    RUN_TEST(test_note_wrap_low_and_range_place_it);
+    RUN_TEST(test_note_wrap_a_narrow_range_clips_what_no_octave_brings_inside);
+    RUN_TEST(test_note_wrap_keeps_the_range_on_the_keyboard);
+    RUN_TEST(test_note_wrap_takes_its_root_from_the_key_or_a_cable);
+    RUN_TEST(test_note_wrap_releases_what_it_sent_after_the_root_moves);
+    RUN_TEST(test_note_wrap_hangs_nothing);
     return UNITY_END();
 }

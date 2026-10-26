@@ -20,6 +20,7 @@
 #include "algorithm/midi/midi_to_cv.h"
 #include "algorithm/midi/rps10.h"
 #include "algorithm/midi/note_wrap.h"
+#include "algorithm/midi/pocket_arp.h"
 #include "util/tone.h"
 
 void setUp() {}
@@ -2588,6 +2589,150 @@ static void test_note_wrap_hangs_nothing() {
     assert_no_hanging_notes<NoteWrap>(c, 0, 3, 7, false);
 }
 
+// ---------------------------------------------------------------------------
+// PocketArp: the Pocket Piano's patterns
+// ---------------------------------------------------------------------------
+
+static NodeConfig pocket_config() {
+    NodeConfig c = node_config(ALGO_POCKET_ARP);
+    c.in_buses[0] = one_bus(0);
+    c.in_buses[1] = one_bus(0);
+    c.in_buses[2] = BusSet{};
+    c.out_buses[0] = one_bus(1);
+    return c;
+}
+
+// One rising edge, and the note-ons it struck in voice order.
+static std::vector<uint8_t> pocket_strike(BusManager& bus, PocketArp& node, uint32_t now_us = 0) {
+    bus.gate_write(0, true);
+    std::vector<MidiEvent> out = run_pass(bus, node, 1, now_us);
+    std::vector<uint8_t> struck;
+    for (const MidiEvent& e : out) if (is_note_on(e)) struck.push_back(e.data1);
+    bus.gate_write(0, false);
+    out = run_pass(bus, node, 1, now_us);
+    for (const MidiEvent& e : out) TEST_ASSERT_FALSE(is_note_on(e));
+    return struck;
+}
+
+// The figure is pparp's: chris_shifter() compiled as C&G wrote it and run on
+// C E G B, played in that order. Twelve strikes, then round again.
+static void test_pocket_arp_cascade_is_the_pocket_pianos() {
+    static const uint8_t FIGURE[12][4] = {
+        {72, 52, 79, 59}, {60, 64, 67, 71}, {48, 88, 79, 71}, {84, 64, 91, 71},
+        {72, 76, 79, 83}, {60, 52, 91, 83}, {48, 76, 55, 83}, {84, 88, 91, 95},
+        {72, 64, 55, 95}, {60, 88, 67, 95}, {48, 52, 55, 59}, {84, 76, 67, 59},
+    };
+    BusManager bus;
+    PocketArp node(pocket_config());
+    bus.note_write(0, on(60));
+    bus.note_write(0, on(64));
+    bus.note_write(0, on(67));
+    bus.note_write(0, on(71));
+    run_pass(bus, node, 1);
+    for (uint8_t step = 0; step < 24; step++) {
+        const std::vector<uint8_t> struck = pocket_strike(bus, node);
+        TEST_ASSERT_EQUAL(4, struck.size());
+        for (uint8_t v = 0; v < 4; v++) TEST_ASSERT_EQUAL_UINT8(FIGURE[step % 12][v], struck[v]);
+        TEST_ASSERT_EQUAL(4, node.sounding_count());             // legato: the last strike was released
+    }
+}
+
+// A voice is a slot: a key takes the first free one and the others do not
+// move, and a fifth key is ignored, as on the instrument.
+static void test_pocket_arp_voices_are_slots_in_the_order_played() {
+    BusManager bus;
+    PocketArp node(pocket_config());
+    bus.note_write(0, on(60));
+    bus.note_write(0, on(64));
+    bus.note_write(0, on(67));
+    bus.note_write(0, on(71));
+    bus.note_write(0, on(74));
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL_UINT8(71, node.voice(3));
+
+    bus.note_write(0, off(64));
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL_UINT8(PocketArp::NONE, node.voice(1));
+    TEST_ASSERT_EQUAL_UINT8(67, node.voice(2));
+    bus.note_write(0, on(62));
+    run_pass(bus, node, 1);
+    TEST_ASSERT_EQUAL_UINT8(62, node.voice(1));
+
+    // First strike: voice 1 is two octaves down from the top, voice 2 is not.
+    const std::vector<uint8_t> struck = pocket_strike(bus, node);
+    TEST_ASSERT_EQUAL(4, struck.size());
+    TEST_ASSERT_EQUAL_UINT8(62 - 12, struck[1]);
+    TEST_ASSERT_EQUAL_UINT8(67 + 12, struck[2]);
+}
+
+// Reset puts the figure back where a fresh node starts it.
+static void test_pocket_arp_reset_restarts_the_figure() {
+    BusManager bus;
+    NodeConfig c = pocket_config();
+    c.in_buses[2] = one_bus(1);
+    PocketArp node(c);
+    bus.note_write(0, on(60));
+    run_pass(bus, node, 1);
+    const std::vector<uint8_t> first = pocket_strike(bus, node);
+    pocket_strike(bus, node);
+    pocket_strike(bus, node);
+    bus.gate_write(1, true);
+    run_pass(bus, node, 1);
+    bus.gate_write(1, false);
+    run_pass(bus, node, 1);
+    const std::vector<uint8_t> again = pocket_strike(bus, node);
+    TEST_ASSERT_EQUAL(1, again.size());
+    TEST_ASSERT_EQUAL_UINT8(first[0], again[0]);
+}
+
+// A key and its octave can land on one pitch; it is struck once.
+static void test_pocket_arp_strikes_a_shared_pitch_once() {
+    BusManager bus;
+    PocketArp node(pocket_config());
+    bus.note_write(0, on(60));
+    bus.note_write(0, on(72));
+    run_pass(bus, node, 1);
+    for (uint8_t step = 0; step < 5; step++) TEST_ASSERT_EQUAL(2, pocket_strike(bus, node).size());
+    const std::vector<uint8_t> sixth = pocket_strike(bus, node);  // shifts 2 and 3: both C4
+    TEST_ASSERT_EQUAL(1, sixth.size());
+    TEST_ASSERT_EQUAL_UINT8(60, sixth[0]);
+}
+
+// Gate releases on time; jitter delays each note by no more than it says.
+static void test_pocket_arp_gate_and_jitter() {
+    BusManager bus;
+    NodeConfig c = pocket_config();
+    c.params[PocketArp::P_GATE] = 20;
+    c.params[PocketArp::P_JITTER] = 4;
+    PocketArp node(c);
+    bus.note_write(0, on(60));
+    bus.note_write(0, on(64));
+    bus.note_write(0, on(67));
+    run_pass(bus, node, 1);
+
+    bus.gate_write(0, true);
+    uint8_t ons = 0;
+    for (uint32_t t = 0; t <= 4000; t += 500) {
+        for (const MidiEvent& e : run_pass(bus, node, 1, t)) if (is_note_on(e)) ons++;
+    }
+    TEST_ASSERT_EQUAL(3, ons);                                   // every one inside 4 ms
+    TEST_ASSERT_EQUAL(3, node.sounding_count());
+    run_pass(bus, node, 1, 30000);
+    TEST_ASSERT_EQUAL(0, node.sounding_count());                 // and gone 20 ms after
+
+    TEST_ASSERT_FALSE(node.set_param(PocketArp::P_JITTER, PocketArp::MAX_JITTER_MS + 1));
+    TEST_ASSERT_FALSE(node.set_param(PocketArp::P_PATTERN, 1));
+}
+
+static void test_pocket_arp_hangs_nothing() {
+    NodeConfig c = modifier_config(ALGO_POCKET_ARP);
+    c.in_buses[1] = one_bus(1);
+    assert_no_hanging_notes<PocketArp>(c, 0, 3, 41u, true);
+    c.params[PocketArp::P_GATE] = 7;
+    c.params[PocketArp::P_JITTER] = 9;
+    assert_no_hanging_notes<PocketArp>(c, 0, 3, 42u, true);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_held_notes_arrival_order_survives_out_of_order_offs);
@@ -2689,5 +2834,11 @@ int main() {
     RUN_TEST(test_note_wrap_takes_its_root_from_the_key_or_a_cable);
     RUN_TEST(test_note_wrap_releases_what_it_sent_after_the_root_moves);
     RUN_TEST(test_note_wrap_hangs_nothing);
+    RUN_TEST(test_pocket_arp_cascade_is_the_pocket_pianos);
+    RUN_TEST(test_pocket_arp_voices_are_slots_in_the_order_played);
+    RUN_TEST(test_pocket_arp_reset_restarts_the_figure);
+    RUN_TEST(test_pocket_arp_strikes_a_shared_pitch_once);
+    RUN_TEST(test_pocket_arp_gate_and_jitter);
+    RUN_TEST(test_pocket_arp_hangs_nothing);
     return UNITY_END();
 }

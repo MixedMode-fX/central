@@ -188,7 +188,7 @@ touched.
 | Gate sequencers | `StepSequencer`, `EuclidianSequencer`, `RandomSequencer` |
 | Note sequencers | `NoteSequencer`, `PolySequencer` |
 | Drum sequencers | `DrumSeqGate`, `DrumSeqMidi` |
-| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger`, `NoteBuffer`, `NoteWrap` |
+| MIDI modifiers | `Transpose`, `NotePriority`, `VelocityCurve`, `Chord`, `NoteQuantise`, `Probability`, `Arpeggiator`, `NoteDelay`, `Retrigger`, `NoteBuffer`, `NoteWrap`, `PocketArp` |
 | Harmony | `Harmony`, `Voicer`, `Mirror`, `Tonnetz`, `Key` |
 | Routing | `NoteFilter`, `Channel` |
 | Conversion | `Sustain`, `GateToNote`, `MidiToCV`, `CvToNote`, `CvToGate`, `RPS10` |
@@ -390,6 +390,13 @@ is only what a parameter list cannot say.
   note-on at the `root` inlet — from `low` semitones away, `range` semitones
   wide; by default one octave up from the root. Under an octave some pitch
   classes have no place, and those notes are dropped.
+- **`PocketArp` is the Critter & Guitari Pocket Piano's patterns**, ported
+  from C&G's BSD-licensed source rather than imitated. `cascade` is its Octave
+  Cascade: every advance strikes all the held notes, each thrown to its own
+  octave by a figure that repeats every twelve advances. The octave belongs to
+  the voice, and a voice is the slot a key took when it went down, so changing
+  one key leaves the others where they were. Keys past `POCKET_VOICES` are
+  ignored, as they are on the instrument.
 - **`Voicer`'s ledger is keyed on the note it emitted**, not the note that
   caused it, because it emits a function of the whole held chord rather than of
   one note. Common-tone retention is then the *absence* of code: a shared note

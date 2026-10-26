@@ -49,12 +49,14 @@ SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
     mod(matrix), macros(macro_table), sum(control_sum), monitor(watch), launchpad(nullptr),
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
-    pending_patch(empty_patch()), pending_globals(default_globals()),
+    pending_patch(), pending_globals(default_globals()),
     pending_at(0), pending_slot(0xFF), pending(false),
     tx(), tx_at(0), tx_overflow(false), reply_to(MIDI_CONTROL_PORT),
     reject_count(0), error(SYSEX_ERR_NONE),
     device(SYSEX_DEFAULT_DEVICE), timing(SWAP_IMMEDIATE)
-{}
+{
+    clear_patch(pending_patch);
+}
 
 // Replies ---------------------------------------------------------------
 
@@ -668,7 +670,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         }
 
         case SYSEX_RESTORE_DEFAULTS:
-            pending_patch = default_patch();
+            default_patch(pending_patch);
             pending_globals = default_globals_for_patch();
             pending_slot = 0xFF;
             arm_swap(now_us);

@@ -4,6 +4,10 @@ Patch default_patch(){
     return empty_patch();
 }
 
+void default_patch(Patch& out){
+    clear_patch(out);
+}
+
 GlobalSettings default_globals_for_patch(){
     GlobalSettings g = default_globals();
     g.clock_source = 0;                   // MasterClock::CLOCK_INTERNAL

@@ -18,6 +18,9 @@
 // over SysEx (#11) or the console - because there is no button to hold at
 // power-on.
 Patch default_patch();
+// The same, written in place: what the firmware uses, so no 20 KB temporary
+// lands on its stack (node/patch.h, clear_patch).
+void default_patch(Patch& out);
 
 // The globals that go with it: the internal clock at the default tempo, and
 // Program Change recall off, so a Program Change meant for a downstream synth

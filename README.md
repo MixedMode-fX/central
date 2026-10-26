@@ -11,8 +11,8 @@ An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
   the hub never reaches the Launchpad (`MidiPort` in `src/hal/midi_types.h`).
 - A Focusrite Scarlett on the host port is an effect: input 1 runs through
   Clouds' reverb, fully wet, to outputs 1 and 2. No other audio interface is
-  claimed. The driver and the reverb are vendored under `lib/`
-  (`src/hal/teensy/teensy_audio.h`); none of it has run on hardware yet.
+  claimed. The driver is a pinned dependency and the reverb is vendored
+  under `lib/` (`src/hal/teensy/teensy_audio.h`).
 - No encoder, no switches, no display. The module is configured from a host:
   the serial console, the SysEx protocol, or the browser app.
 
@@ -41,7 +41,7 @@ core's MIDI Library and USBHost_t36 versions are reproducible.
 Sources build with `-Wall -Wextra -Weffc++ -Wshadow -Werror`; framework
 includes are passed as `-isystem` (`scripts/project_warnings.py`) so `-Werror`
 judges our code only. Headers live next to their sources under `src/`;
-`include/` and `lib/` are unused.
+`include/` is unused, and `lib/` holds only the vendored reverb.
 
 ### Versions
 

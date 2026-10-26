@@ -63,7 +63,10 @@ static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_ma
 // virtual Launchpad is on the other end of whichever cable the patch names:
 // its pads come in through emu_control_surface and its LEDs leave in the
 // port SysEx buffer.
-static Launchpad launchpad(patches, master, cc_map, panel);
+// No audio interface in the page: the reverb page holds its faders and
+// nothing hears them (hal/ireverb.h).
+static HeldReverb reverb;
+static Launchpad launchpad(patches, master, cc_map, panel, reverb);
 
 // The patch under construction. Separate from what is running: the page fills
 // this through the emu_patch_* setters and calls emu_load() to make it live.

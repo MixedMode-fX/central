@@ -2,6 +2,7 @@
 
 #ifdef MMMC_USB_AUDIO
 
+#include <stdio.h>
 #include <string.h>
 #include "hal/teensy/teensy_includes.h"
 #include "hal/teensy/teensy_midi.h"
@@ -69,7 +70,53 @@ AudioConnection in_to_right(scarlett_in, 0, reverb, 1);
 AudioConnection left_to_out(reverb, 0, scarlett_out, 0);
 AudioConnection right_to_out(reverb, 1, scarlett_out, 1);
 
+// The Launchpad's reverb page, onto the plug-in's 0..1 parameters. Set from
+// the main loop; the plug-in reads them at the top of each block.
+class CumulusControls final : public IReverb {
+public:
+    uint8_t get(uint8_t control) const override {
+        if (control >= CONTROLS) return 0;
+        return (uint8_t)(reverb.getParameter(PARAM[control]) * 127.0f + 0.5f);
+    }
+    void set(uint8_t control, uint8_t value) override {
+        if (control < CONTROLS) reverb.setParameter(PARAM[control], (value > 127 ? 127 : value) / 127.0f);
+    }
+    void clear() override { reverb.plugin().clear(); }
+    bool running() const override { return scarlett.streaming(); }
+
+private:
+    static constexpr int PARAM[CONTROLS] = {CumulusReverb::PARAM_TIME, CumulusReverb::PARAM_DIFFUSION,
+                                            CumulusReverb::PARAM_TONE, CumulusReverb::PARAM_INPUT};
+};
+
+CumulusControls controls;
+
 }  // namespace
+
+IReverb& mm_reverb(){ return controls; }
+
+void mm_audio_describe(IConsoleIo& out){
+    static const char* const STATE[] = {"idle", "configuring", "streaming", "failed"};
+    const uint8_t s = (uint8_t)scarlett.state();
+    char text[128];
+    if (!scarlett){
+        snprintf(text, sizeof text, "  %-8s - (%s; only a Scarlett is claimed)\r\n", "audio", STATE[s & 3]);
+        out.write(text);
+        return;
+    }
+    const uint8_t* product = scarlett.product();
+    snprintf(text, sizeof text, "  %-8s %04X:%04X %s, %s%s%s\r\n", "audio", scarlett.idVendor(),
+             scarlett.idProduct(), product && *product ? (const char*)product : "(no name)", STATE[s & 3],
+             scarlett.state() == USBAudioDevice::State::Failed ? ": " : "",
+             scarlett.state() == USBAudioDevice::State::Failed ? scarlett.failure() : "");
+    out.write(text);
+    if (scarlett.streaming()){
+        snprintf(text, sizeof text, "           %lu Hz, %u in / %u out, %u / %u bits, reverb %s\r\n",
+                 (unsigned long)scarlett.sampleRate(), scarlett.inputChannels(), scarlett.outputChannels(),
+                 scarlett.inputBits(), scarlett.outputBits(), reverb.bypassed() ? "bypassed" : "wet");
+        out.write(text);
+    }
+}
 
 void mm_audio_setup(){
     AudioMemory(USB_AUDIO_MEMORY_BLOCKS);
@@ -87,6 +134,9 @@ void mm_audio_setup(){
 
 #else
 
+static HeldReverb held;
+IReverb& mm_reverb(){ return held; }
+void mm_audio_describe(IConsoleIo& out){ out.write("  audio    - (not in this build)\r\n"); }
 void mm_audio_setup(){}
 
 #endif

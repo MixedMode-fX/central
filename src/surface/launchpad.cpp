@@ -8,11 +8,12 @@
 static const uint8_t INQUIRY[] = {0xF0, SYSEX_UNIVERSAL_NON_REALTIME, SYSEX_BROADCAST_DEVICE,
                                   SYSEX_GENERAL_INFORMATION, SYSEX_IDENTITY_REQUEST, 0xF7};
 
-Launchpad::Launchpad(PatchManager& manager, MixedModeMaster& master, CcMapper& mapper, IMidiOut& out) :
-    patches(manager), mm(master), cc(mapper), midi(out),
+Launchpad::Launchpad(PatchManager& manager, MixedModeMaster& master, CcMapper& mapper, IMidiOut& out,
+                     IReverb& reverb) :
+    patches(manager), mm(master), cc(mapper), midi(out), fx(reverb),
     active_port(0), active_model(LP_MODEL_AUTO), seen_model(LP_MODEL_AUTO), is_linked(false),
     last_inquiry_us(0), last_seen_us(0), ever_asked(false),
-    current_page(PAGE_NOTE), shift(0), widgets_page(0),
+    current_page(PAGE_NOTE), before_reverb(PAGE_NOTE), clear_down(0), shift(0), widgets_page(0),
     held_note(), held_channel(), fader_value(), toggles_on(), buttons_down(), side_down(0),
     want(), shown(), last_led_us(0), tx()
 {
@@ -218,6 +219,7 @@ void Launchpad::pad(uint8_t row, uint8_t col, uint8_t velocity, bool down, uint3
         case PAGE_KEY:     if (down) key_pad(row, col, now_us); break;
         case PAGE_WIDGETS: widget_pad(row, col, down, now_us); break;
         case PAGE_TEMPO:   if (down) tempo_pad(row, col, now_us); break;
+        case PAGE_REVERB:  reverb_pad(row, col, down); break;
         default: break;
     }
 }
@@ -271,6 +273,9 @@ void Launchpad::side(uint8_t index, bool down, uint32_t now_us){
         case SIDE_CONTINUE: cc.write_control(CC_TARGET_TRANSPORT, 0, CC_TRANSPORT_CONTINUE, 1, now_us); return;
         case SIDE_TAP:      cc.write_control(CC_TARGET_TRANSPORT, 0, CC_TRANSPORT_TAP, 1, now_us); return;
         case SIDE_PANIC:    release_all(now_us); mm.panic(); return;
+        case SIDE_REVERB:
+            set_page(current_page == PAGE_REVERB ? before_reverb : (uint8_t)PAGE_REVERB, now_us);
+            return;
         default: return;
     }
 }
@@ -280,6 +285,8 @@ void Launchpad::set_page(uint8_t page, uint32_t now_us){
     // Leaving the note page releases what it holds: a note-off has to come
     // from the pad that played it, and that pad means something else now.
     if (current_page == PAGE_NOTE) release_all(now_us);
+    if (page == PAGE_REVERB) before_reverb = current_page;
+    clear_down = 0;
     current_page = page;
 }
 
@@ -479,6 +486,22 @@ void Launchpad::set_tempo(int32_t bpm, uint32_t now_us){
     cc.write_control(CC_TARGET_CLOCK, 0, CC_CLOCK_TEMPO, (uint16_t)bpm, now_us);
 }
 
+// The reverb page -----------------------------------------------------------------
+//
+// Columns 1 to 4 are faders, bottom row first as a widget fader is; the
+// bottom-right block empties the tank on the press.
+
+void Launchpad::reverb_pad(uint8_t row, uint8_t col, bool down){
+    if (is_clear_pad(row, col)){
+        const uint8_t bit = (uint8_t)(1u << (row * 2u + col - REVERB_CLEAR_COL));
+        if (!down){ clear_down &= (uint8_t)~bit; return; }
+        if (clear_down == 0) fx.clear();
+        clear_down |= bit;
+        return;
+    }
+    if (down && col < IReverb::CONTROLS) fx.set(col, fader_level(row));
+}
+
 // Output ---------------------------------------------------------------------------
 
 void Launchpad::service(uint32_t now_us){
@@ -509,6 +532,7 @@ void Launchpad::draw(uint32_t now_us){
         case PAGE_KEY:     draw_key(); break;
         case PAGE_WIDGETS: draw_widgets(); break;
         case PAGE_TEMPO:   draw_tempo(now_us); break;
+        case PAGE_REVERB:  draw_reverb(); break;
         default: break;
     }
 }
@@ -516,10 +540,10 @@ void Launchpad::draw(uint32_t now_us){
 // The top row and the right column: the same on every page.
 void Launchpad::draw_frame(uint32_t now_us){
     (void)now_us;
-    static const uint8_t PAGE_BUTTON[PAGES] = {TOP_NOTE, TOP_KEY, TOP_WIDGETS, TOP_TEMPO};
-    for (uint8_t p = 0; p < PAGES; p++) set(button_id(PAGE_BUTTON[p]), p == current_page ? WHITE : DIM);
+    static const uint8_t PAGE_BUTTON[TOP_PAGES] = {TOP_NOTE, TOP_KEY, TOP_WIDGETS, TOP_TEMPO};
+    for (uint8_t p = 0; p < TOP_PAGES; p++) set(button_id(PAGE_BUTTON[p]), p == current_page ? WHITE : DIM);
     // The arrows light where they do something.
-    const bool vertical = current_page != PAGE_WIDGETS;
+    const bool vertical = current_page != PAGE_WIDGETS && current_page != PAGE_REVERB;
     set(button_id(TOP_UP), vertical ? DIM : OFF);
     set(button_id(TOP_DOWN), vertical ? DIM : OFF);
     const bool horizontal = current_page == PAGE_WIDGETS || current_page == PAGE_TEMPO;
@@ -537,6 +561,7 @@ void Launchpad::draw_frame(uint32_t now_us){
     set(side_id(SIDE_CONTINUE), (side_down & (1u << SIDE_CONTINUE)) ? YELLOW : dim(YELLOW));
     set(side_id(SIDE_TAP), on_beat ? WHITE : DIM);
     set(side_id(SIDE_PANIC), (side_down & (1u << SIDE_PANIC)) ? PINK : dim(PINK));
+    set(side_id(SIDE_REVERB), current_page == PAGE_REVERB ? WHITE : (fx.running() ? VIOLET : dim(VIOLET)));
     set(LOGO_ID, WHITE);
 }
 
@@ -667,4 +692,15 @@ void Launchpad::flush(uint32_t now_us){
     if (n == 0) return;
     tx[at++] = 0xF7;
     midi.send_sysex(active_port, tx, at);
+}
+
+void Launchpad::draw_reverb(){
+    static const uint8_t COLOUR[IReverb::CONTROLS] = {BLUE, CYAN, YELLOW, GREEN};
+    for (uint8_t col = 0; col < IReverb::CONTROLS; col++){
+        const uint8_t level = (uint8_t)(((uint32_t)fx.get(col) * 7u + 63u) / 127u);
+        for (uint8_t row = 0; row < GRID; row++) set(led_id(row, col), row <= level ? COLOUR[col] : dim(COLOUR[col]));
+    }
+    for (uint8_t row = 0; row < REVERB_CLEAR_ROWS; row++){
+        for (uint8_t col = REVERB_CLEAR_COL; col < GRID; col++) set(led_id(row, col), clear_down ? RED : dim(RED));
+    }
 }

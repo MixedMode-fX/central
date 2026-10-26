@@ -183,6 +183,9 @@ class Engine {
         ControlSum      control_sum;
         ModMatrix       mod_matrix;
         NrpnDecoder     nrpn;
+        // No audio interface in a DAW: the reverb page holds its faders and
+        // nothing hears them (hal/ireverb.h).
+        HeldReverb      reverb;
         // The Launchpad, on whichever cable the patch names: in a plugin
         // that is the host's MIDI input, so a Launchpad routed to the track
         // by the DAW plays the module as one on the module's own socket does.

@@ -6,6 +6,7 @@
 #include "hal/isysex_in.h"
 #include "hal/imidi_out.h"
 #include "hal/midi_types.h"
+#include "hal/ireverb.h"
 #include "bus/domain.h"
 #include "node/patch.h"
 #include "master.h"
@@ -60,8 +61,16 @@
 //            of its target rather than what was last pressed.
 //   tempo    transport, nudges, a sixteen-step tempo bar and the beat.
 //
+// A fifth page has no top-row button to spare, so the right column's fifth
+// button opens it and closes it again:
+//
+//   reverb   the Scarlett's reverb (hal/ireverb.h): time, diffusion, tone
+//            and input as four faders, and a block of four pads that
+//            empties the tank. The button is violet while an interface is
+//            streaming through it.
+//
 // The right column is the same on every page: start/stop, continue, tap,
-// panic. The logo lights when the surface is linked.
+// panic, reverb. The logo lights when the surface is linked.
 //
 // **LEDs are a frame, diffed and rate-limited.** The page draws what it
 // wants into a frame; once per LED interval the LEDs that differ from what
@@ -76,8 +85,15 @@ class Launchpad : public ISysexIn {
             PAGE_KEY     = 1,
             PAGE_WIDGETS = 2,
             PAGE_TEMPO   = 3,
+            PAGE_REVERB  = 4,
             PAGES,
         };
+        // The pages the top row has a button for.
+        static constexpr uint8_t TOP_PAGES = PAGE_REVERB;
+        // The reverb page: a fader a column from the left, in IReverb's
+        // order, and the clear block in the bottom-right corner.
+        static constexpr uint8_t REVERB_CLEAR_COL = 6;
+        static constexpr uint8_t REVERB_CLEAR_ROWS = 2;
 
         static constexpr uint8_t GRID = 8;
         static constexpr uint8_t PADS = GRID * GRID;
@@ -123,7 +139,8 @@ class Launchpad : public ISysexIn {
         // The widget colour a zero byte means.
         static constexpr uint8_t WIDGET_DEFAULT_COLOUR = BLUE;
 
-        Launchpad(PatchManager& patches, MixedModeMaster& master, CcMapper& mapper, IMidiOut& midi);
+        Launchpad(PatchManager& patches, MixedModeMaster& master, CcMapper& mapper, IMidiOut& midi,
+                  IReverb& reverb);
         Launchpad(const Launchpad&) = delete;
         Launchpad& operator=(const Launchpad&) = delete;
 
@@ -172,7 +189,8 @@ class Launchpad : public ISysexIn {
         enum TopButton : uint8_t { TOP_UP = 0, TOP_DOWN, TOP_LEFT, TOP_RIGHT,
                                    TOP_KEY, TOP_NOTE, TOP_WIDGETS, TOP_TEMPO, TOP_BUTTONS };
         // The right column, top to bottom.
-        enum SideButton : uint8_t { SIDE_PLAY = 7, SIDE_CONTINUE = 6, SIDE_TAP = 5, SIDE_PANIC = 4 };
+        enum SideButton : uint8_t { SIDE_PLAY = 7, SIDE_CONTINUE = 6, SIDE_TAP = 5, SIDE_PANIC = 4,
+                                    SIDE_REVERB = 3 };
 
         static constexpr uint8_t NO_NOTE = 0xFF;
         static constexpr uint8_t UNKNOWN = 0xFF;
@@ -202,6 +220,10 @@ class Launchpad : public ISysexIn {
         void key_pad(uint8_t row, uint8_t col, uint32_t now_us);
         void widget_pad(uint8_t row, uint8_t col, bool down, uint32_t now_us);
         void tempo_pad(uint8_t row, uint8_t col, uint32_t now_us);
+        void reverb_pad(uint8_t row, uint8_t col, bool down);
+        static bool is_clear_pad(uint8_t row, uint8_t col){
+            return row < REVERB_CLEAR_ROWS && col >= REVERB_CLEAR_COL;
+        }
         void nudge_tempo(int16_t by, uint32_t now_us);
         void set_tempo(int32_t bpm, uint32_t now_us);
         void set_page(uint8_t page, uint32_t now_us);
@@ -220,6 +242,7 @@ class Launchpad : public ISysexIn {
         void draw_key();
         void draw_widgets();
         void draw_tempo(uint32_t now_us);
+        void draw_reverb();
         void draw_frame(uint32_t now_us);
         void set(uint8_t id, uint8_t colour){ if (id < LEDS) want[id] = (uint8_t)(colour & 0x7F); }
         void flush(uint32_t now_us);
@@ -228,6 +251,7 @@ class Launchpad : public ISysexIn {
         MixedModeMaster& mm;
         CcMapper& cc;
         IMidiOut& midi;
+        IReverb& fx;
 
         uint8_t active_port;
         uint8_t active_model;       // the configured model the link was made for
@@ -238,6 +262,10 @@ class Launchpad : public ISysexIn {
         bool ever_asked;
 
         uint8_t current_page;
+        // The page the reverb button came from, and goes back to.
+        uint8_t before_reverb;
+        // Clear pads held, so the block lights while pressed.
+        uint8_t clear_down;
         int8_t shift;
         uint8_t widgets_page;
         // What each pad of the note page is holding: the pitch and the

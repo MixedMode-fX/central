@@ -605,6 +605,7 @@ USB serial and `SERIAL_UART` both carry the same text console.
 | `defaults` | back to the built-in patch |
 | `maps` / `map` / `unmap` / `learn` | controller bindings |
 | `mods` / `mod` / `unmod` | modulation routes |
+| `usb` | the USB host socket: each driver's device, every device enumerated since boot, and the Launchpad |
 
 ### SysEx
 
@@ -764,7 +765,7 @@ that answers; the patch may also name the model outright.
   device is put into programmer mode and lit, and silence for
   `LINK_TIMEOUT_US` unlinks it, so a Launchpad plugged in after boot is found
   and one unplugged is not sent frames. Taking it out of the patch returns it to live mode.
-- **Four pages and a column**, laid out in the guide below. A pad owns the
+- **Five pages and a column**, laid out in the guide below. A pad owns the
   note-off of the pitch it played, so the key may move under a held chord.
 - **LEDs are a frame, diffed and rate-limited.** Only the LEDs that changed
   go out, at most `LEDS_PER_MESSAGE` a message and one message an interval
@@ -786,7 +787,7 @@ on them. The grid's rows count from the top.
 | --- | --- | --- |
 | up, down, left, right | ▲ ▼ ◀ ▶, top row buttons 1-4 | ▲ ▼ at the top of the left column, ◀ ▶ top row buttons 1-2 |
 | the pages key, note, widgets, tempo | top row buttons 5-8 | Session Note Chord Custom, top row buttons 3-6 |
-| play/stop, continue, tap, panic: right column, top four | the top four ▶ | Patterns Steps Pattern Settings Velocity |
+| play/stop, continue, tap, panic, reverb: right column, top five | the top five ▶ | Patterns Steps Pattern Settings Velocity Probability |
 
 The lit page button is the page you are on.
 
@@ -801,6 +802,14 @@ The lit page button is the page you are on.
   internal; following MIDI or CV clock, the tempo is the source's.
 - **panic** - lets go of every held note and sends all-notes-off on every
   port.
+- **reverb** - opens the reverb page, and from it goes back to the page you
+  came from. Violet while a Scarlett is streaming through the reverb, dark
+  violet while none is.
+
+**Reverb** - the Scarlett's reverb (`src/hal/ireverb.h`). Columns 1 to 4 are
+faders, bottom row lowest: time, diffusion, tone and input. The four red pads
+in the bottom-right corner empty the tank. The faders are not in the patch:
+power-on brings back the reverb's own settings.
 
 **Note** - a guitar neck, as a Launchpad's own note mode is. Each pad is a
 semitone above the one to its left and each row a fourth above the row below,

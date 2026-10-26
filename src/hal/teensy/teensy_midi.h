@@ -4,6 +4,7 @@
 #include "hal/teensy/teensy_includes.h"
 #include "hal/imidi_out.h"
 #include "hal/isysex_in.h"
+#include "hal/iusb_host.h"
 #include "midi/midi_queue.h"
 #include "hardware.h"
 
@@ -47,6 +48,10 @@ constexpr uint8_t ALL_MIDI_PORTS = 0
 // (hal/teensy/teensy_audio.h).
 extern USBHost mm_usb;
 #endif
+
+// What is on the host socket, for the console's `usb`; null in a build
+// without MMMC_USB_HOST.
+IUsbHost* mm_usb_host();
 
 // Brings up every compiled-in transport. Call once from setup().
 //

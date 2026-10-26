@@ -80,7 +80,7 @@ static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_ma
 // the panel the module has not got, on a cable it has. In front of the
 // graph like a transport, and writing through the same applier a mapped CC
 // does.
-static Launchpad launchpad(patches, master, cc_map, panel);
+static Launchpad launchpad(patches, master, cc_map, panel, mm_reverb());
 
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
@@ -115,6 +115,8 @@ void setup(){
     // still comes up doing something observable.
     patches.boot(micros());
     protocol.attach(launchpad);
+    console.attach(launchpad);
+    console.attach(mm_usb_host());
     console.greet();
 
     // Last: the timer only starts once there is a patch for it to drive.

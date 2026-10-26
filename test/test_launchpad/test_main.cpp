@@ -59,6 +59,7 @@ struct Rig {
     ModMatrix mod;
     NrpnDecoder nrpn;
     Monitor monitor;
+    HeldReverb reverb;
     Launchpad surface;
     SysexHandler sysex;
     MidiInputQueue queue;
@@ -67,7 +68,7 @@ struct Rig {
     Rig() : gpio(), midi(), eeprom(), led_driver(), panel(gpio, midi),
             master(panel, panel), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
-            nrpn(patches, cc), monitor(master, panel, leds), surface(patches, master, cc, panel),
+            nrpn(patches, cc), monitor(master, panel, leds), reverb(), surface(patches, master, cc, panel, reverb),
             sysex(patches, master, store, leds, panel, cc, mod, macros, sum, monitor), queue(), now(0) {
         sysex.attach(surface);
     }
@@ -597,6 +598,73 @@ static void test_panic_releases_the_grid_and_sweeps_the_ports() {
 }
 
 // ---------------------------------------------------------------------------
+// Reverb
+// ---------------------------------------------------------------------------
+static void test_the_reverb_button_opens_the_reverb_page_and_returns() {
+    Rig rig;
+    rig.link(on_host());
+    rig.top(6);                          // widgets
+    rig.loop();
+    rig.side(3);                         // reverb
+    rig.loop();
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_REVERB, rig.surface.page());
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::WHITE, rig.sent_colour(Launchpad::side_id(3)));
+    rig.side(3);
+    rig.loop();
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_WIDGETS, rig.surface.page());
+    rig.settle();
+    // Nothing streaming through it: the button is the dark violet.
+    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::VIOLET), rig.sent_colour(Launchpad::side_id(3)));
+}
+
+static void test_the_reverb_faders_set_its_controls_and_show_them() {
+    Rig rig;
+    rig.link(on_host());
+    rig.side(3);
+    rig.loop();
+    rig.pad(7, IReverb::CONTROL_TIME, true);     // the top of the time fader
+    rig.pad(0, IReverb::CONTROL_TONE, true);     // the bottom of the tone fader
+    rig.pad(3, IReverb::CONTROL_INPUT, true);
+    rig.loop();
+    TEST_ASSERT_EQUAL(127, rig.reverb.get(IReverb::CONTROL_TIME));
+    TEST_ASSERT_EQUAL(0, rig.reverb.get(IReverb::CONTROL_TONE));
+    TEST_ASSERT_EQUAL(Launchpad::fader_level(3), rig.reverb.get(IReverb::CONTROL_INPUT));
+    TEST_ASSERT_EQUAL(95, rig.reverb.get(IReverb::CONTROL_DIFFUSION));   // untouched
+    // Nothing reaches the patch: the faders are the reverb's, not CCs.
+    TEST_ASSERT_EQUAL(0, rig.notes_out().size());
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.sent_colour(Launchpad::led_id(7, IReverb::CONTROL_TIME)));
+    TEST_ASSERT_EQUAL(Launchpad::YELLOW, rig.sent_colour(Launchpad::led_id(0, IReverb::CONTROL_TONE)));
+    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::YELLOW), rig.sent_colour(Launchpad::led_id(1, IReverb::CONTROL_TONE)));
+    TEST_ASSERT_EQUAL(Launchpad::GREEN, rig.sent_colour(Launchpad::led_id(3, IReverb::CONTROL_INPUT)));
+    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::GREEN), rig.sent_colour(Launchpad::led_id(4, IReverb::CONTROL_INPUT)));
+    // The arrows do nothing here, so they are dark.
+    TEST_ASSERT_EQUAL(Launchpad::OFF, rig.sent_colour(Launchpad::top_id(0)));
+}
+
+static void test_the_clear_block_empties_the_tank_once_a_press() {
+    Rig rig;
+    rig.link(on_host());
+    rig.side(3);
+    rig.loop();
+    rig.pad(0, 6, true);
+    rig.pad(1, 7, true);                 // a second finger on the block
+    rig.loop();
+    TEST_ASSERT_EQUAL(1, rig.reverb.cleared());
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::RED, rig.sent_colour(Launchpad::led_id(1, 6)));
+    rig.pad(0, 6, false);
+    rig.pad(1, 7, false);
+    rig.loop();
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::RED), rig.sent_colour(Launchpad::led_id(1, 6)));
+    rig.pad(1, 6, true);
+    rig.loop();
+    TEST_ASSERT_EQUAL(2, rig.reverb.cleared());
+}
+
+// ---------------------------------------------------------------------------
 // Widgets
 // ---------------------------------------------------------------------------
 static LaunchpadConfig with_widgets(){
@@ -900,6 +968,9 @@ int main(int, char**){
     RUN_TEST(test_the_transport_is_on_the_tempo_page_and_the_right_column);
     RUN_TEST(test_the_tap_button_taps_the_tempo);
     RUN_TEST(test_panic_releases_the_grid_and_sweeps_the_ports);
+    RUN_TEST(test_the_reverb_button_opens_the_reverb_page_and_returns);
+    RUN_TEST(test_the_reverb_faders_set_its_controls_and_show_them);
+    RUN_TEST(test_the_clear_block_empties_the_tank_once_a_press);
     RUN_TEST(test_widgets_send_their_ccs_into_the_patch);
     RUN_TEST(test_a_widget_cc_is_the_binding_tables_before_it_is_the_graphs);
     RUN_TEST(test_a_widget_can_be_learned);

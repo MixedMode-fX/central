@@ -31,7 +31,7 @@ import { LaunchpadView } from '../launchpad/Launchpad.js';
 import '../launchpad/Launchpad.css';
 
 // The firmware's page names, in its Page order (src/surface/launchpad.h).
-const PAGES = ['note', 'key', 'widgets', 'tempo'];
+const PAGES = ['note', 'key', 'widgets', 'tempo', 'reverb'];
 const WIDGET_COLUMNS = 8;
 
 export function LaunchpadTab(app) {

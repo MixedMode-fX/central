@@ -17,7 +17,7 @@ Console::Console(IConsoleIo& console_io, PatchManager& manager,
                  MixedModeMaster& master, PatchStore& patch_store, StatusLeds& status,
                  CcMapper& mapper) :
     io(console_io), patches(manager), mm(master), store(patch_store), leds(status), cc(mapper),
-    line(), argv(), argc(0), length(0), overflowed(false)
+    usb_host(nullptr), launchpad(nullptr), line(), argv(), argc(0), length(0), overflowed(false)
 {}
 
 void Console::put_uint(uint32_t value){
@@ -139,6 +139,7 @@ void Console::dispatch(uint32_t now_us){
     if (str_eq(cmd, "mod"))        { cmd_mod(argc, now_us); return; }
     if (str_eq(cmd, "unmod"))      { cmd_unmod(argc, now_us); return; }
     if (str_eq(cmd, "learn"))      { cmd_learn(argc, now_us); return; }
+    if (str_eq(cmd, "usb"))        { cmd_usb(); return; }
 
     put("unknown command: ");
     put_line(cmd);
@@ -169,6 +170,7 @@ void Console::cmd_help(){
     put_line("mods                    the modulation routes");
     put_line("mod <slot> <cv bus> <node> <param> [depth] [flags]   modulate a parameter");
     put_line("unmod <slot>            forget a route");
+    put_line("usb                     what is on the USB host socket, and the Launchpad");
 }
 
 void Console::cmd_info(){
@@ -693,4 +695,45 @@ void Console::cmd_learn(uint8_t n, uint32_t now_us){
     if (!a || !b || !c || slot >= N_CC_MAP){ put_line("learn: bad arguments"); return; }
     cc.learn_arm((uint8_t)slot, CC_TARGET_NODE, (uint8_t)node, (uint16_t)param, now_us);
     put_line("armed: turn a controller");
+}
+
+// The host socket as its drivers see it, then the Launchpad as the patch and
+// the surface see it: a device that enumerated but sits in no driver was
+// claimed by nothing, and a Launchpad that is in a MIDI slot but not linked
+// is on a cable the patch does not name, or has not answered.
+static const char* cable_name(uint8_t port){
+    switch (port){
+        case mmMIDI_USB_0:          return "usb device cable 1";
+        case mmMIDI_USB_1:          return "usb device cable 2";
+        case mmMIDI_USB_2:          return "usb device cable 3";
+        case mmMIDI_USB_3:          return "usb device cable 4";
+        case mmMIDI_SERIAL_1:       return "din 1";
+        case mmMIDI_SERIAL_2:       return "din 2";
+        case mmMIDI_HOST_LAUNCHPAD: return "usb host launchpad";
+        case mmMIDI_HOST_1:         return "usb host";
+        default:                    return "?";
+    }
+}
+
+void Console::cmd_usb(){
+    if (usb_host) usb_host->describe(io);
+    else put_line("no USB host in this build");
+
+    const LaunchpadConfig& lp = patches.active().launchpad;
+    put("launchpad: ");
+    if (lp.port == 0){
+        put_line("the patch names no cable for one");
+        return;
+    }
+    put("the patch names ");
+    put(cable_name(lp.port));
+    if (!launchpad){ put_line(""); return; }
+    if (!launchpad->linked()){
+        put_line(", nothing has answered on it");
+        return;
+    }
+    static const char* const MODEL[LP_MODELS] = {"?", "Mini MK3", "X", "Pro MK3"};
+    const uint8_t model = launchpad->model();
+    put(", linked, ");
+    put_line(model < LP_MODELS ? MODEL[model] : "?");
 }

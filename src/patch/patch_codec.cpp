@@ -11,16 +11,16 @@
 //
 // Payload:
 //   globals            sizeof(GlobalSettings), as bytes
-//   gate ports         GPIO_N x {direction 1, buses 2}
-//   midi in            N_MIDI_IN_NODES x {source_mask 1, channel 1, buses 2}
-//   midi out           N_MIDI_OUT_NODES x {target_mask 1, channel 1, buses 2}
+//   gate ports         GPIO_N x {direction 1, buses 4}
+//   midi in            N_MIDI_IN_NODES x {source_mask 1, channel 1, buses 4}
+//   midi out           N_MIDI_OUT_NODES x {target_mask 1, channel 1, buses 4}
 //   n_nodes            1
 //   nodes              n_nodes x {
 //                          algorithm_id      1
 //                          in length         1   (trailing empty sets trimmed)
-//                          in_buses          2 x that many (a bit per bus)
+//                          in_buses          4 x that many (a bit per bus)
 //                          out length        1
-//                          out_buses         2 x that many
+//                          out_buses         4 x that many
 //                          param length      2   (trailing zeros trimmed)
 //                          params            that many bytes
 //                      }
@@ -40,7 +40,7 @@
 //   n_routes           1   (modulation; unused slots are not stored)
 //   routes             n_routes x {
 //                          slot              1   which mod_map entry it is
-//                          buses             2   CV buses, a bit per bus
+//                          buses             4   CV buses, a bit per bus
 //                          target_kind       1
 //                          target_index      1
 //                          param             2
@@ -81,10 +81,10 @@
 static constexpr size_t HEADER_BYTES = 8;
 static constexpr size_t CRC_BYTES = 2;
 static constexpr size_t PORT_BYTES =
-    (size_t)GPIO_N * 3u + (size_t)N_MIDI_IN_NODES * 4u + (size_t)N_MIDI_OUT_NODES * 4u + 1u;
-static constexpr size_t NODE_FIXED_BYTES = 1u + 1u + 2u * MAX_IN + 1u + 2u * MAX_OUT + 2u;
+    (size_t)GPIO_N * 5u + (size_t)N_MIDI_IN_NODES * 6u + (size_t)N_MIDI_OUT_NODES * 6u + 1u;
+static constexpr size_t NODE_FIXED_BYTES = 1u + 1u + 4u * MAX_IN + 1u + 4u * MAX_OUT + 2u;
 static constexpr size_t MAPPING_BYTES = 13u;
-static constexpr size_t ROUTE_BYTES = 13u;
+static constexpr size_t ROUTE_BYTES = 15u;
 static constexpr size_t MACRO_BYTES = 1u + MACRO_NAME_BYTES;
 static constexpr size_t MACRO_DEST_BYTES = 11u;
 static constexpr size_t LAUNCHPAD_BYTES = 5u;
@@ -127,7 +127,7 @@ namespace {
         void u32(uint32_t v){ u16((uint16_t)(v & 0xFFFFu)); u16((uint16_t)(v >> 16)); }
         void bytes(const uint8_t* src, size_t n){ for (size_t i = 0; i < n; i++) u8(src[i]); }
         // A port's set of buses, a bit per bus.
-        void set(BusSet s){ u16(s.bits); }
+        void set(BusSet s){ u32(s.bits); }
         void sets(const BusSet* src, size_t n){ for (size_t i = 0; i < n; i++) set(src[i]); }
     };
 
@@ -144,7 +144,7 @@ namespace {
         uint16_t u16(){ const uint16_t lo = u8(); return (uint16_t)(lo | ((uint16_t)u8() << 8)); }
         uint32_t u32(){ const uint32_t lo = u16(); return lo | ((uint32_t)u16() << 16); }
         void bytes(uint8_t* dst, size_t n){ for (size_t i = 0; i < n; i++) dst[i] = u8(); }
-        BusSet set(){ return BusSet{u16()}; }
+        BusSet set(){ return BusSet{u32()}; }
         void sets(BusSet* dst, size_t n){ for (size_t i = 0; i < n; i++) dst[i] = set(); }
     };
 

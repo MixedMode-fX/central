@@ -148,13 +148,9 @@ class SysexHandler : public ISysexIn {
         void put_u32(uint32_t value){
             for (uint8_t i = 0; i < 5; i++) put((uint8_t)((value >> (7u * i)) & 0x7F));
         }
-        // A port's set of buses (bus/domain.h): sixteen bits, so three data
-        // bytes rather than a u14's two.
-        void put_set(BusSet set){
-            put((uint8_t)(set.bits & 0x7F));
-            put((uint8_t)((set.bits >> 7) & 0x7F));
-            put((uint8_t)((set.bits >> 14) & 0x7F));
-        }
+        // A port's set of buses (bus/domain.h): thirty-two bits, so five
+        // data bytes, as a u32.
+        void put_set(BusSet set){ put_u32(set.bits); }
         // A signed value: its magnitude as a u14, then its sign on its own.
         // Biasing would halve a range the target's own units already fill,
         // and a sign bit borrowed from a flags byte is one more place for

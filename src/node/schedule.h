@@ -54,7 +54,7 @@
 // Which buses to publish at one point in the pass, per domain.
 struct PublishSet {
     uint32_t gate;                  // one bit per gate bus
-    uint16_t note;
+    uint32_t note;
     uint16_t cv;
 };
 
@@ -105,7 +105,7 @@ class Schedule {
 static_assert(N_NODE <= 64, "the scheduler holds a set of nodes in a 64-bit word");
 static_assert(N_BUS_TOTAL <= 64, "the scheduler holds a set of buses in a 64-bit word");
 static_assert(N_GATE_BUS <= 32, "a gate bus set is a 32-bit word");
-static_assert(N_NOTE_BUS <= 16, "a note bus set is a 16-bit word");
+static_assert(N_NOTE_BUS <= 32, "a note bus set is a 32-bit word");
 static_assert(N_CV_BUS <= 16, "a CV bus set is a 16-bit word");
 
 #endif

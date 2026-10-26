@@ -143,7 +143,7 @@ void BusManager::cv_write(BusSet set, int16_t value){
 
 // -------------------------------------------------------------------------
 
-void BusManager::publish(uint32_t gate_mask, uint16_t note_mask, uint16_t cv_mask){
+void BusManager::publish(uint32_t gate_mask, uint32_t note_mask, uint16_t cv_mask){
     // Gates. A bus published for the first time this pass starts from
     // nothing, so one whose writer has stopped writing falls low; one
     // published again ORs the late writes into what is already there.
@@ -162,7 +162,7 @@ void BusManager::publish(uint32_t gate_mask, uint16_t note_mask, uint16_t cv_mas
             note_front[b].events[note_front[b].count++] = note_back[b].events[i];
         }
         note_back[b].count = 0;
-        note_published = (uint16_t)(note_published | (1u << b));
+        note_published |= (1u << b);
     }
 
     for (uint8_t b = 0; cv_mask != 0 && b < N_CV_BUS; b++){
@@ -178,7 +178,7 @@ void BusManager::publish(uint32_t gate_mask, uint16_t note_mask, uint16_t cv_mas
 }
 
 void BusManager::swap(){
-    publish(0xFFFFFFFFu, 0xFFFFu, 0xFFFFu);
+    publish(0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFu);
     gate_published = 0;
     note_published = 0;
     cv_published = 0;

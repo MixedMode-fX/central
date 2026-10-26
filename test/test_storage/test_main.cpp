@@ -63,7 +63,8 @@ static Patch three_node_patch() {
     p.gate_ports[0] = GatePortConfig{GATE_PORT_IN, one_bus(0)};
     p.gate_ports[1] = GatePortConfig{GATE_PORT_OUT, one_bus(3)};
     p.midi_in[0] = MidiInConfig{0x11, 2, one_bus(1)};
-    p.midi_out[2] = MidiOutConfig{0x30, 5, one_bus(1)};
+    // A merge reaching the last note bus, so the image carries every bit of a set.
+    p.midi_out[2] = MidiOutConfig{0x30, 5, BusSet{(1u << 1) | (1u << (N_NOTE_BUS - 1))}};
 
     p.nodes[0] = node_config(ALGO_LOGIC_NOT);
     p.nodes[0].in_buses[0] = one_bus(0);

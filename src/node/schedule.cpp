@@ -20,7 +20,7 @@ static uint64_t bus_bits(Domain domain, BusSet set){
 // BusManager publishes from.
 static void add_bus(PublishSet& set, uint8_t bus){
     if (bus < NOTE_BASE)    set.gate |= (uint32_t)1u << bus;
-    else if (bus < CV_BASE) set.note = (uint16_t)(set.note | (1u << (bus - NOTE_BASE)));
+    else if (bus < CV_BASE) set.note |= (uint32_t)1u << (bus - NOTE_BASE);
     else                    set.cv   = (uint16_t)(set.cv   | (1u << (bus - CV_BASE)));
 }
 

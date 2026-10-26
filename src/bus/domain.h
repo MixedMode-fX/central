@@ -34,29 +34,31 @@ enum class Domain : uint8_t {
 // those sources were driving. Connecting anything could therefore disconnect
 // something somewhere else, and that is the rigidity this replaces.
 //
-// A set is a bit per bus. Every domain has at most sixteen buses (the
-// static_asserts below), so one is sixteen bits: two bytes per port in the
-// preset format and in RAM.
+// A set is a bit per bus. Every domain has at most thirty-two buses (the
+// static_asserts below), so one is thirty-two bits: four bytes per port in
+// the preset format and in RAM.
 // Plain data with no constructors of its own, so a NodeConfig holding one is
 // still the aggregate the preset format treats it as: `BusSet{}` is the empty
 // set and `BusSet{bits}` names one directly.
 struct BusSet {
-    uint16_t bits;
+    uint32_t bits;
+
+    static constexpr uint8_t CAPACITY = 32;
 
     bool any() const { return bits != 0; }
-    bool has(uint8_t bus) const { return bus < 16 && (bits & (uint16_t)(1u << bus)) != 0; }
-    void add(uint8_t bus){ if (bus < 16) bits = (uint16_t)(bits | (1u << bus)); }
-    void remove(uint8_t bus){ if (bus < 16) bits = (uint16_t)(bits & ~(1u << bus)); }
+    bool has(uint8_t bus) const { return bus < CAPACITY && (bits & (1u << bus)) != 0; }
+    void add(uint8_t bus){ if (bus < CAPACITY) bits |= (1u << bus); }
+    void remove(uint8_t bus){ if (bus < CAPACITY) bits &= ~(1u << bus); }
     uint8_t count() const {
         uint8_t n = 0;
-        for (uint16_t b = bits; b != 0; b &= (uint16_t)(b - 1u)) n++;
+        for (uint32_t b = bits; b != 0; b &= b - 1u) n++;
         return n;
     }
     // The lowest bus in the set, or 0xFF when it is empty. What a caller
     // wants when a set is known to hold at most one - a jack's direction
     // toggle, a console listing.
     uint8_t first() const {
-        for (uint8_t b = 0; b < 16; b++) if (has(b)) return b;
+        for (uint8_t b = 0; b < CAPACITY; b++) if (has(b)) return b;
         return 0xFF;
     }
 };
@@ -132,7 +134,7 @@ inline uint8_t bus_count(Domain d){
 // Every bus a domain has, as a set: what a port's set is checked against.
 inline BusSet all_buses(Domain d){
     const uint8_t n = bus_count(d);
-    return BusSet{(uint16_t)((n >= 16) ? 0xFFFFu : ((1u << n) - 1u))};
+    return BusSet{(n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u)};
 }
 
 // True when every bus in `set` exists in `domain`. The validator's whole
@@ -150,8 +152,8 @@ struct MidiEvent {
     uint8_t data2;
 };
 
-static_assert(N_GATE_BUS <= 16, "a BusSet is sixteen bits");
-static_assert(N_NOTE_BUS <= 16, "a BusSet is sixteen bits");
-static_assert(N_CV_BUS <= 16, "a BusSet is sixteen bits");
+static_assert(N_GATE_BUS <= BusSet::CAPACITY, "a BusSet is thirty-two bits");
+static_assert(N_NOTE_BUS <= BusSet::CAPACITY, "a BusSet is thirty-two bits");
+static_assert(N_CV_BUS <= BusSet::CAPACITY, "a BusSet is thirty-two bits");
 
 #endif

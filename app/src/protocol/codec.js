@@ -105,11 +105,11 @@ export function emptyGlobals() {
 // the wire carry it as a bit per bus, so these two are where the list becomes
 // a number and back.
 
-export const busMask = (buses) => (buses ?? []).reduce((mask, b) => mask | (1 << b), 0) & 0xffff;
+export const busMask = (buses) => (buses ?? []).reduce((mask, b) => (mask | (1 << b)) >>> 0, 0);
 
 export function busList(mask) {
   const buses = [];
-  for (let b = 0; b < 16; b++) if (mask & (1 << b)) buses.push(b);
+  for (let b = 0; b < 32; b++) if ((mask >>> b) & 1) buses.push(b);
   return buses;
 }
 
@@ -193,7 +193,7 @@ class Writer {
   u32(v) { this.u16(v & 0xffff); this.u16((v >>> 16) & 0xffff); }
   many(values) { for (const v of values) this.u8(v); }
   // A port's set of buses, a bit per bus.
-  set(buses) { this.u16(busMask(buses)); }
+  set(buses) { this.u32(busMask(buses)); }
   sets(lists) { for (const buses of lists) this.set(buses); }
 }
 
@@ -206,7 +206,7 @@ class Reader {
   u16() { const lo = this.u8(); return lo | (this.u8() << 8); }
   u32() { const lo = this.u16(); return (lo | (this.u16() << 16)) >>> 0; }
   many(n) { const out = []; for (let i = 0; i < n; i++) out.push(this.u8()); return out; }
-  set() { return busList(this.u16()); }
+  set() { return busList(this.u32()); }
   sets(n) { const out = []; for (let i = 0; i < n; i++) out.push(this.set()); return out; }
 }
 
@@ -569,11 +569,11 @@ export function splitSysex(bytes) {
 
 // A 14-bit value, as the protocol carries one: low seven bits first.
 export const u14 = (value) => [value & 0x7f, (value >> 7) & 0x7f];
-// A port's set of buses on the wire: sixteen bits, so three data bytes.
-export const u21 = (value) => [value & 0x7f, (value >> 7) & 0x7f, (value >> 14) & 0x7f];
-export const wireBuses = (buses) => u21(busMask(buses));
-export const readBuses = (bytes, at) =>
-  busList(bytes[at] | (bytes[at + 1] << 7) | ((bytes[at + 2] & 0x03) << 14));
+// Thirty-two bits as five data bytes, low septet first.
+export const u32 = (value) => [0, 7, 14, 21, 28].map((shift) => (value >>> shift) & 0x7f);
+// A port's set of buses on the wire: thirty-two bits, so a u32.
+export const wireBuses = (buses) => u32(busMask(buses));
+export const readBuses = (bytes, at) => busList(readU32(bytes, at));
 export const readU14 = (bytes, at) => bytes[at] | (bytes[at + 1] << 7);
 // Thirty-two bits as five data bytes, low septet first: a time in
 // microseconds, a subtick count, a word of gate buses (SYSEX_MONITOR).

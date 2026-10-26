@@ -96,10 +96,11 @@ struct Rig {
 };
 
 // A port's set of buses, as SYSEX_SET_CONNECTION and the port messages carry
-// it: three seven-bit bytes, low septet first (bus/domain.h).
+// it: five seven-bit bytes, low septet first (bus/domain.h).
 static std::vector<uint8_t> wire(BusSet set) {
-    return {(uint8_t)(set.bits & 0x7F), (uint8_t)((set.bits >> 7) & 0x7F),
-            (uint8_t)((set.bits >> 14) & 0x7F)};
+    std::vector<uint8_t> out;
+    for (uint8_t i = 0; i < 5; i++) out.push_back((uint8_t)((set.bits >> (7u * i)) & 0x7F));
+    return out;
 }
 static std::vector<uint8_t> args_with(std::vector<uint8_t> head, BusSet set) {
     for (uint8_t b : wire(set)) head.push_back(b);
@@ -632,6 +633,12 @@ static void test_one_bus_change_leaves_every_other_node_undisturbed() {
     TEST_ASSERT_EQUAL(one_bus(3).bits, rig.patches.active().nodes[0].out_buses[0].bits);
     TEST_ASSERT_EQUAL(steps_before, seq->steps_taken());
     TEST_ASSERT_EQUAL_PTR(seq, rig.master.node(1));       // the same object
+
+    // Every bit of a set crosses the wire, up to the last note bus.
+    const BusSet last = one_bus(N_NOTE_BUS - 1);
+    rig.send(SYSEX_SET_CONNECTION, args_with({0, 1, 0}, last));
+    TEST_ASSERT_TRUE(rig.acked());
+    TEST_ASSERT_EQUAL(last.bits, rig.patches.active().nodes[0].out_buses[0].bits);
 
     // The empty set is "connected to nothing".
     rig.send(SYSEX_SET_CONNECTION, args_with({0, 1, 0}, BusSet{}));
@@ -1226,8 +1233,9 @@ static void test_the_protocol_never_allocates() {
 
         message[3] = SYSEX_SET_CONNECTION;
         message[5] = 0; message[6] = 1; message[7] = 0;
-        message[8] = (uint8_t)(1 + (i % 3)); message[9] = 0xF7;
-        rig.sysex.deliver_sysex(CONTROL, message, 10, rig.now);
+        message[8] = (uint8_t)(1 + (i % 3)); message[9] = 0; message[10] = 0;
+        message[11] = 0; message[12] = 0; message[13] = 0xF7;
+        rig.sysex.deliver_sysex(CONTROL, message, 14, rig.now);
 
         rig.sysex.service((uint32_t)(1000 * i));
     }

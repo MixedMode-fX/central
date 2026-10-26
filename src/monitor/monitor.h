@@ -67,7 +67,7 @@ class Monitor {
         // a monitor that had gone cold starts from an empty record: what
         // happened while nobody was asking is not the answer to a new
         // question.
-        void watch(uint16_t note_buses, uint32_t now_us);
+        void watch(uint32_t note_buses, uint32_t now_us);
         bool armed(uint32_t now_us) const {
             return watching && (uint32_t)(now_us - watched_at) < MONITOR_ARMED_US;
         }
@@ -106,7 +106,7 @@ class Monitor {
         HalTap& tap;
         const StatusLeds& leds;
 
-        uint16_t note_mask;
+        uint32_t note_mask;
         uint32_t watched_at;
         bool watching;
 

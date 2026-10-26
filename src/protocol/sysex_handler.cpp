@@ -31,12 +31,13 @@ static constexpr size_t MONITOR_FRAME_MAX =
     + 1;                                               // F7
 static_assert(MONITOR_FRAME_MAX <= SYSEX_TX_MAX, "a monitor frame must fit one reply");
 
-// A port's set of buses, as put_set() wrote it: three seven-bit data bytes,
+// A port's set of buses, as put_set() wrote it: five seven-bit data bytes,
 // low septet first (bus/domain.h).
+static constexpr uint8_t SET_BYTES = 5;
 static BusSet read_set(const uint8_t* at){
-    return BusSet{(uint16_t)((at[0] & 0x7Fu)
-                           | ((uint16_t)(at[1] & 0x7Fu) << 7)
-                           | ((uint16_t)(at[2] & 0x7Fu) << 14))};
+    uint32_t bits = 0;
+    for (uint8_t i = 0; i < SET_BYTES; i++) bits |= (uint32_t)(at[i] & 0x7Fu) << (7u * i);
+    return BusSet{bits};
 }
 
 SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
@@ -228,14 +229,14 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         }
 
         // One inlet or outlet of one node: the whole set of buses that port
-        // is on (bus/domain.h), as three data bytes. Under the bus model this
-        // is two bytes in the config, with no re-sort, no graph rebuild and
+        // is on (bus/domain.h), as five data bytes. Under the bus model this
+        // is four bytes in the config, with no re-sort, no graph rebuild and
         // no cycle re-check - which is what makes dragging a cable in the
         // editor a single message rather than a full dump. The set is sent
         // whole rather than as "add this bus" so that the message says what
         // the port *is*, and two editors cannot drift apart over it.
         case SYSEX_SET_CONNECTION: {
-            if (n < 6){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 3 + SET_BYTES){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             const uint8_t node = args[0];
             const uint8_t is_out = args[1];
             const uint8_t index = args[2];
@@ -252,7 +253,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         }
 
         case SYSEX_SET_GATE_PORT: {
-            if (n < 5){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 2 + SET_BYTES){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             GatePortConfig c{args[1], read_set(&args[2])};
             if (patches.commit_gate_port(args[0], c, now_us) != APPLY_OK){
                 nak(source, SYSEX_ERR_REJECTED);
@@ -263,7 +264,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         }
 
         case SYSEX_SET_MIDI_PORT: {
-            if (n < 7){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 4 + SET_BYTES){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             // The mask is seven bits on the wire plus one carried in the
             // direction byte's high bit, because a port mask reaches 0x80.
             const uint8_t mask = (uint8_t)(args[2] | ((args[1] & 0x02) ? 0x80u : 0u));
@@ -338,7 +339,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         // same trick for the byte that does not fit seven bits - depth
         // reaches 255, so its top bit rides in the flags byte's spare bit.
         case SYSEX_SET_MOD_ROUTE: {
-            if (n < 14){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < 11 + SET_BYTES){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             if (args[0] >= N_MOD_ROUTE){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
             ModRoute route = unused_route();
             // An empty set of source buses clears the slot: a route with
@@ -347,14 +348,15 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             // with the source field.
             const BusSet set = read_set(&args[1]);
             if (set.any()){
+                const uint8_t* f = &args[1 + SET_BYTES];
                 route.buses = set;
-                route.target_kind = args[4];
-                route.target_index = args[5];
-                route.param = (uint16_t)(args[6] | ((uint16_t)args[7] << 7));
-                route.min = (uint16_t)(args[8] | ((uint16_t)args[9] << 7));
-                route.max = (uint16_t)(args[10] | ((uint16_t)args[11] << 7));
-                route.depth = (uint8_t)(args[12] | ((args[13] & 0x40) ? 0x80u : 0u));
-                route.flags = (uint8_t)(args[13] & 0x3F);
+                route.target_kind = f[0];
+                route.target_index = f[1];
+                route.param = (uint16_t)(f[2] | ((uint16_t)f[3] << 7));
+                route.min = (uint16_t)(f[4] | ((uint16_t)f[5] << 7));
+                route.max = (uint16_t)(f[6] | ((uint16_t)f[7] << 7));
+                route.depth = (uint8_t)(f[8] | ((f[9] & 0x40) ? 0x80u : 0u));
+                route.flags = (uint8_t)(f[9] & 0x3F);
             }
             patches.begin_edit();
             patches.staging().mod_map[args[0]] = route;
@@ -656,12 +658,12 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         // The monitor's record (monitor/monitor.h). The request names what
         // is worth sending, and is what keeps the monitor armed.
         case SYSEX_MONITOR_REQUEST: {
-            if (n < 4){ nak(source, SYSEX_ERR_TRUNCATED); return; }
-            const uint8_t count = args[3];
+            if (n < SET_BYTES + 1){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            const uint8_t count = args[SET_BYTES];
             if (count > MONITOR_MAX_NODES){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
-            if (n < 4u + count){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (n < SET_BYTES + 1u + count){ nak(source, SYSEX_ERR_TRUNCATED); return; }
             monitor.watch(read_set(&args[0]).bits, now_us);
-            reply_monitor(source, &args[4], count);
+            reply_monitor(source, &args[SET_BYTES + 1], count);
             return;
         }
 

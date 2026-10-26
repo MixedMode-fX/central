@@ -16,7 +16,7 @@
 
 // Internal buses per domain.
 #define N_GATE_BUS 16
-#define N_NOTE_BUS 16
+#define N_NOTE_BUS 32
 #define N_CV_BUS 8
 // Events a note bus can carry per pass. Beyond this, writes are dropped and
 // counted (BusManager::note_overflows()). The input drain never delivers

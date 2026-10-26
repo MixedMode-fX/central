@@ -104,7 +104,7 @@ export class Monitor {
   get noteMask() {
     let mask = 0;
     for (const bus of this.watch.keys()) mask |= 1 << bus;
-    return mask & 0xffff;
+    return mask >>> 0;
   }
 
   get watchedBuses() { return new Set(this.watch.keys()); }

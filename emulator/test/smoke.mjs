@@ -58,7 +58,7 @@ const sysex = (command, args) => {
 // the CV buses, and the notes on the buses asked for.
 const MONITOR_REQUEST = 0x33, MONITOR = 0x5a;
 const frame = (noteBuses = 0) => {
-  const reply = sysex(MONITOR_REQUEST, [noteBuses & 0x7f, (noteBuses >> 7) & 0x7f, (noteBuses >> 14) & 0x7f, 0]);
+  const reply = sysex(MONITOR_REQUEST, [0, 7, 14, 21, 28].map((s) => (noteBuses >>> s) & 0x7f).concat(0));
   assert.equal(reply[3], MONITOR, 'the module answered a monitor request with something else');
   const u14 = (at) => reply[at] | (reply[at + 1] << 7);
   // at(5) clock flags(1) bpm(2) count(5) gates(10) jacks(8) leds(4): the CV buses start at 5 + 35.

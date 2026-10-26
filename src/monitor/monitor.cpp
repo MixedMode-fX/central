@@ -18,7 +18,7 @@ Monitor::Monitor(const MixedModeMaster& master, HalTap& panel, const StatusLeds&
     led_hi(), cv_last(), events(), n_events(0), lost(false)
 {}
 
-void Monitor::watch(uint16_t note_buses, uint32_t now_us){
+void Monitor::watch(uint32_t note_buses, uint32_t now_us){
     if (!armed(now_us)) clear(now_us);
     note_mask = note_buses;
     watched_at = now_us;

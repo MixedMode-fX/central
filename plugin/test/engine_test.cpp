@@ -282,7 +282,7 @@ static void test_an_edit_over_sysex_changes_what_is_running(){
     load_thru(e);
     // SET_MIDI_PORT: index 0, flags (bit 0: an output), mask, channel, buses.
     // Re-point the output's channel override to 5 and hear the note on 5.
-    const std::vector<uint8_t> set = framed(SYSEX_SET_MIDI_PORT, {0, 1, mmMIDI_USB_0, 5, 0x01, 0, 0});
+    const std::vector<uint8_t> set = framed(SYSEX_SET_MIDI_PORT, {0, 1, mmMIDI_USB_0, 5, 0x01, 0, 0, 0, 0});
     e.receive_sysex(MIDI_CONTROL_PORT, set.data(), (uint32_t)set.size());
     CHECK(e.midi().editor_sysex_used > 3 && e.midi().editor_sysex[3] == SYSEX_ACK);
     const InEvent in[] = { channel_event(0, HOST_IN, MIDI_NOTE_ON, 1, 60, 100) };
@@ -358,7 +358,7 @@ static void test_state_round_trips_the_patch_and_the_presets(){
 static void test_the_window_is_told_what_the_module_did(){
     Engine& e = fresh(engine_a);
     load_thru(e);
-    const std::vector<uint8_t> ask = framed(SYSEX_MONITOR_REQUEST, {1, 0, 0, 0});   // note bus 0, no nodes
+    const std::vector<uint8_t> ask = framed(SYSEX_MONITOR_REQUEST, {1, 0, 0, 0, 0, 0});   // note bus 0, no nodes
     e.receive_sysex(MIDI_CONTROL_PORT, ask.data(), (uint32_t)ask.size());
     e.midi().clear_editor_sysex();
     InEvent in[2] = {channel_event(0, HOST_IN, MIDI_NOTE_ON, 1, 60, 100),

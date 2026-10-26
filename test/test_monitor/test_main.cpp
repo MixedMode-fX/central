@@ -83,11 +83,11 @@ struct Rig {
 
     // A request, framed the way the wire carries it: the note bus mask, and
     // the nodes whose positions are wanted.
-    void request(uint16_t note_buses, const std::vector<uint8_t>& nodes = {}) {
+    void request(uint32_t note_buses, const std::vector<uint8_t>& nodes = {}) {
         std::vector<uint8_t> m = {0xF0, SYSEX_MANUFACTURER, sysex.device_id(),
-                                  SYSEX_MONITOR_REQUEST, SYSEX_PROTOCOL_VERSION,
-                                  (uint8_t)(note_buses & 0x7F), (uint8_t)((note_buses >> 7) & 0x7F),
-                                  (uint8_t)((note_buses >> 14) & 0x7F), (uint8_t)nodes.size()};
+                                  SYSEX_MONITOR_REQUEST, SYSEX_PROTOCOL_VERSION};
+        for (uint8_t i = 0; i < 5; i++) m.push_back((uint8_t)((note_buses >> (7u * i)) & 0x7F));
+        m.push_back((uint8_t)nodes.size());
         for (uint8_t n : nodes) m.push_back(n);
         m.push_back(0xF7);
         midi.clear();
@@ -423,7 +423,7 @@ static void test_a_request_naming_too_many_nodes_is_refused() {
 
     // And a request that promises nodes it does not carry.
     uint8_t short_one[] = {0xF0, SYSEX_MANUFACTURER, SYSEX_DEFAULT_DEVICE, SYSEX_MONITOR_REQUEST,
-                           SYSEX_PROTOCOL_VERSION, 0, 0, 0, 2, 0xF7};
+                           SYSEX_PROTOCOL_VERSION, 0, 0, 0, 0, 0, 2, 0xF7};
     rig.midi.clear();
     rig.sysex.deliver_sysex(CONTROL, short_one, sizeof short_one, rig.now);
     nak = rig.midi.last_reply(SYSEX_NAK);
@@ -463,7 +463,7 @@ static void test_watching_never_allocates() {
     rig.midi.clear();
     rig.midi.sysex.reserve(4096);
     uint8_t message[] = {0xF0, SYSEX_MANUFACTURER, SYSEX_DEFAULT_DEVICE, SYSEX_MONITOR_REQUEST,
-                         SYSEX_PROTOCOL_VERSION, 1, 0, 0, 0, 0xF7};
+                         SYSEX_PROTOCOL_VERSION, 1, 0, 0, 0, 0, 0, 0xF7};
     const size_t before = g_allocations;
     for (int i = 0; i < 50; i++) {
         rig.gpio.set_input(0, (i & 1) ? GPIO_HIGH : GPIO_LOW);

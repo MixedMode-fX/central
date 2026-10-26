@@ -423,7 +423,7 @@ export class Device extends EventTarget {
     const r = route ?? {};
     if (!(r.buses ?? []).length) {
       return this.command(P.SysexCommand.SYSEX_SET_MOD_ROUTE,
-        [slot, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        [slot, ...codec.wireBuses([]), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
     return this.command(P.SysexCommand.SYSEX_SET_MOD_ROUTE, [
       slot, ...codec.wireBuses(r.buses), r.targetKind, r.targetIndex,
@@ -438,15 +438,15 @@ export class Device extends EventTarget {
     this.throwOnNak(reply, 'no such modulation route');
     const buses = codec.readBuses(reply, 6);
     if (!buses.length) return null;
-    const flags = reply[18];
+    const flags = reply[20];
     return {
       buses,
-      targetKind: reply[9],
-      targetIndex: reply[10],
-      param: codec.readU14(reply, 11),
-      min: codec.readU14(reply, 13),
-      max: codec.readU14(reply, 15),
-      depth: (reply[17] & 0x7f) | ((flags & 0x40) ? 0x80 : 0),
+      targetKind: reply[11],
+      targetIndex: reply[12],
+      param: codec.readU14(reply, 13),
+      min: codec.readU14(reply, 15),
+      max: codec.readU14(reply, 17),
+      depth: (reply[19] & 0x7f) | ((flags & 0x40) ? 0x80 : 0),
       flags: flags & 0x3f,
     };
   }
@@ -512,7 +512,7 @@ export class Device extends EventTarget {
     const asked = nodes.slice(0, P.MONITOR_MAX_NODES);
     const [reply] = await this.request(
       this.msg(P.SysexCommand.SYSEX_MONITOR_REQUEST,
-               [...codec.u21(noteBuses & 0xffff), asked.length, ...asked]),
+               [...codec.u32(noteBuses), asked.length, ...asked]),
       (r) => this.isReply(r, P.SysexCommand.SYSEX_MONITOR) || this.isReply(r, P.SysexCommand.SYSEX_NAK),
       { what: 'the monitor' });
     this.throwOnNak(reply, 'the module refused a monitor request');

@@ -277,7 +277,7 @@ void Console::cmd_key(uint8_t n, uint32_t now_us){
 void Console::put_buses(BusSet set){
     if (!set.any()){ put("-"); return; }
     bool first = true;
-    for (uint8_t b = 0; b < 16; b++){
+    for (uint8_t b = 0; b < BusSet::CAPACITY; b++){
         if (!set.has(b)) continue;
         if (!first) put(",");
         put_uint(b);

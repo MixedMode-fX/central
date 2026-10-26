@@ -90,6 +90,27 @@ static void test_out_of_range_indices_are_ignored() {
     TEST_ASSERT_EQUAL(0, bus.note_read(0, 5).type);
 }
 
+// The last note bus is a bus like the first: written, published by its own
+// bit, and merged with bus 0 when a set names both.
+static void test_the_last_note_bus_is_a_bus_like_any_other() {
+    const uint8_t last = N_NOTE_BUS - 1;
+    BusManager bus;
+    TEST_ASSERT_TRUE(bus.note_write(last, note_on(7)));
+    bus.publish(0, 1u << last, 0);
+    TEST_ASSERT_EQUAL(1, bus.note_count(last));
+    TEST_ASSERT_EQUAL(7, bus.note_read(last, 0).data1);
+
+    BusSet set{};
+    set.add(0);
+    set.add(last);
+    bus.swap();
+    bus.note_write(set, note_on(9));
+    bus.swap();
+    TEST_ASSERT_EQUAL(1, bus.note_count(0));
+    TEST_ASSERT_EQUAL(1, bus.note_count(last));
+    TEST_ASSERT_EQUAL(2, bus.note_count(set));
+}
+
 static void test_reset_clears_everything() {
     BusManager bus;
     bus.gate_write(1, true);
@@ -187,6 +208,7 @@ int main() {
     RUN_TEST(test_note_overflow_is_counted_not_silent);
     RUN_TEST(test_cv_sum_saturates);
     RUN_TEST(test_out_of_range_indices_are_ignored);
+    RUN_TEST(test_the_last_note_bus_is_a_bus_like_any_other);
     RUN_TEST(test_reset_clears_everything);
     RUN_TEST(test_reading_a_set_of_gate_buses_is_their_or);
     RUN_TEST(test_writing_a_set_of_gate_buses_writes_every_one);

@@ -125,19 +125,19 @@ EMU_EXPORT uint32_t emu_algo_out_domain(uint32_t i, uint32_t k){
 
 EMU_EXPORT void emu_patch_reset(){ patch = empty_patch(); }
 // Every port names the set of buses it is on (bus/domain.h), and these take
-// that set as a bit per bus - the same sixteen bits the patch image carries,
+// that set as a bit per bus - the same thirty-two bits the patch image carries,
 // so the page never has to spell a connection out one bus at a time.
 EMU_EXPORT void emu_patch_gate_port(uint32_t port, uint32_t direction, uint32_t buses){
-    if (port < GPIO_N) patch.gate_ports[port] = GatePortConfig{(uint8_t)direction, BusSet{(uint16_t)buses}};
+    if (port < GPIO_N) patch.gate_ports[port] = GatePortConfig{(uint8_t)direction, BusSet{buses}};
 }
 EMU_EXPORT void emu_patch_midi_in(uint32_t i, uint32_t source_mask, uint32_t channel, uint32_t buses){
     if (i < N_MIDI_IN_NODES){
-        patch.midi_in[i] = MidiInConfig{(uint8_t)source_mask, (uint8_t)channel, BusSet{(uint16_t)buses}};
+        patch.midi_in[i] = MidiInConfig{(uint8_t)source_mask, (uint8_t)channel, BusSet{buses}};
     }
 }
 EMU_EXPORT void emu_patch_midi_out(uint32_t i, uint32_t target_mask, uint32_t channel, uint32_t buses){
     if (i < N_MIDI_OUT_NODES){
-        patch.midi_out[i] = MidiOutConfig{(uint8_t)target_mask, (uint8_t)channel, BusSet{(uint16_t)buses}};
+        patch.midi_out[i] = MidiOutConfig{(uint8_t)target_mask, (uint8_t)channel, BusSet{buses}};
     }
 }
 // Resets node i to node_config(algorithm_id); n_nodes grows to include it.
@@ -147,10 +147,10 @@ EMU_EXPORT void emu_patch_node(uint32_t i, uint32_t algorithm_id){
     if (patch.n_nodes <= i) patch.n_nodes = (uint8_t)(i + 1);
 }
 EMU_EXPORT void emu_patch_node_in(uint32_t i, uint32_t k, uint32_t buses){
-    if (i < N_NODE && k < MAX_IN) patch.nodes[i].in_buses[k] = BusSet{(uint16_t)buses};
+    if (i < N_NODE && k < MAX_IN) patch.nodes[i].in_buses[k] = BusSet{buses};
 }
 EMU_EXPORT void emu_patch_node_out(uint32_t i, uint32_t k, uint32_t buses){
-    if (i < N_NODE && k < MAX_OUT) patch.nodes[i].out_buses[k] = BusSet{(uint16_t)buses};
+    if (i < N_NODE && k < MAX_OUT) patch.nodes[i].out_buses[k] = BusSet{buses};
 }
 EMU_EXPORT void emu_patch_node_param(uint32_t i, uint32_t k, uint32_t value){
     if (i < N_NODE && k < N_PARAM) patch.nodes[i].params[k] = (uint8_t)value;
@@ -163,7 +163,7 @@ EMU_EXPORT void emu_patch_mod_route(uint32_t slot, uint32_t buses, uint32_t targ
     if (slot >= N_MOD_ROUTE) return;
     ModRoute r = unused_route();
     if (buses != 0){
-        r.buses = BusSet{(uint16_t)buses};
+        r.buses = BusSet{buses};
         r.target_kind = (uint8_t)target_kind;
         r.target_index = (uint8_t)target_index;
         r.param = (uint16_t)param;

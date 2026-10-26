@@ -77,7 +77,7 @@ class BusManager {
         // clears their back buffers. The first publish of a bus in a pass
         // replaces what the readers see; a later one merges into it under
         // the domain's own fan-in rule.
-        void publish(uint32_t gate_mask, uint16_t note_mask, uint16_t cv_mask);
+        void publish(uint32_t gate_mask, uint32_t note_mask, uint16_t cv_mask);
         // Publishes everything not yet published and ends the pass.
         void swap();
         // Clears everything (patch load).
@@ -95,7 +95,7 @@ class BusManager {
         // second publish merges into what the readers see instead of wiping
         // it.
         uint32_t gate_published;
-        uint16_t note_published;
+        uint32_t note_published;
         uint16_t cv_published;
         NoteQueue note_front[N_NOTE_BUS];
         NoteQueue note_back[N_NOTE_BUS];
@@ -105,7 +105,7 @@ class BusManager {
 };
 
 static_assert(N_GATE_BUS <= 32, "gate buses are held in a 32-bit word");
-static_assert(N_NOTE_BUS <= 16, "a note bus mask is a 16-bit word");
+static_assert(N_NOTE_BUS <= 32, "a note bus mask is a 32-bit word");
 static_assert(N_CV_BUS <= 16, "a CV bus mask is a 16-bit word");
 
 #endif

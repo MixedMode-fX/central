@@ -1,0 +1,8 @@
+{
+  "name": "TeensyUSBAudioHost",
+  "version": "0.1.0",
+  "description": "USB Audio Class host driver for USBHost_t36 with Teensy Audio Library objects, vendored from github.com/MixedMode-fX/teensy-usb-audio-host at 1feca60.",
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "teensy"
+}

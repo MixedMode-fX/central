@@ -9,6 +9,10 @@ An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
   Launchpad on it is *USB host Launchpad*, a controller and nothing else, and
   every other device on it is *USB host*, so what goes to the instruments on
   the hub never reaches the Launchpad (`MidiPort` in `src/hal/midi_types.h`).
+- A Focusrite Scarlett on the host port is an effect: input 1 runs through
+  Clouds' reverb, fully wet, to outputs 1 and 2. No other audio interface is
+  claimed. The driver and the reverb are vendored under `lib/`
+  (`src/hal/teensy/teensy_audio.h`); none of it has run on hardware yet.
 - No encoder, no switches, no display. The module is configured from a host:
   the serial console, the SysEx protocol, or the browser app.
 

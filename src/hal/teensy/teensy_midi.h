@@ -42,6 +42,12 @@ constexpr uint8_t ALL_MIDI_PORTS = 0
 #endif
     ;
 
+#ifdef MMMC_USB_HOST
+// The host socket's stack, which the audio interface's driver joins
+// (hal/teensy/teensy_audio.h).
+extern USBHost mm_usb;
+#endif
+
 // Brings up every compiled-in transport. Call once from setup().
 //
 // Library soft-thru is turned off on both DIN ports: an input echoed straight

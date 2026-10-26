@@ -3,6 +3,7 @@
 #include "hardware.h"
 #include "hal/teensy/teensy_gpio.h"
 #include "hal/teensy/teensy_midi.h"
+#include "hal/teensy/teensy_audio.h"
 #include "hal/teensy/teensy_clock.h"
 #include "hal/teensy/teensy_eeprom.h"
 #include "hal/teensy/teensy_leds.h"
@@ -106,6 +107,7 @@ void setup(){
 
     led_driver.begin();
     console_io.begin();
+    mm_audio_setup();
     mm_midi_setup();
 
     // Slot 0 if it checks out, the flash default if it does not - and the red

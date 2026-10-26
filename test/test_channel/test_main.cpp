@@ -61,6 +61,7 @@ static const Driven DRIVEN[] = {
     {ALGO_RETRIGGER,      true},
     {ALGO_NOTE_BUFFER,    true},
     {ALGO_NOTE_WRAP,      false},
+    {ALGO_POCKET_ARP,     true},
     {ALGO_NOTE_SWITCH,    false},
     {ALGO_NOTE_ROUTER,    false},
 };
@@ -325,7 +326,7 @@ static void test_a_message_that_is_not_a_note_moves_too() {
     for (uint8_t i = 0; i < N_DRIVEN; i++) {
         // An arpeggiator plays a figure rather than a stream and drops
         // everything that is not a note; it says so in its own header.
-        if (DRIVEN[i].id == ALGO_ARPEGGIATOR) continue;
+        if (DRIVEN[i].id == ALGO_ARPEGGIATOR || DRIVEN[i].id == ALGO_POCKET_ARP) continue;
         Rig rig(DRIVEN[i], WANTED_CHANNEL);
         rig.play(MidiEvent{MIDI_CONTROL_CHANGE, SOURCE_CHANNEL, 74, 40});
         const std::vector<MidiEvent> seen = rig.pass();

@@ -346,6 +346,7 @@ export const AlgorithmId = Object.freeze({
   ALGO_NOTE_BUFFER: 60,
   ALGO_RPS10: 61,
   ALGO_NOTE_WRAP: 62,
+  ALGO_POCKET_ARP: 63,
 });
 
 export const AlgorithmCategory = Object.freeze({

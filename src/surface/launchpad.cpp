@@ -9,11 +9,11 @@ static const uint8_t INQUIRY[] = {0xF0, SYSEX_UNIVERSAL_NON_REALTIME, SYSEX_BROA
                                   SYSEX_GENERAL_INFORMATION, SYSEX_IDENTITY_REQUEST, 0xF7};
 
 Launchpad::Launchpad(PatchManager& manager, MixedModeMaster& master, CcMapper& mapper, IMidiOut& out,
-                     IReverb& reverb) :
-    patches(manager), mm(master), cc(mapper), midi(out), fx(reverb),
+                     AudioRack& rack) :
+    patches(manager), mm(master), cc(mapper), midi(out), audio(rack),
     active_port(0), active_model(LP_MODEL_AUTO), seen_model(LP_MODEL_AUTO), is_linked(false),
     last_inquiry_us(0), last_seen_us(0), ever_asked(false),
-    current_page(PAGE_NOTE), before_reverb(PAGE_NOTE), clear_down(0), shift(0), widgets_page(0),
+    current_page(PAGE_NOTE), before_audio(PAGE_NOTE), slot_shown(0), params_page(0), shift(0), widgets_page(0),
     held_note(), held_channel(), fader_value(), toggles_on(), buttons_down(), side_down(0),
     want(), shown(), last_led_us(0), tx()
 {
@@ -24,6 +24,12 @@ Launchpad::Launchpad(PatchManager& manager, MixedModeMaster& master, CcMapper& m
 uint8_t Launchpad::dim(uint8_t colour){
     if (colour < 4 || colour > 59) return DIM;
     return (uint8_t)(4u + ((colour - 4u) / 4u) * 4u + 2u);
+}
+
+uint8_t Launchpad::slot_colour(uint8_t slot){
+    static const uint8_t COLOUR[] = {VIOLET, CYAN, ORANGE, GREEN};
+    static_assert(sizeof COLOUR >= N_RACK_SLOT, "a colour per rack slot");
+    return slot < N_RACK_SLOT ? COLOUR[slot] : DIM;
 }
 
 uint16_t Launchpad::bar_tempo(uint8_t step){
@@ -189,6 +195,10 @@ bool Launchpad::receive(uint8_t source, const MidiEvent& e, uint32_t now_us){
             side((uint8_t)(e.data1 / 10u - 1u), down, now_us);
             return true;
         }
+        if (model() == LP_MODEL_PRO_MK3 && e.data1 >= bottom_id(0) && e.data1 < bottom_id(GRID)){
+            bottom((uint8_t)(e.data1 - bottom_id(0)), down, now_us);
+            return true;
+        }
         return true;
     }
     if (type == MIDI_AFTERTOUCH_POLY){
@@ -219,7 +229,7 @@ void Launchpad::pad(uint8_t row, uint8_t col, uint8_t velocity, bool down, uint3
         case PAGE_KEY:     if (down) key_pad(row, col, now_us); break;
         case PAGE_WIDGETS: widget_pad(row, col, down, now_us); break;
         case PAGE_TEMPO:   if (down) tempo_pad(row, col, now_us); break;
-        case PAGE_REVERB:  reverb_pad(row, col, down); break;
+        case PAGE_AUDIO:   audio_pad(row, col, down, now_us); break;
         default: break;
     }
 }
@@ -258,6 +268,17 @@ void Launchpad::top(uint8_t index, bool down, uint32_t now_us){
         case PAGE_TEMPO:
             nudge_tempo((int16_t)(vertical ? dir : dir * 10), now_us);
             return;
+        case PAGE_AUDIO:
+            if (!vertical){
+                if ((int16_t)slot_shown + dir >= 0 && (int16_t)slot_shown + dir < N_RACK_SLOT){
+                    show_slot((uint8_t)(slot_shown + dir), now_us);
+                }
+                return;
+            }
+            // Down is further down the slot's list of parameters.
+            if (index == TOP_DOWN && params_page + 1u < audio_pages()) params_page++;
+            if (index == TOP_UP && params_page > 0) params_page--;
+            return;
         default: return;
     }
 }
@@ -273,8 +294,11 @@ void Launchpad::side(uint8_t index, bool down, uint32_t now_us){
         case SIDE_CONTINUE: cc.write_control(CC_TARGET_TRANSPORT, 0, CC_TRANSPORT_CONTINUE, 1, now_us); return;
         case SIDE_TAP:      cc.write_control(CC_TARGET_TRANSPORT, 0, CC_TRANSPORT_TAP, 1, now_us); return;
         case SIDE_PANIC:    release_all(now_us); mm.panic(); return;
-        case SIDE_REVERB:
-            set_page(current_page == PAGE_REVERB ? before_reverb : (uint8_t)PAGE_REVERB, now_us);
+        case SIDE_AUDIO:
+            set_page(current_page == PAGE_AUDIO ? before_audio : (uint8_t)PAGE_AUDIO, now_us);
+            return;
+        case SIDE_CLEAR:
+            if (current_page == PAGE_AUDIO) audio.clear(slot_shown);
             return;
         default: return;
     }
@@ -285,8 +309,7 @@ void Launchpad::set_page(uint8_t page, uint32_t now_us){
     // Leaving the note page releases what it holds: a note-off has to come
     // from the pad that played it, and that pad means something else now.
     if (current_page == PAGE_NOTE) release_all(now_us);
-    if (page == PAGE_REVERB) before_reverb = current_page;
-    clear_down = 0;
+    if (page == PAGE_AUDIO) before_audio = current_page;
     current_page = page;
 }
 
@@ -486,20 +509,34 @@ void Launchpad::set_tempo(int32_t bpm, uint32_t now_us){
     cc.write_control(CC_TARGET_CLOCK, 0, CC_CLOCK_TEMPO, (uint16_t)bpm, now_us);
 }
 
-// The reverb page -----------------------------------------------------------------
+// The audio page -------------------------------------------------------------------
 //
-// Columns 1 to 4 are faders, bottom row first as a widget fader is; the
-// bottom-right block empties the tank on the press.
+// A column a parameter of the slot on screen, eight to a page, bottom row
+// first as a widget fader is. The writes go to the rack, which is the
+// module's and not the patch's.
 
-void Launchpad::reverb_pad(uint8_t row, uint8_t col, bool down){
-    if (is_clear_pad(row, col)){
-        const uint8_t bit = (uint8_t)(1u << (row * 2u + col - REVERB_CLEAR_COL));
-        if (!down){ clear_down &= (uint8_t)~bit; return; }
-        if (clear_down == 0) fx.clear();
-        clear_down |= bit;
-        return;
-    }
-    if (down && col < IReverb::CONTROLS) fx.set(col, fader_level(row));
+void Launchpad::audio_pad(uint8_t row, uint8_t col, bool down, uint32_t now_us){
+    if (!down) return;
+    const uint8_t param = (uint8_t)(params_page * GRID + col);
+    audio.set_param(slot_shown, param, fader_level(row), now_us);
+}
+
+uint8_t Launchpad::audio_pages() const {
+    const uint8_t n = rack::param_count(audio.slot(slot_shown).plugin);
+    return n == 0 ? 1 : (uint8_t)((n + GRID - 1u) / GRID);
+}
+
+void Launchpad::show_slot(uint8_t slot, uint32_t now_us){
+    if (slot >= N_RACK_SLOT) return;
+    if (slot != slot_shown) params_page = 0;
+    slot_shown = slot;
+    set_page(PAGE_AUDIO, now_us);
+}
+
+// A Pro's upper bottom row: a button per rack slot, which opens the audio
+// page on it from wherever the surface is.
+void Launchpad::bottom(uint8_t index, bool down, uint32_t now_us){
+    if (down && index < N_RACK_SLOT) show_slot(index, now_us);
 }
 
 // Output ---------------------------------------------------------------------------
@@ -532,7 +569,7 @@ void Launchpad::draw(uint32_t now_us){
         case PAGE_KEY:     draw_key(); break;
         case PAGE_WIDGETS: draw_widgets(); break;
         case PAGE_TEMPO:   draw_tempo(now_us); break;
-        case PAGE_REVERB:  draw_reverb(); break;
+        case PAGE_AUDIO:   draw_audio(); break;
         default: break;
     }
 }
@@ -543,15 +580,27 @@ void Launchpad::draw_frame(uint32_t now_us){
     static const uint8_t PAGE_BUTTON[TOP_PAGES] = {TOP_NOTE, TOP_KEY, TOP_WIDGETS, TOP_TEMPO};
     for (uint8_t p = 0; p < TOP_PAGES; p++) set(button_id(PAGE_BUTTON[p]), p == current_page ? WHITE : DIM);
     // The arrows light where they do something.
-    const bool vertical = current_page != PAGE_WIDGETS && current_page != PAGE_REVERB;
+    const bool vertical = current_page != PAGE_WIDGETS;
     set(button_id(TOP_UP), vertical ? DIM : OFF);
     set(button_id(TOP_DOWN), vertical ? DIM : OFF);
-    const bool horizontal = current_page == PAGE_WIDGETS || current_page == PAGE_TEMPO;
+    const bool horizontal = current_page == PAGE_WIDGETS || current_page == PAGE_TEMPO || current_page == PAGE_AUDIO;
     set(button_id(TOP_LEFT), horizontal ? DIM : OFF);
     set(button_id(TOP_RIGHT), horizontal ? DIM : OFF);
     if (current_page == PAGE_WIDGETS){
         set(button_id(TOP_LEFT), widgets_page > 0 ? WHITE : DIM);
         set(button_id(TOP_RIGHT), widgets_page + 1 < WIDGET_PAGES ? WHITE : DIM);
+    }
+    if (current_page == PAGE_AUDIO){
+        set(button_id(TOP_LEFT), slot_shown > 0 ? slot_colour((uint8_t)(slot_shown - 1u)) : OFF);
+        set(button_id(TOP_RIGHT), slot_shown + 1u < N_RACK_SLOT ? slot_colour((uint8_t)(slot_shown + 1u)) : OFF);
+        set(button_id(TOP_UP), params_page > 0 ? WHITE : OFF);
+        set(button_id(TOP_DOWN), params_page + 1u < audio_pages() ? WHITE : OFF);
+    }
+    if (model() == LP_MODEL_PRO_MK3){
+        for (uint8_t s = 0; s < N_RACK_SLOT; s++){
+            const bool on = current_page == PAGE_AUDIO && s == slot_shown;
+            set(bottom_id(s), on ? slot_colour(s) : dim(slot_colour(s)));
+        }
     }
 
     const bool running = mm.clock().running();
@@ -561,7 +610,10 @@ void Launchpad::draw_frame(uint32_t now_us){
     set(side_id(SIDE_CONTINUE), (side_down & (1u << SIDE_CONTINUE)) ? YELLOW : dim(YELLOW));
     set(side_id(SIDE_TAP), on_beat ? WHITE : DIM);
     set(side_id(SIDE_PANIC), (side_down & (1u << SIDE_PANIC)) ? PINK : dim(PINK));
-    set(side_id(SIDE_REVERB), current_page == PAGE_REVERB ? WHITE : (fx.running() ? VIOLET : dim(VIOLET)));
+    set(side_id(SIDE_AUDIO), current_page == PAGE_AUDIO ? WHITE : (audio.streaming() ? VIOLET : dim(VIOLET)));
+    if (current_page == PAGE_AUDIO){
+        set(side_id(SIDE_CLEAR), (side_down & (1u << SIDE_CLEAR)) ? RED : dim(RED));
+    }
     set(LOGO_ID, WHITE);
 }
 
@@ -678,9 +730,10 @@ void Launchpad::flush(uint32_t now_us){
     tx[at++] = device_byte();
     tx[at++] = 0x03;
     uint8_t n = 0;
-    for (uint8_t id = 11; id < LEDS && n < LEDS_PER_MESSAGE; id++){
+    const uint8_t last = model() == LP_MODEL_PRO_MK3 ? (uint8_t)LEDS : (uint8_t)100u;
+    for (uint8_t id = 11; id < last && n < LEDS_PER_MESSAGE; id++){
         const uint8_t col = (uint8_t)(id % 10u);
-        if (col == 0) continue;                       // 20, 30 .. 90: not ours
+        if (col == 0) continue;                       // 20, 30 .. 100: not ours
         if (id > 89 && id < 91) continue;
         if (want[id] == shown[id]) continue;
         tx[at++] = 0x00;                               // static colour
@@ -694,13 +747,23 @@ void Launchpad::flush(uint32_t now_us){
     midi.send_sysex(active_port, tx, at);
 }
 
-void Launchpad::draw_reverb(){
-    static const uint8_t COLOUR[IReverb::CONTROLS] = {BLUE, CYAN, YELLOW, GREEN};
-    for (uint8_t col = 0; col < IReverb::CONTROLS; col++){
-        const uint8_t level = (uint8_t)(((uint32_t)fx.get(col) * 7u + 63u) / 127u);
-        for (uint8_t row = 0; row < GRID; row++) set(led_id(row, col), row <= level ? COLOUR[col] : dim(COLOUR[col]));
+// The slot's parameters as faders in its colour. An empty slot has none,
+// so its page shows which slot it is instead: a pad per slot along the
+// top, this one lit.
+void Launchpad::draw_audio(){
+    const RackSlot& s = audio.slot(slot_shown);
+    const uint8_t colour = slot_colour(slot_shown);
+    const uint8_t n = rack::param_count(s.plugin);
+    if (n == 0){
+        for (uint8_t slot = 0; slot < N_RACK_SLOT; slot++){
+            set(led_id(GRID - 1u, slot), slot == slot_shown ? slot_colour(slot) : dim(slot_colour(slot)));
+        }
+        return;
     }
-    for (uint8_t row = 0; row < REVERB_CLEAR_ROWS; row++){
-        for (uint8_t col = REVERB_CLEAR_COL; col < GRID; col++) set(led_id(row, col), clear_down ? RED : dim(RED));
+    for (uint8_t col = 0; col < GRID; col++){
+        const uint8_t param = (uint8_t)(params_page * GRID + col);
+        if (param >= n) break;
+        const uint8_t level = (uint8_t)(((uint32_t)s.params[param] * 7u + 63u) / 127u);
+        for (uint8_t row = 0; row < GRID; row++) set(led_id(row, col), row <= level ? colour : dim(colour));
     }
 }

@@ -1,0 +1,14 @@
+{
+  "name": "FerricTape",
+  "version": "0.1.0",
+  "description": "A worn tape machine with a slap-back head as a VST-style plug-in for TeensyUSBAudioHost's AudioEffectVST, vendored from that repository's FerricTape example at 96f4b85, the commit platformio.ini pins the driver to.",
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "teensy",
+  "dependencies": [{ "name": "TeensyUSBAudioHost" }],
+  "build": {
+    "srcDir": ".",
+    "includeDir": ".",
+    "srcFilter": ["+<ferric_tape.cpp>"]
+  }
+}

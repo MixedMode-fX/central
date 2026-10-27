@@ -6,12 +6,12 @@
 #include "hal/isysex_in.h"
 #include "hal/imidi_out.h"
 #include "hal/midi_types.h"
-#include "hal/ireverb.h"
 #include "bus/domain.h"
 #include "node/patch.h"
 #include "master.h"
 #include "patch/patch_manager.h"
 #include "control/cc_mapper.h"
+#include "audio/rack.h"
 
 // A Novation Launchpad as the module's panel (node/patch.h, LaunchpadConfig).
 //
@@ -64,13 +64,16 @@
 // A fifth page has no top-row button to spare, so the right column's fifth
 // button opens it and closes it again:
 //
-//   reverb   the Scarlett's reverb (hal/ireverb.h): time, diffusion, tone
-//            and input as four faders, and a block of four pads that
-//            empties the tank. The button is violet while an interface is
-//            streaming through it.
+//   audio    the audio rack (audio/rack.h), a slot at a time: its parameters
+//            as faders, eight to a page, in the slot's colour. Left and
+//            right step through the slots and up and down through the
+//            pages; on a Pro the upper of its two bottom rows picks a slot
+//            outright, from any page. The right column's bottom button
+//            empties the slot's plugin - a tail stops, a tape is erased. The
+//            page's button is violet while an interface is streaming.
 //
 // The right column is the same on every page: start/stop, continue, tap,
-// panic, reverb. The logo lights when the surface is linked.
+// panic, audio. The logo lights when the surface is linked.
 //
 // **LEDs are a frame, diffed and rate-limited.** The page draws what it
 // wants into a frame; once per LED interval the LEDs that differ from what
@@ -85,22 +88,18 @@ class Launchpad : public ISysexIn {
             PAGE_KEY     = 1,
             PAGE_WIDGETS = 2,
             PAGE_TEMPO   = 3,
-            PAGE_REVERB  = 4,
+            PAGE_AUDIO   = 4,
             PAGES,
         };
         // The pages the top row has a button for.
-        static constexpr uint8_t TOP_PAGES = PAGE_REVERB;
-        // The reverb page: a fader a column from the left, in IReverb's
-        // order, and the clear block in the bottom-right corner.
-        static constexpr uint8_t REVERB_CLEAR_COL = 6;
-        static constexpr uint8_t REVERB_CLEAR_ROWS = 2;
+        static constexpr uint8_t TOP_PAGES = PAGE_AUDIO;
 
         static constexpr uint8_t GRID = 8;
         static constexpr uint8_t PADS = GRID * GRID;
         // LED ids run 11..99 in programmer mode: (row + 1) * 10 + (column + 1)
         // for the grid, 91..98 for the top row, 19..89 for the right column
-        // and 99 for the logo.
-        static constexpr uint8_t LEDS = 100;
+        // and 99 for the logo; a Pro's upper bottom row is 101..108.
+        static constexpr uint8_t LEDS = 109;
         static constexpr uint8_t WIDGET_COLUMNS = GRID;
         static constexpr uint8_t WIDGET_PAGES = LP_WIDGETS / WIDGET_COLUMNS;
         // How far the note page's register may be moved from the patch's.
@@ -138,9 +137,11 @@ class Launchpad : public ISysexIn {
         static uint8_t dim(uint8_t colour);
         // The widget colour a zero byte means.
         static constexpr uint8_t WIDGET_DEFAULT_COLOUR = BLUE;
+        // The colour of a rack slot's faders, and of its button on a Pro.
+        static uint8_t slot_colour(uint8_t slot);
 
         Launchpad(PatchManager& patches, MixedModeMaster& master, CcMapper& mapper, IMidiOut& midi,
-                  IReverb& reverb);
+                  AudioRack& rack);
         Launchpad(const Launchpad&) = delete;
         Launchpad& operator=(const Launchpad&) = delete;
 
@@ -167,6 +168,8 @@ class Launchpad : public ISysexIn {
         uint8_t page() const { return current_page; }
         int8_t octave_shift() const { return shift; }
         uint8_t widget_page() const { return widgets_page; }
+        uint8_t audio_slot() const { return slot_shown; }
+        uint8_t audio_page() const { return params_page; }
         uint8_t port() const { return active_port; }
         // The frame as last drawn, by LED id, for the tests.
         uint8_t led(uint8_t id) const { return id < LEDS ? want[id] : 0; }
@@ -175,6 +178,7 @@ class Launchpad : public ISysexIn {
         static uint8_t led_id(uint8_t row, uint8_t col){ return (uint8_t)((row + 1u) * 10u + col + 1u); }
         static uint8_t top_id(uint8_t col){ return (uint8_t)(91u + col); }
         static uint8_t side_id(uint8_t row){ return (uint8_t)((row + 1u) * 10u + 9u); }
+        static uint8_t bottom_id(uint8_t col){ return (uint8_t)(101u + col); }
         static constexpr uint8_t LOGO_ID = 99;
 
         // The eight levels a fader pad stands for, bottom row first.
@@ -190,7 +194,7 @@ class Launchpad : public ISysexIn {
                                    TOP_KEY, TOP_NOTE, TOP_WIDGETS, TOP_TEMPO, TOP_BUTTONS };
         // The right column, top to bottom.
         enum SideButton : uint8_t { SIDE_PLAY = 7, SIDE_CONTINUE = 6, SIDE_TAP = 5, SIDE_PANIC = 4,
-                                    SIDE_REVERB = 3 };
+                                    SIDE_AUDIO = 3, SIDE_CLEAR = 0 };
 
         static constexpr uint8_t NO_NOTE = 0xFF;
         static constexpr uint8_t UNKNOWN = 0xFF;
@@ -220,10 +224,11 @@ class Launchpad : public ISysexIn {
         void key_pad(uint8_t row, uint8_t col, uint32_t now_us);
         void widget_pad(uint8_t row, uint8_t col, bool down, uint32_t now_us);
         void tempo_pad(uint8_t row, uint8_t col, uint32_t now_us);
-        void reverb_pad(uint8_t row, uint8_t col, bool down);
-        static bool is_clear_pad(uint8_t row, uint8_t col){
-            return row < REVERB_CLEAR_ROWS && col >= REVERB_CLEAR_COL;
-        }
+        void bottom(uint8_t index, bool down, uint32_t now_us);
+        void audio_pad(uint8_t row, uint8_t col, bool down, uint32_t now_us);
+        // The parameter pages the slot on screen has: at least one.
+        uint8_t audio_pages() const;
+        void show_slot(uint8_t slot, uint32_t now_us);
         void nudge_tempo(int16_t by, uint32_t now_us);
         void set_tempo(int32_t bpm, uint32_t now_us);
         void set_page(uint8_t page, uint32_t now_us);
@@ -242,7 +247,7 @@ class Launchpad : public ISysexIn {
         void draw_key();
         void draw_widgets();
         void draw_tempo(uint32_t now_us);
-        void draw_reverb();
+        void draw_audio();
         void draw_frame(uint32_t now_us);
         void set(uint8_t id, uint8_t colour){ if (id < LEDS) want[id] = (uint8_t)(colour & 0x7F); }
         void flush(uint32_t now_us);
@@ -251,7 +256,7 @@ class Launchpad : public ISysexIn {
         MixedModeMaster& mm;
         CcMapper& cc;
         IMidiOut& midi;
-        IReverb& fx;
+        AudioRack& audio;
 
         uint8_t active_port;
         uint8_t active_model;       // the configured model the link was made for
@@ -262,10 +267,12 @@ class Launchpad : public ISysexIn {
         bool ever_asked;
 
         uint8_t current_page;
-        // The page the reverb button came from, and goes back to.
-        uint8_t before_reverb;
-        // Clear pads held, so the block lights while pressed.
-        uint8_t clear_down;
+        // The page the audio button came from, and goes back to.
+        uint8_t before_audio;
+        // The rack slot the audio page shows, and which eight of its
+        // parameters.
+        uint8_t slot_shown;
+        uint8_t params_page;
         int8_t shift;
         uint8_t widgets_page;
         // What each pad of the note page is holding: the pitch and the

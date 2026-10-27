@@ -1,7 +1,7 @@
 {
   "name": "CumulusReverb",
   "version": "0.1.0",
-  "description": "Clouds' reverb as a VST-style plug-in for TeensyUSBAudioHost's AudioEffectVST, vendored from that repository's CumulusReverb example at 1feca60, the commit platformio.ini pins the driver to.",
+  "description": "Clouds' reverb as a VST-style plug-in for TeensyUSBAudioHost's AudioEffectVST, vendored from that repository's CumulusReverb example at 96f4b85, the commit platformio.ini pins the driver to.",
   "license": "MIT",
   "frameworks": "arduino",
   "platforms": "teensy",

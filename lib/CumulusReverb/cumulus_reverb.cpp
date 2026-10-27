@@ -7,16 +7,57 @@ class CumulusReverb::Engine : public clouds::Reverb {
 
 namespace {
 
-const char* const NAMES[CumulusReverb::NUM_PARAMS] = {"Amount", "Time", "Diffuse", "Tone", "Input"};
+const char* const NAMES[CumulusReverb::NUM_PARAMS] = {"Amount", "Time",  "Diffuse", "Tone",  "Input",
+                                                      "Clock",  "Warp",  "Speed",   "Glitch"};
 
 // Clouds' fixed diffusion and input level, its feedback knob at noon for
-// the tone, and a medium tail a third wet.
-const float DEFAULTS[CumulusReverb::NUM_PARAMS] = {0.3f, 0.5f, 0.75f, 0.5f, 0.5f};
+// the tone, and a medium tail a third wet; the clock at x1 and still.
+const float DEFAULTS[CumulusReverb::NUM_PARAMS] = {0.3f, 0.5f, 0.75f, 0.75f, 0.5f, 1.0f, 0.0f, 0.3f, 0.0f};
+
+// Tone's loop low-pass coefficient, 1 - e^-c, with c exponential in the
+// parameter between these: 0.12 and 0.97. At 0.75 it is Clouds' 0.78.
+const float TONE_C_MIN = 0.1278f;
+const float TONE_C_MAX = 3.5066f;
+
+// What a glitch multiplies the clock by.
+const float GLITCH_STEPS[] = {0.5f, 0.25f, 1.0f / 3.0f, 2.0f / 3.0f, 0.125f, 0.75f};
+const int NUM_GLITCH_STEPS = sizeof GLITCH_STEPS / sizeof GLITCH_STEPS[0];
+
+const float PI_F = 3.14159265f;
+
+float clockOf(float value)
+{
+    return powf(2.0f, -3.0f * (1.0f - value));
+}
+
+// sin(2 pi phase) for phase in 0..1, to within 0.001: a parabola, refined.
+inline float sine(float phase)
+{
+    const float t = 2.0f * phase - 1.0f;
+    const float y = -4.0f * t + 4.0f * t * fabsf(t);
+    return 0.225f * (y * fabsf(y) - y) + y;
+}
 
 }  // namespace
 
 CumulusReverb::CumulusReverb(audioMasterCallback master)
-    : AudioEffectX(master, 0, NUM_PARAMS), storage_(), engine_(nullptr), params_(), clear_(false), delay_()
+    : AudioEffectX(master, 0, NUM_PARAMS),
+      storage_(),
+      engine_(nullptr),
+      params_(),
+      clear_(false),
+      phase_(0.0f),
+      last_(),
+      next_(),
+      smooth_(),
+      warp_phase_(0.0f),
+      drift_(0.0f),
+      drift_target_(0.0f),
+      drift_left_(0),
+      glitch_(1.0f),
+      glitch_left_(0),
+      noise_(0x9e3779b9u),
+      delay_()
 {
     setNumInputs(2);
     setNumOutputs(2);
@@ -41,11 +82,14 @@ void CumulusReverb::rebuild()
     static_assert(sizeof(Engine) <= REVERB_BYTES, "raise REVERB_BYTES");
     static_assert(alignof(Engine) <= 8, "align storage_ for clouds::Reverb");
     // Init() empties the delay memory but not the loop filters' states;
-    // building the engine again from zero does both.
+    // building the engine again from zero does both. The clock's samples
+    // in flight go with them.
     engine_->~Engine();
     memset(storage_, 0, sizeof storage_);
     engine_ = new (storage_) Engine();
     engine_->Init(delay_);
+    phase_ = 0.0f;
+    for (int c = 0; c < 2; c++) last_[c] = next_[c] = smooth_[c] = 0.0f;
 }
 
 void CumulusReverb::setParameter(VstInt32 index, float value)
@@ -68,13 +112,26 @@ void CumulusReverb::getParameterName(VstInt32 index, char* text)
 void CumulusReverb::getParameterDisplay(VstInt32 index, char* text)
 {
     text[0] = 0;
-    if (index == PARAM_AMOUNT) int2string(static_cast<VstInt32>(params_[PARAM_AMOUNT] * 100.0f + 0.5f), text, kVstMaxParamStrLen);
-    else if (index >= 0 && index < NUM_PARAMS) float2string(params_[index], text, kVstMaxParamStrLen);
+    if (index < 0 || index >= NUM_PARAMS) return;
+    const float v = params_[index];
+    if (index == PARAM_AMOUNT || index == PARAM_WARP || index == PARAM_GLITCH) {
+        int2string(static_cast<VstInt32>(v * 100.0f + 0.5f), text, kVstMaxParamStrLen);
+    } else if (index == PARAM_CLOCK) {
+        float2string(clockOf(v), text, 5);
+    } else if (index == PARAM_SPEED) {
+        float2string(0.05f * powf(240.0f, v), text, 5);
+    } else {
+        float2string(v, text, kVstMaxParamStrLen);
+    }
 }
 
 void CumulusReverb::getParameterLabel(VstInt32 index, char* text)
 {
-    vst_strncpy(text, index == PARAM_AMOUNT ? "%" : "", kVstMaxParamStrLen);
+    const char* label = "";
+    if (index == PARAM_AMOUNT || index == PARAM_WARP || index == PARAM_GLITCH) label = "%";
+    else if (index == PARAM_CLOCK) label = "x";
+    else if (index == PARAM_SPEED) label = "Hz";
+    vst_strncpy(text, label, kVstMaxParamStrLen);
 }
 
 bool CumulusReverb::getEffectName(char* name)
@@ -102,23 +159,73 @@ void CumulusReverb::processReplacing(float** inputs, float** outputs, VstInt32 s
         rebuild();
     }
     // The parameters are read once a block, as loop() may be moving them.
-    engine_->set_amount(params_[PARAM_AMOUNT]);
-    engine_->set_time(0.35f + 0.63f * params_[PARAM_TIME]);
-    engine_->set_diffusion(0.4f + 0.4f * params_[PARAM_DIFFUSION]);
-    engine_->set_lp(0.6f + 0.37f * params_[PARAM_TONE]);
-    engine_->set_input_gain(0.4f * params_[PARAM_INPUT]);
+    // The reverb runs all wet; the crossfade is Clouds' own, done here so
+    // the dry signal never goes through the clock.
+    const float* p = params_;
+    const float rate = getSampleRate();
+    engine_->set_amount(1.0f);
+    engine_->set_time(0.35f + 0.63f * p[PARAM_TIME]);
+    engine_->set_diffusion(0.4f + 0.4f * p[PARAM_DIFFUSION]);
+    engine_->set_lp(1.0f - expf(-TONE_C_MIN * powf(TONE_C_MAX / TONE_C_MIN, p[PARAM_TONE])));
+    engine_->set_input_gain(0.4f * p[PARAM_INPUT]);
+    const float amount = p[PARAM_AMOUNT];
 
-    clouds::FloatFrame run[RUN_FRAMES];
-    for (VstInt32 done = 0; done < sampleFrames; done += RUN_FRAMES) {
-        const int n = sampleFrames - done < RUN_FRAMES ? static_cast<int>(sampleFrames - done) : RUN_FRAMES;
-        for (int i = 0; i < n; i++) {
-            run[i].l = inputs[0][done + i];
-            run[i].r = inputs[1][done + i];
+    const float base = clockOf(p[PARAM_CLOCK]);
+    const float warp = 2.0f * p[PARAM_WARP] * p[PARAM_WARP];  // octaves
+    const float warp_step = 0.05f * powf(240.0f, p[PARAM_SPEED]) / rate;
+    const float drift_glide = 1.0f - expf(-2.0f * PI_F * 0.7f / rate);
+    const uint32_t drift_hold = static_cast<uint32_t>(0.4f * rate);
+    const float glitch_chance = 3.0f * p[PARAM_GLITCH] * p[PARAM_GLITCH] / rate;
+
+    for (VstInt32 i = 0; i < sampleFrames; i++) {
+        noise_ ^= noise_ << 13;
+        noise_ ^= noise_ >> 17;
+        noise_ ^= noise_ << 5;
+
+        // The clock: where Clock sets it, swept down by Warp, thrown by
+        // Glitch, never slower than x1/64.
+        float now = base * glitch_;
+        if (warp > 0.0f) {
+            warp_phase_ += warp_step;
+            if (warp_phase_ >= 1.0f) warp_phase_ -= 1.0f;
+            if (drift_left_ == 0) {
+                drift_left_ = drift_hold;
+                drift_target_ = static_cast<float>(noise_ >> 8) * (1.0f / 16777216.0f);
+            }
+            drift_left_--;
+            drift_ += (drift_target_ - drift_) * drift_glide;
+            const float sweep = 0.35f * (1.0f + sine(warp_phase_)) + 0.3f * drift_;  // 0..1
+            now *= powf(2.0f, -warp * sweep);
         }
-        engine_->Process(run, static_cast<size_t>(n));
-        for (int i = 0; i < n; i++) {
-            outputs[0][done + i] = run[i].l;
-            outputs[1][done + i] = run[i].r;
+        if (now < 1.0f / 64.0f) now = 1.0f / 64.0f;
+        if (glitch_left_ > 0) {
+            if (--glitch_left_ == 0) glitch_ = 1.0f;
+        } else if (static_cast<float>(noise_ >> 8) * (1.0f / 16777216.0f) < glitch_chance) {
+            glitch_ = GLITCH_STEPS[(noise_ >> 3) % NUM_GLITCH_STEPS];
+            glitch_left_ = static_cast<uint32_t>((0.03f + 0.37f * static_cast<float>((noise_ >> 11) & 0xff) / 255.0f) * rate) + 1;
+        }
+
+        // The tank's input, smoothed towards its rate: at x1 untouched.
+        const float smoothing = now * 1.6f < 1.0f ? now * 1.6f : 1.0f;
+        for (int c = 0; c < 2; c++) smooth_[c] += (inputs[c][i] - smooth_[c]) * smoothing;
+
+        // A tank sample each time the clock comes round. At x1 that is
+        // every host sample, and the output is the tank's own.
+        phase_ += now;
+        while (phase_ >= 1.0f) {
+            phase_ -= 1.0f;
+            clouds::FloatFrame frame = {smooth_[0], smooth_[1]};
+            engine_->Process(&frame, 1);
+            last_[0] = next_[0];
+            last_[1] = next_[1];
+            next_[0] = frame.l;
+            next_[1] = frame.r;
+        }
+        const float t = now >= 1.0f ? 1.0f : phase_;
+        for (int c = 0; c < 2; c++) {
+            const float wet = last_[c] + (next_[c] - last_[c]) * t;
+            const float dry = inputs[c][i];
+            outputs[c][i] = dry + (wet - dry) * amount;
         }
     }
 }

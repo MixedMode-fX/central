@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 21
+#define SYSEX_PROTOCOL_VERSION 22
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -60,6 +60,23 @@ enum SysexCommand : uint8_t {
     SYSEX_DUMP_REQUEST     = 0x05,   // send me the running patch
     SYSEX_PATCH_CHUNK_IN   = 0x06,   // one chunk of a patch, into staging
     SYSEX_PATCH_ABORT      = 0x07,   // forget the partial transfer
+    // The USB host socket and the audio rack (hal/iusb_host.h,
+    // audio/rack.h). None of it is in the patch: the rack is the module's
+    // and is stored on its own, so these write it directly, and a patch
+    // load leaves it alone. A vendor or product id is a u16, three data
+    // bytes low septet first.
+    SYSEX_USB_REQUEST      = 0x08,   // what is on the socket
+    SYSEX_PLUGIN_REQUEST   = 0x09,   // what plugins a slot can run
+    SYSEX_GET_AUDIO_SLOT   = 0x0A,   // <slot>
+    // <slot> <plugin> <source L> <source R> <out L> <out R>. A new plugin
+    // starts at its defaults; the same one keeps its parameters.
+    SYSEX_SET_AUDIO_SLOT   = 0x0B,
+    SYSEX_SET_AUDIO_PARAM  = 0x0C,   // <slot> <param> <value 0..127>
+    SYSEX_AUDIO_CLEAR      = 0x0D,   // <slot>: empty its plugin, so a tail stops
+    // <vid u16> <pid u16> <name>: the interface to claim from the next time
+    // one is plugged in. A zero vendor is any interface.
+    SYSEX_SET_AUDIO_DEVICE = 0x0E,
+    SYSEX_GET_AUDIO_STATE  = 0x0F,
     // <node> <param u14> <value u14>. A parameter byte reaches 255 and a
     // SysEx data byte holds seven bits, so the value is two bytes: the low
     // seven and then the eighth. SYSEX_PARAM_VALUE answers the same way.
@@ -189,7 +206,20 @@ enum SysexCommand : uint8_t {
     // <slot> <kind> <cc> <channel> <colour>
     SYSEX_LP_WIDGET        = 0x5C,
     // <linked> <model> <page> <octave shift + 64> <widget page>
+    // <audio slot> <audio parameter page>
     SYSEX_LP_STATE         = 0x5D,
+    // <n>, then n x (<vid u16> <pid u16> <UsbRole bits> <name>): the
+    // connected devices first, then those only seen since boot.
+    SYSEX_USB_DEVICES      = 0x5E,
+    // One per plugin: <index> <count> <RackPlugin> <n params> <instances>
+    // <name> <summary>, then n x (<default> <name>) - its own and the
+    // slot's two.
+    SYSEX_PLUGIN           = 0x5F,
+    // <slot> <plugin> <source L> <source R> <out L> <out R> <n> <value x n>
+    SYSEX_AUDIO_SLOT       = 0x60,
+    // <AudioState> <rate u32> <in channels> <out channels>
+    // <chosen: vid u16, pid u16, name> <held: vid u16, pid u16, name> <failure>
+    SYSEX_AUDIO_STATE      = 0x61,
     SYSEX_SLOTS            = 0x63,
     SYSEX_ACK              = 0x70,
     SYSEX_NAK              = 0x71,   // <SysexError>

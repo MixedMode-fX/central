@@ -31,6 +31,7 @@
 #include <USBAudioHost.h>
 #include <AudioEffectVST.h>
 #include <cumulus_reverb.h>
+#include <ferric_tape.h>
 #endif
 
 #pragma GCC diagnostic pop

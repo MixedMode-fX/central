@@ -31,7 +31,7 @@ import { LaunchpadView } from '../launchpad/Launchpad.js';
 import '../launchpad/Launchpad.css';
 
 // The firmware's page names, in its Page order (src/surface/launchpad.h).
-const PAGES = ['note', 'key', 'widgets', 'tempo', 'reverb'];
+const PAGES = ['note', 'key', 'widgets', 'tempo', 'audio'];
 const WIDGET_COLUMNS = 8;
 
 export function LaunchpadTab(app) {
@@ -72,7 +72,9 @@ export function ConfigPanel(app) {
     StateLine(app, lp),
     Hint(lp.port
       ? 'The top row’s four right-hand buttons - Session to Custom on a Pro - are the pages: key, note, widgets, tempo. '
-        + 'The right column is start/stop, continue, tap and panic on every page. '
+        + 'The right column is start/stop, continue, tap, panic and the audio page on every page. '
+        + 'On the audio page left and right step through the rack’s slots, up and down through their parameters, '
+        + 'and the bottom of the right column empties the slot; a Pro’s upper bottom row picks a slot from anywhere. '
         + 'A note-page pad plays the key; a widget’s CC arrives on this cable, so bind it in the mod matrix or learn it.'
       : 'Choose a cable and the module asks it who is there. What answers is put into programmer mode and lit.'));
 }
@@ -94,7 +96,8 @@ function StateLine(app, lp) {
     }
     const shift = state.octaveShift ? ` · ${state.octaveShift > 0 ? '+' : ''}${state.octaveShift} oct` : '';
     const page = PAGES[state.page] ?? `page ${state.page}`;
-    const widgets = state.page === 2 ? ` ${state.widgetPage + 1}` : '';
+    const widgets = state.page === 2 ? ` ${state.widgetPage + 1}`
+      : state.page === 4 ? ` · slot ${state.audioSlot + 1}, parameters page ${state.audioPage + 1}` : '';
     line.textContent = `linked · ${launchpadModelName(state.model)} · ${page} page${widgets}${shift}`;
     line.classList.add('linked');
   };

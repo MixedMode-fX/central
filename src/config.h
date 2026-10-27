@@ -80,13 +80,33 @@
 // device with several MIDI interfaces takes one of these for each.
 #define N_HOST_MIDI_DEVICES 6
 
-// The Scarlett on the USB host socket (hal/teensy/teensy_audio.h). The rate
-// is asked of the interface, which may stream another; the Audio Library's
-// blocks are what the reverb's graph is built from, and string buffers are
-// what lets the driver read a device's product name to tell a Scarlett apart.
+// The audio interface on the USB host socket (hal/teensy/teensy_audio.h).
+// The rate is asked of the interface, which may stream another; the Audio
+// Library's blocks are what the rack's graph is built from - every channel
+// of the interface, a low cut and a plugin per slot, a mixer per output - and
+// string buffers are what lets the driver read a device's product name.
 #define USB_AUDIO_SAMPLE_RATE 44100
-#define USB_AUDIO_MEMORY_BLOCKS 40
+#define USB_AUDIO_MEMORY_BLOCKS 96
 #define USB_AUDIO_STRING_BUFFERS 8
+
+// The audio rack (audio/rack.h): the effects run on that interface. It is
+// the module's, not a patch's, so a patch change never cuts a tail off.
+//
+// Four slots, because an output's mixer is an AudioMixer4 with one input per
+// slot; a slot reads an interface input or an earlier slot, so two of them
+// chain into the tape-into-reverb send. RACK_CHANNELS is how many of the
+// interface's channels a slot can be routed to, each way - the driver's own
+// ceiling. RACK_PARAMS is the widest slot: Ferric's twelve controls and the
+// low cut and level every slot has.
+#define N_RACK_SLOT 4
+#define RACK_CHANNELS 8
+#define RACK_PARAMS 16
+// The product name kept with the chosen interface, so the app can name a
+// device that is not plugged in.
+#define RACK_DEVICE_NAME_BYTES 24
+// Devices one USB list holds: every driver's, and those seen since boot.
+#define USB_LIST_ENTRIES 12
+#define USB_NAME_BYTES 24
 
 // Reserved hardware nodes outside the pool.
 #define N_MIDI_IN_NODES 4

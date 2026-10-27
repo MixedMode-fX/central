@@ -63,10 +63,11 @@ static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_ma
 // virtual Launchpad is on the other end of whichever cable the patch names:
 // its pads come in through emu_control_surface and its LEDs leave in the
 // port SysEx buffer.
-// No audio interface in the page: the reverb page holds its faders and
-// nothing hears them (hal/ireverb.h).
-static HeldReverb reverb;
-static Launchpad launchpad(patches, master, cc_map, panel, reverb);
+// No audio interface in the page: the rack is kept, stored and reported,
+// and nothing hears it (hal/iaudio_host.h).
+static HeldAudio audio_host;
+static AudioRack audio_rack(eeprom, audio_host);
+static Launchpad launchpad(patches, master, cc_map, panel, audio_rack);
 
 // The patch under construction. Separate from what is running: the page fills
 // this through the emu_patch_* setters and calls emu_load() to make it live.
@@ -430,6 +431,8 @@ EMU_EXPORT uint32_t emu_node_algo(uint32_t i){
 // Boot as the module does: slot 0 if it checks out, the flash default if not.
 EMU_EXPORT uint32_t emu_boot(uint32_t now_us){
     protocol.attach(launchpad);
+    protocol.attach(audio_rack);
+    audio_rack.boot();
     patches.boot(now_us);
     cc_map.reset();
     patch = patches.active();
@@ -510,6 +513,7 @@ EMU_EXPORT void emu_control_service(uint32_t now_us){
     protocol.service(now_us);
     nrpn.service(now_us);
     patches.service(now_us);
+    audio_rack.service(now_us);
     const uint32_t beat = master.clock().count() / CLOCK_SUBTICKS_PER_QUARTER;
     if (!have_beat || beat != last_beat){
         if (have_beat) leds.beat(now_us);

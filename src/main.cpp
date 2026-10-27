@@ -48,7 +48,10 @@ static MixedModeMaster master(panel, panel);
 // The module's entire feedback surface (#7): two LEDs and a text console.
 static StatusLeds leds(led_driver);
 static PatchStore store(eeprom);
-static PatchManager patches(master, store, leds);
+// In RAM2, as the protocol is below: the running patch and its staging copy
+// are 40 KB, read through the data cache, and the stack needs the room in
+// RAM1. The constructor sets every member.
+static DMAMEM PatchManager patches(master, store, leds);
 
 // Controller bindings (#21). Not a node: a parameter is not a bus signal, so
 // mapping applies at the MIDI input layer and writes through the same
@@ -70,17 +73,26 @@ static Console console(console_io, patches, master, store, leds, cc_map);
 // editor on the cable does nothing here.
 static Monitor monitor(master, panel, leds);
 
+// The audio rack (audio/rack.h): the effects on the interface on the USB
+// host socket. The module's, not a patch's, so it is stored in its own
+// region of the EEPROM and a patch load leaves it running.
+static AudioRack audio_rack(eeprom, mm_audio_host());
+
 // The patch protocol (#11). Not a node, not reachable from a bus: with no
 // button to hold at power-on, a patch that could take this down would leave
 // reflashing over USB as the only way to recover.
-static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_matrix,
-                             macros, control_sum, monitor);
+//
+// In RAM2: a staging image and a pending patch are 21 KB that RAM1 has not
+// got beside the audio driver, and nothing here runs in a pass. RAM2 is not
+// zeroed at boot, which is safe because the constructor sets every member.
+static DMAMEM SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_matrix,
+                                    macros, control_sum, monitor);
 
 // The Launchpad, when the patch names a cable for one (surface/launchpad.h):
 // the panel the module has not got, on a cable it has. In front of the
 // graph like a transport, and writing through the same applier a mapped CC
 // does.
-static Launchpad launchpad(patches, master, cc_map, panel, mm_reverb());
+static Launchpad launchpad(patches, master, cc_map, panel, audio_rack);
 
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
@@ -114,7 +126,10 @@ void setup(){
     // LED says which (#7). A freshly flashed module with an empty EEPROM
     // still comes up doing something observable.
     patches.boot(micros());
+    audio_rack.boot();
     protocol.attach(launchpad);
+    protocol.attach(audio_rack);
+    protocol.attach(mm_usb_host());
     console.attach(launchpad);
     console.attach(mm_usb_host());
     console.greet();
@@ -186,6 +201,7 @@ void loop(){
     protocol.service(now);
     nrpn.service(now);
     patches.service(now);
+    audio_rack.service(now);
 
     // 6. the record, last: after the pass has published the buses and the
     //    LEDs have been written, so a frame reads one consistent pass.

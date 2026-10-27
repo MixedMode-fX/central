@@ -39,6 +39,7 @@ export const N_MOD_ROUTE = 16;
 export const N_NODE = 46;
 export const N_NOTE_BUS = 32;
 export const N_PARAM = 336;
+export const N_RACK_SLOT = 4;
 export const NOTE_SEQ_VOICES = 4;
 export const NRPN_CLOCK_BASE = 15456;
 export const NRPN_KEY_BASE = 15488;
@@ -47,8 +48,12 @@ export const NRPN_TRANSPORT_BASE = 15472;
 export const PARAM_CENTRE = 128;
 export const PATCH_FORMAT_VERSION = 15;
 export const PATCH_MAGIC = 1296911683;
-export const PATCH_SLOT_BYTES = 1071;
+export const PATCH_SLOT_BYTES = 1031;
 export const PATCH_SLOTS = 4;
+export const RACK_CHANNELS = 8;
+export const RACK_DEVICE_NAME_BYTES = 24;
+export const RACK_PARAMS = 16;
+export const RACK_STORE_BYTES = 160;
 export const SYSEX_BROADCAST_DEVICE = 127;
 export const SYSEX_CHUNK_FIRST = 1;
 export const SYSEX_CHUNK_LAST = 2;
@@ -60,10 +65,12 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 21;
+export const SYSEX_PROTOCOL_VERSION = 22;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 512;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
+export const USB_LIST_ENTRIES = 12;
+export const USB_NAME_BYTES = 24;
 
 export const SysexCommand = Object.freeze({
   SYSEX_HELLO: 1,
@@ -73,6 +80,14 @@ export const SysexCommand = Object.freeze({
   SYSEX_DUMP_REQUEST: 5,
   SYSEX_PATCH_CHUNK_IN: 6,
   SYSEX_PATCH_ABORT: 7,
+  SYSEX_USB_REQUEST: 8,
+  SYSEX_PLUGIN_REQUEST: 9,
+  SYSEX_GET_AUDIO_SLOT: 10,
+  SYSEX_SET_AUDIO_SLOT: 11,
+  SYSEX_SET_AUDIO_PARAM: 12,
+  SYSEX_AUDIO_CLEAR: 13,
+  SYSEX_SET_AUDIO_DEVICE: 14,
+  SYSEX_GET_AUDIO_STATE: 15,
   SYSEX_SET_PARAM: 16,
   SYSEX_GET_PARAM: 17,
   SYSEX_SET_CONNECTION: 18,
@@ -126,6 +141,10 @@ export const SysexCommand = Object.freeze({
   SYSEX_LAUNCHPAD: 91,
   SYSEX_LP_WIDGET: 92,
   SYSEX_LP_STATE: 93,
+  SYSEX_USB_DEVICES: 94,
+  SYSEX_PLUGIN: 95,
+  SYSEX_AUDIO_SLOT: 96,
+  SYSEX_AUDIO_STATE: 97,
   SYSEX_SLOTS: 99,
   SYSEX_ACK: 112,
   SYSEX_NAK: 113,
@@ -376,6 +395,37 @@ export const ScaleId = Object.freeze({
   SCALE_WHOLE_TONE: 13,
   SCALE_CHROMATIC: 14,
   SCALE_COUNT: 15,
+});
+
+export const RackPlugin = Object.freeze({
+  RACK_PLUGIN_NONE: 0,
+  RACK_PLUGIN_THRU: 1,
+  RACK_PLUGIN_CUMULUS: 2,
+  RACK_PLUGIN_FERRIC: 3,
+  RACK_PLUGINS: 4,
+});
+
+export const RackSource = Object.freeze({
+  RACK_SOURCE_NONE: 0,
+  RACK_SOURCE_INPUT: 1,
+  RACK_SOURCE_SLOT: 32,
+});
+
+export const AudioState = Object.freeze({
+  AUDIO_IDLE: 0,
+  AUDIO_CONFIGURING: 1,
+  AUDIO_STREAMING: 2,
+  AUDIO_FAILED: 3,
+});
+
+export const UsbRole = Object.freeze({
+  USB_ROLE_HUB: 1,
+  USB_ROLE_MIDI: 2,
+  USB_ROLE_LAUNCHPAD: 4,
+  USB_ROLE_AUDIO: 8,
+  USB_ROLE_AUDIO_IDLE: 16,
+  USB_ROLE_HAS_AUDIO: 32,
+  USB_ROLE_CONNECTED: 64,
 });
 
 export const ScaleMask = Object.freeze({

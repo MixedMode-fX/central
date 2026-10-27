@@ -3,6 +3,7 @@
 #include "node/registry.h"
 #include "control/nrpn.h"
 #include "version.h"
+#include <string.h>
 
 // Message layout, after the F0 and before the F7:
 //
@@ -47,6 +48,7 @@ SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
                            Monitor& watch) :
     patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out), cc(mapper),
     mod(matrix), macros(macro_table), sum(control_sum), monitor(watch), launchpad(nullptr),
+    rack(nullptr), usb(nullptr),
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
     pending_patch(), pending_globals(default_globals()),
@@ -82,6 +84,20 @@ void SysexHandler::put_string(const char* text, uint8_t limit){
         const char c = text[i];
         put((uint8_t)((c >= 32 && c <= 126) ? c : '?'));
     }
+}
+
+void SysexHandler::put_device(const AudioDeviceId& d){
+    put_u16(d.vid);
+    put_u16(d.pid);
+    char name[RACK_DEVICE_NAME_BYTES + 1];
+    memcpy(name, d.name, RACK_DEVICE_NAME_BYTES);
+    name[RACK_DEVICE_NAME_BYTES] = '\0';
+    put_string(name);
+}
+
+// A u16 as put_u16() writes it.
+static uint16_t read_u16(const uint8_t* at){
+    return (uint16_t)((at[0] & 0x7Fu) | ((at[1] & 0x7Fu) << 7) | ((at[2] & 0x03u) << 14));
 }
 
 void SysexHandler::send_reply(uint8_t source){
@@ -197,6 +213,57 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
         case SYSEX_PATCH_ABORT:
             abort_transfer();
             ack(source);
+            return;
+
+        // The USB host socket and the audio rack. The rack is not the
+        // patch's, so these write it directly rather than through an edit.
+        case SYSEX_USB_REQUEST: reply_usb(source); return;
+        case SYSEX_PLUGIN_REQUEST: reply_plugins(source); return;
+        case SYSEX_GET_AUDIO_SLOT:
+            if (n < 1){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (rack == nullptr || args[0] >= N_RACK_SLOT){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_audio_slot(source, args[0]);
+            return;
+        case SYSEX_SET_AUDIO_SLOT: {
+            if (n < 6){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (rack == nullptr){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            const uint8_t sources[2] = {args[2], args[3]};
+            const uint8_t outs[2] = {args[4], args[5]};
+            if (!rack->set_slot(args[0], args[1], sources, outs, now_us)){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            ack(source);
+            return;
+        }
+        case SYSEX_SET_AUDIO_PARAM:
+            if (n < 3){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (rack == nullptr || !rack->set_param(args[0], args[1], args[2], now_us)){
+                nak(source, SYSEX_ERR_BAD_ARGUMENT);
+                return;
+            }
+            ack(source);
+            return;
+        case SYSEX_AUDIO_CLEAR:
+            if (n < 1){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (rack == nullptr || !rack->clear(args[0])){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            ack(source);
+            return;
+        case SYSEX_SET_AUDIO_DEVICE: {
+            if (n < 7){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            if (rack == nullptr){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            const uint8_t length = args[6];
+            if (length > RACK_DEVICE_NAME_BYTES){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            if (n < 7u + length){ nak(source, SYSEX_ERR_TRUNCATED); return; }
+            AudioDeviceId d;
+            memset(&d, 0, sizeof d);
+            d.vid = read_u16(&args[0]);
+            d.pid = read_u16(&args[3]);
+            for (uint8_t i = 0; i < length; i++) d.name[i] = (char)args[7 + i];
+            rack->select(d, now_us);
+            ack(source);
+            return;
+        }
+        case SYSEX_GET_AUDIO_STATE:
+            if (rack == nullptr){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
+            reply_audio_state(source);
             return;
 
         // A parameter is a byte, and a SysEx data byte is seven bits. Values
@@ -744,6 +811,9 @@ void SysexHandler::reply_capabilities(uint8_t source){
     put(MACRO_NAME_BYTES);
     // The columns a Launchpad's custom pages have between them.
     put(LP_WIDGETS);
+    // The audio rack's slots, and the interface channels each way.
+    put(N_RACK_SLOT);
+    put(RACK_CHANNELS);
     send_reply(source);
 }
 
@@ -1066,6 +1136,79 @@ void SysexHandler::reply_lp_state(uint8_t source){
     put(launchpad->page());
     put((uint8_t)(launchpad->octave_shift() + 64));
     put(launchpad->widget_page());
+    put(launchpad->audio_slot());
+    put(launchpad->audio_page());
+    send_reply(source);
+}
+
+// The audio rack and the USB host ------------------------------------------
+
+void SysexHandler::reply_usb(uint8_t source){
+    UsbDeviceEntry entries[USB_LIST_ENTRIES];
+    const uint8_t count = usb != nullptr ? usb->list(entries, USB_LIST_ENTRIES) : 0;
+    begin_reply(SYSEX_USB_DEVICES);
+    put(count);
+    for (uint8_t i = 0; i < count; i++){
+        const UsbDeviceEntry& e = entries[i];
+        put_u16(e.vid);
+        put_u16(e.pid);
+        put(e.roles);
+        char name[USB_NAME_BYTES + 1];
+        memcpy(name, e.name, USB_NAME_BYTES);
+        name[USB_NAME_BYTES] = '\0';
+        put_string(name);
+    }
+    send_reply(source);
+}
+
+// One message per plugin, off the compiled table, as the algorithms are: a
+// plugin added to the rack appears in the editor with no editor change.
+void SysexHandler::reply_plugins(uint8_t source){
+    for (uint8_t id = 0; id < RACK_PLUGINS; id++){
+        const RackPluginDesc& d = rack::plugin(id);
+        const uint8_t count = rack::param_count(id);
+        begin_reply(SYSEX_PLUGIN);
+        put(id);
+        put(RACK_PLUGINS);
+        put(id);
+        put(count);
+        put(d.instances);
+        put_string(d.name);
+        put_string(d.summary, SUMMARY_MAX);
+        for (uint8_t p = 0; p < count; p++){
+            put(rack::param_default(id, p));
+            put_string(rack::param_name(id, p));
+        }
+        send_reply(source);
+    }
+}
+
+void SysexHandler::reply_audio_slot(uint8_t source, uint8_t slot){
+    const RackSlot& s = rack->slot(slot);
+    const uint8_t count = rack::param_count(s.plugin);
+    begin_reply(SYSEX_AUDIO_SLOT);
+    put(slot);
+    put(s.plugin);
+    put(s.source[0]);
+    put(s.source[1]);
+    put(s.out[0]);
+    put(s.out[1]);
+    put(count);
+    for (uint8_t p = 0; p < count; p++) put(s.params[p]);
+    send_reply(source);
+}
+
+void SysexHandler::reply_audio_state(uint8_t source){
+    AudioStatus st;
+    rack->status(st);
+    begin_reply(SYSEX_AUDIO_STATE);
+    put(st.state);
+    put_u32(st.rate);
+    put(st.in_channels);
+    put(st.out_channels);
+    put_device(rack->device());
+    put_device(st.held);
+    put_string(st.failure);
     send_reply(source);
 }
 

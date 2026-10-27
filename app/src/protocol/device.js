@@ -142,6 +142,9 @@ export class Device extends EventTarget {
     this.capabilities.macroNameBytes = u8();
     // The columns a Launchpad's custom pages have between them.
     this.capabilities.lpWidgets = u8();
+    // The audio rack's slots, and the interface channels each way.
+    this.capabilities.rackSlots = u8();
+    this.capabilities.rackChannels = u8();
     return this.capabilities;
   }
 
@@ -650,6 +653,92 @@ export class Device extends EventTarget {
     return {
       linked: reply[5] !== 0, model: reply[6], page: reply[7],
       octaveShift: reply[8] - 64, widgetPage: reply[9],
+      audioSlot: reply[10], audioPage: reply[11],
+    };
+  }
+
+  // The USB host socket and the audio rack ------------------------------------
+  // (src/hal/iusb_host.h, src/audio/rack.h). None of it is in the patch: the
+  // rack is the module's, stored on its own, and these write it directly.
+
+  // What is on the socket: the connected devices first, then those only seen
+  // since boot, each with what it is to the module (UsbRole bits).
+  async usbDevices() {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_USB_REQUEST),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_USB_DEVICES));
+    const read = codec.reader(reply, 5);
+    const count = read.u8();
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      out.push({ vid: read.u16(), pid: read.u16(), roles: read.u8(), name: read.string() });
+    }
+    return out;
+  }
+
+  // The plugins a slot can run, with their parameters' names and defaults,
+  // read rather than hardcoded so a plugin added to the rack appears here.
+  async readPlugins() {
+    const replies = await this.request(
+      this.msg(P.SysexCommand.SYSEX_PLUGIN_REQUEST),
+      (r, all) => this.isReply(r, P.SysexCommand.SYSEX_PLUGIN)
+                  && all.filter((x) => this.isReply(x, P.SysexCommand.SYSEX_PLUGIN)).length >= r[6],
+      { what: 'the plugin list' });
+    this.plugins = [];
+    for (const reply of replies) {
+      if (!this.isReply(reply, P.SysexCommand.SYSEX_PLUGIN)) continue;
+      const read = codec.reader(reply, 7);
+      const id = read.u8();
+      const count = read.u8();
+      const instances = read.u8();
+      const name = read.string();
+      const summary = read.string();
+      const params = [];
+      for (let p = 0; p < count; p++) params.push({ def: read.u8(), name: read.string() });
+      this.plugins[id] = { id, name, summary, instances, params };
+    }
+    return this.plugins;
+  }
+
+  async getAudioSlot(slot) {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_AUDIO_SLOT, [slot]),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_AUDIO_SLOT) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    if (!reply || this.isReply(reply, P.SysexCommand.SYSEX_NAK)) return null;
+    const count = reply[11];
+    return {
+      plugin: reply[6], source: [reply[7], reply[8]], out: [reply[9], reply[10]],
+      params: Array.from(reply.slice(12, 12 + count)),
+    };
+  }
+  // A new plugin starts at its defaults; the same one keeps its parameters.
+  async setAudioSlot(slot, { plugin, source, out }) {
+    return this.command(P.SysexCommand.SYSEX_SET_AUDIO_SLOT, [slot, plugin, source[0], source[1], out[0], out[1]]);
+  }
+  async setAudioParam(slot, param, value) {
+    return this.command(P.SysexCommand.SYSEX_SET_AUDIO_PARAM, [slot, param, value]);
+  }
+  async clearAudioSlot(slot) { return this.command(P.SysexCommand.SYSEX_AUDIO_CLEAR, [slot]); }
+
+  // The interface to claim the next time one is plugged in; a zero vendor
+  // is any interface.
+  async setAudioDevice({ vid = 0, pid = 0, name = '' }) {
+    const text = [...name].slice(0, P.RACK_DEVICE_NAME_BYTES).map((c) => c.charCodeAt(0) & 0x7f);
+    return this.command(P.SysexCommand.SYSEX_SET_AUDIO_DEVICE,
+      [...codec.u16(vid), ...codec.u16(pid), text.length, ...text]);
+  }
+  // What the interface is doing, which one is chosen and which one the
+  // driver holds - not the same until the chosen one has been plugged in.
+  async getAudioState() {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_GET_AUDIO_STATE),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_AUDIO_STATE) || this.isReply(r, P.SysexCommand.SYSEX_NAK));
+    if (!reply || this.isReply(reply, P.SysexCommand.SYSEX_NAK)) return null;
+    const read = codec.reader(reply, 5);
+    const device = () => ({ vid: read.u16(), pid: read.u16(), name: read.string() });
+    return {
+      state: read.u8(), rate: read.u32(), inChannels: read.u8(), outChannels: read.u8(),
+      chosen: device(), held: device(), failure: read.string(),
     };
   }
 

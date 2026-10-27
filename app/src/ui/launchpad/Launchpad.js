@@ -14,17 +14,20 @@
 // hundred LEDs, each a background colour, is cheaper than rebuilding
 // anything, and a render would drop a finger mid-press.
 
+import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
 import { MODELS, gridId, topId, sideId, leftId, bottomId, LOGO_ID, isGridId } from '../../runtime/launchpad.js';
 import './Launchpad.css';
 
 const GRID = 8;
+// A Pro's upper bottom row picks a rack slot, one button each.
+const RACK_SLOTS = P.N_RACK_SLOT;
 
 // What a button around the grid is for, as the firmware lays it out
 // (src/surface/launchpad.h): named here only so a screen reader and a
 // tooltip can say it. The lights say the rest.
 const TOP = ['up', 'down', 'left', 'right', 'key page', 'note page', 'widgets page', 'tempo page'];
-const SIDE = ['start / stop', 'continue', 'tap tempo', 'panic', '', '', '', ''];
+const SIDE = ['start / stop', 'continue', 'tap tempo', 'panic', 'audio page', '', '', 'empty the slot (audio page)'];
 
 export function LaunchpadView(app, launchpad) {
   const spec = MODELS[launchpad.model];
@@ -56,7 +59,9 @@ export function LaunchpadView(app, launchpad) {
   if (spec.bottom) {
     rows.push(
       el('span', { class: 'lp-gap' }),
-      Array.from({ length: GRID }, (_, c) => cell(bottomId(c), { kind: 'inert', label: 'a Pro button the module does not use' })),
+      Array.from({ length: GRID }, (_, c) => cell(bottomId(c), c < RACK_SLOTS
+        ? { kind: 'round', label: `audio slot ${c + 1}` }
+        : { kind: 'inert', label: 'a Pro button the module does not use' })),
       el('span', { class: 'lp-gap' }));
   }
 

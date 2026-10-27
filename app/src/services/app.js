@@ -24,6 +24,7 @@ import { Play } from './play.js';
 import { Transport } from './transport.js';
 import { Surface } from './surface.js';
 import { Patches } from './patches.js';
+import { Audio } from './audio.js';
 
 export function createApp({ root, view, wasmUrl }) {
   const state = createState();
@@ -78,7 +79,10 @@ export function createApp({ root, view, wasmUrl }) {
   // The pads and pots: the performer's own controller, kept in this browser
   // rather than in the patch (services/surface.js).
   const surface = new Surface({ state, library, play, editor, session, render });
-  Object.assign(app, { render, arrangement, session, editor, patches, play, transport, surface });
+  // The audio rack and the USB socket: the module's, written straight to it
+  // (services/audio.js).
+  const audio = new Audio({ session, render, fail: (message) => app.fail(message) });
+  Object.assign(app, { render, arrangement, session, editor, patches, play, transport, surface, audio });
 
   app.say = (message) => editor.say(message);
   app.fail = (message) => editor.fail(message);

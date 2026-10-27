@@ -42,6 +42,8 @@ export class Live {
     this.nodeSlots = new Set();
     // Whether the Launchpad's state line is on screen (SYSEX_GET_LP_STATE).
     this.launchpad = false;
+    // Whether the rack and the USB socket are on screen.
+    this.audio = false;
   }
 
   reset() {
@@ -52,6 +54,7 @@ export class Live {
     this.globalNames.clear();
     this.nodeSlots.clear();
     this.launchpad = false;
+    this.audio = false;
   }
 
   // Called every animation frame, and once after every render, with what the
@@ -70,6 +73,8 @@ export class Live {
   watchNode(index) { this.nodeSlots.add(index); }
 
   watchLaunchpad() { this.launchpad = true; }
+
+  watchAudio() { this.audio = true; }
 
   tick(frame) {
     for (const painter of this.painters) painter(frame);

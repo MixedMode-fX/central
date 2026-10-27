@@ -83,8 +83,8 @@ Engine::Engine() :
     cc_map(patch_manager, mm, macros), control_sum(cc_map),
     mod_matrix(patch_manager, cc_map, control_sum),
     nrpn(patch_manager, cc_map),
-    reverb(),
-    launchpad(patch_manager, mm, cc_map, panel, reverb),
+    audio_host(), rack(eeprom, audio_host),
+    launchpad(patch_manager, mm, cc_map, panel, rack),
     protocol(patch_manager, mm, patch_store, status, panel, cc_map, mod_matrix, macros, control_sum, monitor),
     queue(),
     now_us(0), subtick_interval(0), subtick_due(0),
@@ -98,6 +98,7 @@ void Engine::boot(uint32_t seed_a, uint32_t seed_b){
     entropy::stir(seed_b);
     entropy::stir(seed_a ^ (seed_b << 7));
     protocol.attach(launchpad);
+    protocol.attach(rack);
     run_boot();
     booted = true;
 }
@@ -107,6 +108,7 @@ void Engine::boot(uint32_t seed_a, uint32_t seed_b){
 // and macro position belonged to the one that went away
 // (protocol/sysex_handler.cpp says the same at a load).
 void Engine::run_boot(){
+    rack.boot();
     patch_manager.boot(now_us);
     if (patch_manager.running_defaults()){
         // The module's default follows its own timer. A plugin's follows the
@@ -206,6 +208,7 @@ void Engine::pass(){
     protocol.service(now);
     nrpn.service(now);
     patch_manager.service(now);
+    rack.service(now);
     monitor.sample(now);
     now_us = now + PASS_US;
 }

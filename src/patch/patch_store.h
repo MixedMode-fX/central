@@ -37,10 +37,15 @@
 // library so the native tests size their fake the same way.
 #define EEPROM_BYTES 4284
 
+// The tail of the EEPROM is not a patch's: it is the audio rack's
+// (audio/rack.h), which is global and saved on its own.
+#define RACK_STORE_BYTES 160
+
 // Presets, including slot 0 (the current patch). Four slots of ~1 KB each is
 // what EEPROM_BYTES affords; see the static_assert in the .cpp.
 #define PATCH_SLOTS 4
-#define PATCH_SLOT_BYTES (EEPROM_BYTES / PATCH_SLOTS)
+#define PATCH_SLOT_BYTES ((EEPROM_BYTES - RACK_STORE_BYTES) / PATCH_SLOTS)
+#define RACK_STORE_BASE (PATCH_SLOTS * PATCH_SLOT_BYTES)
 
 enum StoreError : uint8_t {
     STORE_OK = 0,

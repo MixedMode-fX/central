@@ -14,6 +14,8 @@
 #include "led/status_leds.h"
 #include "monitor/monitor.h"
 #include "surface/launchpad.h"
+#include "audio/rack.h"
+#include "hal/iusb_host.h"
 
 // The patch protocol's device end (#11).
 //
@@ -81,6 +83,11 @@ class SysexHandler : public ISysexIn {
         // is not an editor. Without one, SYSEX_GET_LP_STATE is refused and
         // foreign SysEx is dropped as it always was.
         void attach(Launchpad& surface){ launchpad = &surface; }
+        // The audio rack and the USB host socket (audio/rack.h,
+        // hal/iusb_host.h). Without them their messages are refused, and the
+        // USB list is empty.
+        void attach(AudioRack& audio){ rack = &audio; }
+        void attach(IUsbHost* host){ usb = host; }
 
         // A patch arrived by a path no message carried - a plugin host
         // restoring its project (plugin/src/engine.cpp) - and is running.
@@ -123,6 +130,10 @@ class SysexHandler : public ISysexIn {
         void reply_launchpad(uint8_t source);
         void reply_lp_widget(uint8_t source, uint8_t slot);
         void reply_lp_state(uint8_t source);
+        void reply_usb(uint8_t source);
+        void reply_plugins(uint8_t source);
+        void reply_audio_slot(uint8_t source, uint8_t slot);
+        void reply_audio_state(uint8_t source);
         void ack(uint8_t source);
         void nak(uint8_t source, SysexError code);
         void notify(uint8_t event, uint8_t detail);
@@ -143,6 +154,11 @@ class SysexHandler : public ISysexIn {
         static constexpr uint8_t SUMMARY_MAX = 96;
         void put_string(const char* text, uint8_t limit = TEXT_MAX);
         void put_u14(uint16_t value){ put((uint8_t)(value & 0x7F)); put((uint8_t)((value >> 7) & 0x7F)); }
+        // A USB vendor or product id: sixteen bits, so three data bytes.
+        void put_u16(uint16_t value){ put_u14((uint16_t)(value & 0x3FFF)); put((uint8_t)(value >> 14)); }
+        // An interface as the rack names it: ids, then the name, which fills
+        // its field without a terminator when it is long.
+        void put_device(const AudioDeviceId& d);
         // Thirty-two bits as five data bytes, low septet first: a time in
         // microseconds, a subtick count, a word of gate buses.
         void put_u32(uint32_t value){
@@ -189,6 +205,8 @@ class SysexHandler : public ISysexIn {
         // empties its record, and both happen here.
         Monitor& monitor;
         Launchpad* launchpad;
+        AudioRack* rack;
+        IUsbHost* usb;
 
         // The staging image a bulk transfer accumulates into. The live graph
         // is untouched until the last chunk has arrived and the whole image

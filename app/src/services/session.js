@@ -12,6 +12,10 @@ import { Monitor } from '../runtime/monitor.js';
 // meter drawn faster than this says nothing more, and over a DIN cable every
 // question is a round trip the musical stream is waiting for.
 const MOD_POLL_MS = 100;
+// How often the audio tab asks what is on the USB socket and what the rack
+// is doing: a device is plugged in by hand, and a Launchpad moves the rack
+// no faster than a hand does either.
+const AUDIO_POLL_MS = 1000;
 
 export class Session extends EventTarget {
   constructor({ state, live, render }) {
@@ -42,6 +46,14 @@ export class Session extends EventTarget {
     // (src/surface/launchpad.h): linked or not, which model, which page.
     // Live state, like the rest here.
     this.lpLive = null;
+    // The audio rack, its interface and the USB socket (src/audio/rack.h,
+    // src/hal/iusb_host.h): the module's, not the patch's, and read back
+    // from it rather than kept here. `rack` is read on connecting; the rest
+    // while the audio tab is on screen.
+    this.rack = null;
+    this.audioLive = null;
+    this.usbLive = null;
+    this.audioPolledAt = 0;
     // The running module, as it reports itself (runtime/monitor.js): what
     // everything live on the page is painted from, whichever transport the
     // module is on the end of.
@@ -62,6 +74,7 @@ export class Session extends EventTarget {
     await this.device.readCapabilities();
     await this.device.readAlgorithms();
     for (const descriptor of this.device.algorithms) await this.device.readParams(descriptor.id);
+    await this.readRack();
     const dumped = await this.device.dump();
     this.state.patch = dumped.patch;
     this.state.globals = dumped.globals;
@@ -70,6 +83,33 @@ export class Session extends EventTarget {
     this.offline = false;
     this.state.status = 'connected';
     this.startPolls();
+  }
+
+  // The plugins a slot can run and what every slot holds. A module with no
+  // rack has no slots, and the page shows none.
+  async readRack() {
+    const slots = this.device.capabilities.rackSlots ?? 0;
+    if (!slots) { this.rack = null; return; }
+    await this.device.readPlugins();
+    const read = [];
+    for (let s = 0; s < slots; s++) read.push(await this.device.getAudioSlot(s));
+    this.rack = { slots: read };
+  }
+
+  // What the interface and the socket are doing, and the rack again - a
+  // Launchpad moves its faders without the page. At most every
+  // AUDIO_POLL_MS unless forced.
+  async pollAudio({ force = false } = {}) {
+    if (!this.device || !this.rack) return;
+    const now = Date.now();
+    if (!force && now - this.audioPolledAt < AUDIO_POLL_MS) return;
+    this.audioPolledAt = now;
+    this.audioLive = await this.device.getAudioState();
+    this.usbLive = await this.device.usbDevices();
+    for (let s = 0; s < this.rack.slots.length; s++) {
+      const slot = await this.device.getAudioSlot(s);
+      if (slot) this.rack.slots[s] = slot;
+    }
   }
 
   // Paint what moves from what the module last reported: after a frame,
@@ -163,11 +203,12 @@ export class Session extends EventTarget {
     const macros = [...this.live.macroSlots];
     const globals = [...this.live.globalNames];
     const launchpad = this.live.launchpad;
+    const audio = this.live.audio;
     if (!slots.length) this.modLive.clear();
     if (!macros.length) this.macroLive.clear();
     if (!globals.length) this.globalsLive.clear();
     if (!launchpad) this.lpLive = null;
-    if (!slots.length && !macros.length && !globals.length && !launchpad) return;
+    if (!slots.length && !macros.length && !globals.length && !launchpad && !audio) return;
     this.modPolling = true;
     try {
       for (const slot of slots) {
@@ -185,6 +226,7 @@ export class Session extends EventTarget {
         if (value === null) this.globalsLive.delete(name); else this.globalsLive.set(name, value);
       }
       if (launchpad) this.lpLive = await this.device.getLpState();
+      if (audio) await this.pollAudio();
     } catch {
       // A module that has gone away is the connection's problem, not this
       // view's: the meters go quiet and every other panel is unaffected.

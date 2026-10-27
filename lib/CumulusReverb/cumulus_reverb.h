@@ -22,20 +22,46 @@
 // The delay lengths and LFO rates are Clouds' own, tuned for its 32 kHz:
 // at 44.1 kHz the space is 0.73 times the size and the shimmer 1.38 times
 // as fast as on the module, at 48 kHz 0.67 and 1.5. The sample rate a host
-// sets is not used.
+// sets times only the clock's movement, below.
 //
-// The parameters follow how Clouds' firmware drives the reverb, so the
-// defaults are the module's sound with its feedback knob at noon:
+// Around it sits a clock of its own, after the variable sample clock of
+// delays like Lexicon's Prime Time: the tank runs at a fraction of the
+// host's rate, its input held and smoothed down to it and its output
+// interpolated back up. A slower clock is a bigger, darker room with an
+// aliased edge; moving the clock while the tail rings bends its pitch.
+// Warp sweeps the clock down from where Clock sets it, an LFO with a drift
+// in it, and Glitch throws it, at random, to a fraction of itself for a
+// moment.
 //
-//   0 Amount     wet against dry, the reverb's own crossfade.
+// The first five parameters follow how Clouds' firmware drives the
+// reverb, and with the clock at x1 and still, the defaults are the
+// module's sound with its feedback knob at noon:
+//
+//   0 Amount     wet against dry, as the reverb's own crossfade.
 //   1 Time       loop gain, 0.35 to 0.98 as Clouds' reverb knob sets it.
 //   2 Diffusion  allpass coefficient, 0.4 to 0.8; Clouds fixes it at 0.7.
-//   3 Tone       loop low-pass, 0.6 (dark) to 0.97 (open), which Clouds'
-//                feedback knob moves.
+//   3 Tone       loop low-pass, 0.12 (murky) to 0.97 (open), on an
+//                exponential curve; Clouds' feedback knob moves it from
+//                0.6 to 0.97, and at noon sets 0.78, the default here.
 //   4 Input      level into the tank, 0 to 0.4; Clouds feeds it 0.2.
+//   5 Clock      the tank's rate, x1/8 to x1 of the host's.
+//   6 Warp       how far the clock is swept down: to two octaves.
+//   7 Speed      the sweep's rate, 0.05 to 12 Hz.
+//   8 Glitch     how often the clock jumps, to about three times a second.
 class CumulusReverb : public AudioEffectX {
 public:
-    enum Parameter { PARAM_AMOUNT, PARAM_TIME, PARAM_DIFFUSION, PARAM_TONE, PARAM_INPUT, NUM_PARAMS };
+    enum Parameter {
+        PARAM_AMOUNT,
+        PARAM_TIME,
+        PARAM_DIFFUSION,
+        PARAM_TONE,
+        PARAM_INPUT,
+        PARAM_CLOCK,
+        PARAM_WARP,
+        PARAM_SPEED,
+        PARAM_GLITCH,
+        NUM_PARAMS
+    };
 
     // What clouds::Reverb needs beside it: its FxEngine's delay memory,
     // FxEngine<16384, FORMAT_12_BIT> in clouds/dsp/fx/reverb.h, and room to
@@ -67,15 +93,26 @@ public:
 private:
     void rebuild();
 
-    // clouds::Reverb processes interleaved frames; blocks are split into
-    // runs of this many, as Clouds' own block size.
-    static const int RUN_FRAMES = 32;
-
     alignas(8) unsigned char storage_[REVERB_BYTES];
     class Engine;
     Engine* engine_;  // a clouds::Reverb, constructed in storage_
     float params_[NUM_PARAMS];
     volatile bool clear_;
+
+    // The clock: how far towards the tank's next sample, 0..1; the tank's
+    // last two outputs, interpolated between; its input, smoothed.
+    float phase_;
+    float last_[2];
+    float next_[2];
+    float smooth_[2];
+    // The clock's movement.
+    float warp_phase_;  // 0..1
+    float drift_, drift_target_;
+    uint32_t drift_left_;
+    float glitch_;  // the clock's multiplier while a glitch lasts, else 1
+    uint32_t glitch_left_;
+    uint32_t noise_;
+
     uint16_t delay_[DELAY_WORDS];
 };
 

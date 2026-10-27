@@ -59,7 +59,8 @@ struct Rig {
     ModMatrix mod;
     NrpnDecoder nrpn;
     Monitor monitor;
-    HeldReverb reverb;
+    HeldAudio audio;
+    AudioRack rack;
     Launchpad surface;
     SysexHandler sysex;
     MidiInputQueue queue;
@@ -68,9 +69,12 @@ struct Rig {
     Rig() : gpio(), midi(), eeprom(), led_driver(), panel(gpio, midi),
             master(panel, panel), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum),
-            nrpn(patches, cc), monitor(master, panel, leds), reverb(), surface(patches, master, cc, panel, reverb),
+            nrpn(patches, cc), monitor(master, panel, leds), audio(), rack(eeprom, audio),
+            surface(patches, master, cc, panel, rack),
             sysex(patches, master, store, leds, panel, cc, mod, macros, sum, monitor), queue(), now(0) {
+        rack.boot();
         sysex.attach(surface);
+        sysex.attach(rack);
     }
 
     // One loop of main.cpp: the queue dispatched, the controllers applied, a
@@ -96,6 +100,7 @@ struct Rig {
     }
     void top(uint8_t index, bool down = true){ in(LP, MIDI_CONTROL_CHANGE, 1, Launchpad::top_id(index), down ? 127 : 0); }
     void side(uint8_t row, bool down = true){ in(LP, MIDI_CONTROL_CHANGE, 1, Launchpad::side_id(row), down ? 127 : 0); }
+    void bottom(uint8_t col, bool down = true){ in(LP, MIDI_CONTROL_CHANGE, 1, Launchpad::bottom_id(col), down ? 127 : 0); }
 
     // A Launchpad answering what the module asked, as the real ones do: the
     // inquiry with a family that does not tell a Mini from a Pro, and the
@@ -598,16 +603,18 @@ static void test_panic_releases_the_grid_and_sweeps_the_ports() {
 }
 
 // ---------------------------------------------------------------------------
-// Reverb
+// Audio
 // ---------------------------------------------------------------------------
-static void test_the_reverb_button_opens_the_reverb_page_and_returns() {
+// The default rack (audio/rack.h): Cumulus in slot 0, Ferric in slot 1, the
+// tape's send reverb in slot 2 and slot 3 empty.
+static void test_the_audio_button_opens_the_audio_page_and_returns() {
     Rig rig;
     rig.link(on_host());
     rig.top(6);                          // widgets
     rig.loop();
-    rig.side(3);                         // reverb
+    rig.side(3);                         // audio
     rig.loop();
-    TEST_ASSERT_EQUAL(Launchpad::PAGE_REVERB, rig.surface.page());
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_AUDIO, rig.surface.page());
     rig.settle();
     TEST_ASSERT_EQUAL(Launchpad::WHITE, rig.sent_colour(Launchpad::side_id(3)));
     rig.side(3);
@@ -618,50 +625,108 @@ static void test_the_reverb_button_opens_the_reverb_page_and_returns() {
     TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::VIOLET), rig.sent_colour(Launchpad::side_id(3)));
 }
 
-static void test_the_reverb_faders_set_its_controls_and_show_them() {
+static void test_the_audio_faders_set_the_slots_parameters_and_show_them() {
     Rig rig;
     rig.link(on_host());
     rig.side(3);
     rig.loop();
-    rig.pad(7, IReverb::CONTROL_TIME, true);     // the top of the time fader
-    rig.pad(0, IReverb::CONTROL_TONE, true);     // the bottom of the tone fader
-    rig.pad(3, IReverb::CONTROL_INPUT, true);
+    rig.pad(7, 1, true);                 // the top of slot 0's second fader: Cumulus' time
+    rig.pad(0, 3, true);                 // the bottom of its tone
     rig.loop();
-    TEST_ASSERT_EQUAL(127, rig.reverb.get(IReverb::CONTROL_TIME));
-    TEST_ASSERT_EQUAL(0, rig.reverb.get(IReverb::CONTROL_TONE));
-    TEST_ASSERT_EQUAL(Launchpad::fader_level(3), rig.reverb.get(IReverb::CONTROL_INPUT));
-    TEST_ASSERT_EQUAL(95, rig.reverb.get(IReverb::CONTROL_DIFFUSION));   // untouched
-    // Nothing reaches the patch: the faders are the reverb's, not CCs.
+    TEST_ASSERT_EQUAL(127, rig.rack.slot(0).params[1]);
+    TEST_ASSERT_EQUAL(0, rig.rack.slot(0).params[3]);
+    TEST_ASSERT_EQUAL(127, rig.audio.slot(0).params[1]);       // and the host was told
+    TEST_ASSERT_EQUAL(95, rig.rack.slot(0).params[2]);         // untouched
+    // Nothing reaches the patch: the faders are the rack's, not CCs.
     TEST_ASSERT_EQUAL(0, rig.notes_out().size());
     rig.settle();
-    TEST_ASSERT_EQUAL(Launchpad::BLUE, rig.sent_colour(Launchpad::led_id(7, IReverb::CONTROL_TIME)));
-    TEST_ASSERT_EQUAL(Launchpad::YELLOW, rig.sent_colour(Launchpad::led_id(0, IReverb::CONTROL_TONE)));
-    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::YELLOW), rig.sent_colour(Launchpad::led_id(1, IReverb::CONTROL_TONE)));
-    TEST_ASSERT_EQUAL(Launchpad::GREEN, rig.sent_colour(Launchpad::led_id(3, IReverb::CONTROL_INPUT)));
-    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::GREEN), rig.sent_colour(Launchpad::led_id(4, IReverb::CONTROL_INPUT)));
-    // The arrows do nothing here, so they are dark.
+    const uint8_t violet = Launchpad::slot_colour(0);
+    TEST_ASSERT_EQUAL(violet, rig.sent_colour(Launchpad::led_id(7, 1)));
+    TEST_ASSERT_EQUAL(violet, rig.sent_colour(Launchpad::led_id(0, 3)));
+    TEST_ASSERT_EQUAL(Launchpad::dim(violet), rig.sent_colour(Launchpad::led_id(1, 3)));
+    // No slot to the left, slot 1 to the right; Cumulus' eleven parameters
+    // are two pages, so down lights and up does not.
+    TEST_ASSERT_EQUAL(Launchpad::OFF, rig.sent_colour(Launchpad::top_id(2)));
+    TEST_ASSERT_EQUAL(Launchpad::slot_colour(1), rig.sent_colour(Launchpad::top_id(3)));
+    TEST_ASSERT_EQUAL(Launchpad::WHITE, rig.sent_colour(Launchpad::top_id(1)));
     TEST_ASSERT_EQUAL(Launchpad::OFF, rig.sent_colour(Launchpad::top_id(0)));
 }
 
-static void test_the_clear_block_empties_the_tank_once_a_press() {
+static void test_the_arrows_step_through_slots_and_parameter_pages() {
     Rig rig;
     rig.link(on_host());
     rig.side(3);
     rig.loop();
-    rig.pad(0, 6, true);
-    rig.pad(1, 7, true);                 // a second finger on the block
+    rig.top(3);                          // right: slot 1, the tape
     rig.loop();
-    TEST_ASSERT_EQUAL(1, rig.reverb.cleared());
+    TEST_ASSERT_EQUAL(1, rig.surface.audio_slot());
+    rig.top(1);                          // down: its second page
+    rig.loop();
+    TEST_ASSERT_EQUAL(1, rig.surface.audio_page());
+    rig.pad(7, 5, true);                 // column 6 of page 2 is parameter 13: the level
+    rig.loop();
+    TEST_ASSERT_EQUAL(127, rig.rack.slot(1).params[rack::level_param(RACK_PLUGIN_FERRIC)]);
+    rig.top(1);                          // no third page
+    rig.loop();
+    TEST_ASSERT_EQUAL(1, rig.surface.audio_page());
+    rig.top(3);                          // another slot starts on its first page
+    rig.loop();
+    TEST_ASSERT_EQUAL(2, rig.surface.audio_slot());
+    TEST_ASSERT_EQUAL(0, rig.surface.audio_page());
+    rig.top(3);
+    rig.top(3);                          // past the last slot: stays
+    rig.loop();
+    TEST_ASSERT_EQUAL(N_RACK_SLOT - 1, rig.surface.audio_slot());
+    // An empty slot says which it is along the top row.
     rig.settle();
-    TEST_ASSERT_EQUAL(Launchpad::RED, rig.sent_colour(Launchpad::led_id(1, 6)));
-    rig.pad(0, 6, false);
-    rig.pad(1, 7, false);
+    TEST_ASSERT_EQUAL(Launchpad::slot_colour(3), rig.sent_colour(Launchpad::led_id(7, 3)));
+    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::slot_colour(0)), rig.sent_colour(Launchpad::led_id(7, 0)));
+}
+
+static void test_the_bottom_button_empties_the_slot_once_a_press() {
+    Rig rig;
+    rig.link(on_host());
+    rig.side(0);                         // not on the audio page: nothing
+    rig.side(0, false);
+    rig.loop();
+    TEST_ASSERT_EQUAL(0, rig.audio.cleared());
+    rig.side(3);
+    rig.top(3);                          // slot 1
+    rig.side(0);
+    rig.loop();
+    TEST_ASSERT_EQUAL(1, rig.audio.cleared());
+    TEST_ASSERT_EQUAL(1, rig.audio.last_cleared());
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::RED, rig.sent_colour(Launchpad::side_id(0)));
+    rig.side(0, false);
     rig.loop();
     rig.settle();
-    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::RED), rig.sent_colour(Launchpad::led_id(1, 6)));
-    rig.pad(1, 6, true);
+    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::RED), rig.sent_colour(Launchpad::side_id(0)));
+}
+
+static void test_a_pros_bottom_row_picks_a_slot_from_any_page() {
+    Rig rig;
+    rig.link(on_host(), Launchpad::DEVICE_PRO_MK3);
+    rig.bottom(2);                       // from the note page
     rig.loop();
-    TEST_ASSERT_EQUAL(2, rig.reverb.cleared());
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_AUDIO, rig.surface.page());
+    TEST_ASSERT_EQUAL(2, rig.surface.audio_slot());
+    rig.bottom(N_RACK_SLOT);             // a button with no slot
+    rig.loop();
+    TEST_ASSERT_EQUAL(2, rig.surface.audio_slot());
+    rig.settle();
+    TEST_ASSERT_EQUAL(Launchpad::slot_colour(2), rig.sent_colour(Launchpad::bottom_id(2)));
+    TEST_ASSERT_EQUAL(Launchpad::dim(Launchpad::slot_colour(0)), rig.sent_colour(Launchpad::bottom_id(0)));
+}
+
+static void test_a_mini_has_no_bottom_row() {
+    Rig rig;
+    rig.link(on_host());
+    rig.bottom(1);
+    rig.loop();
+    TEST_ASSERT_EQUAL(Launchpad::PAGE_NOTE, rig.surface.page());
+    rig.settle();
+    TEST_ASSERT_EQUAL(-1, rig.sent_colour(Launchpad::bottom_id(0)));
 }
 
 // ---------------------------------------------------------------------------
@@ -968,9 +1033,12 @@ int main(int, char**){
     RUN_TEST(test_the_transport_is_on_the_tempo_page_and_the_right_column);
     RUN_TEST(test_the_tap_button_taps_the_tempo);
     RUN_TEST(test_panic_releases_the_grid_and_sweeps_the_ports);
-    RUN_TEST(test_the_reverb_button_opens_the_reverb_page_and_returns);
-    RUN_TEST(test_the_reverb_faders_set_its_controls_and_show_them);
-    RUN_TEST(test_the_clear_block_empties_the_tank_once_a_press);
+    RUN_TEST(test_the_audio_button_opens_the_audio_page_and_returns);
+    RUN_TEST(test_the_audio_faders_set_the_slots_parameters_and_show_them);
+    RUN_TEST(test_the_arrows_step_through_slots_and_parameter_pages);
+    RUN_TEST(test_the_bottom_button_empties_the_slot_once_a_press);
+    RUN_TEST(test_a_pros_bottom_row_picks_a_slot_from_any_page);
+    RUN_TEST(test_a_mini_has_no_bottom_row);
     RUN_TEST(test_widgets_send_their_ccs_into_the_patch);
     RUN_TEST(test_a_widget_cc_is_the_binding_tables_before_it_is_the_graphs);
     RUN_TEST(test_a_widget_can_be_learned);

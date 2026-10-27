@@ -587,3 +587,24 @@ export const readU32 = (bytes, at) =>
 // SYSEX_SET_MACRO_DEST, which is the one place that decides this.
 export const s14 = (value) => [...u14(Math.min(0x3fff, Math.abs(value | 0))), value < 0 ? 1 : 0];
 export const readS14 = (bytes, at) => (bytes[at + 2] ? -readU14(bytes, at) : readU14(bytes, at));
+
+// A USB vendor or product id: sixteen bits, so three data bytes.
+export const u16 = (value) => [value & 0x7f, (value >> 7) & 0x7f, (value >> 14) & 0x03];
+export const readU16 = (bytes, at) => bytes[at] | (bytes[at + 1] << 7) | ((bytes[at + 2] & 0x03) << 14);
+
+// A reply read front to back, for the records whose strings make every
+// field after them move.
+export function reader(bytes, at) {
+  return {
+    u8: () => bytes[at++],
+    u16: () => { const v = readU16(bytes, at); at += 3; return v; },
+    u32: () => { const v = readU32(bytes, at); at += 5; return v; },
+    // Length-prefixed ASCII, as put_string() writes it.
+    string: () => {
+      const n = bytes[at++] ?? 0;
+      const s = String.fromCharCode(...bytes.slice(at, at + n));
+      at += n;
+      return s;
+    },
+  };
+}

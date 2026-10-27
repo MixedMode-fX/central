@@ -1,0 +1,41 @@
+/* The USB socket: a row a device, connected ones lit. */
+.usb-list { display: grid; gap: .4rem; }
+.usb-device {
+  display: grid; grid-template-columns: .7rem minmax(0, 1fr) auto; gap: .6rem; align-items: center;
+  padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised);
+}
+.usb-device.seen { opacity: .65; }
+.usb-dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--dim); }
+.usb-device.connected .usb-dot { background: var(--gate); }
+.usb-name { display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: baseline; min-width: 0; }
+.usb-name strong { overflow-wrap: anywhere; }
+.usb-ids { font-family: var(--mono); font-size: .75rem; color: var(--dim); }
+.usb-roles { flex-basis: 100%; font-size: .8rem; color: var(--dim); }
+.usb-chosen { color: var(--accent); font-size: .85rem; }
+
+.audio-chosen { margin: 0 0 .3rem; }
+.audio-state { margin: 0 0 .6rem; color: var(--dim); }
+.audio-state.streaming { color: var(--gate); }
+.audio-state.failed { color: var(--bad); }
+
+/* The rack: a card a slot, edged in the colour a Launchpad draws it in. */
+.rack { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
+.rack-slot {
+  border: 1px solid var(--line); border-left: 4px solid var(--slot); border-radius: var(--radius);
+  padding: .6rem; background: var(--raised); min-width: 0;
+}
+.rack-slot.empty { opacity: .75; }
+.rack-head { display: flex; gap: .5rem; align-items: center; }
+.rack-head .grow { flex: 1; min-width: 0; }
+.rack-number {
+  width: 1.6rem; height: 1.6rem; border-radius: 50%; display: grid; place-items: center;
+  background: var(--slot); color: var(--bg); font-weight: 700; font-size: .85rem;
+}
+.rack-summary { margin: .4rem 0; color: var(--dim); font-size: .8rem; }
+.rack-slot .fields select { min-width: 0; }
+.rack-params { display: grid; gap: .1rem; margin-top: .4rem; }
+.rack-param {
+  display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) 4.2rem; gap: .5rem; align-items: center;
+}
+.rack-param-name { font-size: .85rem; }
+.rack-value { font-family: var(--mono); font-size: .8rem; color: var(--dim); text-align: right; }

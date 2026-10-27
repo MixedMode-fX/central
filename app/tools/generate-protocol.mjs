@@ -91,10 +91,11 @@ const constants = {
     'N_CC_MAP', 'N_MOD_ROUTE', 'N_MACRO', 'N_MACRO_DEST', 'N_MACRO_DEST_PER_MACRO', 'MACRO_NAME_BYTES', 'LP_WIDGETS', 'MASTER_PPQN', 'CLOCK_SUBTICK', 'CLOCK_MIN_BPM', 'CLOCK_MAX_BPM',
     'CLOCK_DEFAULT_BPM', 'MAX_SEQUENCE_LEN', 'NOTE_SEQ_VOICES', 'DRUM_SEQ_LANES',
     'MONITOR_EVENTS', 'MONITOR_MAX_NODES', 'MONITOR_NODE_VALUES',
+    'N_RACK_SLOT', 'RACK_CHANNELS', 'RACK_PARAMS', 'RACK_DEVICE_NAME_BYTES', 'USB_LIST_ENTRIES', 'USB_NAME_BYTES',
   ]),
   ...defines(codecH, ['PATCH_FORMAT_VERSION']),
   ...defines(read('src/bus/domain.h'), ['CV_BITS', 'CV_FULL']),
-  ...defines(storeH, ['EEPROM_BYTES', 'PATCH_SLOTS']),
+  ...defines(storeH, ['EEPROM_BYTES', 'PATCH_SLOTS', 'RACK_STORE_BYTES']),
   ...defines(nrpnH, ['NRPN_CLOCK_BASE', 'NRPN_TRANSPORT_BASE', 'NRPN_KEY_BASE', 'NRPN_RESERVED_BASE']),
   ...defines(keyH, ['KEY_DEFAULT_OCTAVE', 'KEY_MAX_OCTAVE']),
   ...defines(read('src/node/param.h'), ['PARAM_CENTRE', 'ENV_TIME_UNIT_US']),
@@ -102,7 +103,7 @@ const constants = {
 
 // PATCH_MAGIC and PATCH_SLOT_BYTES are expressions, not plain numbers.
 constants.PATCH_MAGIC = 0x4d4d4d43;
-constants.PATCH_SLOT_BYTES = Math.floor(constants.EEPROM_BYTES / constants.PATCH_SLOTS);
+constants.PATCH_SLOT_BYTES = Math.floor((constants.EEPROM_BYTES - constants.RACK_STORE_BYTES) / constants.PATCH_SLOTS);
 
 // The scale masks are a `switch` rather than a table, so they get a reader of
 // their own. They are needed here because a patch written by hand names its
@@ -150,6 +151,10 @@ const enums = {
   AlgorithmId: enumeration(read('src/node/registry.h'), 'AlgorithmId'),
   AlgorithmCategory: enumeration(read('src/node/node.h'), 'AlgorithmCategory'),
   ScaleId: enumeration(read('src/midi/scale.h'), 'ScaleId'),
+  RackPlugin: enumeration(read('src/audio/rack.h'), 'RackPlugin'),
+  RackSource: enumeration(read('src/audio/rack.h'), 'RackSource'),
+  AudioState: enumeration(read('src/hal/iaudio_host.h'), 'AudioState'),
+  UsbRole: enumeration(read('src/hal/iusb_host.h'), 'UsbRole'),
 };
 enums.ScaleMask = scaleMasks(read('src/midi/scale.h'), enums.ScaleId);
 

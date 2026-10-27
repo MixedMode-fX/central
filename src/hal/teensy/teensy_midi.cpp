@@ -1,5 +1,6 @@
 #include "hal/teensy/teensy_midi.h"
 #include <stdio.h>
+#include <string.h>
 #include "hal/teensy/teensy_audio.h"
 
 #ifdef SERIAL_MIDI_1
@@ -35,6 +36,7 @@ public:
     static constexpr uint8_t PRODUCT_MAX = 31;
     struct Entry {
         uint16_t vid, pid;
+        bool audio;            // it offered an audio function
         char product[PRODUCT_MAX + 1];
     };
 
@@ -46,11 +48,17 @@ public:
 
 protected:
     // In the USB interrupt, during enumeration, after the strings are read.
-    bool claim(Device_t* dev, int type, const uint8_t*, uint32_t) override {
+    bool claim(Device_t* dev, int type, const uint8_t* descriptors, uint32_t len) override {
         if (type != 0) return false;
         Entry& e = entries[count % ENTRIES];
         e.vid = dev->idVendor;
         e.pid = dev->idProduct;
+        // An AudioControl interface anywhere in the configuration.
+        e.audio = false;
+        for (uint32_t at = 0; at + 7 <= len && descriptors[at] >= 2; at += descriptors[at]){
+            const uint8_t* d = &descriptors[at];
+            if (d[1] == 4 && d[0] >= 9 && d[5] == 1 && d[6] == 1) e.audio = true;
+        }
         e.product[0] = '\0';
         if (dev->strbuf != nullptr){
             const uint8_t* s = &dev->strbuf->buffer[dev->strbuf->iStrings[strbuf_t::STR_ID_PROD]];
@@ -148,6 +156,59 @@ public:
                      e.product[0] ? e.product : "(no name)");
             out.write(text);
         }
+    }
+    // What every driver holds, then what was seen since boot and is not
+    // among them: a device no driver holds is never told it has gone, so
+    // only a held one is connected.
+    uint8_t list(UsbDeviceEntry* out, uint8_t max) override {
+        uint8_t n = 0;
+        add_driver(out, n, max, hub1, USB_ROLE_HUB);
+        add_driver(out, n, max, hub2, USB_ROLE_HUB);
+        add_driver(out, n, max, hub3, USB_ROLE_HUB);
+        for (MIDIDevice* m : host_midi){
+            add_driver(out, n, max, *m, host_cable(*m) == mmMIDI_HOST_LAUNCHPAD ? USB_ROLE_LAUNCHPAD : USB_ROLE_MIDI);
+        }
+        UsbDeviceEntry audio[3];
+        const uint8_t held = mm_audio_devices(audio, 3);
+        for (uint8_t i = 0; i < held; i++) add(out, n, max, audio[i]);
+
+        const uint32_t seen = seen_devices.seen();
+        const uint32_t first = seen > EnumerationLog::ENTRIES ? seen - EnumerationLog::ENTRIES : 0;
+        for (uint32_t k = seen; k > first; k--){
+            const EnumerationLog::Entry& e = seen_devices.entry(k - 1);
+            UsbDeviceEntry entry;
+            memset(&entry, 0, sizeof entry);
+            entry.vid = e.vid;
+            entry.pid = e.pid;
+            entry.roles = e.audio ? USB_ROLE_HAS_AUDIO : 0;
+            usb_name_copy(entry.name, USB_NAME_BYTES, e.product);
+            add(out, n, max, entry);
+        }
+        return n;
+    }
+
+private:
+    // Merged with an entry for the same device - by ids and name, which is
+    // all a list has - so a Scarlett held for MIDI and audio is one line.
+    static void add(UsbDeviceEntry* out, uint8_t& n, uint8_t max, const UsbDeviceEntry& e){
+        for (uint8_t i = 0; i < n; i++){
+            if (out[i].vid == e.vid && out[i].pid == e.pid && strncmp(out[i].name, e.name, USB_NAME_BYTES) == 0){
+                out[i].roles |= e.roles;
+                return;
+            }
+        }
+        if (n < max) out[n++] = e;
+    }
+    static void add_driver(UsbDeviceEntry* out, uint8_t& n, uint8_t max, USBDriver& d, uint8_t role){
+        if (!d) return;
+        UsbDeviceEntry e;
+        memset(&e, 0, sizeof e);
+        e.vid = d.idVendor();
+        e.pid = d.idProduct();
+        e.roles = (uint8_t)(role | USB_ROLE_CONNECTED);
+        const uint8_t* product = d.product();
+        if (product != nullptr) usb_name_copy(e.name, USB_NAME_BYTES, (const char*)product);
+        add(out, n, max, e);
     }
 };
 

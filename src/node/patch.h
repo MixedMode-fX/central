@@ -352,9 +352,12 @@ inline NodeConfig node_config(uint8_t algorithm_id){
     return c;
 }
 
-// An empty patch: every port unused, no nodes.
-inline Patch empty_patch(){
-    Patch p = {};
+// An empty patch, written in place: every port unused, no nodes. Every
+// member is set, so whatever `p` held before is gone. On the module a Patch
+// is too big for the stack - 20 KB against what the USB audio leaves of
+// RAM1 - so the firmware's paths clear a buffer they already have rather
+// than copy a temporary into it.
+inline void clear_patch(Patch& p){
     for (uint8_t i = 0; i < GPIO_N; i++) p.gate_ports[i] = GatePortConfig{GATE_PORT_UNUSED, BusSet{}};
     for (uint8_t i = 0; i < N_MIDI_IN_NODES; i++) p.midi_in[i] = MidiInConfig{0, 0, BusSet{}};
     for (uint8_t i = 0; i < N_MIDI_OUT_NODES; i++) p.midi_out[i] = MidiOutConfig{0, 0, BusSet{}};
@@ -362,8 +365,14 @@ inline Patch empty_patch(){
     for (uint8_t i = 0; i < N_MOD_ROUTE; i++) p.mod_map[i] = unused_route();
     for (uint8_t i = 0; i < N_MACRO; i++) p.macros[i] = unused_macro();
     for (uint8_t i = 0; i < N_MACRO_DEST; i++) p.macro_dest[i] = unused_dest();
+    for (uint16_t i = 0; i < N_NODE; i++) p.nodes[i] = NodeConfig{};
     p.launchpad = no_launchpad();
     p.n_nodes = 0;
+}
+
+inline Patch empty_patch(){
+    Patch p = {};
+    clear_patch(p);
     return p;
 }
 

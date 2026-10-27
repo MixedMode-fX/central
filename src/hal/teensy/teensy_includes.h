@@ -26,6 +26,12 @@
 #ifdef MMMC_USB_HOST
 #include <USBHost_t36.h>
 #endif
+#ifdef MMMC_USB_AUDIO
+#include <Audio.h>
+#include <USBAudioHost.h>
+#include <AudioEffectVST.h>
+#include <cumulus_reverb.h>
+#endif
 
 #pragma GCC diagnostic pop
 

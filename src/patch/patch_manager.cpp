@@ -4,10 +4,13 @@
 
 PatchManager::PatchManager(MixedModeMaster& master, PatchStore& patch_store, StatusLeds& status) :
     mm(master), store(patch_store), leds(status),
-    live(empty_patch()), stage(empty_patch()),
+    live(), stage(),
     live_globals(default_globals()), stage_globals(default_globals()),
     error(APPLY_OK), on_defaults(false)
-{}
+{
+    clear_patch(live);
+    clear_patch(stage);
+}
 
 void PatchManager::push_globals(){
     mm.clock().set_source(live_globals.clock_source);
@@ -49,7 +52,9 @@ ApplyError PatchManager::apply(const Patch& patch, const GlobalSettings& g, uint
 }
 
 ApplyError PatchManager::restore_defaults(uint32_t now_us){
-    const ApplyError e = apply(default_patch(), default_globals_for_patch(), now_us);
+    default_patch(stage);
+    stage_globals = default_globals_for_patch();
+    const ApplyError e = commit(now_us);
     // Running the default because it was asked for is not the same state as
     // running it because nothing valid was stored: the red LED stays off.
     return e;
@@ -66,7 +71,9 @@ void PatchManager::boot(uint32_t now_us){
 
     // Nothing valid stored, or it failed to validate: run the default and say
     // so on the red LED. Never run a partially-valid patch.
-    apply(default_patch(), default_globals_for_patch(), now_us);
+    default_patch(stage);
+    stage_globals = default_globals_for_patch();
+    commit(now_us);
     on_defaults = true;
     leds.set_running_defaults(s != STORE_EMPTY);
     // An empty store is a new module, not a fault, so it boots green; a

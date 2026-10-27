@@ -80,6 +80,14 @@
 // device with several MIDI interfaces takes one of these for each.
 #define N_HOST_MIDI_DEVICES 6
 
+// The Scarlett on the USB host socket (hal/teensy/teensy_audio.h). The rate
+// is asked of the interface, which may stream another; the Audio Library's
+// blocks are what the reverb's graph is built from, and string buffers are
+// what lets the driver read a device's product name to tell a Scarlett apart.
+#define USB_AUDIO_SAMPLE_RATE 44100
+#define USB_AUDIO_MEMORY_BLOCKS 40
+#define USB_AUDIO_STRING_BUFFERS 8
+
 // Reserved hardware nodes outside the pool.
 #define N_MIDI_IN_NODES 4
 #define N_MIDI_OUT_NODES 4

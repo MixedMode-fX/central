@@ -59,13 +59,14 @@ struct Rig {
     ModMatrix mod;
     NrpnDecoder nrpn;
     Monitor monitor;
+    HeldReverb reverb;
     Launchpad surface;
     SysexHandler sysex;
 
     Rig() : gpio(), midi(), eeprom(), led_driver(), panel(gpio, midi),
             master(panel, panel), leds(led_driver), store(eeprom),
             patches(master, store, leds), macros(), cc(patches, master, macros), sum(cc), mod(patches, cc, sum), nrpn(patches, cc),
-            monitor(master, panel, leds), surface(patches, master, cc, panel),
+            monitor(master, panel, leds), reverb(), surface(patches, master, cc, panel, reverb),
             sysex(patches, master, store, leds, panel, cc, mod, macros, sum, monitor) {}
 
     // The whole input path, as main.cpp runs it.

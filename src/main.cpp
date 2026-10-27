@@ -3,6 +3,7 @@
 #include "hardware.h"
 #include "hal/teensy/teensy_gpio.h"
 #include "hal/teensy/teensy_midi.h"
+#include "hal/teensy/teensy_audio.h"
 #include "hal/teensy/teensy_clock.h"
 #include "hal/teensy/teensy_eeprom.h"
 #include "hal/teensy/teensy_leds.h"
@@ -79,7 +80,7 @@ static SysexHandler protocol(patches, master, store, leds, panel, cc_map, mod_ma
 // the panel the module has not got, on a cable it has. In front of the
 // graph like a transport, and writing through the same applier a mapped CC
 // does.
-static Launchpad launchpad(patches, master, cc_map, panel);
+static Launchpad launchpad(patches, master, cc_map, panel, mm_reverb());
 
 // Filled by the transports, drained at the top of every pass.
 static MidiInputQueue midi_in_queue;
@@ -106,6 +107,7 @@ void setup(){
 
     led_driver.begin();
     console_io.begin();
+    mm_audio_setup();
     mm_midi_setup();
 
     // Slot 0 if it checks out, the flash default if it does not - and the red
@@ -113,6 +115,8 @@ void setup(){
     // still comes up doing something observable.
     patches.boot(micros());
     protocol.attach(launchpad);
+    console.attach(launchpad);
+    console.attach(mm_usb_host());
     console.greet();
 
     // Last: the timer only starts once there is a patch for it to drive.

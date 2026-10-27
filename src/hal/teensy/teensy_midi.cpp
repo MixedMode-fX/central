@@ -1,4 +1,6 @@
 #include "hal/teensy/teensy_midi.h"
+#include <stdio.h>
+#include "hal/teensy/teensy_audio.h"
 
 #ifdef SERIAL_MIDI_1
 MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_1, midi1, MidiSettings);
@@ -14,6 +16,63 @@ MIDI_CREATE_CUSTOM_INSTANCE(HardwareSerial, SERIAL_MIDI_2, midi2, MidiSettings);
 // anywhere below them: USBHost_t36 hands each new interface to the first
 // driver that is free.
 #ifdef MMMC_USB_HOST
+namespace {
+
+// Every device the socket enumerates, whether a driver wants it or not, for
+// the console's `usb` (hal/iusb_host.h). USBHost_t36 offers each new device
+// whole to every free driver before any interface is offered; this one
+// writes down what it was offered and refuses it, so it stays free and sees
+// the next. A driver that never claims is never told of a disconnect, so this
+// is a history, not what is plugged in now: the drivers say that. Defined
+// before the hubs, which take the whole device, so it is asked first.
+//
+// The -Wnon-virtual-dtor waiver is teensy_audio.cpp's, for the same reason.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+class EnumerationLog final : public USBDriver {
+public:
+    static constexpr uint8_t ENTRIES = 8;
+    static constexpr uint8_t PRODUCT_MAX = 31;
+    struct Entry {
+        uint16_t vid, pid;
+        char product[PRODUCT_MAX + 1];
+    };
+
+    EnumerationLog() : entries(), count(0) { driver_ready_for_device(this); }
+
+    // Seen since boot, of which the last ENTRIES are kept.
+    uint32_t seen() const { return count; }
+    const Entry& entry(uint32_t n) const { return entries[n % ENTRIES]; }
+
+protected:
+    // In the USB interrupt, during enumeration, after the strings are read.
+    bool claim(Device_t* dev, int type, const uint8_t*, uint32_t) override {
+        if (type != 0) return false;
+        Entry& e = entries[count % ENTRIES];
+        e.vid = dev->idVendor;
+        e.pid = dev->idProduct;
+        e.product[0] = '\0';
+        if (dev->strbuf != nullptr){
+            const uint8_t* s = &dev->strbuf->buffer[dev->strbuf->iStrings[strbuf_t::STR_ID_PROD]];
+            uint8_t i = 0;
+            for (; i < PRODUCT_MAX && s[i] != 0; i++) e.product[i] = (char)s[i];
+            e.product[i] = '\0';
+        }
+        count = count + 1;
+        return false;
+    }
+    void disconnect() override {}
+
+private:
+    Entry entries[ENTRIES];
+    volatile uint32_t count;
+};
+#pragma GCC diagnostic pop
+
+EnumerationLog seen_devices;
+
+}  // namespace
+
 USBHost mm_usb;
 USBHub hub1(mm_usb);
 USBHub hub2(mm_usb);
@@ -44,7 +103,66 @@ static uint8_t host_cable(MIDIDevice& device){
     }
     return mmMIDI_HOST_1;
 }
+
+// One driver's line: its device, or a dash when it holds none.
+static void describe_driver(IConsoleIo& out, const char* label, USBDriver& d, const char* note){
+    char text[96];
+    if (!d){
+        snprintf(text, sizeof text, "  %-8s -\r\n", label);
+        out.write(text);
+        return;
+    }
+    const uint8_t* product = d.product();
+    snprintf(text, sizeof text, "  %-8s %04X:%04X %s%s\r\n", label, d.idVendor(), d.idProduct(),
+             product && *product ? (const char*)product : "(no name)", note);
+    out.write(text);
+}
+
+namespace {
+
+class UsbHostReport final : public IUsbHost {
+public:
+    void describe(IConsoleIo& out) override {
+        out.write("drivers\r\n");
+        describe_driver(out, "hub 1", hub1, "");
+        describe_driver(out, "hub 2", hub2, "");
+        describe_driver(out, "hub 3", hub3, "");
+        char label[12];
+        for (uint8_t i = 0; i < N_HOST_MIDI_DEVICES; i++){
+            snprintf(label, sizeof label, "midi %u", (unsigned)(i + 1));
+            MIDIDevice& m = *host_midi[i];
+            describe_driver(out, label, m, !m ? "" :
+                            host_cable(m) == mmMIDI_HOST_LAUNCHPAD ? "  -> usb host launchpad cable"
+                                                                   : "  -> usb host cable");
+        }
+        mm_audio_describe(out);
+
+        const uint32_t seen = seen_devices.seen();
+        char text[96];
+        snprintf(text, sizeof text, "enumerated since boot: %lu, newest last\r\n", (unsigned long)seen);
+        out.write(text);
+        const uint32_t first = seen > EnumerationLog::ENTRIES ? seen - EnumerationLog::ENTRIES : 0;
+        for (uint32_t n = first; n < seen; n++){
+            const EnumerationLog::Entry& e = seen_devices.entry(n);
+            snprintf(text, sizeof text, "  %04X:%04X %s\r\n", e.vid, e.pid,
+                     e.product[0] ? e.product : "(no name)");
+            out.write(text);
+        }
+    }
+};
+
+UsbHostReport usb_host_report;
+
+}  // namespace
 #endif
+
+IUsbHost* mm_usb_host(){
+    #ifdef MMMC_USB_HOST
+    return &usb_host_report;
+    #else
+    return nullptr;
+    #endif
+}
 
 void mm_midi_setup(){
     #ifdef SERIAL_MIDI_1

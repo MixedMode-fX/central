@@ -4,8 +4,10 @@
 #include <stdint.h>
 #include "config.h"
 #include "hal/iconsole_io.h"
+#include "hal/iusb_host.h"
 #include "patch/patch_manager.h"
 #include "control/cc_mapper.h"
+#include "surface/launchpad.h"
 
 // The text console (#7): with no display and no panel controls, this and the
 // SysEx protocol (#11) are the only two ways anyone sees inside the module or
@@ -49,6 +51,11 @@ class Console {
         // Feeds one line directly, for the tests and the emulator.
         void execute(const char* line, uint32_t now_us);
 
+        // What `usb` reports: the host socket, where the build has one, and
+        // the Launchpad surface. Unattached, `usb` says there is none.
+        void attach(IUsbHost* host){ usb_host = host; }
+        void attach(const Launchpad& surface){ launchpad = &surface; }
+
     private:
         void prompt();
         void dispatch(uint32_t now_us);
@@ -78,6 +85,7 @@ class Console {
         void cmd_mod(uint8_t argc, uint32_t now_us);
         void cmd_unmod(uint8_t argc, uint32_t now_us);
         void cmd_learn(uint8_t argc, uint32_t now_us);
+        void cmd_usb();
 
         void put(const char* text){ io.write(text); }
         void put_line(const char* text){ io.write(text); io.write("\r\n"); }
@@ -97,6 +105,8 @@ class Console {
         PatchStore& store;
         StatusLeds& leds;
         CcMapper& cc;
+        IUsbHost* usb_host;
+        const Launchpad* launchpad;
         char line[CONSOLE_LINE_MAX + 1];
         char* argv[MAX_ARGS];
         uint8_t argc;

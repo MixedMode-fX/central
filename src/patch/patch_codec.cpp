@@ -338,7 +338,7 @@ CodecError patch_codec::decode(const uint8_t* in, size_t length,
 
     r.length = crc_at;                          // nothing past the payload is readable
 
-    patch = empty_patch();
+    clear_patch(patch);
     r.bytes(reinterpret_cast<uint8_t*>(&globals), sizeof(GlobalSettings));
 
     for (uint8_t i = 0; i < GPIO_N; i++){

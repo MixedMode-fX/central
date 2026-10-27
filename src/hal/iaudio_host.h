@@ -2,7 +2,6 @@
 #define MMMC_HAL_IAUDIO_HOST_H
 
 #include <stdint.h>
-#include <string.h>
 #include "config.h"
 
 // The one seam between the audio rack (audio/rack.h) and the interface on
@@ -79,7 +78,7 @@ class HeldAudio : public IAudioHost {
         void clear(uint8_t slot) override { clears++; last_clear = slot; }
         void select(const AudioDeviceId& device) override { chosen = device; }
         void status(AudioStatus& out) const override {
-            memset(&out, 0, sizeof out);
+            out = AudioStatus{};
             out.state = AUDIO_IDLE;
             out.failure = "";
         }

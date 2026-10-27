@@ -1,5 +1,4 @@
 #include "audio/rack.h"
-#include <math.h>
 #include "patch/patch_store.h"
 #include "patch/patch_codec.h"
 
@@ -74,10 +73,13 @@ uint8_t param_default(uint8_t id, uint8_t p){
 }
 
 // 40 Hz to 2 kHz on an exponential travel, as the tape sketch's send has it,
-// and off at the bottom.
+// and off at the bottom. A step is 50^(1/127), multiplied out because the
+// core has no libm.
 float low_cut_hz(uint8_t value){
     if (value == 0) return 0.0f;
-    return 40.0f * powf(50.0f, (float)value / 127.0f);
+    float hz = 40.0f;
+    for (uint8_t v = 0; v < value; v++) hz *= 1.0312827f;
+    return hz;
 }
 
 // A cube, unity at LEVEL_UNITY: a fader's travel spent where it is heard.
@@ -97,13 +99,13 @@ bool valid_source(uint8_t slot, uint8_t source){
 bool valid_out(uint8_t out){ return out <= RACK_CHANNELS; }
 
 void default_slot(RackSlot& s, uint8_t id){
-    memset(&s, 0, sizeof s);
+    s = RackSlot{};
     s.plugin = id < RACK_PLUGINS ? id : (uint8_t)RACK_PLUGIN_NONE;
     for (uint8_t p = 0; p < param_count(s.plugin); p++) s.params[p] = param_default(s.plugin, p);
 }
 
 void default_rack(RackConfig& r){
-    memset(&r, 0, sizeof r);
+    r = RackConfig{};
     for (uint8_t s = 0; s < N_RACK_SLOT; s++) default_slot(r.slots[s], RACK_PLUGIN_NONE);
 
     RackSlot& verb = r.slots[0];
@@ -154,8 +156,7 @@ size_t encode(const RackConfig& r, uint8_t* out, size_t capacity){
     at += 2;                                          // the length, below
     out[at++] = (uint8_t)r.device.vid; out[at++] = (uint8_t)(r.device.vid >> 8);
     out[at++] = (uint8_t)r.device.pid; out[at++] = (uint8_t)(r.device.pid >> 8);
-    memcpy(&out[at], r.device.name, RACK_DEVICE_NAME_BYTES);
-    at += RACK_DEVICE_NAME_BYTES;
+    for (uint8_t i = 0; i < RACK_DEVICE_NAME_BYTES; i++) out[at++] = (uint8_t)r.device.name[i];
     for (uint8_t s = 0; s < N_RACK_SLOT; s++){
         const RackSlot& slot = r.slots[s];
         const uint8_t n = param_count(slot.plugin);
@@ -183,14 +184,12 @@ bool decode(const uint8_t* in, size_t length, RackConfig& r){
     const uint16_t crc = (uint16_t)(in[total - 2] | (in[total - 1] << 8));
     if (patch_codec::crc16(in, total - 2) != crc) return false;
 
-    RackConfig decoded;
-    memset(&decoded, 0, sizeof decoded);
+    RackConfig decoded{};
     size_t at = HEADER_BYTES;
     const size_t end = total - 2;
     decoded.device.vid = (uint16_t)(in[at] | (in[at + 1] << 8)); at += 2;
     decoded.device.pid = (uint16_t)(in[at] | (in[at + 1] << 8)); at += 2;
-    memcpy(decoded.device.name, &in[at], RACK_DEVICE_NAME_BYTES);
-    at += RACK_DEVICE_NAME_BYTES;
+    for (uint8_t i = 0; i < RACK_DEVICE_NAME_BYTES; i++) decoded.device.name[i] = (char)in[at++];
     for (uint8_t s = 0; s < N_RACK_SLOT; s++){
         if (at + 6 > end) return false;
         RackSlot& slot = decoded.slots[s];
@@ -236,7 +235,7 @@ void AudioRack::push_all(){
 }
 
 bool AudioRack::set_slot(uint8_t s, uint8_t plugin, const uint8_t source[2], const uint8_t out[2], uint32_t now_us){
-    if (s >= N_RACK_SLOT) return false;
+    if (s >= N_RACK_SLOT || plugin >= RACK_PLUGINS) return false;
     RackSlot next = config.slots[s];
     if (plugin != next.plugin) rack::default_slot(next, plugin);
     next.source[0] = source[0]; next.source[1] = source[1];
@@ -270,7 +269,7 @@ bool AudioRack::clear(uint8_t s){
 
 void AudioRack::select(const AudioDeviceId& device, uint32_t now_us){
     config.device = device;
-    if (config.device.any()){ config.device.pid = 0; memset(config.device.name, 0, sizeof config.device.name); }
+    if (config.device.any()){ config.device = AudioDeviceId{}; }
     host.select(config.device);
     mark_dirty(now_us);
 }

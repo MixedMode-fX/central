@@ -3,7 +3,6 @@
 #include "node/registry.h"
 #include "control/nrpn.h"
 #include "version.h"
-#include <string.h>
 
 // Message layout, after the F0 and before the F7:
 //
@@ -90,7 +89,7 @@ void SysexHandler::put_device(const AudioDeviceId& d){
     put_u16(d.vid);
     put_u16(d.pid);
     char name[RACK_DEVICE_NAME_BYTES + 1];
-    memcpy(name, d.name, RACK_DEVICE_NAME_BYTES);
+    for (uint8_t i = 0; i < RACK_DEVICE_NAME_BYTES; i++) name[i] = d.name[i];
     name[RACK_DEVICE_NAME_BYTES] = '\0';
     put_string(name);
 }
@@ -252,8 +251,7 @@ void SysexHandler::handle_command(uint8_t source, uint8_t command,
             const uint8_t length = args[6];
             if (length > RACK_DEVICE_NAME_BYTES){ nak(source, SYSEX_ERR_BAD_ARGUMENT); return; }
             if (n < 7u + length){ nak(source, SYSEX_ERR_TRUNCATED); return; }
-            AudioDeviceId d;
-            memset(&d, 0, sizeof d);
+            AudioDeviceId d{};
             d.vid = read_u16(&args[0]);
             d.pid = read_u16(&args[3]);
             for (uint8_t i = 0; i < length; i++) d.name[i] = (char)args[7 + i];
@@ -1154,7 +1152,7 @@ void SysexHandler::reply_usb(uint8_t source){
         put_u16(e.pid);
         put(e.roles);
         char name[USB_NAME_BYTES + 1];
-        memcpy(name, e.name, USB_NAME_BYTES);
+        for (uint8_t c = 0; c < USB_NAME_BYTES; c++) name[c] = e.name[c];
         name[USB_NAME_BYTES] = '\0';
         put_string(name);
     }

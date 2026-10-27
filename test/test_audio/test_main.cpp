@@ -282,9 +282,12 @@ struct WireRig {
 static uint16_t u16_at(const std::vector<uint8_t>& b, size_t at){
     return (uint16_t)(b[at] | (b[at + 1] << 7) | ((b[at + 2] & 0x03) << 14));
 }
-static std::string string_at(const std::vector<uint8_t>& b, size_t& at){
+// A length-prefixed string, into a buffer that lives until the next call.
+static const char* string_at(const std::vector<uint8_t>& b, size_t& at){
+    static char s[128];
     const uint8_t n = b[at++];
-    std::string s(b.begin() + (long)at, b.begin() + (long)(at + n));
+    for (uint8_t i = 0; i < n; i++) s[i] = (char)b[at + i];
+    s[n] = 0;
     at += n;
     return s;
 }
@@ -330,10 +333,10 @@ static void test_the_plugins_describe_themselves() {
     TEST_ASSERT_EQUAL(14, b[8]);
     TEST_ASSERT_EQUAL(rack::plugin(RACK_PLUGIN_FERRIC).instances, b[9]);
     size_t at = 10;
-    TEST_ASSERT_EQUAL_STRING("Ferric", string_at(b, at).c_str());
+    TEST_ASSERT_EQUAL_STRING("Ferric", string_at(b, at));
     string_at(b, at);                                                 // the summary
     TEST_ASSERT_EQUAL(rack::param_default(RACK_PLUGIN_FERRIC, 0), b[at++]);
-    TEST_ASSERT_EQUAL_STRING("Drive", string_at(b, at).c_str());
+    TEST_ASSERT_EQUAL_STRING("Drive", string_at(b, at));
 }
 
 static void test_the_device_is_chosen_and_reported() {
@@ -355,7 +358,7 @@ static void test_the_device_is_chosen_and_reported() {
     TEST_ASSERT_EQUAL_HEX16(0x1235, u16_at(b, at));
     TEST_ASSERT_EQUAL_HEX16(0x8219, u16_at(b, at + 3));
     at += 6;
-    TEST_ASSERT_EQUAL_STRING(name, string_at(b, at).c_str());
+    TEST_ASSERT_EQUAL_STRING(name, string_at(b, at));
     TEST_ASSERT_EQUAL(0, u16_at(b, at));                              // nothing held
 }
 
@@ -370,7 +373,7 @@ static void test_the_usb_list_goes_out_whole() {
     TEST_ASSERT_EQUAL_HEX16(0x8219, u16_at(b, 9));
     TEST_ASSERT_TRUE(b[12] & USB_ROLE_CONNECTED);
     size_t at = 13;
-    TEST_ASSERT_EQUAL_STRING("Scarlett 4i4 4th Gen", string_at(b, at).c_str());
+    TEST_ASSERT_EQUAL_STRING("Scarlett 4i4 4th Gen", string_at(b, at));
     TEST_ASSERT_EQUAL_HEX16(0x0113, u16_at(b, at + 3));
 }
 

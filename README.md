@@ -9,10 +9,12 @@ An expandable Eurorack CV & MIDI processor on a Teensy 4.1.
   Launchpad on it is *USB host Launchpad*, a controller and nothing else, and
   every other device on it is *USB host*, so what goes to the instruments on
   the hub never reaches the Launchpad (`MidiPort` in `src/hal/midi_types.h`).
-- A Focusrite Scarlett on the host port is an effect: input 1 runs through
-  Clouds' reverb, fully wet, to outputs 1 and 2. No other audio interface is
-  claimed. The driver is a pinned dependency and the reverb is vendored
-  under `lib/` (`src/hal/teensy/teensy_audio.h`).
+- An audio interface on the host port is an effects rack: `N_RACK_SLOT` slots,
+  each running a plugin (Clouds' reverb, Ferric's tape) between any of its
+  inputs or an earlier slot and any of its outputs (`src/audio/rack.h`). The
+  rack and the chosen interface are the module's, not a patch's. The driver
+  is a pinned dependency and the plugins are vendored under `lib/`
+  (`src/hal/teensy/teensy_audio.h`).
 - No encoder, no switches, no display. The module is configured from a host:
   the serial console, the SysEx protocol, or the browser app.
 
@@ -41,7 +43,7 @@ core's MIDI Library and USBHost_t36 versions are reproducible.
 Sources build with `-Wall -Wextra -Weffc++ -Wshadow -Werror`; framework
 includes are passed as `-isystem` (`scripts/project_warnings.py`) so `-Werror`
 judges our code only. Headers live next to their sources under `src/`;
-`include/` is unused, and `lib/` holds only the vendored reverb.
+`include/` is unused, and `lib/` holds only the vendored audio plugins.
 
 ### Versions
 
@@ -592,6 +594,25 @@ wire, so a patch round-trips through the store and over SysEx byte for byte.
 Nothing writes flash on a parameter change: an edit marks the patch dirty and
 the autosave writes slot 0 once, two seconds later.
 
+The audio rack is stored apart, in the last `RACK_STORE_BYTES` of the EEPROM,
+with its own magic, version and CRC, and saved the same way. A patch load
+leaves it running.
+
+### Audio rack
+
+Each slot is a plugin with a low cut in front of it and a level behind it. A
+slot's two sides read an input or an earlier slot, never a later one, so the
+graph cannot loop; a slot read by another is heard one audio block late.
+Slots writing the same output are summed, which is how a send is built: the
+default rack runs tape on inputs 3 and 4 and feeds it through a low cut to a
+second reverb mixed under it. Each plugin has an instance limit set by RAM,
+and the module refuses a rack that exceeds it.
+
+The interface used is the one chosen from the app, kept so it is the one used
+offline; with none chosen, the first one plugged in. A USB driver claims a
+device as it enumerates, so a new choice takes effect on the next replug.
+Other audio interfaces are held idle so the app can list them as connected.
+
 ### Serial console
 
 USB serial and `SERIAL_UART` both carry the same text console.
@@ -794,7 +815,7 @@ on them. The grid's rows count from the top.
 | --- | --- | --- |
 | up, down, left, right | ▲ ▼ ◀ ▶, top row buttons 1-4 | ▲ ▼ at the top of the left column, ◀ ▶ top row buttons 1-2 |
 | the pages key, note, widgets, tempo | top row buttons 5-8 | Session Note Chord Custom, top row buttons 3-6 |
-| play/stop, continue, tap, panic, reverb: right column, top five | the top five ▶ | Patterns Steps Pattern Settings Velocity Probability |
+| play/stop, continue, tap, panic, audio: right column, top five | the top five ▶ | Patterns Steps Pattern Settings Velocity Probability |
 
 The lit page button is the page you are on.
 
@@ -809,14 +830,18 @@ The lit page button is the page you are on.
   internal; following MIDI or CV clock, the tempo is the source's.
 - **panic** - lets go of every held note and sends all-notes-off on every
   port.
-- **reverb** - opens the reverb page, and from it goes back to the page you
-  came from. Violet while a Scarlett is streaming through the reverb, dark
-  violet while none is.
+- **audio** - opens the audio page, and from it goes back to the page you
+  came from. Violet while an interface is streaming, dark violet while none
+  is.
 
-**Reverb** - the Scarlett's reverb (`src/hal/ireverb.h`). Columns 1 to 4 are
-faders, bottom row lowest: time, diffusion, tone and input. The four red pads
-in the bottom-right corner empty the tank. The faders are not in the patch:
-power-on brings back the reverb's own settings.
+On a Pro, the upper of the two bottom rows picks an audio slot from any page,
+lit in the slot's colour.
+
+**Audio** - the rack, a slot at a time, in the slot's colour. The columns are
+the slot's parameters as faders, bottom row lowest, eight to a page: left and
+right change slot, up and down change page. The bottom button of the right
+column empties the slot's plugin, so a tail stops. The faders move the rack,
+not the patch.
 
 **Note** - a guitar neck, as a Launchpad's own note mode is. Each pad is a
 semitone above the one to its left and each row a fourth above the row below,

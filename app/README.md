@@ -27,7 +27,7 @@ nothing serving it. The build from `main` is live at
 
 ## The shape of it
 
-Seven tabs — **patch**, **globals**, **MIDI**, **Launchpad**, **monitor**, **library**, **schema** — and
+Eight tabs — **patch**, **globals**, **MIDI**, **Launchpad**, **audio**, **monitor**, **library**, **schema** — and
 **play** as a button at the top beside *connect a module*, because those two
 answer the same question: which module am I listening to, the one in the page
 or the one on the cable. Play does not open a tab: it opens the performance
@@ -186,6 +186,12 @@ the drawing then mirroring the hardware. The third is the widgets: what each
 column of the two custom pages sends, written into the patch like a binding.
 Only the page's own module has a cable the page can be on the other end of; a
 module in a plugin or on a cable has its Launchpad on its own socket.
+
+**audio** — the module's, not the patch's (`src/audio/rack.h`): what is on its
+USB host socket, connected or only seen since boot; the audio interface chosen
+and what it is doing; and the rack's slots, each a plugin, its routing and its
+parameters. Every write goes to the module at once and is not undoable, and
+the tab polls while open, so a Launchpad moving a fader moves the slider.
 
 **library** — where a patch lives: this browser, a file, or the module's preset
 slots.

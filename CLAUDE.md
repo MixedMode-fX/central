@@ -9,8 +9,8 @@ VST3 plugin. `README.md` is the reference for the machine itself.
 - `src/` — the firmware core. Freestanding: no heap after boot, no exceptions,
   no libc. `src/hal/teensy/` and `main.cpp` are the only files that know what
   a Teensy is.
-- `lib/` — the Cumulus reverb for the Teensy build only, copied from the
-  CumulusReverb example of teensy-usb-audio-host, whose driver is a pinned
+- `lib/` — the Cumulus reverb and Ferric tape for the Teensy build only,
+  copied from the examples of teensy-usb-audio-host, whose driver is a pinned
   `lib_deps` entry in `platformio.ini`. Bump both together; fix them there
   and copy again. It compiles as a library, so `-Werror` does not judge it.
 - `test/` — the native unit tests, one directory per suite. They build `src/`

@@ -12,7 +12,7 @@ import { Heartbeat } from '../runtime/heartbeat.js';
 import { Controller } from '../runtime/controller.js';
 import { MidiOutputs } from '../runtime/midiout.js';
 import { VirtualLaunchpad } from '../runtime/launchpad.js';
-import { describeSupport, access, discover, controlPort, WebMidiTransport } from '../runtime/webmidi.js';
+import { describeSupport, access, discover, controlPort, unplugWarning, WebMidiTransport } from '../runtime/webmidi.js';
 import { hosted, HostTransport } from '../runtime/host.js';
 import { Library } from './storage.js';
 import { createState, noPatch } from './state.js';
@@ -197,6 +197,8 @@ export function createApp({ root, view, wasmUrl }) {
       state.savedJson = null;
       arrangement.reset();
       if (kept) state.status += ` — kept “${kept.name}”`;
+      const warning = unplugWarning();
+      if (warning) state.status += ` — ${warning}`;
     } catch (error) {
       // Half a connection is none: the page goes back to its own module
       // rather than editing one that stopped answering halfway through.

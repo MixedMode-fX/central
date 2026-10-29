@@ -21,6 +21,16 @@ export function describeSupport() {
   return { ok: true };
 }
 
+// Chrome's default MIDI backend on Windows (WinMM) freezes the whole browser
+// when a module it is talking to is unplugged - not the tab, the browser,
+// until it is killed. Its WinRT backend does not, and nothing a page does
+// avoids it, so the page says where the switch is. Null where none is owed.
+const WINDOWS = /win/i.test(
+  globalThis.navigator?.userAgentData?.platform ?? globalThis.navigator?.platform ?? '');
+export const unplugWarning = () => (WINDOWS
+  ? 'turn on chrome://flags/#use-winrt-midi-api before unplugging the module, or Chrome will freeze'
+  : null);
+
 // One MIDI access for the whole app, asked for once.
 //
 // Two things want it - the control transport that talks to a module, and the

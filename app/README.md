@@ -485,6 +485,11 @@ iOS Safari. A browser without Web MIDI is not a degraded experience, it is a
 user who cannot set their module up, so the page says plainly what is wrong and
 `.syx` export is a first-class path.
 
+**On Windows, turn on `chrome://flags/#use-winrt-midi-api`.** Chrome's default
+Windows MIDI backend freezes the whole browser when a connected module is
+unplugged; the WinRT one does not. The app cannot work around it, so connecting
+on Windows says so.
+
 ## Not built
 
 - Per-step velocity, length, tie/rest and probability in the note lane.

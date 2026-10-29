@@ -12,7 +12,7 @@ import { Heartbeat } from '../runtime/heartbeat.js';
 import { Controller } from '../runtime/controller.js';
 import { MidiOutputs } from '../runtime/midiout.js';
 import { VirtualLaunchpad } from '../runtime/launchpad.js';
-import { describeSupport, access, discover, WebMidiTransport } from '../runtime/webmidi.js';
+import { describeSupport, access, discover, controlPort, unplugWarning, WebMidiTransport } from '../runtime/webmidi.js';
 import { hosted, HostTransport } from '../runtime/host.js';
 import { Library } from './storage.js';
 import { createState, noPatch } from './state.js';
@@ -173,18 +173,21 @@ export function createApp({ root, view, wasmUrl }) {
     const support = describeSupport();
     if (!support.ok) { app.say(support.reason); return; }
     app.say('looking for a module…');
+    let transport = null;
     try {
       const midi = await access();
       const found = await discover(midi);
       if (!found.length) { app.say('no module answered'); return; }
       const kept = patches.stash();
-      const port = found[0];
+      const port = controlPort(found);
       // The module in the page is about to stop playing, and a note it sent
       // out of this computer is only ended by a note-off: nothing will send
       // one once it has stopped.
       app.outputs?.panic();
       app.module?.stop();
-      await session.adopt(new WebMidiTransport(port.input, port.output), { deviceId: port.deviceId });
+      transport = new WebMidiTransport(port.input, port.output);
+      app.follow(midi, transport, port.name);
+      await session.adopt(transport, { deviceId: port.deviceId });
       // Musical MIDI goes out a different cable from the protocol's, which is
       // why cable 3 is reserved: a dump in flight and a pad being hit must not
       // collide. The access is the one already granted - a second request
@@ -194,10 +197,39 @@ export function createApp({ root, view, wasmUrl }) {
       state.savedJson = null;
       arrangement.reset();
       if (kept) state.status += ` — kept “${kept.name}”`;
+      const warning = unplugWarning();
+      if (warning) state.status += ` — ${warning}`;
     } catch (error) {
+      // Half a connection is none: the page goes back to its own module
+      // rather than editing one that stopped answering halfway through.
+      if (transport && session.device?.transport === transport) {
+        transport.close();
+        await app.useModule({ silent: true });
+      }
       state.status = `could not connect: ${error.message}`;
     }
     render();
+  };
+
+  // A module unplugged is the end of its connection, said once, and the page
+  // goes back to the module in it. Until then every animation frame asks it
+  // for a monitor frame, and a port that has gone away is not one to keep
+  // sending to: on Windows that can take Chrome down with it. What was on
+  // screen is put in the library first, as switching back by hand does.
+  //
+  // A listener rather than `onstatechange`, which `connectMidi` owns.
+  app.follow = (midi, transport, name) => {
+    const gone = async (event) => {
+      if (session.device?.transport !== transport) { midi.removeEventListener('statechange', gone); return; }
+      if (event.port !== transport.input && event.port !== transport.output) return;
+      if (event.port.state !== 'disconnected') return;
+      midi.removeEventListener('statechange', gone);
+      transport.close();
+      await app.useModule();
+      state.status = `${name} was unplugged — back to the built-in module`;
+      render();
+    };
+    midi.addEventListener('statechange', gone);
   };
 
   // The MIDI devices on this computer, asked for once: a controller to play

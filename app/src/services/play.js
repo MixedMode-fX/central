@@ -28,6 +28,7 @@
 
 import * as P from '../protocol/generated.js';
 import { MUSICAL_PORTS } from '../protocol/names.js';
+import { baseName, live } from '../runtime/webmidi.js';
 
 const NOTE_ON = 0x90;
 const NOTE_OFF = 0x80;
@@ -42,10 +43,6 @@ const USB_CABLES = [
   P.MidiPort.mmMIDI_USB_0, P.MidiPort.mmMIDI_USB_1,
   P.MidiPort.mmMIDI_USB_2, P.MidiPort.mmMIDI_USB_3,
 ];
-
-// "Teensy MIDI 2" and "Teensy MIDI" are two cables of one device. A trailing
-// number is how every host names them apart.
-const baseName = (name) => String(name ?? '').replace(/\s*\d+$/, '').trim();
 
 export class Play {
   constructor({ state, session, module = () => null, listener = () => null,
@@ -125,7 +122,7 @@ export class Play {
     if (cable < 0) return null;
     const ports = this.ports();
     const chosen = ports[cable] ?? null;
-    if (!chosen || chosen === this.control) return null;
+    if (!chosen || chosen === this.control || !live(chosen)) return null;
     return chosen;
   }
 

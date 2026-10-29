@@ -21,6 +21,16 @@ export function describeSupport() {
   return { ok: true };
 }
 
+// Chrome's default MIDI backend on Windows (WinMM) freezes the whole browser
+// when a module it is talking to is unplugged - not the tab, the browser,
+// until it is killed. Its WinRT backend does not, and nothing a page does
+// avoids it, so the page says where the switch is. Null where none is owed.
+const WINDOWS = /win/i.test(
+  globalThis.navigator?.userAgentData?.platform ?? globalThis.navigator?.platform ?? '');
+export const unplugWarning = () => (WINDOWS
+  ? 'turn on chrome://flags/#use-winrt-midi-api before unplugging the module, or Chrome will freeze'
+  : null);
+
 // One MIDI access for the whole app, asked for once.
 //
 // Two things want it - the control transport that talks to a module, and the
@@ -44,6 +54,19 @@ export async function access() {
   }
 }
 
+// Whether a port is still there. Unplugged, a port stays in the access with
+// its state 'disconnected', and sending to one is not merely refused: Chrome
+// on Windows can take the whole browser down with it. So nothing sends to a
+// port this says is gone.
+export const live = (port) => port?.state !== 'disconnected';
+
+// "Teensy MIDI 2" and "Teensy MIDI" are two cables of one device, and so are
+// Windows' "MIDIOUT2 (Teensy MIDI)" and "Teensy MIDI". A trailing number or a
+// MIDIIN/MIDIOUT wrapper is how every host names them apart.
+export const baseName = (name) => String(name ?? '')
+  .replace(/^MIDI(?:IN|OUT)\d+\s*\((.*)\)$/, '$1')
+  .replace(/\s*\d+$/, '').trim();
+
 // One MIDI input/output pair, as a transport the Device can use.
 export class WebMidiTransport {
   constructor(input, output) {
@@ -53,50 +76,86 @@ export class WebMidiTransport {
     input.onmidimessage = (event) => this.handler(event.data);
   }
   onMessage(fn) { this.handler = fn; }
-  send(bytes) { this.output.send(Array.from(bytes)); }
+  send(bytes) {
+    if (!live(this.output)) throw new Error(`${this.output.name} was unplugged`);
+    this.output.send(Array.from(bytes));
+  }
+  // Deaf to the port from here on. Nothing is closed: a port that has gone
+  // away is not one to call into.
+  close() {
+    this.handler = () => {};
+    if (live(this.input)) this.input.onmidimessage = null;
+  }
   get name() { return this.output.name; }
 }
 
+const isIdentityReply = (d) => d[0] === 0xf0 && d[1] === P.SYSEX_UNIVERSAL_NON_REALTIME
+  && d[4] === P.SYSEX_IDENTITY_REPLY && d[5] === P.SYSEX_MANUFACTURER;
+
 // Finds the module by asking, rather than making a user pick a port by name.
 //
-// The identity request goes out on every output; the port whose *input*
-// answers is the module's, and the output with the same name is the one to
-// talk back on. The module blinks both LEDs when it answers, which is the only
-// way to tell two of them apart.
-export async function discover(access, { timeoutMs = 1500 } = {}) {
-  const outputs = [...access.outputs.values()];
-  const inputs = [...access.inputs.values()];
-  const found = [];
+// The identity request goes out on one output at a time, and the input that
+// answers it is that output's partner - whatever the host has named them.
+// Asking every output at once was a race twice over: the replies came back in
+// any order, so which cable won changed from one try to the next, and the
+// module's USB stack has one SysEx buffer for all four cables, so requests
+// arriving together on several could mangle each other into silence.
+//
+// Every port is opened, and waited for, before anything is sent. Setting
+// `onmidimessage` opens an input too, but without waiting: a reply that
+// arrived before the browser had finished opening it was dropped, and the
+// next try - with the port now open - worked.
+//
+// The module blinks both LEDs when it answers, which is the only way to tell
+// two of them apart.
+export async function discover(access, { windowMs = 250 } = {}) {
+  const outputs = [...access.outputs.values()].filter(live);
+  const inputs = [...access.inputs.values()].filter(live);
+  // A port another program holds is refused here, and is not ours anyway.
+  await Promise.all([...inputs, ...outputs].map((port) => port.open().catch(() => {})));
 
   const request = [
     0xf0, P.SYSEX_UNIVERSAL_NON_REALTIME, P.SYSEX_BROADCAST_DEVICE,
     P.SYSEX_GENERAL_INFORMATION, P.SYSEX_IDENTITY_REQUEST, 0xf7,
   ];
+  let heard = null;
+  const previous = new Map();
+  for (const input of inputs) {
+    previous.set(input, input.onmidimessage);
+    input.onmidimessage = (event) => { if (isIdentityReply(event.data)) heard?.(input, event.data); };
+  }
 
-  await new Promise((resolve) => {
-    const previous = new Map();
-    for (const input of inputs) {
-      previous.set(input, input.onmidimessage);
-      input.onmidimessage = (event) => {
-        const d = event.data;
-        if (d[0] !== 0xf0 || d[1] !== P.SYSEX_UNIVERSAL_NON_REALTIME) return;
-        if (d[4] !== P.SYSEX_IDENTITY_REPLY || d[5] !== P.SYSEX_MANUFACTURER) return;
-        // Pair it with the output whose name matches, falling back to the
-        // first output, which is right for a single-port device.
-        const output = outputs.find((o) => o.name === input.name) ?? outputs[0];
-        if (output && !found.some((f) => f.input === input)) {
-          found.push({ input, output, deviceId: d[2], name: input.name });
-        }
-      };
-    }
+  const found = [];
+  try {
     for (const output of outputs) {
-      try { output.send(request); } catch { /* a port that will not take SysEx is not ours */ }
+      const reply = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), windowMs);
+        heard = (input, data) => { clearTimeout(timer); resolve({ input, data }); };
+        try {
+          output.send(request);
+        } catch {
+          // A port that will not take SysEx is not ours.
+          clearTimeout(timer);
+          resolve(null);
+        }
+      });
+      heard = null;
+      if (reply && !found.some((f) => f.input === reply.input)) {
+        found.push({ input: reply.input, output, deviceId: reply.data[2], name: reply.input.name });
+      }
     }
-    setTimeout(() => {
-      for (const [input, handler] of previous) input.onmidimessage = handler ?? null;
-      resolve();
-    }, timeoutMs);
-  });
-
+  } finally {
+    for (const [input, handler] of previous) input.onmidimessage = handler ?? null;
+  }
   return found;
+}
+
+// The cable to talk to the module on. It answers on all of them, but the
+// protocol belongs on MIDI_CONTROL_PORT - the last of its cables, and a host
+// lists a device's cables in order - so that a dump in flight and a pad being
+// hit are never on the same one. Of two modules, the first found.
+export function controlPort(found) {
+  if (!found.length) return null;
+  const base = baseName(found[0].output.name);
+  return found.filter((f) => baseName(f.output.name) === base).at(-1);
 }

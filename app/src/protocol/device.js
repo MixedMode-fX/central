@@ -84,16 +84,31 @@ export class Device extends EventTarget {
           resolve(replies);
         },
       };
-      const timer = setTimeout(() => {
+      // A waiter that is over leaves the queue: one only the next reply
+      // would have shifted off stayed there for good when no reply came,
+      // and a module unplugged mid-poll stops replying for good.
+      const forget = () => {
         waiter.done = true;
+        clearTimeout(timer);
+        const at = this.pending.indexOf(waiter);
+        if (at >= 0) this.pending.splice(at, 1);
+      };
+      const timer = setTimeout(() => {
+        forget();
         if (partialOk && replies.length) { resolve(replies); return; }
         reject(new Error(replies.length
           ? `${what}: the answer never completed (${replies.length} messages in ${timeout}ms)`
           : `${what} did not answer`));
       }, timeout);
       this.pending.push(waiter);
-      this.send(bytes);
-      this.transport.flush?.();
+      try {
+        this.send(bytes);
+        this.transport.flush?.();
+      } catch (error) {
+        // A port that is gone says so now, not in two seconds.
+        forget();
+        reject(error);
+      }
     });
   }
 

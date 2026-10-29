@@ -37,7 +37,7 @@
 import * as P from '../protocol/generated.js';
 import { MUSICAL_PORTS } from '../protocol/names.js';
 import { OUTPUT_LATENCY_MS } from './module.js';
-import { access } from './webmidi.js';
+import { access, live } from './webmidi.js';
 
 const NOTE_OFF = 0x80, NOTE_ON = 0x90;
 const PROGRAM_CHANGE = 0xc0, CHANNEL_PRESSURE = 0xd0;
@@ -99,7 +99,7 @@ export class MidiOutputs {
 
   output(cable) {
     const name = this.routeOf(cable);
-    return name ? this.outputs.find((port) => port.name === name) ?? null : null;
+    return name ? this.outputs.find((port) => port.name === name && live(port)) ?? null : null;
   }
 
   // Point a cable at one of this computer's outputs, or at nothing. Whatever

@@ -53,6 +53,7 @@ import { Play } from '../src/services/play.js';
 import { Transport } from '../src/services/transport.js';
 import { Transport as TransportView } from '../src/ui/components/Transport.js';
 import { Device } from '../src/protocol/device.js';
+import { discover, controlPort, baseName, WebMidiTransport } from '../src/runtime/webmidi.js';
 import { GlobalsTab, KeyPanel, ClockPanel } from '../src/ui/tabs/GlobalsTab.js';
 import { KeyNow } from '../src/ui/panels/grids/KeyNow.js';
 import { NoteLane } from '../src/ui/panels/grids/Sequencers.js';
@@ -4590,4 +4591,85 @@ test('the virtual Launchpad answers a palette index with a colour', async () => 
   assert.equal(paletteColour(0), '#000000');
   assert.equal(paletteColour(45), '#0000ff');
   assert.equal(paletteColour(3), '#ffffff');
+});
+
+// Finding the module on a cable. The ports here are Chrome's on Windows: one
+// module with four cables named the way WinMM names them, a synth that
+// answers nobody, and an input that drops whatever arrives before it has
+// finished opening - which is what made the first try fail and the second
+// work.
+function fakeHost({ openMs = 5 } = {}) {
+  const port = (kind, name) => ({
+    id: `${kind}:${name}`, name, state: 'connected', opened: false, onmidimessage: null,
+    open() { return new Promise((resolve) => setTimeout(() => { this.opened = true; resolve(this); }, openMs)); },
+  });
+  const cables = ['MMMC', 'MIDIIN2 (MMMC)', 'MIDIIN3 (MMMC)', 'MIDIIN4 (MMMC)'].map((n) => port('in', n));
+  const outs = ['MMMC', 'MIDIOUT2 (MMMC)', 'MIDIOUT3 (MMMC)', 'MIDIOUT4 (MMMC)'].map((n) => port('out', n));
+  const synth = port('out', 'A synth');
+  const asked = [];
+  outs.forEach((output, cable) => {
+    output.send = (bytes) => {
+      asked.push(cable);
+      const input = cables[cable];
+      setTimeout(() => {
+        if (!input.opened) return;
+        input.onmidimessage?.({ data: Uint8Array.from([
+          0xf0, P.SYSEX_UNIVERSAL_NON_REALTIME, 0x05, P.SYSEX_GENERAL_INFORMATION,
+          P.SYSEX_IDENTITY_REPLY, P.SYSEX_MANUFACTURER, 0, 0, 0, 0, 0xf7]) });
+      }, 1 + (3 - cable));               // the later cables answer first
+      void bytes;
+    };
+  });
+  synth.send = () => {};
+  const access = {
+    inputs: new Map(cables.map((p) => [p.id, p])),
+    outputs: new Map([synth, ...outs].map((p) => [p.id, p])),
+  };
+  return { access, cables, outs, synth, asked };
+}
+
+test('a module is found on the first try, and spoken to on its control cable', async () => {
+  const { access, cables, outs } = fakeHost();
+  const found = await discover(access, { windowMs: 30 });
+  assert.equal(found.length, 4, 'not every cable of the module answered');
+  found.forEach((f, cable) => {
+    assert.equal(f.output, outs[cable], 'a reply was paired with an output that did not ask');
+    assert.equal(f.input, cables[cable]);
+    assert.equal(f.deviceId, 0x05);
+  });
+  const port = controlPort(found);
+  assert.equal(port.output, outs[3], 'the protocol is not on the last cable');
+  assert.equal(port.input, cables[3]);
+  for (const input of cables) assert.equal(input.onmidimessage, null, 'discovery left a handler behind');
+});
+
+test('discovery asks no port that has been unplugged', async () => {
+  const { access, outs, asked } = fakeHost();
+  outs[0].state = 'disconnected';
+  outs[0].send = () => { throw new Error('sent to an unplugged port'); };
+  const found = await discover(access, { windowMs: 30 });
+  assert.deepEqual(found.map((f) => f.output), outs.slice(1));
+  assert.ok(!asked.includes(0));
+});
+
+test('a cable is named apart from its device however the host names it', () => {
+  for (const name of ['Teensy MIDI', 'Teensy MIDI 4', 'MIDIOUT4 (Teensy MIDI)', 'MIDIIN2 (Teensy MIDI)']) {
+    assert.equal(baseName(name), 'Teensy MIDI', name);
+  }
+});
+
+test('a module unplugged mid-request fails at once and leaves nothing waiting', async () => {
+  const input = { name: 'MMMC', state: 'connected', onmidimessage: null };
+  let sends = 0;
+  const output = { name: 'MMMC', state: 'connected', send: () => { sends++; } };
+  const device = new Device(new WebMidiTransport(input, output));
+  const first = device.monitorFrame(0, []).catch((error) => error);
+  output.state = input.state = 'disconnected';
+  const started = Date.now();
+  const error = await device.monitorFrame(0, []).catch((e) => e);
+  assert.match(error.message, /unplugged/);
+  assert.ok(Date.now() - started < 100, 'an unplugged port waited for a reply');
+  assert.equal(sends, 1, 'a message went to a port that has gone');
+  assert.equal(device.pending.length, 1, 'the failed request is still queued');
+  void first;
 });

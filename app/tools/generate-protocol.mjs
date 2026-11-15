@@ -155,6 +155,7 @@ const enums = {
   RackSource: enumeration(read('src/audio/rack.h'), 'RackSource'),
   AudioState: enumeration(read('src/hal/iaudio_host.h'), 'AudioState'),
   UsbRole: enumeration(read('src/hal/iusb_host.h'), 'UsbRole'),
+  PsramState: enumeration(read('src/hal/psram.h'), 'PsramState'),
 };
 enums.ScaleMask = scaleMasks(read('src/midi/scale.h'), enums.ScaleId);
 

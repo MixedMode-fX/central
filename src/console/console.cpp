@@ -17,7 +17,7 @@ Console::Console(IConsoleIo& console_io, PatchManager& manager,
                  MixedModeMaster& master, PatchStore& patch_store, StatusLeds& status,
                  CcMapper& mapper) :
     io(console_io), patches(manager), mm(master), store(patch_store), leds(status), cc(mapper),
-    usb_host(nullptr), launchpad(nullptr), line(), argv(), argc(0), length(0), overflowed(false)
+    usb_host(nullptr), launchpad(nullptr), psram{PSRAM_ABSENT, 0, 0}, line(), argv(), argc(0), length(0), overflowed(false)
 {}
 
 void Console::put_uint(uint32_t value){
@@ -178,6 +178,19 @@ void Console::cmd_info(){
     put_kv("nodes    ", mm.node_count());
     put("patch     ");
     put_line(patches.running_defaults() ? "defaults (nothing valid stored)" : "loaded");
+    put("psram     ");
+    if (psram.state == PSRAM_ABSENT){
+        put_line("none fitted");
+    } else {
+        put_uint(psram.megabytes);
+        if (psram.state == PSRAM_OK){
+            put_line(" MB, passed its test");
+        } else {
+            put(" MB, FAILED its test at byte ");
+            put_uint(psram.fault_at);
+            put_line("");
+        }
+    }
     put_kv("eeprom   ", EEPROM_BYTES);
     put_kv("slot size", PATCH_SLOT_BYTES);
     put_kv("writes   ", store.writes());

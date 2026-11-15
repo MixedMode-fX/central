@@ -75,6 +75,14 @@ test('the module answers the standard identity request', async () => {
   assert.equal(identity.member, 1);
 });
 
+test('the module says who it is, and that a page has no PSRAM', async () => {
+  const identity = await device.readIdentity();
+  assert.equal(identity.family, 1);
+  assert.ok(identity.version.length > 0);
+  assert.equal(identity.psram.state, P.PsramState.PSRAM_ABSENT);
+  assert.equal(identity.psram.megabytes, 0);
+});
+
 test('capabilities match the firmware constants', async () => {
   const caps = await device.readCapabilities();
   assert.equal(caps.nodes, E.emu_const_n_node());

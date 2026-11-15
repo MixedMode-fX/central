@@ -8,6 +8,7 @@
 #include "hal/teensy/teensy_eeprom.h"
 #include "hal/teensy/teensy_leds.h"
 #include "hal/teensy/teensy_console_io.h"
+#include "hal/teensy/teensy_psram.h"
 #include "hal/gpio_map.h"
 #include "midi/midi_queue.h"
 #include "util/random.h"
@@ -117,6 +118,10 @@ void setup(){
     // Every port starts as an input; a port node claims an output in setup().
     gpio_map_mode(gpio, ALL_GPIO_MAP, GPIO_MODE_INPUT_PULLUP);
 
+    // Before anything could put something in it: the test overwrites the
+    // whole chip above the EXTMEM statics.
+    const PsramReport psram = mm_psram_test();
+
     led_driver.begin();
     console_io.begin();
     mm_audio_setup();
@@ -132,6 +137,8 @@ void setup(){
     protocol.attach(mm_usb_host());
     console.attach(launchpad);
     console.attach(mm_usb_host());
+    protocol.attach(psram);
+    console.attach(psram);
     console.greet();
 
     // Last: the timer only starts once there is a patch for it to drive.

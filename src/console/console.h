@@ -5,6 +5,7 @@
 #include "config.h"
 #include "hal/iconsole_io.h"
 #include "hal/iusb_host.h"
+#include "hal/psram.h"
 #include "patch/patch_manager.h"
 #include "control/cc_mapper.h"
 #include "surface/launchpad.h"
@@ -55,6 +56,8 @@ class Console {
         // the Launchpad surface. Unattached, `usb` says there is none.
         void attach(IUsbHost* host){ usb_host = host; }
         void attach(const Launchpad& surface){ launchpad = &surface; }
+        // What `info` says of the PSRAM. Unattached, the module has none.
+        void attach(const PsramReport& report){ psram = report; }
 
     private:
         void prompt();
@@ -107,6 +110,7 @@ class Console {
         CcMapper& cc;
         IUsbHost* usb_host;
         const Launchpad* launchpad;
+        PsramReport psram;
         char line[CONSOLE_LINE_MAX + 1];
         char* argv[MAX_ARGS];
         uint8_t argc;

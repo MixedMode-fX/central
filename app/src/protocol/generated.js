@@ -65,7 +65,7 @@ export const SYSEX_GENERAL_INFORMATION = 6;
 export const SYSEX_IDENTITY_REPLY = 2;
 export const SYSEX_IDENTITY_REQUEST = 1;
 export const SYSEX_MANUFACTURER = 125;
-export const SYSEX_PROTOCOL_VERSION = 22;
+export const SYSEX_PROTOCOL_VERSION = 23;
 export const SYSEX_RX_MAX = 320;
 export const SYSEX_TX_MAX = 512;
 export const SYSEX_UNIVERSAL_NON_REALTIME = 126;
@@ -426,6 +426,12 @@ export const UsbRole = Object.freeze({
   USB_ROLE_AUDIO_IDLE: 16,
   USB_ROLE_HAS_AUDIO: 32,
   USB_ROLE_CONNECTED: 64,
+});
+
+export const PsramState = Object.freeze({
+  PSRAM_ABSENT: 0,
+  PSRAM_OK: 1,
+  PSRAM_FAULT: 2,
 });
 
 export const ScaleMask = Object.freeze({

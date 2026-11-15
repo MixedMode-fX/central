@@ -47,7 +47,7 @@ SysexHandler::SysexHandler(PatchManager& manager, MixedModeMaster& master,
                            Monitor& watch) :
     patches(manager), mm(master), store(patch_store), leds(status), midi(midi_out), cc(mapper),
     mod(matrix), macros(macro_table), sum(control_sum), monitor(watch), launchpad(nullptr),
-    rack(nullptr), usb(nullptr),
+    rack(nullptr), usb(nullptr), psram{PSRAM_ABSENT, 0, 0},
     staging(), staged(0), next_seq(0), transfer_started_us(0), transfer_source(0),
     receiving(false),
     pending_patch(), pending_globals(default_globals()),
@@ -756,6 +756,9 @@ void SysexHandler::reply_identity(uint8_t source){
     put(SYSEX_DEVICE_MEMBER);
     put_string(MMMC_VERSION);
     put_string(MMMC_GIT_REV);
+    put(psram.state);
+    put(psram.megabytes);
+    put_u32(psram.fault_at);
     send_reply(source);
 }
 

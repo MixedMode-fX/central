@@ -25,7 +25,7 @@
 import * as P from '../../protocol/generated.js';
 import { el, classes } from '../dom.js';
 import { Panel, Hint, Row } from '../components/Panel.js';
-import { Labelled } from '../components/Field.js';
+import { Labelled, Field, Fields } from '../components/Field.js';
 import { Select, range } from '../components/Select.js';
 import { NumberField } from '../components/NumberField.js';
 import { Switch } from '../components/Switch.js';
@@ -66,8 +66,31 @@ export function MonitorTab(app) {
         ? 'what it plays leaves by the plugin\'s MIDI output, on the track; what it is doing is below'
         : 'what it plays leaves by its own cables and jacks; what it is doing is below'),
       app.hosted ? null : Row(el('button', { onclick: () => app.useModule() }, 'use the built-in module'))),
+    HardwarePanel(app),
     Meters(app), ScopePanel(app), RollPanel(app),
     JacksPanel(app), own(app) ? ListenPanel(app) : null, LogPanel(app));
+}
+
+// --- hardware ---------------------------------------------------------------
+
+// What the module is built from, as it reports itself: the firmware it runs
+// and what its boot test found on the PSRAM pads (src/hal/psram.h).
+function HardwarePanel(app) {
+  const identity = app.device.identity;
+  if (!identity) return null;
+  const { psram } = identity;
+  const faulty = psram.state === P.PsramState.PSRAM_FAULT;
+  const said = {
+    [P.PsramState.PSRAM_ABSENT]: 'none fitted',
+    [P.PsramState.PSRAM_OK]: `${psram.megabytes} MB, passed its boot test`,
+    [P.PsramState.PSRAM_FAULT]: `${psram.megabytes} MB, failed its boot test at byte `
+      + `0x${psram.faultAt.toString(16).padStart(6, '0')}`,
+  }[psram.state] ?? 'unknown';
+  return Panel('hardware',
+    Fields(
+      Field({ label: 'firmware' }, el('span', {}, `${identity.version} (${identity.rev})`)),
+      Field({ label: 'PSRAM' },
+        el('span', { class: classes('psram', faulty && 'warn') }, said))));
 }
 
 // --- jacks ------------------------------------------------------------------

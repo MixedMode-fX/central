@@ -71,6 +71,7 @@ export class Session extends EventTarget {
     this.device.deviceId = deviceId;
     this.monitor.reset();
     this.device.addEventListener('device-event', (e) => this.onDeviceEvent(e.detail));
+    await this.device.readIdentity();
     await this.device.readCapabilities();
     await this.device.readAlgorithms();
     for (const descriptor of this.device.algorithms) await this.device.readParams(descriptor.id);

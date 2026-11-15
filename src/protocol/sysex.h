@@ -31,7 +31,7 @@
 // rather than writing garbage into a live patch. Nothing is negotiated and no
 // other version is accepted: bump this whenever a message's layout changes,
 // and the app - generated from this header - moves with it.
-#define SYSEX_PROTOCOL_VERSION 22
+#define SYSEX_PROTOCOL_VERSION 23
 
 // Universal SysEx, for the standard identity request every editor uses to
 // find a device among the host's ports.
@@ -166,6 +166,9 @@ enum SysexCommand : uint8_t {
     SYSEX_GET_LP_STATE     = 0x38,
 
     // Device -> host
+    // <family> <member> <version> <git rev> <PsramState> <megabytes>
+    // <fault at u32>: who the module is, and what the boot test found on the
+    // PSRAM pads (hal/psram.h).
     SYSEX_IDENTITY         = 0x41,
     SYSEX_CAPABILITIES     = 0x42,
     SYSEX_ALGORITHM        = 0x43,

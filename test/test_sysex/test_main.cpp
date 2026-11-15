@@ -301,6 +301,47 @@ static void test_a_reply_looped_back_is_not_acted_on() {
     TEST_ASSERT_EQUAL(0, rig.midi.sysex.size());
 }
 
+// The identity ends with what the boot test found on the PSRAM pads, so an
+// editor can say whether the chip is there and whether it works.
+static std::vector<uint8_t> identity_tail(Rig& rig) {
+    rig.midi.clear();
+    rig.send(SYSEX_HELLO);
+    const auto* r = rig.midi.last_reply(SYSEX_IDENTITY);
+    TEST_ASSERT_NOT_NULL(r);
+    // F0 7D dev cmd ver family member <len version> <len rev> ... F7
+    const auto& b = r->bytes;
+    size_t at = 7;
+    at += 1 + b[at];
+    at += 1 + b[at];
+    return std::vector<uint8_t>(b.begin() + (long)at, b.end() - 1);
+}
+
+static void test_identity_reports_no_psram_unless_told() {
+    Rig rig;
+    rig.patches.boot(0);
+    const auto tail = identity_tail(rig);
+    TEST_ASSERT_EQUAL(7, tail.size());
+    TEST_ASSERT_EQUAL(PSRAM_ABSENT, tail[0]);
+    TEST_ASSERT_EQUAL(0, tail[1]);
+}
+
+static void test_identity_reports_the_psram_test() {
+    Rig rig;
+    rig.patches.boot(0);
+    rig.sysex.attach(PsramReport{PSRAM_OK, 8, 0});
+    auto tail = identity_tail(rig);
+    TEST_ASSERT_EQUAL(PSRAM_OK, tail[0]);
+    TEST_ASSERT_EQUAL(8, tail[1]);
+
+    rig.sysex.attach(PsramReport{PSRAM_FAULT, 16, 0x00ABCDEFu});
+    tail = identity_tail(rig);
+    TEST_ASSERT_EQUAL(PSRAM_FAULT, tail[0]);
+    TEST_ASSERT_EQUAL(16, tail[1]);
+    uint32_t at = 0;
+    for (uint8_t i = 0; i < 5; i++) at |= (uint32_t)tail[2 + i] << (7u * i);
+    TEST_ASSERT_EQUAL_HEX32(0x00ABCDEFu, at);
+}
+
 static void test_capabilities_report_the_real_limits() {
     Rig rig;
     rig.patches.boot(0);
@@ -1532,6 +1573,8 @@ int main() {
     RUN_TEST(test_a_message_for_another_device_is_ignored);
     RUN_TEST(test_an_older_protocol_version_fails_cleanly);
     RUN_TEST(test_a_reply_looped_back_is_not_acted_on);
+    RUN_TEST(test_identity_reports_no_psram_unless_told);
+    RUN_TEST(test_identity_reports_the_psram_test);
     RUN_TEST(test_capabilities_report_the_real_limits);
     RUN_TEST(test_the_algorithm_dump_matches_the_registry);
     RUN_TEST(test_parameter_descriptors_are_reported_per_group);

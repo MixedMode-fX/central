@@ -29,6 +29,7 @@ export class Device extends EventTarget {
     super();
     this.transport = transport;
     this.deviceId = P.SYSEX_DEFAULT_DEVICE;
+    this.identity = null;
     this.capabilities = null;
     this.algorithms = [];          // by table index
     this.byId = new Map();         // algorithm id -> descriptor
@@ -113,6 +114,21 @@ export class Device extends EventTarget {
     if (reply[5] !== P.SYSEX_MANUFACTURER) throw new Error('not an MMMC');
     this.deviceId = reply[2];
     return { device: reply[2], family: reply[6], member: reply[8] };
+  }
+
+  // Who the module is: its firmware, and what the boot test found on the
+  // PSRAM pads (src/hal/psram.h).
+  async readIdentity() {
+    const [reply] = await this.request(
+      this.msg(P.SysexCommand.SYSEX_HELLO),
+      (r) => this.isReply(r, P.SysexCommand.SYSEX_IDENTITY),
+      { what: 'identity' });
+    const read = codec.reader(reply, 5);
+    this.identity = {
+      family: read.u8(), member: read.u8(), version: read.string(), rev: read.string(),
+      psram: { state: read.u8(), megabytes: read.u8(), faultAt: read.u32() },
+    };
+    return this.identity;
   }
 
   async readCapabilities() {

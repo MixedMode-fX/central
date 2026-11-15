@@ -4577,10 +4577,11 @@ test('the Launchpad tab draws the patch\'s half and the page\'s', async () => {
     const pad = find(tab, (n) => n.attrs['data-id'] === '11');
     pad.fire('pointerdown', { preventDefault() {} });
     pad.fire('pointerup', {});
-    // The Pro has its extra column and row, inert.
+    // The Pro has its extra column and row, inert but for the bottom row's
+    // first buttons, which pick an audio slot.
     app.launchpad.setModel('pro');
     tab = LaunchpadTab(app);
-    assert.equal(findAll(tab, (n) => n.classList.contains('inert')).length, 16);
+    assert.equal(findAll(tab, (n) => n.classList.contains('inert')).length, 16 - P.N_RACK_SLOT);
   });
 });
 

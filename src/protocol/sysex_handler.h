@@ -16,6 +16,7 @@
 #include "surface/launchpad.h"
 #include "audio/rack.h"
 #include "hal/iusb_host.h"
+#include "hal/psram.h"
 
 // The patch protocol's device end (#11).
 //
@@ -88,6 +89,9 @@ class SysexHandler : public ISysexIn {
         // USB list is empty.
         void attach(AudioRack& audio){ rack = &audio; }
         void attach(IUsbHost* host){ usb = host; }
+        // What the boot test made of the PSRAM (hal/psram.h), for
+        // SYSEX_IDENTITY. Unattached, the module has none.
+        void attach(const PsramReport& report){ psram = report; }
 
         // A patch arrived by a path no message carried - a plugin host
         // restoring its project (plugin/src/engine.cpp) - and is running.
@@ -207,6 +211,7 @@ class SysexHandler : public ISysexIn {
         Launchpad* launchpad;
         AudioRack* rack;
         IUsbHost* usb;
+        PsramReport psram;
 
         // The staging image a bulk transfer accumulates into. The live graph
         // is untouched until the last chunk has arrived and the whole image
